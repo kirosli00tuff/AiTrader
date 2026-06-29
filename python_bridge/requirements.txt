@@ -1,0 +1,12 @@
+# Python bridge + advisory services (llm_consensus, ml_factor, whale_signal).
+# Pinned loosely for portability; all services run offline with mock fallbacks.
+numpy>=1.26
+PyYAML>=6.0
+requests>=2.31
+# Encrypted-at-rest credential store (account_manager/credentials.py resolver).
+cryptography>=42.0
+
+# Optional (advanced): PyTorch is the intended production DNN trainer per
+# docs/DNN_RL_DESIGN.md. The shipped Stage-A model is NumPy-based so the demo
+# and tests run without it. Uncomment to enable the optional torch trainer:
+# torch>=2.2

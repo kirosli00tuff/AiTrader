@@ -1,0 +1,164 @@
+# =============================================================================
+# Market AI Lab — Default Configuration (SAFE DEFAULTS)
+# =============================================================================
+# Conservative starting values for the initial phase. Every value is exposed in
+# config + UI. Live trading is DISABLED BY DEFAULT and gated behind an explicit
+# in-app approval workflow. The static safety layer (Layer 1) treats the
+# `risk:` block as HARD limits that adaptive logic may NEVER weaken.
+# =============================================================================
+
+system:
+  starting_paper_balance: 100000
+  default_mode_per_venue: paper          # disabled | recommendation_only | paper | live
+  live_mode_default_enabled: false       # live is OFF by default, everywhere
+  kill_switch_enabled: true
+  manual_resume_required_after_kill_switch: true
+
+# -----------------------------------------------------------------------------
+# Venues — each supports: disabled | recommendation_only | paper | live
+# Live defaults to disabled. Paper/recommendation_only only, out of the box.
+# -----------------------------------------------------------------------------
+venues:
+  polymarket:
+    mode: paper
+    live_enabled: false
+    paper_adapter: polymarket-paper-trader
+    live_adapter: polymarket_live          # TODO: implement real trading later
+    whale_source: apify_polymarket_whale_tracker
+  alpaca:
+    mode: paper                            # primary continuous testing/training venue
+    live_enabled: false
+    paper_adapter: alpaca_paper            # Alpaca paper API (stocks + crypto)
+    live_adapter: alpaca_live              # architecture ready, disabled
+    institutional_context: sec_api_13f     # delayed disclosure context, NOT live flow
+  binance:
+    mode: paper                            # simulated/test first
+    live_enabled: false
+    paper_adapter: binance_sim
+    live_adapter: binance_live             # live-ready adapter structure, disabled
+    whale_source: whale_alert_api
+  ibkr:
+    mode: recommendation_only              # scaffold/data only for now
+    live_enabled: false
+    paper_adapter: ibkr_sim_placeholder    # TODO: complete IBKR support
+    live_adapter: ibkr_live                # TODO
+    institutional_context: sec_api_13f
+
+# -----------------------------------------------------------------------------
+# Layer 1 — STATIC SAFETY (HARD LIMITS). Adaptive logic may NOT weaken these.
+# -----------------------------------------------------------------------------
+risk:
+  max_daily_loss_total_pct: 0.03
+  max_daily_loss_per_venue_pct: 0.02
+  max_trade_risk_pct_of_equity: 0.005
+  max_total_open_risk_pct: 0.03
+  max_open_positions_total: 5
+  max_open_positions_per_venue: 2
+  max_exposure_per_symbol_pct: 0.02
+  max_exposure_per_market_pct: 0.02
+  max_exposure_per_category_pct: 0.05
+  max_consecutive_losses: 3
+  cooldown_minutes_after_loss_breach: 120
+  min_confidence_default: 0.65
+  min_edge_default: 0.02
+  required_model_agreement_count: 2
+  stale_signal_reject_minutes: 10
+  kill_switch_enabled: true
+  hard_stop_live_if_loss_breach: true
+  manual_resume_required_after_kill_switch: true
+
+# -----------------------------------------------------------------------------
+# Sizing — fixed-fractional default
+# -----------------------------------------------------------------------------
+sizing:
+  default_position_sizing_method: fixed_fractional
+  default_risk_per_trade_pct: 0.005
+  default_position_scale_cap: 1.0
+  dnn_position_scale_cap: 0.5
+  whale_position_scale_cap: 0.35
+
+# -----------------------------------------------------------------------------
+# Adaptive learning (Layer 2) — bounded, logged, rollback-capable
+# -----------------------------------------------------------------------------
+adaptive:
+  adaptive_learning_enabled: true
+  adaptive_weight_updates_enabled: true
+  manual_weight_override_priority: true        # manual weights win over adaptive
+  adaptive_threshold_update_frequency_trades: 25
+  dnn_retrain_frequency_trades: 50
+  dnn_challenger_evaluation_window_trades: 100
+  dnn_auto_promote_if_better: false            # promotion is a manual/gated action
+  rollback_on_metric_degradation: true
+
+# -----------------------------------------------------------------------------
+# Whale / smart-money (Layer 4)
+# -----------------------------------------------------------------------------
+whale:
+  whale_tracking_enabled: true
+  whale_signal_weight: 0.10
+  whale_min_activity_score: 0.60
+  whale_min_historical_usefulness: 0.55
+  whale_max_signal_age_minutes: 15
+  whale_contradiction_penalty_enabled: true
+  whale_auto_disable_if_unhelpful: true
+
+# -----------------------------------------------------------------------------
+# Live approval gate — ALL must hold before live can be enabled in-app
+# -----------------------------------------------------------------------------
+live_approval:
+  live_approval_required: true
+  live_requires_connected_credentials: true
+  live_requires_kill_switch_configured: true
+  live_requires_recent_performance_visible: true
+  live_requires_manual_confirmation: true
+  live_requires_positive_paper_expectancy: true
+  live_requires_drawdown_below_pct: 0.05
+
+# -----------------------------------------------------------------------------
+# Dashboard
+# -----------------------------------------------------------------------------
+dashboard:
+  dashboard_refresh_seconds: 5
+  trade_feed_page_size: 50
+  equity_curve_default_window_days: 30
+  pnl_chart_default_window_days: 7
+  show_model_verdict_board_by_default: true
+  show_weight_control_panel_by_default: true
+  show_dnn_panel_by_default: true
+  show_whale_panel_by_default: true
+
+# -----------------------------------------------------------------------------
+# Model-weight defaults (ensemble). Editable in UI, auto-normalized,
+# resettable to defaults, lockable against adaptive change.
+# -----------------------------------------------------------------------------
+model_weights:
+  llm_primary_weight: 0.27
+  llm_secondary_weight: 0.18
+  llm_tertiary_weight: 0.12
+  rule_based_factor_weight: 0.18
+  dnn_rl_factor_weight: 0.15
+  whale_signal_factor_weight: 0.10
+  # sum = 1.00
+
+# -----------------------------------------------------------------------------
+# External data sources (set credentials on the in-app Accounts/Connections
+# page or via environment variables — see .env.example). Keys are NEVER stored
+# in this file.
+# -----------------------------------------------------------------------------
+data_sources:
+  apify:
+    enabled: true
+    actor: "apimie/polymarket-whales-trader"   # Polymarket whale-tracker
+    base_url: "https://api.apify.com/v2"
+    token_env: APIFY_TOKEN
+  whale_alert:
+    enabled: true
+    base_url: "https://api.whale-alert.io/v1"
+    min_value_usd: 500000
+    api_key_env: WHALE_ALERT_API_KEY
+  sec_api_13f:
+    enabled: true
+    base_url: "https://api.sec-api.io"
+    endpoint: "/form-13f/holdings"
+    note: "DELAYED institutional holdings disclosure — NOT live trade flow."
+    api_key_env: SEC_API_KEY

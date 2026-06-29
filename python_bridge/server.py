@@ -1,0 +1,82 @@
+"""Python bridge RPC server (JSON over HTTP, stdlib only).
+
+Exposes advisory scoring to the C++ core:
+  POST /score/llm    -> multi-LLM consensus verdict
+  POST /score/dnn    -> DNN/RL advisory factor
+  POST /score/whale  -> whale / smart-money signal
+  GET  /health       -> liveness
+
+Each handler returns a flat JSON object that includes bridge-compatible
+{bias, confidence, edge} aliases so the C++ engine's minimal JSON reader can
+consume them directly. Runs fully offline (all services have mock fallbacks).
+"""
+from __future__ import annotations
+
+import json
+import os
+import sys
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+# Make repo-root packages importable when run as a script.
+_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _ROOT not in sys.path:
+    sys.path.insert(0, _ROOT)
+
+from llm_consensus import consensus           # noqa: E402
+from ml_factor import score_state             # noqa: E402
+from whale_signal import whale_signal_for     # noqa: E402
+
+
+def _handle(path: str, payload: dict) -> dict:
+    if path == "/score/llm":
+        return consensus(payload).to_dict()
+    if path == "/score/dnn":
+        return score_state(payload)
+    if path == "/score/whale":
+        symbol = str(payload.get("symbol", "?"))
+        market_bias = float(payload.get("bias", payload.get("catalyst", 0.0)))
+        sig, _ = whale_signal_for(symbol, market_bias=market_bias)
+        return sig.to_dict()
+    raise KeyError(path)
+
+
+class Handler(BaseHTTPRequestHandler):
+    def log_message(self, *args):  # silence default logging
+        pass
+
+    def _send(self, code: int, obj: dict) -> None:
+        body = json.dumps(obj).encode()
+        self.send_response(code)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def do_GET(self):
+        if self.path == "/health":
+            self._send(200, {"status": "ok"})
+        else:
+            self._send(404, {"error": "not found"})
+
+    def do_POST(self):
+        length = int(self.headers.get("Content-Length", 0))
+        raw = self.rfile.read(length) if length else b"{}"
+        try:
+            payload = json.loads(raw or b"{}")
+            result = _handle(self.path, payload)
+            self._send(200, result)
+        except KeyError:
+            self._send(404, {"error": f"unknown endpoint {self.path}"})
+        except Exception as e:  # noqa: BLE001
+            self._send(500, {"error": str(e)})
+
+
+def serve(host: str = "127.0.0.1", port: int = 8765) -> None:
+    httpd = ThreadingHTTPServer((host, port), Handler)
+    print(f"python_bridge serving on http://{host}:{port} (offline mock mode)")
+    httpd.serve_forever()
+
+
+if __name__ == "__main__":
+    p = int(os.environ.get("BRIDGE_PORT", "8765"))
+    serve(port=p)

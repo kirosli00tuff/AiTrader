@@ -1,0 +1,7 @@
+# Plotly Dash dashboard / control board.
+dash>=2.14
+plotly>=5.18
+pandas>=2.1
+PyYAML>=6.0
+# Encrypted-at-rest credential store for the Accounts/Connections page.
+cryptography>=42.0
