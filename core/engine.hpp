@@ -8,6 +8,7 @@
 // the engine always runs offline.
 #pragma once
 
+#include <csignal>
 #include <memory>
 #include <string>
 #include <vector>
@@ -31,6 +32,10 @@ struct EngineOptions {
     int bridge_port = 8765;
     bool use_bridge = false;  // try the Python bridge for advisory factors
     uint64_t seed = 42;
+    // Continuous (run-forever) mode. Empty data_source means "use config".
+    bool continuous = false;
+    int interval_seconds = 0;        // 0 -> use cfg.engine.loop_interval_seconds
+    std::string data_source;          // "mock" | "alpaca"; empty -> use config
 };
 
 class Engine {
@@ -44,7 +49,14 @@ public:
     // Run N iterations (the demo paper loop).
     void run(int iterations);
 
+    // Run forever (continuous 24/7 paper loop), sleeping interval seconds
+    // between ticks. Returns when *stop_flag becomes non-zero (set by a signal
+    // handler) — the current tick completes, state is flushed, then it exits.
+    void run_forever(const volatile std::sig_atomic_t* stop_flag);
+
     storage::Storage& storage() { return *storage_; }
+
+    bool last_poll_was_live() const { return last_poll_live_; }
 
 private:
     std::vector<signal_engine::FactorSignal> gather_factors(
@@ -60,7 +72,7 @@ private:
     config::Config cfg_;
     EngineOptions opts_;
     std::unique_ptr<storage::Storage> storage_;
-    std::unique_ptr<market_data::MockFeed> feed_;
+    std::unique_ptr<market_data::Feed> feed_;
     std::unique_ptr<news::MockCatalystProvider> news_;
     std::unique_ptr<risk::RiskGate> gate_;
     std::unique_ptr<account::AccountManager> accounts_;
@@ -76,6 +88,11 @@ private:
     uint64_t rng_;
     int trade_count_ = 0;
     std::map<std::string, double> factor_perf_;  // running perf per factor
+
+    // Continuous-mode state.
+    bool continuous_ = false;          // gate equity by market hours when true
+    bool alpaca_feed_ = false;         // feed is AlpacaFeed (tracks live status)
+    bool last_poll_live_ = false;      // last poll contained real Alpaca data
 };
 
 }  // namespace mal::core

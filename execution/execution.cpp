@@ -1,5 +1,8 @@
 #include "execution/execution.hpp"
 
+#include <sstream>
+
+#include "core/bridge_client.hpp"
 #include "core/util.hpp"
 
 namespace mal::execution {
@@ -28,9 +31,61 @@ Fill PolymarketPaperAdapter::place(const risk::OrderProposal& o) {
     return make_paper_fill(o, "paper", 0.0);  // Polymarket has no maker fee here
 }
 
+Fill AlpacaPaperAdapter::sim_at_live_price(const risk::OrderProposal& o,
+                                           const std::string& note) {
+    // Simulated fill at the live market price carried on the proposal.
+    Fill f = make_paper_fill(o, "paper", 0.0001);
+    f.note = note;
+    return f;
+}
+
 Fill AlpacaPaperAdapter::place(const risk::OrderProposal& o) {
-    // Alpaca paper API: simulate fill (real impl would call the paper endpoint).
-    return make_paper_fill(o, "paper", 0.0001);
+    if (strategy_ == "sim_live_price") {
+        return sim_at_live_price(o, "paper (sim @ live price)");
+    }
+
+    // strategy_ is "api" or "auto": try the Alpaca paper API via the bridge.
+    std::ostringstream body;
+    body << "{\"symbol\":\"" << util::json_escape(o.symbol) << "\","
+         << "\"side\":\"" << util::json_escape(o.side) << "\","
+         << "\"qty\":" << o.qty << ","
+         << "\"price\":" << o.price << "}";
+    auto resp = bridge::http_post_json(bridge_host_, bridge_port_,
+                                       "/execute/alpaca_paper", body.str());
+    if (resp) {
+        std::string status = bridge::json_get_string(*resp, "status", "");
+        if (status == "ok") {
+            Fill f;
+            f.venue = o.venue;
+            f.symbol = o.symbol;
+            f.side = o.side;
+            f.mode = "paper";
+            f.qty = o.qty;
+            // Use the broker-reported fill price/qty when present.
+            double fp = bridge::json_get_number(*resp, "filled_price", o.price);
+            double fq = bridge::json_get_number(*resp, "filled_qty", o.qty);
+            if (fq > 0.0) f.qty = fq;
+            f.price = fp > 0.0 ? fp : o.price;
+            f.notional = f.qty * f.price;
+            f.fee = 0.0;  // Alpaca paper equities are commission-free.
+            f.ts = util::now_iso8601();
+            f.executed = true;
+            std::string id = bridge::json_get_string(*resp, "order_id", "");
+            f.note = "alpaca paper API" + (id.empty() ? "" : " (id=" + id + ")");
+            return f;
+        }
+    }
+
+    // API unreachable / unauthorized / geo-blocked.
+    if (strategy_ == "api") {
+        // Even in explicit-api mode, keep paper trading alive with a clearly
+        // marked sim fill rather than silently dropping the order.
+        return sim_at_live_price(
+            o, "paper (sim @ live price; alpaca paper API unavailable)");
+    }
+    // "auto": documented geo-fallback.
+    return sim_at_live_price(
+        o, "paper (sim @ live price; alpaca paper unavailable)");
 }
 
 Fill BinanceSimAdapter::place(const risk::OrderProposal& o) {

@@ -15,6 +15,25 @@ system:
   manual_resume_required_after_kill_switch: true
 
 # -----------------------------------------------------------------------------
+# Engine — continuous (24/7) run-forever loop. Used with `--continuous`.
+# The finite `--iterations` path (the offline demo) ignores these.
+# -----------------------------------------------------------------------------
+engine:
+  loop_interval_seconds: 15              # wall-clock seconds between ticks
+  respect_market_hours: true            # skip equity ticks when US RTH is closed
+                                        # (crypto + prediction markets stay 24/7)
+
+# -----------------------------------------------------------------------------
+# Market data — where price snapshots come from.
+#   mock   = deterministic offline feed (no keys, default)
+#   alpaca = real-time Alpaca market-data API (paper/data key; works in Canada)
+# If 'alpaca' is selected but no key is resolvable / the fetch fails, the engine
+# automatically falls back to the mock feed and logs a clear notice.
+# -----------------------------------------------------------------------------
+market_data:
+  source: mock                          # mock | alpaca
+
+# -----------------------------------------------------------------------------
 # Venues — each supports: disabled | recommendation_only | paper | live
 # Live defaults to disabled. Paper/recommendation_only only, out of the box.
 # -----------------------------------------------------------------------------
@@ -31,6 +50,11 @@ venues:
     paper_adapter: alpaca_paper            # Alpaca paper API (stocks + crypto)
     live_adapter: alpaca_live              # architecture ready, disabled
     institutional_context: sec_api_13f     # delayed disclosure context, NOT live flow
+    paper_execution: auto                  # api | sim_live_price | auto
+                                           # auto: use Alpaca paper API, else
+                                           # fall back to a simulated fill at the
+                                           # live market price (e.g. if Alpaca
+                                           # paper is geo-blocked / unreachable).
   binance:
     mode: paper                            # simulated/test first
     live_enabled: false

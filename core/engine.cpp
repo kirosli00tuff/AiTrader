@@ -1,8 +1,10 @@
 #include "core/engine.hpp"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <functional>
+#include <thread>
 
 #include "core/bridge_client.hpp"
 #include "core/util.hpp"
@@ -29,14 +31,26 @@ Engine::Engine(config::Config cfg, EngineOptions opts)
     storage_ = std::make_unique<storage::Storage>(opts_.db_path);
     storage_->init_schema(opts_.schema_path);
 
+    continuous_ = opts_.continuous;
+
     // Build a small instrument universe spanning the demo's paper venues.
-    std::vector<market_data::MockFeed::Instrument> instruments = {
+    std::vector<market_data::Instrument> instruments = {
         {"polymarket", "PRES-2028-YES", "PRES-2028", "politics", 0.52},
         {"polymarket", "FED-CUT-Q3", "FED-CUT", "macro", 0.40},
         {"alpaca", "AAPL", "AAPL", "equity", 195.0},
         {"alpaca", "BTC-USD", "BTC-USD", "crypto", 64000.0},
     };
-    feed_ = std::make_unique<market_data::MockFeed>(instruments, opts_.seed);
+
+    // Select the market-data source: CLI override else config.
+    std::string source =
+        !opts_.data_source.empty() ? opts_.data_source : cfg_.market_data.source;
+    if (source == "alpaca") {
+        feed_ = std::make_unique<market_data::AlpacaFeed>(
+            instruments, opts_.bridge_host, opts_.bridge_port, opts_.seed);
+        alpaca_feed_ = true;
+    } else {
+        feed_ = std::make_unique<market_data::MockFeed>(instruments, opts_.seed);
+    }
     news_ = std::make_unique<news::MockCatalystProvider>();
     gate_ = std::make_unique<risk::RiskGate>(cfg_.risk);
     accounts_ = std::make_unique<account::AccountManager>(cfg_);
@@ -140,6 +154,14 @@ double Engine::simulate_outcome(const signal_engine::CombinedVerdict& v,
 int Engine::run_iteration() {
     int executed = 0;
     auto states = feed_->poll();
+    if (alpaca_feed_) {
+        last_poll_live_ =
+            static_cast<market_data::AlpacaFeed*>(feed_.get())->last_poll_was_live();
+    }
+    // In continuous mode, optionally skip US equity instruments when the regular
+    // trading session is closed. Crypto + prediction markets keep ticking 24/7.
+    const bool gate_equity = continuous_ && cfg_.engine.respect_market_hours;
+    const bool equity_open = !gate_equity || util::us_equity_market_open();
     // Demo paper trades are modeled as round-trips that open and close within
     // the iteration (PnL realized immediately), so open-position/exposure state
     // is flat at the start of each iteration. Cumulative state that must persist
@@ -156,6 +178,8 @@ int Engine::run_iteration() {
         if (!venue_cfg) continue;
         // Demo trades only the two primary paper venues.
         if (ms.venue != "polymarket" && ms.venue != "alpaca") continue;
+        // Skip equities while the US session is closed (crypto stays 24/7).
+        if (!equity_open && ms.category == "equity") continue;
 
         auto cat = news_->score_for(ms.symbol);
         auto signals = gather_factors(ms, cat);
@@ -205,7 +229,8 @@ int Engine::run_iteration() {
 
         // --- Mode router (paper) ---
         execution::PolymarketPaperAdapter poly;
-        execution::AlpacaPaperAdapter alp;
+        execution::AlpacaPaperAdapter alp(venue_cfg->paper_execution,
+                                          opts_.bridge_host, opts_.bridge_port);
         execution::DisabledLiveAdapter live(o.venue);
         execution::VenueAdapter* paper =
             (o.venue == "polymarket")
@@ -340,6 +365,43 @@ void Engine::run(int iterations) {
         {ts, "summary", "", "", "info",
          "Paper loop complete: " + std::to_string(trade_count_) + " trades",
          util::to_json({}, {{"final_equity", equity_}})});
+}
+
+void Engine::run_forever(const volatile std::sig_atomic_t* stop_flag) {
+    int interval = opts_.interval_seconds > 0 ? opts_.interval_seconds
+                                              : cfg_.engine.loop_interval_seconds;
+    if (interval < 1) interval = 1;
+
+    {
+        const std::string ts = util::now_iso8601();
+        std::string src = alpaca_feed_ ? "alpaca" : "mock";
+        storage_->append_event(
+            {ts, "continuous_start", "", "", "info",
+             "Continuous paper loop started (source=" + src +
+                 ", interval=" + std::to_string(interval) + "s)",
+             "{}"});
+    }
+
+    int iteration = 0;
+    while (!(stop_flag && *stop_flag)) {
+        run_iteration();
+        maybe_adapt(iteration);
+        ++iteration;
+
+        // Sleep in 1s slices so a signal interrupts promptly (finish the slice,
+        // not the whole interval).
+        for (int s = 0; s < interval && !(stop_flag && *stop_flag); ++s) {
+            std::this_thread::sleep_for(std::chrono::seconds(1));
+        }
+    }
+
+    const std::string ts = util::now_iso8601();
+    storage_->append_event(
+        {ts, "continuous_stop", "", "", "info",
+         "Continuous paper loop stopped after " + std::to_string(iteration) +
+             " ticks, " + std::to_string(trade_count_) + " trades",
+         util::to_json({}, {{"final_equity", equity_}})});
+    // SQLite writes autocommit per statement, so state is already durable.
 }
 
 }  // namespace mal::core

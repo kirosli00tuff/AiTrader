@@ -117,6 +117,16 @@ Config load_config(const std::string& path) {
     c.system.manual_resume_required_after_kill_switch =
         get_bool(root, "system.manual_resume_required_after_kill_switch", true);
 
+    // engine (continuous-mode loop)
+    c.engine.loop_interval_seconds =
+        get_int(root, "engine.loop_interval_seconds", c.engine.loop_interval_seconds);
+    c.engine.respect_market_hours =
+        get_bool(root, "engine.respect_market_hours", c.engine.respect_market_hours);
+
+    // market data source
+    c.market_data.source =
+        get_str(root, "market_data.source", c.market_data.source);
+
     // venues
     auto venues_node = root->at("venues");
     if (venues_node && !venues_node->is_scalar) {
@@ -131,6 +141,8 @@ Config load_config(const std::string& path) {
             v.whale_source = get_str(root, "venues." + name + ".whale_source", "");
             v.institutional_context =
                 get_str(root, "venues." + name + ".institutional_context", "");
+            v.paper_execution =
+                get_str(root, "venues." + name + ".paper_execution", "auto");
             c.venues.push_back(std::move(v));
         }
     }
@@ -290,6 +302,25 @@ std::vector<std::string> validate_config(const Config& cfg) {
 
     if (cfg.dashboard.dashboard_refresh_seconds < 1)
         problems.push_back("dashboard.dashboard_refresh_seconds must be >= 1");
+
+    // Continuous-mode loop interval must be a positive number of seconds.
+    if (cfg.engine.loop_interval_seconds < 1)
+        problems.push_back("engine.loop_interval_seconds must be >= 1");
+
+    // Market-data source must be a known value.
+    if (cfg.market_data.source != "mock" && cfg.market_data.source != "alpaca")
+        problems.push_back(
+            "market_data.source must be 'mock' or 'alpaca', got '" +
+            cfg.market_data.source + "'");
+
+    // Per-venue paper-execution strategy must be a known value.
+    for (const auto& v : cfg.venues) {
+        const auto& pe = v.paper_execution;
+        if (pe != "api" && pe != "sim_live_price" && pe != "auto")
+            problems.push_back("venue '" + v.name +
+                               "' paper_execution must be 'api', "
+                               "'sim_live_price', or 'auto', got '" + pe + "'");
+    }
 
     return problems;
 }

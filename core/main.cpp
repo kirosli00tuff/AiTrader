@@ -1,8 +1,13 @@
 // Market AI Lab — engine entry point.
 //
-// Runs the offline paper loop and persists everything to the shared SQLite DB.
+// Runs the paper loop and persists everything to the shared SQLite DB.
+// Two modes:
+//   finite demo:  mal_engine [--iterations N]            (default, 20 ticks)
+//   continuous:   mal_engine --continuous [--interval-seconds N]
 // Usage: mal_engine --config <yaml> --db <path> --schema <sql> [--iterations N]
+//                   [--continuous] [--interval-seconds N] [--data-source mock|alpaca]
 //                   [--bridge host:port]
+#include <csignal>
 #include <cstdlib>
 #include <cstring>
 #include <iostream>
@@ -18,6 +23,17 @@ std::string arg_value(int argc, char** argv, const std::string& flag,
         if (flag == argv[i]) return argv[i + 1];
     return def;
 }
+
+bool arg_flag(int argc, char** argv, const std::string& flag) {
+    for (int i = 1; i < argc; ++i)
+        if (flag == argv[i]) return true;
+    return false;
+}
+
+// Set by SIGINT/SIGTERM; the continuous loop finishes its current tick, flushes,
+// and exits cleanly.
+volatile std::sig_atomic_t g_stop = 0;
+extern "C" void handle_stop(int) { g_stop = 1; }
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -30,12 +46,19 @@ int main(int argc, char** argv) {
         int iterations = std::atoi(
             arg_value(argc, argv, "--iterations", "20").c_str());
         std::string bridge = arg_value(argc, argv, "--bridge", "");
+        bool continuous = arg_flag(argc, argv, "--continuous");
+        int interval_seconds = std::atoi(
+            arg_value(argc, argv, "--interval-seconds", "0").c_str());
+        std::string data_source = arg_value(argc, argv, "--data-source", "");
 
         auto cfg = mal::config::load_config(cfg_path);
 
         mal::core::EngineOptions opts;
         opts.db_path = db_path;
         opts.schema_path = schema;
+        opts.continuous = continuous;
+        opts.interval_seconds = interval_seconds;
+        opts.data_source = data_source;
         if (!bridge.empty()) {
             auto colon = bridge.find(':');
             opts.bridge_host = bridge.substr(0, colon);
@@ -45,15 +68,36 @@ int main(int argc, char** argv) {
             opts.use_bridge = true;
         }
 
+        std::string source =
+            !data_source.empty() ? data_source : cfg.market_data.source;
+        int eff_interval =
+            interval_seconds > 0 ? interval_seconds
+                                 : cfg.engine.loop_interval_seconds;
+
         std::cout << "Market AI Lab engine starting (live DISABLED by default)\n"
                   << "  config: " << cfg_path << "\n"
                   << "  db:     " << db_path << "\n"
-                  << "  iters:  " << iterations << "\n"
+                  << "  mode:   "
+                  << (continuous ? "continuous (24/7)" : "finite demo") << "\n";
+        if (continuous)
+            std::cout << "  every:  " << eff_interval << "s\n";
+        else
+            std::cout << "  iters:  " << iterations << "\n";
+        std::cout << "  source: " << source << "\n"
                   << "  bridge: " << (opts.use_bridge ? bridge : "off (mock)")
                   << "\n";
 
         mal::core::Engine engine(std::move(cfg), opts);
-        engine.run(iterations);
+
+        if (continuous) {
+            std::signal(SIGINT, handle_stop);
+            std::signal(SIGTERM, handle_stop);
+            std::cout << "Continuous mode running. Press Ctrl-C to stop.\n";
+            engine.run_forever(&g_stop);
+            std::cout << "\nShutdown complete.\n";
+        } else {
+            engine.run(iterations);
+        }
 
         std::cout << "Paper loop complete. Trades="
                   << engine.storage().count("trades")

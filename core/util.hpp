@@ -1,6 +1,7 @@
 // Market AI Lab — small shared utilities (time + minimal JSON emission).
 #pragma once
 
+#include <ctime>
 #include <map>
 #include <string>
 
@@ -8,6 +9,14 @@ namespace mal::util {
 
 // Current UTC time as ISO-8601 (e.g. 2026-06-29T12:34:56Z).
 std::string now_iso8601();
+
+// True if the US equity regular trading session (09:30–16:00 America/New_York,
+// Mon–Fri) is open at the given UTC time. Used by the continuous engine loop to
+// skip equity ticks when the market is closed (crypto + prediction markets are
+// 24/7 and are never gated by this). This is a lightweight approximation: it
+// applies a fixed US Eastern offset with a standard US DST window and does NOT
+// account for market holidays. Defaults to the current time.
+bool us_equity_market_open(std::time_t utc_now = std::time(nullptr));
 
 // Build a flat JSON object from string->string and string->double maps.
 // Values are escaped. Intended for compact structured payloads in the event log

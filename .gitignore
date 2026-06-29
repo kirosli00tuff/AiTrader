@@ -29,6 +29,9 @@ CMakeFiles/
 # --- UI runtime state ---
 ui/weight_overrides.json
 
+# --- Local 24/7 launcher runtime state (ops/start.sh) ---
+.run/
+
 # --- Editor / OS ---
 .vscode/
 .idea/

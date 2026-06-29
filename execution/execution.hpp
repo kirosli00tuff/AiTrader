@@ -43,11 +43,36 @@ public:
     Fill place(const risk::OrderProposal& o) override;
 };
 
+// Alpaca paper-trading adapter.
+//
+// Strategy (`paper_execution` from config):
+//   "api"            — submit the order to the Alpaca PAPER trading API via the
+//                      Python bridge (POST /execute/alpaca_paper).
+//   "sim_live_price" — never call the API; simulate an immediate fill at the
+//                      live market price carried on the order proposal.
+//   "auto" (default) — try the API; if the bridge is unreachable, unauthorized,
+//                      or geo-blocked, fall back to a sim-at-live-price fill so
+//                      paper trading keeps running everywhere (e.g. Canada).
+//
+// SAFETY: this is paper only — it targets paper-api.alpaca.markets. It never
+// touches a live brokerage account.
 class AlpacaPaperAdapter : public VenueAdapter {
 public:
+    AlpacaPaperAdapter(std::string strategy = "auto",
+                       std::string bridge_host = "127.0.0.1",
+                       int bridge_port = 8765)
+        : strategy_(std::move(strategy)),
+          bridge_host_(std::move(bridge_host)),
+          bridge_port_(bridge_port) {}
     std::string name() const override { return "alpaca_paper"; }
     bool is_live() const override { return false; }
     Fill place(const risk::OrderProposal& o) override;
+
+private:
+    Fill sim_at_live_price(const risk::OrderProposal& o, const std::string& note);
+    std::string strategy_;
+    std::string bridge_host_;
+    int bridge_port_;
 };
 
 class BinanceSimAdapter : public VenueAdapter {

@@ -33,6 +33,22 @@ struct VenueConfig {
     std::string live_adapter;
     std::string whale_source;            // optional
     std::string institutional_context;   // optional
+    // Paper execution strategy: "api" (call the venue paper API),
+    // "sim_live_price" (simulate a fill at the live market price), or "auto"
+    // (try the API, fall back to sim-at-live-price if unreachable/geo-blocked).
+    // Only meaningful for venues with a real paper API (Alpaca). Default auto.
+    std::string paper_execution = "auto";
+};
+
+// Continuous (run-forever) engine loop settings.
+struct EngineConfig {
+    int loop_interval_seconds = 15;       // wall-clock seconds between ticks
+    bool respect_market_hours = true;     // skip equity ticks when US RTH closed
+};
+
+// Market-data source selection.
+struct MarketDataConfig {
+    std::string source = "mock";          // "mock" (offline) | "alpaca" (live)
 };
 
 // Layer-1 hard limits. Never weakened by adaptive logic.
@@ -122,6 +138,8 @@ struct ModelWeights {
 
 struct Config {
     SystemConfig system;
+    EngineConfig engine;
+    MarketDataConfig market_data;
     std::vector<VenueConfig> venues;
     RiskConfig risk;
     SizingConfig sizing;

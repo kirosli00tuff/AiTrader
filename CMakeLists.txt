@@ -40,6 +40,11 @@ include_directories(${CMAKE_SOURCE_DIR})
 # --- Core utility (shared) ---
 add_library(mal_util STATIC core/util.cpp)
 
+# --- Bridge client (RPC to Python bridge; POSIX sockets, no deps) ---
+# Standalone so market_data / execution can call the bridge without depending on
+# the whole core engine.
+add_library(mal_bridge STATIC core/bridge_client.cpp)
+
 # --- Config (typed config + YAML subset parser + validation) ---
 add_library(mal_config STATIC config/config.cpp config/yaml.cpp)
 
@@ -60,22 +65,22 @@ target_link_libraries(mal_learning PUBLIC mal_config mal_signal_engine)
 
 # --- Market data / news / execution / account_manager ---
 add_library(mal_market_data STATIC market_data/market_data.cpp)
-target_link_libraries(mal_market_data PUBLIC mal_util)
+target_link_libraries(mal_market_data PUBLIC mal_util mal_bridge)
 
 add_library(mal_news STATIC news_ingestion/news_ingestion.cpp)
 target_link_libraries(mal_news PUBLIC mal_util)
 
 add_library(mal_execution STATIC execution/execution.cpp)
-target_link_libraries(mal_execution PUBLIC mal_config mal_risk mal_util)
+target_link_libraries(mal_execution PUBLIC mal_config mal_risk mal_util mal_bridge)
 
 add_library(mal_account STATIC account_manager/account_manager.cpp)
 target_link_libraries(mal_account PUBLIC mal_config)
 
 # --- Core engine ---
-add_library(mal_core STATIC core/engine.cpp core/bridge_client.cpp)
+add_library(mal_core STATIC core/engine.cpp)
 target_link_libraries(mal_core PUBLIC
   mal_config mal_storage mal_risk mal_signal_engine mal_learning
-  mal_market_data mal_news mal_execution mal_account mal_util)
+  mal_market_data mal_news mal_execution mal_account mal_util mal_bridge)
 
 # --- Engine binary ---
 add_executable(mal_engine core/main.cpp)

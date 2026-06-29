@@ -1,10 +1,12 @@
 """Python bridge RPC server (JSON over HTTP, stdlib only).
 
 Exposes advisory scoring to the C++ core:
-  POST /score/llm    -> multi-LLM consensus verdict
-  POST /score/dnn    -> DNN/RL advisory factor
-  POST /score/whale  -> whale / smart-money signal
-  GET  /health       -> liveness
+  POST /score/llm        -> multi-LLM consensus verdict
+  POST /score/dnn        -> DNN/RL advisory factor
+  POST /score/whale      -> whale / smart-money signal
+  POST /marketdata/alpaca -> latest prices for requested symbols (real-time)
+  POST /execute/alpaca_paper -> submit an Alpaca PAPER trading order
+  GET  /health           -> liveness
 
 Each handler returns a flat JSON object that includes bridge-compatible
 {bias, confidence, edge} aliases so the C++ engine's minimal JSON reader can
@@ -25,6 +27,7 @@ if _ROOT not in sys.path:
 from llm_consensus import consensus           # noqa: E402
 from ml_factor import score_state             # noqa: E402
 from whale_signal import whale_signal_for     # noqa: E402
+from market_data import alpaca_source         # noqa: E402
 
 
 def _handle(path: str, payload: dict) -> dict:
@@ -37,6 +40,17 @@ def _handle(path: str, payload: dict) -> dict:
         market_bias = float(payload.get("bias", payload.get("catalyst", 0.0)))
         sig, _ = whale_signal_for(symbol, market_bias=market_bias)
         return sig.to_dict()
+    if path == "/marketdata/alpaca":
+        raw = str(payload.get("symbols", ""))
+        symbols = [s.strip() for s in raw.split(",") if s.strip()]
+        return alpaca_source.fetch_prices(symbols)
+    if path == "/execute/alpaca_paper":
+        return alpaca_source.submit_paper_order(
+            symbol=str(payload.get("symbol", "")),
+            side=str(payload.get("side", "buy")),
+            qty=float(payload.get("qty", 0.0)),
+            price=float(payload.get("price", 0.0)),
+        )
     raise KeyError(path)
 
 

@@ -12,6 +12,8 @@ The Python services and Dash UI read the same YAML for display/control defaults.
 | Block | Struct | Notes |
 |-------|--------|-------|
 | `system` | `SystemConfig` | balance, default mode, live default (must be false), kill switch. |
+| `engine` | `EngineConfig` | continuous (24/7) loop interval + market-hours awareness. |
+| `market_data` | `MarketDataConfig` | price source: `mock` (offline) or `alpaca` (live). |
 | `venues` | `vector<VenueConfig>` | per-venue mode/adapters; live disabled by default. |
 | `risk` | `RiskConfig` | **Layer-1 HARD LIMITS** — never weakened by adaptive logic. |
 | `sizing` | `SizingConfig` | sizing method + advisory caps (`dnn_position_scale_cap`, `whale_position_scale_cap`). |
@@ -22,8 +24,26 @@ The Python services and Dash UI read the same YAML for display/control defaults.
 | `model_weights` | `ModelWeights` | ensemble weights (auto-normalized in the engine). |
 | `data_sources` | (read by Python) | Apify / Whale Alert / SEC 13F endpoints + key env vars. |
 
+## New blocks: `engine` and `market_data`
+
+| Key | Type | Default | Meaning |
+|-----|------|---------|---------|
+| `engine.loop_interval_seconds` | int ≥ 1 | `15` | Wall-clock seconds between ticks in continuous (`--continuous`) mode. The default for `--interval-seconds`. |
+| `engine.respect_market_hours` | bool | `true` | In continuous mode, skip equity ticks when US regular trading hours are closed. Crypto + prediction markets keep ticking 24/7. |
+| `market_data.source` | `mock` \| `alpaca` | `mock` | Price source. `mock` is the deterministic offline feed (no keys). `alpaca` polls the real-time Alpaca market-data API (works with a paper/data key — no live brokerage needed, available in Canada). If `alpaca` is selected but no key resolves or the fetch fails, the engine auto-falls-back to `mock` and logs a notice. |
+
+Per-venue:
+
+| Key | Type | Default | Meaning |
+|-----|------|---------|---------|
+| `venues.<venue>.paper_execution` | `api` \| `sim_live_price` \| `auto` | `auto` | Paper-execution strategy. `api` calls the venue paper API; `sim_live_price` simulates a fill at the live market price; `auto` tries the API and falls back to sim-at-live-price if the API is unreachable / unauthorized / geo-blocked (guarantees continuous paper trading even where Alpaca paper signup is blocked). |
+
+The finite `--iterations` demo path ignores `engine.*`; only `--continuous` uses them.
+
 ## Validation rules (enforced in C++)
 
+- `engine.loop_interval_seconds ≥ 1`; `market_data.source ∈ {mock, alpaca}`.
+- `venues.<venue>.paper_execution ∈ {api, sim_live_price, auto}`.
 - All `*_pct` values must be fractions in `[0, 1]`.
 - `risk.max_daily_loss_per_venue_pct` ≤ `risk.max_daily_loss_total_pct`.
 - Position/agreement counts must be non-negative; `max_consecutive_losses ≥ 1`.

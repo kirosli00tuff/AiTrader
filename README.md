@@ -22,6 +22,7 @@ source has a deterministic mock fallback.
 - [Safety model (the four layers)](#safety-model-the-four-layers)
 - [Repository layout](#repository-layout)
 - [Quick start (one command)](#quick-start-one-command)
+- [Run it 24/7 locally](#run-it-247-locally)
 - [Manual build & run](#manual-build--run)
 - [The dashboard](#the-dashboard)
 - [Advisory services](#advisory-services)
@@ -117,7 +118,7 @@ expectancy, drawdown below threshold, explicit manual confirmation).
 | `whale_signal/` | Apify / Whale Alert / SEC-13F adapters + scoring | Python |
 | `python_bridge/` | JSON-over-HTTP RPC server + client | Python |
 | `ui/` | Plotly Dash control board | Python |
-| `ops/` | `run_demo.sh`, `demo.py` offline orchestration | Bash/Py |
+| `ops/` | `run_demo.sh`/`demo.py` offline demo; `start.sh`/`start.bat`/`stop.sh` 24/7 local launchers | Bash/Bat/Py |
 
 ## Quick start (one command)
 
@@ -136,6 +137,62 @@ Seed only (no dashboard):
 ```bash
 ops/run_demo.sh --no-dash
 ITER=40 ops/run_demo.sh           # custom iteration count
+```
+
+## Run it 24/7 locally
+
+The finite demo above runs a fixed number of ticks and exits. To keep the engine
+trading **continuously, in real time, on your own desktop**, use the one-click
+launchers. They build the engine if needed, set up the venv, start the
+`python_bridge` and the C++ engine in **continuous (24/7) paper mode** in the
+background, then open the dashboard at <http://localhost:8050>.
+
+```bash
+ops/start.sh                       # macOS / Linux — mock feed, offline-safe
+ops\start.bat                      # Windows
+```
+
+```bash
+ops/stop.sh                        # clean shutdown (engine finishes its tick, flushes, exits)
+```
+
+Real-time **Alpaca** market data (stocks + crypto) needs only a **paper / data
+key — NOT a live brokerage account**, so it works from regions where Alpaca live
+trading is unavailable (e.g. Canada):
+
+```bash
+# Put ALPACA_PAPER_API_KEY / ALPACA_PAPER_API_SECRET in .env (see .env.example),
+# or save them on the in-app Accounts/Connections page, then:
+DATA_SOURCE=alpaca ops/start.sh
+INTERVAL=10 DATA_SOURCE=alpaca ops/start.sh   # override the loop interval (s)
+```
+
+**Offline / no-key behavior is automatic.** If the bridge is unreachable or a
+symbol has no quote, the feed advances that symbol with a deterministic walk; if
+the Alpaca paper API is unreachable/unauthorized/geo-blocked, orders fall back to
+a **sim-at-live-price** fill (marked in the trade note). Either way the engine
+keeps ticking and **live trading stays DISABLED** behind the approval gate.
+
+The continuous loop runs `--continuous` with `engine.loop_interval_seconds`
+between ticks. With `engine.respect_market_hours: true` it skips US-equity ticks
+when the regular session is closed, while crypto and prediction markets keep
+trading 24/7. `SIGINT`/`SIGTERM` (Ctrl-C or `ops/stop.sh`) trigger a graceful
+shutdown: the current tick completes, state is flushed to SQLite, and it exits 0.
+
+Directly, without the launcher:
+
+```bash
+build/mal_engine --continuous --data-source alpaca \
+                 --interval-seconds 15 --bridge 127.0.0.1:8765 \
+                 --db market_ai_lab.db --schema storage/schema.sql
+```
+
+**Optional native desktop window.** Instead of a browser tab, you can wrap the
+dashboard in a real OS window with pywebview:
+
+```bash
+pip install -r ui/requirements.txt -r ui/requirements-desktop.txt
+python ui/desktop.py
 ```
 
 ## Manual build & run

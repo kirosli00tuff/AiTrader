@@ -17,6 +17,15 @@ system:
   kill_switch_enabled: true
   manual_resume_required_after_kill_switch: true
 
+# Continuous (24/7) loop settings; only used with `--continuous`.
+engine:
+  loop_interval_seconds: 15
+  respect_market_hours: true
+
+# Offline by default. Set to 'alpaca' for real-time Alpaca market data.
+market_data:
+  source: mock
+
 venues:
   polymarket:
     mode: paper
@@ -30,6 +39,7 @@ venues:
     paper_adapter: alpaca_paper
     live_adapter: alpaca_live
     institutional_context: sec_api_13f
+    paper_execution: auto                # api | sim_live_price | auto
   binance:
     mode: recommendation_only            # TODO: complete Binance support
     live_enabled: false
