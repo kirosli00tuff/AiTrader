@@ -1,11 +1,18 @@
-# Optional desktop-window extra for the Market AI Lab dashboard.
+# Optional desktop-app extras for the Market AI Lab dashboard.
 #
-# Install ON TOP of ui/requirements.txt to run the Dash board in a native OS
-# window (see ui/desktop.py) instead of a browser tab:
+# Install ON TOP of ui/requirements.txt to run the Dash board as a TRUE native
+# desktop application (native OS window + system tray + 24/7 engine
+# supervision — see ui/desktop.py), and to package it into a single Windows
+# .exe with PyInstaller (see ops/build_exe.bat and ui/MarketAILab.spec):
+#
 #   pip install -r ui/requirements.txt -r ui/requirements-desktop.txt
-#   python ui/desktop.py
+#   python ui/desktop.py            # run from source
+#   ops\build_exe.bat               # build dist\MarketAILab.exe (Windows/MSVC)
 #
-# pywebview uses the platform's native webview (WebKit/Edge/GTK). On Linux you
-# may also need system packages (e.g. python3-gi, gir1.2-webkit2-4.1) or the
-# Qt backend (pip install pyqt5 qtpy).
+# pywebview uses the platform's native webview (WebView2/EdgeChromium on
+# Windows — built into Windows 10/11; WebKit/GTK on Linux, where you may also
+# need system packages e.g. python3-gi, gir1.2-webkit2-4.1, or the Qt backend).
 pywebview>=4.4
+pystray>=0.19
+pillow>=10.0
+pyinstaller>=6.3

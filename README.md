@@ -187,13 +187,92 @@ build/mal_engine --continuous --data-source alpaca \
                  --db market_ai_lab.db --schema storage/schema.sql
 ```
 
-**Optional native desktop window.** Instead of a browser tab, you can wrap the
-dashboard in a real OS window with pywebview:
+## Desktop app (.exe) — true 24/7 Windows application
+
+For a real desktop experience, Market AI Lab ships as a native Windows app: a
+single `MarketAILab.exe` that opens a **native OS window** (not a browser tab)
+showing the full dashboard, while supervising the C++ engine + `python_bridge`
+in the background so the system keeps trading **24/7**.
+
+* **Native window** via pywebview (uses the built-in Windows WebView2 runtime).
+* **System-tray icon** with: *Open dashboard*, *Engine: start/stop*, *Quit*.
+* **Close-to-tray:** closing the window does **not** stop trading — it hides to
+  the tray and the engine keeps running. The app only fully exits via tray ->
+  *Quit*, which cleanly stops the engine and bridge.
+* **Self-healing:** if the engine or bridge crashes, the supervisor restarts it.
+* Launches the engine with the same `--continuous` paper-mode flags as the
+  launchers above, so **live trading stays DISABLED** and Layer-1 safety remains
+  the final authority.
+
+### Run from source (any OS, for development)
 
 ```bash
 pip install -r ui/requirements.txt -r ui/requirements-desktop.txt
 python ui/desktop.py
 ```
+
+### Build the Windows .exe (one command)
+
+```bat
+ops\build_exe.bat
+```
+
+This (1) builds the C++ engine with **MSVC / CMake** in Release, (2) creates a
+venv and installs the UI + desktop + bridge deps, and (3) runs **PyInstaller**
+(`ui/MarketAILab.spec`) to produce `dist\MarketAILab.exe` bundling the Dash UI,
+the Python advisory services, the icon, and the engine. Double-click the result
+to launch the 24/7 app.
+
+**Prerequisites (install once):**
+
+* **Visual Studio Build Tools 2022** -> *Desktop development with C++* workload
+  (provides MSVC, the Windows SDK, and CMake). Run `build_exe.bat` from a
+  *Developer Command Prompt for VS 2022* so `cl.exe` is on `PATH`.
+* **Python 3.12 64-bit** (3.13 also works) with *Add to PATH* checked.
+* **Git for Windows**. WebView2 runtime is built into Windows 10/11.
+
+### Building on a non-C: drive (e.g. E:) / low disk space
+
+The venv + PyInstaller scratch need **~5-10 GB free**. If your `C:` drive is
+full, put the whole project on another drive and redirect the build's temp
+folder there too. Note MSVC itself still installs on `C:` (one-time, ~3-6 GB),
+so keep a little `C:` headroom for the toolchain.
+
+```bat
+REM 1. Put the repo on E:
+E:
+cd E:\
+git clone https://github.com/kirosli00tuff/AiTrader.git
+cd E:\AiTrader
+
+REM 2. Redirect build temp to E: (multi-GB PyInstaller/pip scratch)
+mkdir E:\maltmp
+set TEMP=E:\maltmp
+set TMP=E:\maltmp
+
+REM 3. Build (venv, build\, dist\ all land on E: automatically)
+ops\build_exe.bat
+```
+
+Use a real fixed/SSD drive (not a slow USB stick or network drive). Verify the
+repo's location any time with `git rev-parse --show-toplevel`.
+
+### Keep it running 24/7 (auto-start at logon)
+
+To have the app start automatically and trade around the clock:
+
+* **Startup folder (simplest):** press `Win+R`, type `shell:startup`, and drop a
+  shortcut to `dist\MarketAILab.exe` in the folder that opens. It launches at
+  every logon (and minimizes to the tray).
+* **Task Scheduler (more control):** create a task -> trigger *At log on* ->
+  action *Start a program* -> point at `MarketAILab.exe`, and tick *Run with
+  highest privileges* if needed.
+* **Prevent sleep** so it keeps trading overnight:
+
+  ```bat
+  powercfg /change standby-timeout-ac 0
+  powercfg /change monitor-timeout-ac 10
+  ```
 
 ## Manual build & run
 
