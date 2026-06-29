@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=Market AI Lab
+GenericName=AI Trading Lab
+Comment=24/7 AI paper-trading research dashboard (native desktop app)
+Exec=__REPO__/ops/run_desktop.sh
+Icon=__REPO__/ops/MarketAILab.png
+Terminal=false
+Categories=Office;Finance;Development;
+Keywords=trading;ai;finance;paper;dashboard;
+StartupNotify=true
+StartupWMClass=Market AI Lab

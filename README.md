@@ -211,6 +211,58 @@ pip install -r ui/requirements.txt -r ui/requirements-desktop.txt
 python ui/desktop.py
 ```
 
+### Linux / Ubuntu desktop app (pin to dock + autostart 24/7)
+
+On Ubuntu you run the app from source (no `.exe`) and install a proper desktop
+launcher you can pin to the dock/taskbar and start automatically at login.
+
+**1. Install OS prerequisites** (build tools + the GTK WebKit backend that the
+native window needs):
+
+```bash
+sudo apt update
+sudo apt install -y build-essential cmake git python3-venv python3-pip \
+    python3-gi gir1.2-webkit2-4.1 gir1.2-gtk-3.0 \
+    libcairo2-dev libgirepository1.0-dev pkg-config
+```
+
+**2. Build** (one command — builds the C++ engine, creates the venv, installs
+deps, generates the icon). It will print the exact `apt` line if anything is
+still missing:
+
+```bash
+git clone https://github.com/kirosli00tuff/AiTrader.git
+cd AiTrader
+bash ops/build_linux.sh
+```
+
+**3. Install the launcher + pin to the taskbar:**
+
+```bash
+bash ops/install_desktop.sh
+```
+
+Then open *Market AI Lab* from your app grid (Activities / Show Apps). While
+it's running, right-click its dock icon and choose **Pin to Dash** /
+**Add to Favorites** to keep it on your bottom taskbar for one-click launch.
+
+**4. Autostart 24/7 at login** (optional):
+
+```bash
+bash ops/install_desktop.sh --autostart
+```
+
+The app then launches automatically every time you log in and keeps trading in
+the background (close the window -> hides to tray; quit only from the tray).
+To stop autostart later: `rm ~/.config/autostart/market-ai-lab.desktop`.
+To remove the launcher entirely: `bash ops/install_desktop.sh --uninstall`.
+
+> GNOME note: the system-tray icon needs the *AppIndicator and KStatusNotifier*
+> Shell extension (`sudo apt install gnome-shell-extension-appindicator`, then
+> enable it). Close-to-background and the window still work without it; the
+> tray menu just won't show until the extension is enabled. To run the app
+> straight away without installing a launcher, use `ops/run_desktop.sh`.
+
 ### Build the Windows .exe (one command)
 
 ```bat
