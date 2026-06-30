@@ -180,6 +180,10 @@ class Supervisor:
             if self._stop.is_set():
                 break
             with self._lock:
+                # Re-check _stop inside the lock so a quit already underway
+                # never triggers a spurious restart during teardown.
+                if self._stop.is_set():
+                    break
                 if self._bridge is not None and self._bridge.poll() is not None:
                     sys.stderr.write("[desktop] bridge exited — restarting\n")
                     self._start_bridge()
