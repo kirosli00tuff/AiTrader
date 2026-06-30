@@ -258,11 +258,25 @@ the background (close the window -> hides to tray; quit only from the tray).
 To stop autostart later: `rm ~/.config/autostart/market-ai-lab.desktop`.
 To remove the launcher entirely: `bash ops/install_desktop.sh --uninstall`.
 
-> GNOME note: the system-tray icon needs the *AppIndicator and KStatusNotifier*
-> Shell extension (`sudo apt install gnome-shell-extension-appindicator`, then
-> enable it). Close-to-background and the window still work without it; the
-> tray menu just won't show until the extension is enabled. To run the app
-> straight away without installing a launcher, use `ops/run_desktop.sh`.
+> **Backend note (modern Ubuntu / GTK4 / Python 3.13+):** pywebview's GTK
+> backend can fail to open the window (e.g. a GTK4 `name 'initialized' is not
+> defined` error). If that happens, install the **Qt** backend —
+> `ops/run_desktop.sh` then prefers it automatically:
+>
+> ```bash
+> source .venv/bin/activate
+> pip install pyqt6 pyqt6-webengine qtpy
+> bash ops/run_desktop.sh
+> ```
+>
+> Force a backend explicitly with `PYWEBVIEW_GUI=qt` (or `gtk`).
+>
+> **Tray note (GNOME):** the system-tray icon needs the *AppIndicator* Shell
+> extension (`sudo apt install gnome-shell-extension-appindicator`, then enable
+> it and log out/in). Without it the app still runs and the window works — the
+> tray is simply skipped, and closing the window quits the app (instead of
+> hiding to tray). To run the app straight away without installing a launcher,
+> use `ops/run_desktop.sh`.
 
 ### Build the Windows .exe (one command)
 

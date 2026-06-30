@@ -324,20 +324,38 @@ class TrayController:
             pass
         os._exit(0)
 
-    def run(self) -> None:
-        import pystray  # type: ignore
-        from pystray import MenuItem as Item  # type: ignore
+    # Set True once a tray icon is successfully showing, so the window-close
+    # handler knows whether hiding-to-tray would strand the app with no UI.
+    available = False
 
-        image = _load_icon_image()
-        menu = pystray.Menu(
-            Item("Open dashboard", self._open_dashboard, default=True),
-            Item(self._engine_label, self._toggle_engine),
-            pystray.Menu.SEPARATOR,
-            Item("Quit", self._quit),
-        )
-        self._icon = pystray.Icon("MarketAILab", image, "Market AI Lab", menu)
-        # run() blocks; we call it on its own thread from main().
-        self._icon.run()
+    def run(self) -> None:
+        # The tray is optional. On some desktops (e.g. GNOME without the
+        # AppIndicator extension) pystray's backend raises at import/icon time.
+        # Never let that crash the app — just log and skip the tray; the window
+        # and Quit-from-window still work.
+        try:
+            import pystray  # type: ignore
+            from pystray import MenuItem as Item  # type: ignore
+
+            image = _load_icon_image()
+            menu = pystray.Menu(
+                Item("Open dashboard", self._open_dashboard, default=True),
+                Item(self._engine_label, self._toggle_engine),
+                pystray.Menu.SEPARATOR,
+                Item("Quit", self._quit),
+            )
+            self._icon = pystray.Icon("MarketAILab", image, "Market AI Lab", menu)
+            self.available = True
+            # run() blocks; we call it on its own thread from main().
+            self._icon.run()
+        except Exception as exc:  # noqa: BLE001
+            self.available = False
+            sys.stderr.write(
+                f"[desktop] system tray unavailable ({exc}). The app will run\n"
+                "[desktop]   without a tray icon; closing the window will quit.\n"
+                "[desktop]   On GNOME, install the AppIndicator extension to\n"
+                "[desktop]   enable close-to-tray:\n"
+                "[desktop]   sudo apt install gnome-shell-extension-appindicator\n")
 
 
 # --------------------------------------------------------------------------- #
@@ -368,12 +386,19 @@ def main() -> None:
     tray = TrayController(supervisor, window)
 
     def _on_closing():
-        # Returning False cancels the native close; we hide to the tray instead.
-        try:
-            window.hide()
-        except Exception:  # noqa: BLE001
-            pass
-        return False
+        # If a tray icon is showing, hide-to-tray (engine keeps running) and
+        # cancel the close. If there is NO tray (e.g. GNOME without the
+        # AppIndicator extension), hiding would leave the user no way to get
+        # the window back — so quit cleanly instead.
+        if tray.available:
+            try:
+                window.hide()
+            except Exception:  # noqa: BLE001
+                pass
+            return False
+        sys.stdout.write("[desktop] no tray available — closing the window quits.\n")
+        supervisor.shutdown()
+        return True
 
     try:
         window.events.closing += _on_closing
@@ -381,9 +406,11 @@ def main() -> None:
         # Older pywebview API — best-effort; Quit from tray still works.
         pass
 
-    # Run the tray on a background thread (pystray.run blocks).
+    # Run the tray on a background thread (pystray.run blocks). Give it a brief
+    # moment to initialize so tray.available is set before the window opens.
     try:
         threading.Thread(target=tray.run, daemon=True).start()
+        time.sleep(0.8)
     except Exception as exc:  # noqa: BLE001
         sys.stderr.write(f"[desktop] system tray unavailable: {exc}\n")
 

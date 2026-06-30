@@ -16,3 +16,16 @@ pywebview>=4.4
 pystray>=0.19
 pillow>=10.0
 pyinstaller>=6.3
+
+# --- Linux backend note ---------------------------------------------------- #
+# pywebview needs a native webview backend. Two options on Linux:
+#   * GTK  (system pkgs: python3-gi gir1.2-webkit2-4.1) - default on older setups
+#   * Qt   (pip pkgs below)                             - more reliable on
+#                                                          GTK4 / Python 3.13+
+# If the GTK window fails to open (e.g. a GTK4/Python-3.14 'initialized' error),
+# install the Qt backend and ops/run_desktop.sh will prefer it automatically:
+#   pip install pyqt6 pyqt6-webengine qtpy
+# (uncomment the next three lines to make Qt part of the default desktop install)
+# pyqt6>=6.6
+# pyqt6-webengine>=6.6
+# qtpy>=2.4

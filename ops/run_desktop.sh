@@ -25,9 +25,17 @@ fi
 # shellcheck disable=SC1091
 source "$VENV/bin/activate"
 
-# Force the GTK backend (most reliable on Ubuntu/GNOME). pywebview falls back
-# automatically if GTK is unavailable.
-export PYWEBVIEW_GUI="${PYWEBVIEW_GUI:-gtk}"
+# Backend selection. On modern Ubuntu (GTK4 + new Python) pywebview's GTK
+# backend can be unstable, so we PREFER Qt (QtWebEngine) when it is installed,
+# and fall back to GTK otherwise. Override with PYWEBVIEW_GUI=gtk|qt if needed.
+if [ -z "${PYWEBVIEW_GUI:-}" ]; then
+  if python -c "import qtpy" >/dev/null 2>&1; then
+    export PYWEBVIEW_GUI=qt
+  else
+    export PYWEBVIEW_GUI=gtk
+  fi
+fi
+echo "[run] using pywebview backend: $PYWEBVIEW_GUI"
 # Use a repo-local DB to avoid the /tmp SQLite "disk I/O error" gotcha.
 export MAL_DB_PATH="${MAL_DB_PATH:-$REPO_ROOT/market_ai_lab.db}"
 
