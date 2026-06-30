@@ -222,6 +222,7 @@ native window needs):
 ```bash
 sudo apt update
 sudo apt install -y build-essential cmake git python3-venv python3-pip \
+    libsqlite3-dev \
     python3-gi gir1.2-webkit2-4.1 gir1.2-gtk-3.0 \
     libcairo2-dev libgirepository1.0-dev pkg-config
 ```
