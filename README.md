@@ -372,26 +372,44 @@ build/mal_engine --bridge 127.0.0.1:8765 --iterations 25
 ## The dashboard
 
 `ui/app.py` reads the shared SQLite DB and refreshes via `dcc.Interval`
-(default 5 s, from `dashboard.dashboard_refresh_seconds`). Panels:
+(default 5 s, from `dashboard.dashboard_refresh_seconds`). It is laid out as a
+clean, broker-style app with **four top-level tabs**:
 
-- **Performance** — equity curve, daily realized PnL, drawdown %, trade-by-trade
-  PnL (+ cumulative), win/loss calendar heatmap
-- **Allocation / exposure** — venue allocation pie, exposure by symbol/market
-- **Models** — verdict-comparison board (verdict / confidence / edge / weight),
-  factor-weight contribution chart, weight-change history table, and an
+- **Paper** (default landing page) — a beginner-friendly broker view of the
+  paper account: a large **portfolio hero** (total equity, with today's change
+  and all-time P/L stacked beneath, green ▲ / red ▼), a row of simple stat cards
+  (Total P/L, Win rate, # Trades, Max drawdown, Open positions), the equity
+  curve, open positions, and recent activity. Trades are filtered to
+  `mode == 'paper'`.
+- **Live** — the same skeleton, but **locked by default**: a clear banner states
+  that real-money trading is disabled, and the **approval gate** (from
+  `approval_state()` + `venue_state()`) is surfaced so you can see what live
+  enablement would require. Numbers come from `mode == 'live'` trades / live
+  venue balances; with live off (the normal case) it shows zeros / "no live
+  activity". This page never enables live on its own.
+- **Advanced** — every dense/technical panel, grouped under section headers:
+  equity curve, daily realized PnL, drawdown %, trade-by-trade PnL, win/loss
+  calendar heatmap, venue allocation, exposure by symbol/market, factor-weight
+  contribution, Layer-2 param before/after, DNN/RL performance, whale-signal
+  history, whale-agreement-vs-outcome, the model verdict board, the
   **adjustable model-weight control panel** (numeric inputs, per-factor lock,
-  reset-to-defaults; auto-normalized)
-- **Learning** — Layer-2 param-change history table, before/after chart, DNN/RL
-  performance chart, model registry (champion/challenger)
-- **Whale** — recent whale activity table, whale-signal history chart,
-  whale-agreement-vs-outcome chart
-- **Trading** — recent trades, open positions, blocked/rejected (RiskGate) table
-- **Safety** — live-approval readiness panel, venue-state table, append-only
-  event log
+  reset-to-defaults; auto-normalized), live-approval readiness, venue state,
+  model registry (champion/challenger), recent trades, open positions,
+  blocked/rejected (RiskGate), weight-change history, param-change history, and
+  the append-only event log.
+- **Accounts / Connections** — enter and save credentials per venue (separate
+  paper/live) and per data source (see below).
 
-The weight control panel is the UI's only writer: it appends to `weight_changes`
-and mirrors normalized weights to `ui/weight_overrides.json`. Adjusting weights
-only re-blends advisory factors — it can never weaken the deterministic RiskGate.
+The hero numbers are computed robustly from `equity_curve("AGGREGATE")`: total
+value is the latest equity row; today's change is latest minus the first equity
+recorded on the latest day; all-time is latest minus the first row. With fewer
+than two rows everything shows `$0.00 (0.00%)` rather than erroring, and the
+offline / empty-DB path renders friendly empty states everywhere.
+
+The weight control panel (on **Advanced**) is the UI's only writer: it appends to
+`weight_changes` and mirrors normalized weights to `ui/weight_overrides.json`.
+Adjusting weights only re-blends advisory factors — it can never weaken the
+deterministic RiskGate.
 
 ## Advisory services
 

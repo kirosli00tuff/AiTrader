@@ -1,23 +1,22 @@
-"""Market AI Lab — Plotly Dash control board.
+"""Market AI Lab — Plotly Dash dashboard (broker-style).
 
-Reads the shared SQLite database (single source of truth) and renders every
-panel/chart/table required by the build spec:
+A clean, beginner-friendly layout modeled on big online brokers, with four
+top-level tabs:
 
-  Performance        equity curve, daily PnL, drawdown, trade-by-trade PnL,
-                     win/loss calendar heatmap
-  Allocation         venue allocation, exposure by symbol/market
-  Models             verdict-comparison board, factor-weight contribution,
-                     weight-change history, adjustable weight control panel
-  Learning           Layer-2 param-change history, before/after chart,
-                     DNN/RL performance chart, model registry
-  Whale              recent whale activity, whale-signal history,
-                     whale-agreement-vs-outcome
-  Trading            recent trades, open positions, blocked/rejected trades
-  Safety             live-approval readiness, venue state, event log
+  Paper      (default)  big portfolio hero + simple stat cards + equity chart,
+                        open positions and recent activity (paper account).
+  Live                  same skeleton but LOCKED by default — surfaces the
+                        approval gate; live trading stays disabled.
+  Advanced              every dense/technical panel (AI verdicts, model-weight
+                        control panel, DNN/RL, whale charts, registry, venue
+                        state, blocked trades, weight/param history, event log,
+                        allocation/exposure, learning curve, calendar heatmap).
+  Accounts              the credentials / connections manager.
 
-The model-weight control panel is fully adjustable (numeric input + lock +
-reset). Adjusting weights only re-blends ADVISORY factors; it can never weaken
-the deterministic Layer-1 RiskGate.
+All numbers come from the existing read-only ``db`` helpers (single source of
+truth). The model-weight control panel is fully adjustable (numeric input +
+lock + reset); adjusting weights only re-blends ADVISORY factors and can never
+weaken the deterministic Layer-1 RiskGate.
 """
 from __future__ import annotations
 
@@ -68,14 +67,18 @@ FACTOR_LABELS = {
     "whale_signal": "Whale Signal",
 }
 
-_BG = "#0e1117"
+_BG = "#0d1117"
 _PANEL = "#161b22"
 _FG = "#e6edf3"
+_MUTED = "#8b949e"
 _ACCENT = "#2f81f7"
+_GREEN = "#3fb950"
+_RED = "#f85149"
+_AMBER = "#d29922"
 
-app = dash.Dash(__name__, title="Market AI Lab — Control Board",
+app = dash.Dash(__name__, title="AiTrader — Dashboard",
                 suppress_callback_exceptions=True)
-server = app.server  # for gunicorn / WSGI if ever needed
+server = app.server  # for gunicorn / WSGI / desktop wrapper
 
 
 # --- Reusable layout helpers ------------------------------------------------
@@ -112,7 +115,7 @@ def _table(df: pd.DataFrame, page_size: int = 10) -> dash_table.DataTable:
 def _empty_fig(msg: str = "no data yet") -> go.Figure:
     fig = go.Figure()
     fig.add_annotation(text=msg, showarrow=False,
-                       font={"color": "#8b949e", "size": 13})
+                       font={"color": _MUTED, "size": 13})
     fig.update_layout(template="plotly_dark", paper_bgcolor=_PANEL,
                       plot_bgcolor=_PANEL, height=260,
                       margin=dict(l=10, r=10, t=10, b=10),
@@ -128,7 +131,210 @@ def _style(fig: go.Figure, height: int = 260) -> go.Figure:
     return fig
 
 
-# --- Static layout ----------------------------------------------------------
+# --- Broker-style formatting + summary helpers ------------------------------
+
+def _fmt_money(x) -> str:
+    try:
+        x = float(x)
+    except Exception:
+        x = 0.0
+    sign = "-" if x < 0 else ""
+    return f"{sign}${abs(x):,.2f}"
+
+
+def _fmt_pct(x) -> str:
+    try:
+        x = float(x)
+    except Exception:
+        x = 0.0
+    return f"{x:+.2f}%"
+
+
+def _agg_equity() -> pd.DataFrame:
+    """Aggregate equity curve (ts, equity[, drawdown_pct...]).
+
+    Prefers the AGGREGATE balance rows; falls back to summing per-venue
+    equity so the hero/chart still work on partially-seeded databases.
+    """
+    df = db.equity_curve("AGGREGATE")
+    if not df.empty:
+        return df
+    venues = [v for v in db.venues_with_balances() if v != "AGGREGATE"]
+    frames = []
+    for v in venues:
+        d = db.equity_curve(v)
+        if not d.empty:
+            frames.append(d[["ts", "equity"]].rename(
+                columns={"equity": v}).set_index("ts"))
+    if frames:
+        merged = pd.concat(frames, axis=1).sort_index().ffill()
+        merged["equity"] = merged.sum(axis=1)
+        return merged.reset_index()[["ts", "equity"]]
+    return pd.DataFrame()
+
+
+def _equity_summary(df: pd.DataFrame):
+    """Return (latest, today_chg, today_pct, alltime_chg, alltime_pct).
+
+    Robust to empty / single-row frames -> zeros (never raises).
+    """
+    if df is None or df.empty or "equity" not in df:
+        return 0.0, 0.0, 0.0, 0.0, 0.0
+    eq = pd.to_numeric(df["equity"], errors="coerce")
+    valid = df.loc[eq.notna()].copy()
+    eq = eq.dropna()
+    if eq.empty:
+        return 0.0, 0.0, 0.0, 0.0, 0.0
+    latest = float(eq.iloc[-1])
+    if len(eq) < 2:
+        return latest, 0.0, 0.0, 0.0, 0.0
+    first = float(eq.iloc[0])
+    all_chg = latest - first
+    all_pct = (all_chg / first * 100.0) if first else 0.0
+    # Today's change: latest minus the first equity recorded on the latest day.
+    today_open = first
+    try:
+        ts = pd.to_datetime(valid["ts"], errors="coerce")
+        days = ts.dt.date
+        last_day = days.iloc[-1]
+        same_day = valid.loc[days == last_day, "equity"]
+        same_day = pd.to_numeric(same_day, errors="coerce").dropna()
+        if not same_day.empty:
+            today_open = float(same_day.iloc[0])
+    except Exception:
+        today_open = first
+    today_chg = latest - today_open
+    today_pct = (today_chg / today_open * 100.0) if today_open else 0.0
+    return latest, today_chg, today_pct, all_chg, all_pct
+
+
+def _trade_stats(tdf: pd.DataFrame):
+    """Return (total_pl, win_rate_pct, n_trades) from a trades frame."""
+    if tdf is None or tdf.empty:
+        return 0.0, 0.0, 0
+    pnl = pd.to_numeric(tdf.get("pnl"), errors="coerce").dropna()
+    total_pl = float(pnl.sum()) if not pnl.empty else 0.0
+    n_trades = int(len(tdf))
+    if "outcome" in tdf:
+        decided = tdf[tdf["outcome"].isin(["win", "loss"])]
+        n_dec = len(decided)
+        wins = int((decided["outcome"] == "win").sum()) if n_dec else 0
+        win_rate = (wins / n_dec * 100.0) if n_dec else 0.0
+    else:
+        win_rate = 0.0
+    return total_pl, win_rate, n_trades
+
+
+def _max_drawdown(edf: pd.DataFrame) -> float:
+    """Most-negative drawdown % from an equity frame (0.0 if unavailable)."""
+    if edf is None or edf.empty:
+        return 0.0
+    if "drawdown_pct" in edf:
+        dd = pd.to_numeric(edf["drawdown_pct"], errors="coerce").dropna()
+        if not dd.empty:
+            return float(dd.min())
+    eq = pd.to_numeric(edf.get("equity"), errors="coerce").dropna()
+    if eq.empty:
+        return 0.0
+    dd = (eq / eq.cummax() - 1.0) * 100.0
+    return float(dd.min())
+
+
+def _change_line(label: str, chg: float, pct: float, big: bool = False) -> html.Div:
+    up = chg >= 0
+    color = _GREEN if up else _RED
+    arrow = "▲" if up else "▼"  # ▲ / ▼
+    size = "20px" if big else "15px"
+    return html.Div([
+        html.Span(f"{arrow} {_fmt_money(chg)} ({_fmt_pct(pct)})",
+                  style={"color": color, "fontSize": size, "fontWeight": "600"}),
+        html.Span(label, style={"color": _MUTED, "fontSize": "13px",
+                                "marginLeft": "10px"}),
+    ], style={"margin": "3px 0"})
+
+
+def _hero(value, today_chg, today_pct, all_chg, all_pct,
+          label: str = "Total portfolio value") -> html.Div:
+    return html.Div([
+        html.Div(label, style={"color": _MUTED, "fontSize": "14px",
+                               "letterSpacing": "0.5px",
+                               "textTransform": "uppercase"}),
+        html.Div(_fmt_money(value), style={"color": _FG, "fontSize": "54px",
+                                           "fontWeight": "700",
+                                           "lineHeight": "1.1",
+                                           "margin": "6px 0"}),
+        _change_line("today", today_chg, today_pct, big=True),
+        _change_line("all-time", all_chg, all_pct),
+    ], style={"padding": "26px 30px"})
+
+
+def _stat_card(label: str, value: str, color: str | None = None) -> html.Div:
+    return html.Div([
+        html.Div(value, style={"color": color or _FG, "fontSize": "26px",
+                               "fontWeight": "700"}),
+        html.Div(label, style={"color": _MUTED, "fontSize": "12px",
+                               "marginTop": "5px",
+                               "textTransform": "uppercase",
+                               "letterSpacing": "0.4px"}),
+    ], style={"background": _PANEL, "borderRadius": "10px",
+              "padding": "18px 20px", "margin": "8px", "flex": "1 1 160px",
+              "minWidth": "150px", "border": "1px solid #30363d"})
+
+
+def _stat_cards(tdf: pd.DataFrame, edf: pd.DataFrame,
+                n_open: int) -> list[html.Div]:
+    total_pl, win_rate, n_trades = _trade_stats(tdf)
+    mdd = _max_drawdown(edf)
+    return [
+        _stat_card("Total P/L", _fmt_money(total_pl),
+                   _GREEN if total_pl >= 0 else _RED),
+        _stat_card("Win rate", f"{win_rate:.1f}%"),
+        _stat_card("# Trades", str(n_trades)),
+        _stat_card("Max drawdown", f"{mdd:.2f}%", _RED if mdd < 0 else _FG),
+        _stat_card("Open positions", str(n_open)),
+    ]
+
+
+# --- Page: Paper (default) --------------------------------------------------
+
+def _paper_page() -> html.Div:
+    return html.Div([
+        html.Div(id="hero-paper", style={"background": _PANEL,
+                                         "borderRadius": "12px",
+                                         "margin": "12px",
+                                         "border": "1px solid #30363d"}),
+        html.Div(id="stats-paper",
+                 style={"display": "flex", "flexWrap": "wrap", "margin": "0 4px"}),
+        html.Div([_panel("Portfolio value over time",
+                         dcc.Graph(id="g-equity-paper"))],
+                 style={"display": "flex"}),
+        html.Div([_panel("Open positions", html.Div(id="t-positions-paper"))],
+                 style={"display": "flex"}),
+        html.Div([_panel("Recent activity", html.Div(id="t-trades-paper"))],
+                 style={"display": "flex"}),
+    ], style={"paddingBottom": "30px"})
+
+
+# --- Page: Live (locked by default) -----------------------------------------
+
+def _live_page() -> html.Div:
+    return html.Div([
+        html.Div(id="live-gate", style={"margin": "12px"}),
+        html.Div(id="hero-live", style={"background": _PANEL,
+                                        "borderRadius": "12px",
+                                        "margin": "12px",
+                                        "border": "1px solid #30363d"}),
+        html.Div(id="stats-live",
+                 style={"display": "flex", "flexWrap": "wrap", "margin": "0 4px"}),
+        html.Div([_panel("Live open positions",
+                         html.Div(id="t-positions-live"))],
+                 style={"display": "flex"}),
+        html.Div([_panel("Live activity", html.Div(id="t-trades-live"))],
+                 style={"display": "flex"}),
+    ], style={"paddingBottom": "30px"})
+
+
+# --- Page: Advanced (all dense/technical panels) ----------------------------
 
 def _weight_controls() -> html.Div:
     weights = db.load_weight_overrides()
@@ -146,13 +352,13 @@ def _weight_controls() -> html.Div:
             dcc.Checklist(id={"type": "w-lock", "factor": factor},
                           options=[{"label": " lock", "value": "locked"}],
                           value=["locked"] if locks[factor] else [],
-                          style={"display": "inline-block", "color": "#8b949e",
+                          style={"display": "inline-block", "color": _MUTED,
                                  "fontSize": "12px"}),
         ], style={"marginBottom": "6px"}))
     return html.Div([
         html.P("Adjust ensemble weights (auto-normalized). Advisory blend only — "
                "never affects the Layer-1 RiskGate.",
-               style={"color": "#8b949e", "fontSize": "11px"}),
+               style={"color": _MUTED, "fontSize": "11px"}),
         *rows,
         html.Div([
             html.Button("Apply", id="w-apply", n_clicks=0,
@@ -165,74 +371,84 @@ def _weight_controls() -> html.Div:
                                "border": "none", "padding": "6px 16px",
                                "borderRadius": "6px", "cursor": "pointer"}),
         ], style={"marginTop": "8px"}),
-        html.Div(id="w-status", style={"color": "#3fb950", "fontSize": "12px",
+        html.Div(id="w-status", style={"color": _GREEN, "fontSize": "12px",
                                        "marginTop": "6px"}),
     ])
 
 
-_dashboard_tab = html.Div([
-    # Row: performance
-    html.Div([
-        _panel("Equity Curve (Aggregate)", dcc.Graph(id="g-equity")),
-        _panel("Daily Realized PnL", dcc.Graph(id="g-daily-pnl")),
-        _panel("Drawdown %", dcc.Graph(id="g-drawdown")),
-    ], style={"display": "flex", "flexWrap": "wrap"}),
-
-    html.Div([
-        _panel("Trade-by-Trade PnL", dcc.Graph(id="g-trade-pnl")),
-        _panel("Win / Loss Calendar", dcc.Graph(id="g-calendar")),
-        _panel("Venue Allocation", dcc.Graph(id="g-venue-alloc")),
-    ], style={"display": "flex", "flexWrap": "wrap"}),
-
-    html.Div([
-        _panel("Exposure by Symbol / Market", dcc.Graph(id="g-exposure")),
-        _panel("Factor-Weight Contribution", dcc.Graph(id="g-weights")),
-        _panel("Learning: Param Before/After", dcc.Graph(id="g-learning")),
-    ], style={"display": "flex", "flexWrap": "wrap"}),
-
-    html.Div([
-        _panel("DNN / RL Performance", dcc.Graph(id="g-dnn")),
-        _panel("Whale Signal History", dcc.Graph(id="g-whale-hist")),
-        _panel("Whale Agreement vs Outcome", dcc.Graph(id="g-whale-agree")),
-    ], style={"display": "flex", "flexWrap": "wrap"}),
-
-    # Row: model verdict board + weight control
-    html.Div([
-        _panel("Model Verdict Board (verdict / confidence / edge / weight)",
-               html.Div(id="t-verdicts")),
-        _panel("Model-Weight Control Panel", _weight_controls()),
-    ], style={"display": "flex", "flexWrap": "wrap"}),
-
-    # Row: safety / approval
-    html.Div([
-        _panel("Live-Approval Readiness", html.Div(id="t-approval")),
-        _panel("Venue State", html.Div(id="t-venues")),
-        _panel("Model Registry (champion/challenger)", html.Div(id="t-registry")),
-    ], style={"display": "flex", "flexWrap": "wrap"}),
-
-    # Row: tables
-    html.Div([
-        _panel("Recent Trades", html.Div(id="t-trades")),
-        _panel("Open Positions", html.Div(id="t-positions")),
-    ], style={"display": "flex", "flexWrap": "wrap"}),
-
-    html.Div([
-        _panel("Blocked / Rejected Trades (RiskGate)", html.Div(id="t-blocked")),
-        _panel("Weight-Change History", html.Div(id="t-weighthist")),
-    ], style={"display": "flex", "flexWrap": "wrap"}),
-
-    html.Div([
-        _panel("Layer-2 Param-Change History", html.Div(id="t-paramhist")),
-        _panel("Recent Whale Activity", html.Div(id="t-whaleact")),
-    ], style={"display": "flex", "flexWrap": "wrap"}),
-
-    html.Div([
-        _panel("Event Log (append-only audit)", html.Div(id="t-events")),
-    ], style={"display": "flex", "flexWrap": "wrap"}),
-])
+def _section(title: str) -> html.H2:
+    return html.H2(title, style={"color": _FG, "padding": "10px 18px 0",
+                                 "fontSize": "17px",
+                                 "borderTop": "1px solid #30363d",
+                                 "marginTop": "10px"})
 
 
-# --- Accounts / Connections page --------------------------------------------
+def _advanced_page() -> html.Div:
+    return html.Div([
+        html.P("Power-user view — every model, safety and audit panel. Nothing "
+               "here can weaken the deterministic Layer-1 RiskGate.",
+               style={"color": _MUTED, "fontSize": "12px", "padding": "0 18px"}),
+
+        _section("Performance"),
+        html.Div([
+            _panel("Equity Curve (Aggregate)", dcc.Graph(id="g-equity")),
+            _panel("Daily Realized PnL", dcc.Graph(id="g-daily-pnl")),
+            _panel("Drawdown %", dcc.Graph(id="g-drawdown")),
+        ], style={"display": "flex", "flexWrap": "wrap"}),
+        html.Div([
+            _panel("Trade-by-Trade PnL", dcc.Graph(id="g-trade-pnl")),
+            _panel("Win / Loss Calendar", dcc.Graph(id="g-calendar")),
+            _panel("Venue Allocation", dcc.Graph(id="g-venue-alloc")),
+        ], style={"display": "flex", "flexWrap": "wrap"}),
+
+        _section("Allocation & exposure"),
+        html.Div([
+            _panel("Exposure by Symbol / Market", dcc.Graph(id="g-exposure")),
+            _panel("Factor-Weight Contribution", dcc.Graph(id="g-weights")),
+            _panel("Learning: Param Before/After", dcc.Graph(id="g-learning")),
+        ], style={"display": "flex", "flexWrap": "wrap"}),
+
+        _section("Models & AI advisory"),
+        html.Div([
+            _panel("DNN / RL Performance", dcc.Graph(id="g-dnn")),
+            _panel("Whale Signal History", dcc.Graph(id="g-whale-hist")),
+            _panel("Whale Agreement vs Outcome", dcc.Graph(id="g-whale-agree")),
+        ], style={"display": "flex", "flexWrap": "wrap"}),
+        html.Div([
+            _panel("Model Verdict Board (verdict / confidence / edge / weight)",
+                   html.Div(id="t-verdicts")),
+            _panel("Model-Weight Control Panel", _weight_controls()),
+        ], style={"display": "flex", "flexWrap": "wrap"}),
+
+        _section("Safety & state"),
+        html.Div([
+            _panel("Live-Approval Readiness", html.Div(id="t-approval")),
+            _panel("Venue State", html.Div(id="t-venues")),
+            _panel("Model Registry (champion/challenger)",
+                   html.Div(id="t-registry")),
+        ], style={"display": "flex", "flexWrap": "wrap"}),
+
+        _section("Trading & audit"),
+        html.Div([
+            _panel("Recent Trades", html.Div(id="t-trades")),
+            _panel("Open Positions", html.Div(id="t-positions")),
+        ], style={"display": "flex", "flexWrap": "wrap"}),
+        html.Div([
+            _panel("Blocked / Rejected Trades (RiskGate)",
+                   html.Div(id="t-blocked")),
+            _panel("Weight-Change History", html.Div(id="t-weighthist")),
+        ], style={"display": "flex", "flexWrap": "wrap"}),
+        html.Div([
+            _panel("Layer-2 Param-Change History", html.Div(id="t-paramhist")),
+            _panel("Recent Whale Activity", html.Div(id="t-whaleact")),
+        ], style={"display": "flex", "flexWrap": "wrap"}),
+        html.Div([
+            _panel("Event Log (append-only audit)", html.Div(id="t-events")),
+        ], style={"display": "flex", "flexWrap": "wrap"}),
+    ], style={"paddingBottom": "30px"})
+
+
+# --- Page: Accounts / Connections -------------------------------------------
 
 VENUE_GROUPS = [("alpaca", "Alpaca"), ("binance", "Binance"),
                 ("ibkr", "IBKR"), ("polymarket", "Polymarket")]
@@ -252,7 +468,7 @@ def _cred_input(spec) -> html.Div:
               else "not set")
     return html.Div([
         html.Span(spec.label, style={"width": "90px", "display": "inline-block",
-                                     "color": "#8b949e", "fontSize": "12px"}),
+                                     "color": _MUTED, "fontSize": "12px"}),
         dcc.Input(id={"type": "cred-input", "name": spec.name},
                   type="password" if spec.secret else "text",
                   value=prefill, placeholder=placeholder, debounce=True,
@@ -270,7 +486,7 @@ def _group_card(group: str, glabel: str, kind: str) -> html.Div:
             specs = [s for s in creds.CREDENTIALS.values()
                      if s.group == group and s.mode == mode]
             tag = "PAPER" if mode == "paper" else "LIVE"
-            tcolor = "#3fb950" if mode == "paper" else "#f85149"
+            tcolor = _GREEN if mode == "paper" else _RED
             children.append(html.Div(tag, style={
                 "color": tcolor, "fontSize": "11px", "fontWeight": "bold",
                 "marginTop": "6px"}))
@@ -302,11 +518,11 @@ def _accounts_tab() -> html.Div:
                    "key (.keystore/) and NEVER written to YAML or logs. "
                    "Resolution order at runtime: in-app saved credential first, "
                    "then environment / .env.",
-                   style={"color": "#8b949e", "fontSize": "12px"}),
+                   style={"color": _MUTED, "fontSize": "12px"}),
             html.P("Live trading stays DISABLED by default; saving live keys only "
                    "makes them resolvable for the approval gate — it does not "
                    "enable live.",
-                   style={"color": "#d29922", "fontSize": "12px"}),
+                   style={"color": _AMBER, "fontSize": "12px"}),
         ], style={"padding": "0 16px"}),
 
         html.H3("Venues", style={"color": _FG, "padding": "0 16px",
@@ -326,7 +542,7 @@ def _accounts_tab() -> html.Div:
                                "borderRadius": "6px", "cursor": "pointer",
                                "marginRight": "10px"}),
             html.Span(id="cred-save-status",
-                      style={"color": "#3fb950", "fontSize": "12px"}),
+                      style={"color": _GREEN, "fontSize": "12px"}),
         ], style={"padding": "8px 16px"}),
 
         html.Div([
@@ -335,7 +551,7 @@ def _accounts_tab() -> html.Div:
             _panel("Test / Validate Connection", html.Div([
                 html.P("Offline-safe validator: checks that the required "
                        "credentials for the selection resolve (no network call).",
-                       style={"color": "#8b949e", "fontSize": "11px"}),
+                       style={"color": _MUTED, "fontSize": "11px"}),
                 dcc.Dropdown(id="cred-test-target", options=_test_options(),
                              value="alpaca:paper", clearable=False,
                              style={"width": "320px", "color": "#111"}),
@@ -351,33 +567,41 @@ def _accounts_tab() -> html.Div:
     ], style={"paddingBottom": "30px"})
 
 
+# --- App layout (all tab bodies built at load so every id exists) -----------
+
+_TAB_STYLE = {"background": _BG, "color": _FG, "border": "none",
+              "padding": "12px 18px", "fontSize": "15px"}
+_TAB_SELECTED = {"background": _PANEL, "color": _ACCENT, "border": "none",
+                 "borderBottom": f"2px solid {_ACCENT}", "padding": "12px 18px",
+                 "fontSize": "15px", "fontWeight": "600"}
+
 app.layout = html.Div([
     dcc.Interval(id="tick", interval=REFRESH_MS, n_intervals=0),
     html.Div([
-        html.H1("Market AI Lab — Control Board",
+        html.H1("AiTrader",
                 style={"color": _FG, "margin": "0", "fontSize": "22px"}),
         html.Span(id="header-status",
-                  style={"color": "#8b949e", "fontSize": "13px",
+                  style={"color": _MUTED, "fontSize": "13px",
                          "marginLeft": "16px"}),
     ], style={"padding": "14px 22px", "background": _PANEL,
               "borderBottom": f"2px solid {_ACCENT}",
               "display": "flex", "alignItems": "baseline"}),
-    dcc.Tabs(id="main-tabs", value="dash", children=[
-        dcc.Tab(label="Control Board", value="dash", children=_dashboard_tab,
-                style={"background": _BG, "color": _FG, "border": "none"},
-                selected_style={"background": _PANEL, "color": _ACCENT,
-                                "border": "none"}),
+    dcc.Tabs(id="main-tabs", value="paper", children=[
+        dcc.Tab(label="Paper", value="paper", children=_paper_page(),
+                style=_TAB_STYLE, selected_style=_TAB_SELECTED),
+        dcc.Tab(label="Live", value="live", children=_live_page(),
+                style=_TAB_STYLE, selected_style=_TAB_SELECTED),
+        dcc.Tab(label="Advanced", value="advanced", children=_advanced_page(),
+                style=_TAB_STYLE, selected_style=_TAB_SELECTED),
         dcc.Tab(label="Accounts / Connections", value="accounts",
                 children=_accounts_tab(),
-                style={"background": _BG, "color": _FG, "border": "none"},
-                selected_style={"background": _PANEL, "color": _ACCENT,
-                                "border": "none"}),
+                style=_TAB_STYLE, selected_style=_TAB_SELECTED),
     ]),
 ], style={"background": _BG, "minHeight": "100vh", "fontFamily":
           "system-ui, sans-serif", "paddingBottom": "30px"})
 
 
-# --- Chart callbacks --------------------------------------------------------
+# --- Header -----------------------------------------------------------------
 
 @app.callback(Output("header-status", "children"), Input("tick", "n_intervals"))
 def _header(_n):
@@ -389,6 +613,211 @@ def _header(_n):
     last = tr.iloc[0]["ts"] if not tr.empty else "—"
     return f"live trading: {live}  •  last trade: {last}"
 
+
+# --- Paper page callbacks ---------------------------------------------------
+
+@app.callback(Output("hero-paper", "children"), Input("tick", "n_intervals"))
+def _hero_paper(_n):
+    val, tc, tp, ac, ap = _equity_summary(_agg_equity())
+    return _hero(val, tc, tp, ac, ap)
+
+
+@app.callback(Output("stats-paper", "children"), Input("tick", "n_intervals"))
+def _stats_paper(_n):
+    td = db.trades(5000)
+    if not td.empty and "mode" in td:
+        td = td[td["mode"] == "paper"]
+    pos = db.positions()
+    n_open = 0 if pos.empty else int(len(pos))
+    return _stat_cards(td, _agg_equity(), n_open)
+
+
+@app.callback(Output("g-equity-paper", "figure"), Input("tick", "n_intervals"))
+def _equity_paper(_n):
+    df = _agg_equity()
+    if df.empty:
+        return _empty_fig("no portfolio history yet")
+    _, _, _, all_chg, _ = _equity_summary(df)
+    up = all_chg >= 0
+    color = _GREEN if up else _RED
+    fill = "rgba(63,185,80,0.12)" if up else "rgba(248,81,73,0.12)"
+    fig = px.area(df, x="ts", y="equity")
+    fig.update_traces(line_color=color, fillcolor=fill)
+    return _style(fig, height=320)
+
+
+@app.callback(Output("t-positions-paper", "children"), Input("tick", "n_intervals"))
+def _positions_paper(_n):
+    df = db.positions()
+    if df.empty:
+        return html.P("No open positions.", style={"color": _MUTED})
+    cols = [c for c in ["symbol", "venue", "side", "qty", "avg_price",
+                        "notional", "unrealized_pnl"] if c in df]
+    d = df[cols].copy()
+    for c in ("qty", "avg_price", "notional", "unrealized_pnl"):
+        if c in d:
+            d[c] = d[c].round(4)
+    return _table(d, 10)
+
+
+@app.callback(Output("t-trades-paper", "children"), Input("tick", "n_intervals"))
+def _trades_paper(_n):
+    df = db.trades(TRADE_PAGE * 4)
+    if df.empty:
+        return html.P("No trades yet.", style={"color": _MUTED})
+    if "mode" in df:
+        df = df[df["mode"] == "paper"]
+    if df.empty:
+        return html.P("No paper trades yet.", style={"color": _MUTED})
+    cols = [c for c in ["ts", "symbol", "side", "qty", "price", "pnl",
+                        "outcome"] if c in df]
+    d = df[cols].copy()
+    for c in ("qty", "price", "pnl"):
+        if c in d:
+            d[c] = d[c].round(4)
+    return _table(d, 12)
+
+
+# --- Live page callbacks ----------------------------------------------------
+
+def _live_venues() -> list[str]:
+    vs = db.venue_state()
+    if vs.empty or "live_enabled" not in vs:
+        return []
+    return vs[vs["live_enabled"] == 1]["venue"].tolist()
+
+
+@app.callback(Output("live-gate", "children"), Input("tick", "n_intervals"))
+def _live_gate(_n):
+    ap = db.approval_state()
+    enabled = (not ap.empty and int(ap.iloc[0]["live_enabled"]) == 1)
+    if enabled:
+        banner = html.Div([
+            html.Div("● LIVE TRADING ENABLED", style={
+                "color": "white", "background": _RED, "display": "inline-block",
+                "padding": "8px 16px", "borderRadius": "8px",
+                "fontWeight": "700"}),
+            html.P("Real-money trading is currently enabled. Every order still "
+                   "routes through the deterministic Layer-1 RiskGate.",
+                   style={"color": _FG, "fontSize": "13px", "marginTop": "8px"}),
+        ])
+    else:
+        banner = html.Div([
+            html.Div("🔒 Live (real-money) trading is DISABLED by default",
+                     style={"color": _FG, "fontSize": "20px",
+                            "fontWeight": "700"}),
+            html.P("AiTrader is paper-first. Live trading stays off until the "
+                   "approval gate passes and you explicitly enable it. This page "
+                   "only surfaces the gate — it cannot enable live on its own.",
+                   style={"color": _MUTED, "fontSize": "13px",
+                          "marginTop": "6px"}),
+        ])
+
+    details = []
+    if not ap.empty:
+        r = ap.iloc[0]
+        details.append(html.P(
+            f"manual_confirmation: {int(r['manual_confirmation'])}  •  "
+            f"last_checked: {r['last_checked_ts']}",
+            style={"color": _MUTED, "fontSize": "12px", "margin": "4px 0"}))
+        readiness = str(r.get("readiness_json", "") or "")
+        if readiness:
+            details.append(html.Details([
+                html.Summary("Approval gate readiness",
+                             style={"color": _FG, "fontSize": "13px",
+                                    "cursor": "pointer"}),
+                html.Pre(readiness, style={"color": _MUTED, "fontSize": "11px",
+                                           "whiteSpace": "pre-wrap"}),
+            ]))
+    else:
+        details.append(html.P("No approval state recorded yet.",
+                              style={"color": _MUTED, "fontSize": "12px"}))
+
+    vs = db.venue_state()
+    if not vs.empty:
+        details.append(html.Div("Venue readiness", style={
+            "color": _FG, "fontSize": "13px", "fontWeight": "600",
+            "marginTop": "10px", "marginBottom": "4px"}))
+        details.append(_table(vs, 8))
+
+    return html.Div([banner, html.Div(details, style={"marginTop": "12px"})],
+                    style={"background": _PANEL, "borderRadius": "12px",
+                           "padding": "20px 24px", "border": "1px solid #30363d"})
+
+
+@app.callback(Output("hero-live", "children"), Input("tick", "n_intervals"))
+def _hero_live(_n):
+    frames = []
+    for v in _live_venues():
+        d = db.equity_curve(v)
+        if not d.empty:
+            frames.append(d[["ts", "equity"]].set_index("ts"))
+    if frames:
+        merged = pd.concat(frames, axis=1).sort_index().ffill()
+        merged.columns = [f"c{i}" for i in range(merged.shape[1])]
+        merged["equity"] = merged.sum(axis=1)
+        df = merged.reset_index()[["ts", "equity"]]
+    else:
+        df = pd.DataFrame()
+    val, tc, tp, ac, ap = _equity_summary(df)
+    return _hero(val, tc, tp, ac, ap, label="Live account value")
+
+
+@app.callback(Output("stats-live", "children"), Input("tick", "n_intervals"))
+def _stats_live(_n):
+    td = db.trades(5000)
+    if not td.empty and "mode" in td:
+        td = td[td["mode"] == "live"]
+    else:
+        td = td.iloc[0:0] if not td.empty else td
+    live_venues = set(_live_venues())
+    pos = db.positions()
+    n_open = 0
+    if not pos.empty and live_venues and "venue" in pos:
+        n_open = int(len(pos[pos["venue"].isin(live_venues)]))
+    return _stat_cards(td, pd.DataFrame(), n_open)
+
+
+@app.callback(Output("t-positions-live", "children"), Input("tick", "n_intervals"))
+def _positions_live(_n):
+    pos = db.positions()
+    live_venues = set(_live_venues())
+    if pos.empty or not live_venues or "venue" not in pos:
+        return html.P("No live positions — live trading is disabled.",
+                      style={"color": _MUTED})
+    df = pos[pos["venue"].isin(live_venues)]
+    if df.empty:
+        return html.P("No live positions — live trading is disabled.",
+                      style={"color": _MUTED})
+    cols = [c for c in ["symbol", "venue", "side", "qty", "avg_price",
+                        "notional", "unrealized_pnl"] if c in df]
+    d = df[cols].copy()
+    for c in ("qty", "avg_price", "notional", "unrealized_pnl"):
+        if c in d:
+            d[c] = d[c].round(4)
+    return _table(d, 10)
+
+
+@app.callback(Output("t-trades-live", "children"), Input("tick", "n_intervals"))
+def _trades_live(_n):
+    df = db.trades(TRADE_PAGE * 4)
+    if df.empty or "mode" not in df:
+        return html.P("No live activity — live trading is disabled.",
+                      style={"color": _MUTED})
+    df = df[df["mode"] == "live"]
+    if df.empty:
+        return html.P("No live activity — live trading is disabled.",
+                      style={"color": _MUTED})
+    cols = [c for c in ["ts", "symbol", "side", "qty", "price", "pnl",
+                        "outcome"] if c in df]
+    d = df[cols].copy()
+    for c in ("qty", "price", "pnl"):
+        if c in d:
+            d[c] = d[c].round(4)
+    return _table(d, 12)
+
+
+# --- Advanced: chart callbacks ----------------------------------------------
 
 @app.callback(Output("g-equity", "figure"), Input("tick", "n_intervals"))
 def _equity(_n):
@@ -593,13 +1022,13 @@ def _whale_agree(_n):
     return _style(fig)
 
 
-# --- Table callbacks --------------------------------------------------------
+# --- Advanced: table callbacks ----------------------------------------------
 
 @app.callback(Output("t-verdicts", "children"), Input("tick", "n_intervals"))
 def _verdicts(_n):
     df = db.latest_model_outputs()
     if df.empty:
-        return html.P("no model outputs yet", style={"color": "#8b949e"})
+        return html.P("no model outputs yet", style={"color": _MUTED})
     df = df.copy()
     df["model"] = df["model"].map(lambda m: FACTOR_LABELS.get(m, m))
     for c in ("confidence", "edge", "weight"):
@@ -611,7 +1040,7 @@ def _verdicts(_n):
 def _approval(_n):
     df = db.approval_state()
     if df.empty:
-        return html.P("no approval state", style={"color": "#8b949e"})
+        return html.P("no approval state", style={"color": _MUTED})
     r = df.iloc[0]
     live = int(r["live_enabled"]) == 1
     badge = ("LIVE ENABLED", "#f85149") if live else ("LIVE DISABLED (safe default)", "#3fb950")
@@ -623,9 +1052,9 @@ def _approval(_n):
         html.P(f"manual_confirmation: {int(r['manual_confirmation'])}",
                style={"color": _FG, "fontSize": "13px", "margin": "2px"}),
         html.P(f"last_checked: {r['last_checked_ts']}",
-               style={"color": "#8b949e", "fontSize": "12px", "margin": "2px"}),
+               style={"color": _MUTED, "fontSize": "12px", "margin": "2px"}),
         html.Pre(str(r.get("readiness_json", "")),
-                 style={"color": "#8b949e", "fontSize": "11px",
+                 style={"color": _MUTED, "fontSize": "11px",
                         "whiteSpace": "pre-wrap"}),
     ])
 
@@ -634,7 +1063,7 @@ def _approval(_n):
 def _venues(_n):
     df = db.venue_state()
     if df.empty:
-        return html.P("no venue state", style={"color": "#8b949e"})
+        return html.P("no venue state", style={"color": _MUTED})
     return _table(df, 8)
 
 
@@ -643,7 +1072,7 @@ def _registry(_n):
     df = db.model_registry()
     if df.empty:
         return html.P("no registry entries (champion auto-trains on first run)",
-                      style={"color": "#8b949e"})
+                      style={"color": _MUTED})
     return _table(df, 6)
 
 
@@ -651,7 +1080,7 @@ def _registry(_n):
 def _trades(_n):
     df = db.trades(TRADE_PAGE * 4)
     if df.empty:
-        return html.P("no trades yet", style={"color": "#8b949e"})
+        return html.P("no trades yet", style={"color": _MUTED})
     for c in ("qty", "price", "notional", "pnl", "combined_conf", "combined_edge"):
         if c in df:
             df[c] = df[c].round(4)
@@ -662,7 +1091,7 @@ def _trades(_n):
 def _positions(_n):
     df = db.positions()
     if df.empty:
-        return html.P("no open positions", style={"color": "#8b949e"})
+        return html.P("no open positions", style={"color": _MUTED})
     for c in ("qty", "avg_price", "notional", "unrealized_pnl"):
         df[c] = df[c].round(4)
     return _table(df, 10)
@@ -672,7 +1101,7 @@ def _positions(_n):
 def _blocked(_n):
     df = db.blocked_trades(300)
     if df.empty:
-        return html.P("no blocked trades", style={"color": "#8b949e"})
+        return html.P("no blocked trades", style={"color": _MUTED})
     if "qty" in df:
         df["qty"] = df["qty"].round(2)
     return _table(df, 12)
@@ -682,7 +1111,7 @@ def _blocked(_n):
 def _weighthist(_n):
     df = db.weight_change_history(300)
     if df.empty:
-        return html.P("no weight changes", style={"color": "#8b949e"})
+        return html.P("no weight changes", style={"color": _MUTED})
     for c in ("old_weight", "new_weight"):
         df[c] = df[c].round(4)
     return _table(df, 12)
@@ -692,7 +1121,7 @@ def _weighthist(_n):
 def _paramhist(_n):
     df = db.param_history(300)
     if df.empty:
-        return html.P("no param history", style={"color": "#8b949e"})
+        return html.P("no param history", style={"color": _MUTED})
     return _table(df, 12)
 
 
@@ -701,7 +1130,7 @@ def _whaleact(_n):
     df = db.whale_activity(300)
     if df.empty:
         return html.P("no whale activity (run demo to populate)",
-                      style={"color": "#8b949e"})
+                      style={"color": _MUTED})
     if "value_usd" in df:
         df["value_usd"] = df["value_usd"].round(0)
     return _table(df, 12)
@@ -711,7 +1140,7 @@ def _whaleact(_n):
 def _events(_n):
     df = db.events(300)
     if df.empty:
-        return html.P("no events", style={"color": "#8b949e"})
+        return html.P("no events", style={"color": _MUTED})
     return _table(df, 15)
 
 
