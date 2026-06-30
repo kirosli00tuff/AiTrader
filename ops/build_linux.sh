@@ -34,10 +34,18 @@ need_cmd g++          || APT_PKGS+=(build-essential)
 need_cmd "$PY"        || APT_PKGS+=(python3)
 "$PY" -c "import venv" 2>/dev/null || APT_PKGS+=(python3-venv)
 
-# The C++ engine links system SQLite3 (CMakeLists.txt). Detect its dev header.
-if ! ls /usr/include/sqlite3.h /usr/include/*/sqlite3.h >/dev/null 2>&1; then
-  APT_PKGS+=(libsqlite3-dev)
+# The C++ engine links system SQLite3 (CMakeLists.txt). Detect its dev header
+# robustly: check the standard path, any arch-specific subdir, and pkg-config.
+have_sqlite=0
+[ -f /usr/include/sqlite3.h ] && have_sqlite=1
+for h in /usr/include/*/sqlite3.h; do [ -f "$h" ] && have_sqlite=1; done
+if [ "$have_sqlite" -eq 0 ] && command -v pkg-config >/dev/null 2>&1; then
+  pkg-config --exists sqlite3 2>/dev/null && have_sqlite=1
 fi
+if [ "$have_sqlite" -eq 0 ] && command -v dpkg >/dev/null 2>&1; then
+  dpkg -s libsqlite3-dev >/dev/null 2>&1 && have_sqlite=1
+fi
+if [ "$have_sqlite" -eq 0 ]; then APT_PKGS+=(libsqlite3-dev); fi
 
 # pywebview on Linux needs a GTK WebKit (or Qt) backend at the OS level.
 # python3-gi + the WebKit2 GIR provide the GTK backend.
