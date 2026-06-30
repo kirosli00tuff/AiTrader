@@ -31,6 +31,8 @@ import yaml
 from dash import Input, Output, State, dash_table, dcc, html, ctx
 
 import db
+import config_editor as cfg_editor
+from dash import ALL
 
 # Make repo-root packages (account_manager) importable from the ui/ cwd.
 _RR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -45,13 +47,16 @@ _CFG_PATH = os.environ.get(
 )
 
 
-def _load_dashboard_cfg() -> dict:
+def _load_full_cfg() -> dict:
     try:
         with open(_CFG_PATH) as fh:
-            cfg = yaml.safe_load(fh) or {}
-        return cfg.get("dashboard", {}) or {}
+            return yaml.safe_load(fh) or {}
     except Exception:
         return {}
+
+
+def _load_dashboard_cfg() -> dict:
+    return _load_full_cfg().get("dashboard", {}) or {}
 
 
 _DCFG = _load_dashboard_cfg()
@@ -66,6 +71,29 @@ FACTOR_LABELS = {
     "dnn_rl": "DNN / RL",
     "whale_signal": "Whale Signal",
 }
+
+
+def _llm_model_names() -> dict:
+    """Concrete model id per LLM slot, read live from the config's llm_models
+    block (single source of truth — never hardcoded)."""
+    names = _load_full_cfg().get("llm_models", {}) or {}
+    return {str(k): str(v) for k, v in names.items()}
+
+
+def _factor_label(factor: str) -> str:
+    """Label for an ensemble factor. For LLM slots, surface the exact configured
+    model id (e.g. "gpt-5.5") instead of the generic slot name."""
+    names = _llm_model_names()
+    mid = names.get(factor, "")
+    if mid:
+        return mid
+    return FACTOR_LABELS.get(factor, factor)
+
+_MODAL_HIDDEN = {"display": "none"}
+_MODAL_SHOWN = {"display": "flex", "alignItems": "center",
+                "justifyContent": "center", "position": "fixed",
+                "top": 0, "left": 0, "width": "100vw", "height": "100vh",
+                "background": "rgba(0,0,0,0.78)", "zIndex": 1000}
 
 _BG = "#0d1117"
 _PANEL = "#161b22"
@@ -129,6 +157,32 @@ def _style(fig: go.Figure, height: int = 260) -> go.Figure:
                       margin=dict(l=40, r=14, t=30, b=30),
                       legend=dict(font={"size": 10}))
     return fig
+
+
+# Every chart id, registered as it is built, so the fullscreen modal callback
+# can read the live figure of whichever chart the user expands. Populated while
+# the layout is constructed (before any callback is registered).
+GRAPH_IDS: list[str] = []
+
+
+def _graph(graph_id: str, **graph_kwargs) -> html.Div:
+    """A dcc.Graph plus a consistent "⤢ Expand" button that opens the same
+    figure in the shared fullscreen modal. The button never alters the chart's
+    own tick callback — it just mirrors the current figure into the overlay."""
+    if graph_id not in GRAPH_IDS:
+        GRAPH_IDS.append(graph_id)
+    return html.Div([
+        html.Div(
+            html.Button("⤢ Expand",
+                        id={"type": "expand", "graph": graph_id}, n_clicks=0,
+                        title="Open this chart full screen",
+                        style={"background": "transparent", "color": _MUTED,
+                               "border": "1px solid #30363d",
+                               "borderRadius": "6px", "fontSize": "11px",
+                               "padding": "2px 8px", "cursor": "pointer"}),
+            style={"textAlign": "right", "marginBottom": "-6px"}),
+        dcc.Graph(id=graph_id, **graph_kwargs),
+    ])
 
 
 # --- Broker-style formatting + summary helpers ------------------------------
@@ -306,7 +360,7 @@ def _paper_page() -> html.Div:
         html.Div(id="stats-paper",
                  style={"display": "flex", "flexWrap": "wrap", "margin": "0 4px"}),
         html.Div([_panel("Portfolio value over time",
-                         dcc.Graph(id="g-equity-paper"))],
+                         _graph("g-equity-paper"))],
                  style={"display": "flex"}),
         html.Div([_panel("Open positions", html.Div(id="t-positions-paper"))],
                  style={"display": "flex"}),
@@ -340,9 +394,10 @@ def _weight_controls() -> html.Div:
     weights = db.load_weight_overrides()
     locks = db.load_locks()
     rows = []
-    for factor, label in FACTOR_LABELS.items():
+    for factor in FACTOR_LABELS:
+        label = _factor_label(factor)
         rows.append(html.Div([
-            html.Span(label, style={"width": "120px", "display": "inline-block",
+            html.Span(label, style={"width": "150px", "display": "inline-block",
                                     "color": _FG, "fontSize": "13px"}),
             dcc.Input(id={"type": "w-input", "factor": factor}, type="number",
                       min=0, max=1, step=0.01, value=round(weights[factor], 3),
@@ -376,6 +431,84 @@ def _weight_controls() -> html.Div:
     ])
 
 
+def _l1_current_table() -> dash_table.DataTable:
+    """Current on-disk Level 1 values (refreshed from the config file)."""
+    try:
+        vals = cfg_editor.read_l1_values(_CFG_PATH)
+    except Exception:
+        vals = {}
+    rows = [{"parameter": k, "value": str(vals.get(k, "—"))}
+            for k in cfg_editor.L1_KEYS]
+    df = pd.DataFrame(rows, columns=["parameter", "value"])
+    return _table(df, 18)
+
+
+def _l1_editor() -> html.Div:
+    """Editable Level 1 (static safety) risk-gate panel with a typed-confirm
+    gate. Edits the engine config file on disk; the deterministic runtime
+    RiskGate is never bypassed — Layer 1 reads the new values on next reload."""
+    try:
+        vals = cfg_editor.read_l1_values(_CFG_PATH)
+    except Exception:
+        vals = {}
+    rows = []
+    for key, label in cfg_editor.L1_PARAMS:
+        cur = vals.get(key)
+        kind = cfg_editor.kind_of(key)
+        if kind == "bool":
+            field = dcc.Dropdown(
+                id={"type": "l1-input", "param": key},
+                options=[{"label": "true", "value": "true"},
+                         {"label": "false", "value": "false"}],
+                value="true" if cur else "false", clearable=False,
+                style={"width": "120px", "color": "#111", "fontSize": "12px"})
+        else:
+            step = 0.001 if kind == "pct" else 1
+            field = dcc.Input(
+                id={"type": "l1-input", "param": key}, type="number",
+                value=cur, step=step,
+                style={"width": "120px", "background": "#0d1117", "color": _FG,
+                       "border": "1px solid #30363d", "padding": "3px"})
+        rows.append(html.Div([
+            html.Span(label, style={"width": "300px", "display": "inline-block",
+                                    "color": _FG, "fontSize": "12px"}),
+            field,
+        ], style={"marginBottom": "5px", "display": "flex",
+                  "alignItems": "center", "gap": "10px"}))
+    return html.Div([
+        html.P("Edit the engine's Level 1 (static safety) hard limits. Changes "
+               "are written to the config file on disk and picked up by the C++ "
+               "engine on its next config reload. This edits ONLY the static "
+               "config Layer 1 reads — it cannot bypass or weaken the running "
+               "RiskGate, which stays the final authority.",
+               style={"color": _MUTED, "fontSize": "11px"}),
+        html.P("Every applied change is recorded in the event log below. "
+               "Raising OR lowering any value requires the typed confirmation.",
+               style={"color": _AMBER, "fontSize": "11px"}),
+        *rows,
+        html.Div([
+            html.Span("Type CONFIRM to apply:",
+                      style={"color": _FG, "fontSize": "12px",
+                             "marginRight": "8px"}),
+            dcc.Input(id="l1-confirm", type="text", value="",
+                      placeholder="CONFIRM",
+                      style={"width": "140px", "background": "#0d1117",
+                             "color": _FG, "border": "1px solid #30363d",
+                             "padding": "4px"}),
+            html.Button("Apply changes", id="l1-apply", n_clicks=0,
+                        style={"background": _ACCENT, "color": "white",
+                               "border": "none", "padding": "6px 16px",
+                               "borderRadius": "6px", "marginLeft": "10px",
+                               "cursor": "pointer"}),
+        ], style={"marginTop": "10px"}),
+        html.Div(id="l1-status", style={"fontSize": "12px", "marginTop": "8px"}),
+        html.Div("Current values on disk", style={
+            "color": _FG, "fontSize": "12px", "fontWeight": "600",
+            "marginTop": "12px", "marginBottom": "4px"}),
+        html.Div(_l1_current_table(), id="l1-current"),
+    ])
+
+
 def _section(title: str) -> html.H2:
     return html.H2(title, style={"color": _FG, "padding": "10px 18px 0",
                                  "fontSize": "17px",
@@ -391,28 +524,28 @@ def _advanced_page() -> html.Div:
 
         _section("Performance"),
         html.Div([
-            _panel("Equity Curve (Aggregate)", dcc.Graph(id="g-equity")),
-            _panel("Daily Realized PnL", dcc.Graph(id="g-daily-pnl")),
-            _panel("Drawdown %", dcc.Graph(id="g-drawdown")),
+            _panel("Equity Curve (Aggregate)", _graph("g-equity")),
+            _panel("Daily Realized PnL", _graph("g-daily-pnl")),
+            _panel("Drawdown %", _graph("g-drawdown")),
         ], style={"display": "flex", "flexWrap": "wrap"}),
         html.Div([
-            _panel("Trade-by-Trade PnL", dcc.Graph(id="g-trade-pnl")),
-            _panel("Win / Loss Calendar", dcc.Graph(id="g-calendar")),
-            _panel("Venue Allocation", dcc.Graph(id="g-venue-alloc")),
+            _panel("Trade-by-Trade PnL", _graph("g-trade-pnl")),
+            _panel("Win / Loss Calendar", _graph("g-calendar")),
+            _panel("Venue Allocation", _graph("g-venue-alloc")),
         ], style={"display": "flex", "flexWrap": "wrap"}),
 
         _section("Allocation & exposure"),
         html.Div([
-            _panel("Exposure by Symbol / Market", dcc.Graph(id="g-exposure")),
-            _panel("Factor-Weight Contribution", dcc.Graph(id="g-weights")),
-            _panel("Learning: Param Before/After", dcc.Graph(id="g-learning")),
+            _panel("Exposure by Symbol / Market", _graph("g-exposure")),
+            _panel("Factor-Weight Contribution", _graph("g-weights")),
+            _panel("Learning: Param Before/After", _graph("g-learning")),
         ], style={"display": "flex", "flexWrap": "wrap"}),
 
         _section("Models & AI advisory"),
         html.Div([
-            _panel("DNN / RL Performance", dcc.Graph(id="g-dnn")),
-            _panel("Whale Signal History", dcc.Graph(id="g-whale-hist")),
-            _panel("Whale Agreement vs Outcome", dcc.Graph(id="g-whale-agree")),
+            _panel("DNN / RL Performance", _graph("g-dnn")),
+            _panel("Whale Signal History", _graph("g-whale-hist")),
+            _panel("Whale Agreement vs Outcome", _graph("g-whale-agree")),
         ], style={"display": "flex", "flexWrap": "wrap"}),
         html.Div([
             _panel("Model Verdict Board (verdict / confidence / edge / weight)",
@@ -421,6 +554,10 @@ def _advanced_page() -> html.Div:
         ], style={"display": "flex", "flexWrap": "wrap"}),
 
         _section("Safety & state"),
+        html.Div([
+            _panel("Level 1 Risk-Gate Editor (static safety hard limits)",
+                   _l1_editor()),
+        ], style={"display": "flex", "flexWrap": "wrap"}),
         html.Div([
             _panel("Live-Approval Readiness", html.Div(id="t-approval")),
             _panel("Venue State", html.Div(id="t-venues")),
@@ -575,8 +712,33 @@ _TAB_SELECTED = {"background": _PANEL, "color": _ACCENT, "border": "none",
                  "borderBottom": f"2px solid {_ACCENT}", "padding": "12px 18px",
                  "fontSize": "15px", "fontWeight": "600"}
 
+def _chart_modal() -> html.Div:
+    """Shared fullscreen overlay reused by every chart's Expand button."""
+    return html.Div(
+        id="chart-modal", style={"display": "none"},
+        children=html.Div([
+            html.Div([
+                html.Span(id="modal-title", style={"color": _FG,
+                                                    "fontSize": "16px",
+                                                    "fontWeight": "600"}),
+                html.Button("✕ Close", id="modal-close", n_clicks=0,
+                            style={"background": "#30363d", "color": _FG,
+                                   "border": "none", "padding": "6px 16px",
+                                   "borderRadius": "6px", "cursor": "pointer",
+                                   "float": "right"}),
+            ], style={"marginBottom": "8px", "overflow": "hidden"}),
+            dcc.Graph(id="modal-graph",
+                      style={"height": "82vh", "width": "100%"}),
+        ], style={"background": _PANEL, "borderRadius": "12px",
+                  "padding": "18px 22px", "width": "94vw", "height": "92vh",
+                  "border": "1px solid #30363d", "boxSizing": "border-box"}),
+    )
+
+
 app.layout = html.Div([
     dcc.Interval(id="tick", interval=REFRESH_MS, n_intervals=0),
+    dcc.Store(id="modal-current"),
+    _chart_modal(),
     html.Div([
         html.H1("AiTrader",
                 style={"color": _FG, "margin": "0", "fontSize": "22px"}),
@@ -946,12 +1108,12 @@ def _weights_chart(_n):
     mo = db.latest_model_outputs()
     if not mo.empty:
         mo = mo.copy()
-        mo["label"] = mo["model"].map(lambda m: FACTOR_LABELS.get(m, m))
+        mo["label"] = mo["model"].map(_factor_label)
         fig = px.bar(mo, x="label", y="weight", color="confidence",
                      color_continuous_scale="Blues")
         return _style(fig)
     w = db.load_weight_overrides()
-    fig = go.Figure(go.Bar(x=[FACTOR_LABELS[k] for k in w], y=list(w.values()),
+    fig = go.Figure(go.Bar(x=[_factor_label(k) for k in w], y=list(w.values()),
                            marker_color=_ACCENT))
     return _style(fig)
 
@@ -1030,7 +1192,7 @@ def _verdicts(_n):
     if df.empty:
         return html.P("no model outputs yet", style={"color": _MUTED})
     df = df.copy()
-    df["model"] = df["model"].map(lambda m: FACTOR_LABELS.get(m, m))
+    df["model"] = df["model"].map(_factor_label)
     for c in ("confidence", "edge", "weight"):
         df[c] = df[c].round(4)
     return _table(df[["model", "verdict", "confidence", "edge", "weight"]], 8)
@@ -1171,7 +1333,7 @@ def _apply_weights(_apply, _reset, values, value_ids, lock_vals, lock_ids):
         locks[ident["factor"]] = "locked" in (lv or [])
     db.save_weight_overrides(weights, locks, source="manual")
     norm = db.normalize(weights)
-    summary = ", ".join(f"{FACTOR_LABELS[k]}={v:.2f}" for k, v in norm.items())
+    summary = ", ".join(f"{_factor_label(k)}={v:.2f}" for k, v in norm.items())
     return f"Applied (normalized): {summary}"
 
 
@@ -1248,6 +1410,133 @@ def _test_connection(_n, target):
     color = "#3fb950" if result["ok"] else "#f85149"
     icon = "✓" if result["ok"] else "✗"
     return html.Span(f"{icon} {result['message']}{note}", style={"color": color})
+
+
+# --- Fullscreen chart modal (shared by every chart's Expand button) ---------
+
+_GRAPH_TITLES = {
+    "g-equity-paper": "Portfolio value over time",
+    "g-equity": "Equity Curve (Aggregate)",
+    "g-daily-pnl": "Daily Realized PnL",
+    "g-drawdown": "Drawdown %",
+    "g-trade-pnl": "Trade-by-Trade PnL",
+    "g-calendar": "Win / Loss Calendar",
+    "g-venue-alloc": "Venue Allocation",
+    "g-exposure": "Exposure by Symbol / Market",
+    "g-weights": "Factor-Weight Contribution",
+    "g-learning": "Learning: Param Before/After",
+    "g-dnn": "DNN / RL Performance",
+    "g-whale-hist": "Whale Signal History",
+    "g-whale-agree": "Whale Agreement vs Outcome",
+}
+
+
+@app.callback(
+    Output("chart-modal", "style"),
+    Output("modal-graph", "figure"),
+    Output("modal-title", "children"),
+    Output("modal-current", "data"),
+    Input({"type": "expand", "graph": ALL}, "n_clicks"),
+    Input("modal-close", "n_clicks"),
+    Input("tick", "n_intervals"),
+    State("modal-current", "data"),
+    [State(gid, "figure") for gid in GRAPH_IDS],
+    prevent_initial_call=True,
+)
+def _chart_modal_cb(_expands, _close, _tick, current, *graph_figs):
+    figs = dict(zip(GRAPH_IDS, graph_figs))
+    trigger = ctx.triggered_id
+
+    if trigger == "modal-close":
+        return _MODAL_HIDDEN, dash.no_update, dash.no_update, None
+
+    if isinstance(trigger, dict) and trigger.get("type") == "expand":
+        # Ignore the synthetic n_clicks=0 fired when the buttons first register.
+        if not any(_expands or []):
+            return dash.no_update, dash.no_update, dash.no_update, dash.no_update
+        gid = trigger.get("graph")
+        fig = figs.get(gid) or _empty_fig()
+        return _MODAL_SHOWN, fig, _GRAPH_TITLES.get(gid, gid), gid
+
+    # tick: keep the modal live while open; never auto-open it.
+    if current:
+        fig = figs.get(current) or _empty_fig()
+        return _MODAL_SHOWN, fig, _GRAPH_TITLES.get(current, current), current
+    return _MODAL_HIDDEN, dash.no_update, dash.no_update, dash.no_update
+
+
+# --- Level 1 risk-gate editor (writes config + event log) -------------------
+
+@app.callback(
+    Output("l1-status", "children"),
+    Output("l1-current", "children"),
+    Output("l1-confirm", "value"),
+    Input("l1-apply", "n_clicks"),
+    State("l1-confirm", "value"),
+    State({"type": "l1-input", "param": ALL}, "value"),
+    State({"type": "l1-input", "param": ALL}, "id"),
+    prevent_initial_call=True,
+)
+def _l1_apply(_n, confirm, values, ids):
+    err = lambda m: (html.Span(f"✗ {m}", style={"color": _RED}),
+                     _l1_current_table(), dash.no_update)
+    try:
+        current = cfg_editor.read_l1_values(_CFG_PATH)
+    except Exception as exc:  # noqa: BLE001
+        return err(f"could not read config: {exc}")
+
+    # Collect only the params the user actually changed.
+    changes = {}
+    for val, ident in zip(values, ids):
+        key = ident["param"]
+        if val is None or val == "":
+            continue
+        try:
+            new_typed = cfg_editor._coerce(key, val)
+        except Exception as exc:  # noqa: BLE001
+            return err(str(exc))
+        if key not in current or current[key] != new_typed:
+            changes[key] = new_typed
+
+    if not changes:
+        return (html.Span("No changes to apply.", style={"color": _MUTED}),
+                _l1_current_table(), dash.no_update)
+
+    if (confirm or "").strip() != "CONFIRM":
+        return err('type "CONFIRM" in the confirmation box to apply changes')
+
+    problems = cfg_editor.validate_l1_changes(current, changes)
+    if problems:
+        return err("; ".join(problems))
+
+    try:
+        written = cfg_editor.write_l1_values(changes, _CFG_PATH)
+    except Exception as exc:  # noqa: BLE001
+        return err(f"write failed: {exc}")
+
+    # Audit every applied change to the event log (old -> new + timestamp).
+    logged = 0
+    for key, new_v in written.items():
+        old_v = current.get(key, "—")
+        msg = (f"Level 1 risk param '{key}' changed {old_v} -> {new_v} "
+               f"via dashboard (typed-confirm)")
+        if db.append_event("config_change", msg, severity="warn",
+                           payload_json=None):
+            logged += 1
+
+    summary = ", ".join(f"{k}: {current.get(k, '—')}→{v}"
+                        for k, v in written.items())
+    note = "" if logged == len(written) else " (event log unavailable — DB read-only?)"
+    return (html.Span(f"✓ Applied {len(written)} change(s) to config and logged "
+                      f"to event log{note}: {summary}", style={"color": _GREEN}),
+            _l1_current_table(), "")
+
+
+@app.callback(Output("l1-current", "children", allow_duplicate=True),
+              Input("tick", "n_intervals"),
+              prevent_initial_call="initial_duplicate")
+def _l1_refresh(_n):
+    return _l1_current_table()
 
 
 if __name__ == "__main__":

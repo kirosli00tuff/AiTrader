@@ -165,6 +165,17 @@ model_weights:
   # sum = 1.00
 
 # -----------------------------------------------------------------------------
+# LLM advisory model identities — the concrete model each ensemble slot uses.
+# This is the single source of truth for the model names; the consensus engine
+# and the dashboard's advisory panels both read these strings, so the UI always
+# shows the exact model in use and stays accurate when you swap a model here.
+# -----------------------------------------------------------------------------
+llm_models:
+  llm_primary: gpt-5.5
+  llm_secondary: claude-opus-4.8
+  llm_tertiary: gemini-2.5-pro
+
+# -----------------------------------------------------------------------------
 # External data sources (set credentials on the in-app Accounts/Connections
 # page or via environment variables — see .env.example). Keys are NEVER stored
 # in this file.

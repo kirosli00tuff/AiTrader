@@ -176,6 +176,29 @@ def model_registry() -> pd.DataFrame:
     )
 
 
+def append_event(kind: str, message: str, severity: str = "info",
+                 venue: str | None = None, symbol: str | None = None,
+                 payload_json: str | None = None) -> bool:
+    """Append a row to the append-only ``events`` audit table.
+
+    Used by the Advanced-tab Level 1 risk-gate editor so every applied config
+    change is recorded in the same event log the C++ engine writes to (and that
+    the Advanced event-log panel renders). Returns True on success.
+    """
+    from datetime import datetime, timezone
+    ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    try:
+        with sqlite3.connect(DB_PATH, timeout=2.0) as conn:
+            conn.execute(
+                "INSERT INTO events(ts, kind, venue, symbol, severity, message, "
+                "payload_json) VALUES(?,?,?,?,?,?,?)",
+                (ts, kind, venue, symbol, severity, message, payload_json))
+            conn.commit()
+        return True
+    except Exception:
+        return False
+
+
 def set_venue_credentials_connected(venue: str, connected: bool) -> None:
     """Reflect resolved live-credential readiness into venue_state so the C++
     approval gate (`try_enable_live` -> credentials_connected) consumes it.

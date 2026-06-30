@@ -81,6 +81,7 @@ class MockLLMProvider:
     name: str
     weight: float = 0.2
     skew: float = 0.0  # provider personality (bull/bear lean)
+    model_id: str = ""  # concrete model identity (e.g. "gpt-5.5"), from config
 
     def score(self, state: dict) -> ModelVerdict:
         sym = str(state.get("symbol", "?"))
@@ -122,12 +123,42 @@ class OpenAIProvider:
         raise NotImplementedError("Live OpenAI provider not implemented.")
 
 
+def llm_model_names(cfg_path: str | None = None) -> dict[str, str]:
+    """Return the configured concrete model id per LLM ensemble slot.
+
+    Single source of truth = the ``llm_models`` block in the engine config
+    (overridable via ``MAL_CONFIG_PATH``). Never hardcoded here so the names
+    stay accurate whenever the config changes. Empty dict if unavailable.
+    """
+    path = cfg_path or os.environ.get("MAL_CONFIG_PATH")
+    if not path:
+        path = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            "config", "default_config.yaml")
+    try:
+        import yaml
+        with open(path) as fh:
+            cfg = yaml.safe_load(fh) or {}
+        names = cfg.get("llm_models", {}) or {}
+        return {str(k): str(v) for k, v in names.items()}
+    except Exception:
+        return {}
+
+
 def default_providers() -> list[LLMProvider]:
-    """The three ensemble LLM slots, mapped to the C++ weight factor names."""
+    """The three ensemble LLM slots, mapped to the C++ weight factor names.
+
+    Each slot's concrete model id is sourced from the config's ``llm_models``
+    block so the live identity is recorded on every provider/verdict.
+    """
+    names = llm_model_names()
     return [
-        MockLLMProvider(name="llm_primary", weight=0.27, skew=0.10),
-        MockLLMProvider(name="llm_secondary", weight=0.18, skew=-0.05),
-        MockLLMProvider(name="llm_tertiary", weight=0.12, skew=0.0),
+        MockLLMProvider(name="llm_primary", weight=0.27, skew=0.10,
+                        model_id=names.get("llm_primary", "")),
+        MockLLMProvider(name="llm_secondary", weight=0.18, skew=-0.05,
+                        model_id=names.get("llm_secondary", "")),
+        MockLLMProvider(name="llm_tertiary", weight=0.12, skew=0.0,
+                        model_id=names.get("llm_tertiary", "")),
     ]
 
 
