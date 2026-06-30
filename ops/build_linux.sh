@@ -84,8 +84,9 @@ fi
 
 # --- 3. Python venv + deps -------------------------------------------------- #
 if [ ! -d "$VENV" ]; then
-  echo "[build] creating venv at $VENV ..."
-  "$PY" -m venv "$VENV"
+  echo "[build] creating venv at $VENV (with --system-site-packages so the"
+  echo "[build]   GTK/WebKit bindings python3-gi are visible to pywebview) ..."
+  "$PY" -m venv --system-site-packages "$VENV"
 fi
 # shellcheck disable=SC1091
 source "$VENV/bin/activate"
