@@ -80,5 +80,24 @@ def test_actor_usefulness_bounded():
 
 
 def test_default_adapters_present():
+    # Free-first: ClankApp is the default crypto whale source; Apify + free
+    # EDGAR 13F round out coverage. Whale Alert is optional (key-gated) and not
+    # in the default chain.
     sources = {a.source for a in default_adapters()}
-    assert {"apify", "whale_alert", "sec_13f"} <= sources
+    assert {"clankapp", "apify", "sec_13f"} <= sources
+    assert sources.isdisjoint({"whale_alert"})
+
+
+def test_clankapp_is_default_primary():
+    from whale_signal.adapters import ClankAppAdapter, WhaleAlertAdapter
+    adapters = default_adapters()
+    assert adapters[0].source == "clankapp"
+    # Whale Alert remains importable as an optional alternative.
+    assert WhaleAlertAdapter().source == "whale_alert"
+
+
+def test_adapters_never_raise_offline():
+    # No keys, no network -> every adapter must return a list, never raise.
+    for adapter in default_adapters():
+        for sym in ("BTC-USD", "AAPL", "PRES-2028-YES"):
+            assert isinstance(adapter.fetch(sym), list)

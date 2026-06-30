@@ -2,7 +2,7 @@
 
 > One-line principle: The DNN/RL model is a core advisory intelligence layer, the
 > whale/smart-money system is a second advanced advisory layer powered specifically by
-> Apify, Whale Alert API, and SEC API 13F, the visual dashboard is a first-class control
+> free-first sources (ClankApp, Apify, SEC EDGAR 13F; Whale Alert optional), the visual dashboard is a first-class control
 > surface, every model's verdict and weight must be visible and adjustable in the app,
 > paper trading is the continuously updating training ground, and **live trading is
 > disabled by default behind an explicit in-app approval gate.**
@@ -68,7 +68,7 @@ The DNN/RL is **important but not sovereign**. Authority flows downward; safety 
 | **1** | **Static Safety** | Enforces hard risk limits, kill switch, hard stops. | **FINAL — never bypassable** by LLMs, DNN, RL, whale logic, adaptive logic, or execution adapters. |
 | **2** | **Adaptive Strategy** | Learns gradually from logged paper results; tunes weights/thresholds/sizing within safe ranges. | May propose/adjust, but cannot weaken Layer-1 limits. Every change logged + rollback-able. |
 | **3** | **DNN / RL Advisory Factor** | Outputs structured advisory signals; evolves via continual learning. | **Advisory only.** Cannot bypass risk or self-enable live. |
-| **4** | **Smart-Money / Whale Signal** | Tracks large investor behaviour via Apify / Whale Alert / SEC 13F. | **Advisory only.** Input, not controller. |
+| **4** | **Smart-Money / Whale Signal** | Tracks large investor behaviour via ClankApp / Apify / SEC EDGAR 13F (Whale Alert optional). | **Advisory only.** Input, not controller. |
 
 ### Layer 1 — Static Safety (C++, `risk/`)
 Enforces, as hard config, all of:
@@ -93,9 +93,11 @@ See `DNN_RL_DESIGN.md`. Outputs: `dnn_action_bias`, `dnn_confidence`,
 ### Layer 4 — Whale / Smart-Money (Python service, `whale_signal/`)
 Outputs: `whale_bias`, `whale_confidence`, `whale_flow_direction`,
 `whale_activity_score`, `whale_follow_signal`, `whale_contradiction_flag`,
-`whale_regime_label`. Sources: **Apify Polymarket whale-tracker**, **Whale Alert API**
-(crypto on-chain large transfers), **SEC API 13F** (institutional holdings — labelled as
-**delayed disclosure**, not live trade flow).
+`whale_regime_label`. Free-first sources: **ClankApp** (free crypto/on-chain
+large transfers — default), **Apify Polymarket whale-tracker**, **SEC EDGAR 13F**
+(free `data.sec.gov` REST, no key — institutional holdings labelled as **delayed
+disclosure**, not live trade flow). **Whale Alert API** is an optional key-gated
+alternative.
 
 ## 3. C++ vs Python Module Map
 
@@ -113,7 +115,7 @@ Outputs: `whale_bias`, `whale_confidence`, `whale_flow_direction`,
 | `storage/` (SQLite, event log) | **C++20** | Single source of truth; shared with Python via the same DB file. |
 | `llm_consensus/` | **Python bridge** | LLM client libraries + multi-model ensemble live in Python. |
 | `ml_factor/` (DNN/RL) | **Python** | PyTorch/sklearn ecosystem. Justified ML service. |
-| `whale_signal/` | **Python** | Apify / Whale Alert / SEC API integrations + scoring. |
+| `whale_signal/` | **Python** | ClankApp / Apify / SEC EDGAR 13F integrations (Whale Alert optional) + scoring. |
 | `python_bridge/` | **Python** | Thin RPC/IPC between C++ core and Python services. |
 | `ui/` (dashboard / control board) | **Python (Dash/Plotly)** | Fastest path to a rich live web dashboard. |
 | `ops/`, `tests/`, `docs/` | mixed | CMake/CTest (C++) + pytest (Python). |

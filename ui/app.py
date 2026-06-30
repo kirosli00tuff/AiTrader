@@ -22,6 +22,8 @@ from __future__ import annotations
 
 import os
 import sys
+from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 
 import dash
 import pandas as pd
@@ -32,6 +34,7 @@ from dash import Input, Output, State, dash_table, dcc, html, ctx
 
 import db
 import config_editor as cfg_editor
+import weight_tuner
 from dash import ALL
 
 # Make repo-root packages (account_manager) importable from the ui/ cwd.
@@ -62,6 +65,9 @@ def _load_dashboard_cfg() -> dict:
 _DCFG = _load_dashboard_cfg()
 REFRESH_MS = int(_DCFG.get("dashboard_refresh_seconds", 5)) * 1000
 TRADE_PAGE = int(_DCFG.get("trade_feed_page_size", 50))
+# Auto-tune on a slower multiple of the dashboard tick so weights visibly drift
+# as the bot learns without thrashing the audit log every few seconds.
+AUTO_TUNE_EVERY = max(1, int(_DCFG.get("auto_tune_every_ticks", 6)))
 
 FACTOR_LABELS = {
     "llm_primary": "LLM Primary",
@@ -88,6 +94,39 @@ def _factor_label(factor: str) -> str:
     if mid:
         return mid
     return FACTOR_LABELS.get(factor, factor)
+
+_PACIFIC = ZoneInfo("America/Los_Angeles")
+
+
+def _fmt_ts_pst(value) -> str:
+    """Shared user-facing timestamp formatter.
+
+    Converts a stored UTC ISO string (e.g. "2026-06-30T01:32:02Z") to friendly
+    US Pacific time with the correct PST/PDT label, e.g. "Jun 29, 6:32 PM PST".
+    Reused everywhere user-facing timestamps appear (trades, whale activity,
+    events). Returns the input unchanged if it cannot be parsed (raw value stays
+    available for sorting upstream).
+    """
+    if not value or not isinstance(value, str):
+        return value or ""
+    try:
+        dt = datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        local = dt.astimezone(_PACIFIC)
+        label = local.tzname() or "PST"  # PST or PDT depending on the date
+        return local.strftime("%b %-d, %-I:%M %p ") + label
+    except Exception:
+        return value
+
+
+def _fmt_ts_col(df: pd.DataFrame, col: str = "ts") -> pd.DataFrame:
+    """Return a copy with the given UTC-ISO column reformatted to friendly PST."""
+    if col in df.columns:
+        df = df.copy()
+        df[col] = [_fmt_ts_pst(v) for v in df[col]]
+    return df
+
 
 _MODAL_HIDDEN = {"display": "none"}
 _MODAL_SHOWN = {"display": "flex", "alignItems": "center",
@@ -137,6 +176,53 @@ def _table(df: pd.DataFrame, page_size: int = 10) -> dash_table.DataTable:
         style_header={"backgroundColor": "#21262d", "fontWeight": "bold",
                       "color": _FG, "border": "1px solid #30363d"},
         sort_action="native",
+    )
+
+
+_TRADE_CELL = {"backgroundColor": _PANEL, "color": _FG,
+               "border": "1px solid #30363d", "fontSize": "12px",
+               "padding": "4px", "fontFamily": "monospace", "textAlign": "left",
+               "maxWidth": "220px", "overflow": "hidden",
+               "textOverflow": "ellipsis"}
+_TRADE_HEADER = {"backgroundColor": "#21262d", "fontWeight": "bold",
+                 "color": _FG, "border": "1px solid #30363d"}
+
+
+def _trade_table(df: pd.DataFrame, scope: str,
+                 page_size: int = 12) -> dash_table.DataTable:
+    """A clickable trade DataTable, sorted MOST RECENT FIRST.
+
+    Rows are pre-sorted descending by the raw UTC timestamp so page 1 shows the
+    newest trades; the raw ``id`` is carried in the row data so a row click can
+    look the full trade up. The displayed ``time`` column uses the shared PST
+    formatter. ``scope`` distinguishes the paper/live/all tables for the
+    detail-modal callback's pattern-matching Input.
+    """
+    df = df.copy()
+    if "ts" in df.columns:
+        df = df.sort_values("ts", ascending=False, kind="stable")
+    show = pd.DataFrame()
+    if "id" in df.columns:
+        show["id"] = df["id"].values
+    if "ts" in df.columns:
+        show["time"] = [_fmt_ts_pst(v) for v in df["ts"]]
+    for c in ("symbol", "side", "qty", "price", "pnl", "outcome"):
+        if c in df.columns:
+            show[c] = df[c].values
+    for c in ("qty", "price", "pnl"):
+        if c in show.columns:
+            show[c] = pd.to_numeric(show[c], errors="coerce").round(4)
+    return dash_table.DataTable(
+        id={"type": "trade-tbl", "scope": scope},
+        data=show.to_dict("records"),
+        columns=[{"name": c, "id": c} for c in show.columns],
+        page_size=page_size,
+        page_action="native",
+        sort_action="native",
+        style_table={"overflowX": "auto"},
+        style_cell=_TRADE_CELL,
+        style_header=_TRADE_HEADER,
+        style_data={"cursor": "pointer"},
     )
 
 
@@ -411,8 +497,11 @@ def _weight_controls() -> html.Div:
                                  "fontSize": "12px"}),
         ], style={"marginBottom": "6px"}))
     return html.Div([
-        html.P("Adjust ensemble weights (auto-normalized). Advisory blend only — "
-               "never affects the Layer-1 RiskGate.",
+        html.P("These are the LIVE effective weights the bot auto-tunes toward "
+               "the most-accurate advisors. Edit any value + Apply to override "
+               "(your edit becomes the new effective value); tick the lock to "
+               "freeze a factor and exclude it from auto-tuning. Advisory blend "
+               "only — never affects the Layer-1/Layer-2 RiskGate.",
                style={"color": _MUTED, "fontSize": "11px"}),
         *rows,
         html.Div([
@@ -428,6 +517,13 @@ def _weight_controls() -> html.Div:
         ], style={"marginTop": "8px"}),
         html.Div(id="w-status", style={"color": _GREEN, "fontSize": "12px",
                                        "marginTop": "6px"}),
+        html.H4("Live effective weights (auto-tuned)",
+                style={"color": _FG, "marginTop": "14px", "marginBottom": "4px",
+                       "fontSize": "13px"}),
+        html.P("Status shows auto vs locked/manual; recent accuracy is the "
+               "trailing hit-rate driving each move.",
+               style={"color": _MUTED, "fontSize": "11px", "marginTop": 0}),
+        html.Div(id="w-live"),
     ])
 
 
@@ -589,8 +685,10 @@ def _advanced_page() -> html.Div:
 
 VENUE_GROUPS = [("alpaca", "Alpaca"), ("binance", "Binance"),
                 ("ibkr", "IBKR"), ("polymarket", "Polymarket")]
-SOURCE_GROUPS = [("apify", "Apify"), ("whale_alert", "Whale Alert"),
-                 ("sec_api", "SEC API")]
+SOURCE_GROUPS = [("clankapp", "ClankApp (free, default)"),
+                 ("apify", "Apify"),
+                 ("sec_api", "SEC EDGAR (free, no key needed)"),
+                 ("whale_alert", "Whale Alert (optional, limited free tier)")]
 
 
 def _cred_input(spec) -> html.Div:
@@ -735,10 +833,81 @@ def _chart_modal() -> html.Div:
     )
 
 
+def _trade_modal() -> html.Div:
+    """Shared trade-detail overlay opened by clicking any trade row.
+
+    The container + body Output id live in the initial layout (no lazy render),
+    mirroring the fullscreen-chart modal pattern.
+    """
+    return html.Div(
+        id="trade-modal", style={"display": "none"},
+        children=html.Div([
+            html.Div([
+                html.Span("Trade detail", style={"color": _FG,
+                                                 "fontSize": "16px",
+                                                 "fontWeight": "600"}),
+                html.Button("✕ Close", id="trade-modal-close", n_clicks=0,
+                            style={"background": "#30363d", "color": _FG,
+                                   "border": "none", "padding": "6px 16px",
+                                   "borderRadius": "6px", "cursor": "pointer",
+                                   "float": "right"}),
+            ], style={"marginBottom": "12px", "overflow": "hidden"}),
+            html.Div(id="trade-modal-body"),
+        ], style={"background": _PANEL, "borderRadius": "12px",
+                  "padding": "18px 22px", "width": "min(680px, 92vw)",
+                  "maxHeight": "88vh", "overflowY": "auto",
+                  "border": "1px solid #30363d", "boxSizing": "border-box"}),
+    )
+
+
+def _trade_detail(trade_id) -> html.Div:
+    """Build the full-detail view for one trade id from the DB."""
+    df = db.query("SELECT * FROM trades WHERE id = ?", (trade_id,))
+    if df.empty:
+        return html.P("Trade not found.", style={"color": _MUTED})
+    row = df.iloc[0].to_dict()
+
+    def _line(label, value):
+        return html.Div([
+            html.Span(f"{label}: ", style={"color": _MUTED, "fontSize": "13px"}),
+            html.Span(str(value), style={"color": _FG, "fontSize": "13px",
+                                         "fontFamily": "monospace"}),
+        ], style={"marginBottom": "4px"})
+
+    order = ["id", "symbol", "venue", "market", "category", "side", "qty",
+             "price", "notional", "fee", "pnl", "outcome", "mode",
+             "combined_conf", "combined_edge", "decision_id"]
+    lines = []
+    if row.get("ts"):
+        lines.append(_line("time", _fmt_ts_pst(row.get("ts"))))
+        lines.append(_line("timestamp (UTC)", row.get("ts")))
+    for k in order:
+        if k in row and row[k] is not None:
+            lines.append(_line(k, row[k]))
+
+    # Associated model/advisor verdicts recorded at the same tick timestamp.
+    detail = [html.Div(lines)]
+    ts = row.get("ts")
+    if ts:
+        mo = db.query(
+            "SELECT model, verdict, confidence, edge, weight FROM model_outputs "
+            "WHERE ts = ? ORDER BY weight DESC", (ts,))
+        if not mo.empty:
+            for c in ("confidence", "edge", "weight"):
+                if c in mo:
+                    mo[c] = pd.to_numeric(mo[c], errors="coerce").round(4)
+            detail.append(html.H4("Advisor verdicts",
+                                   style={"color": _FG, "marginTop": "14px",
+                                          "fontSize": "14px"}))
+            detail.append(_table(mo, 8))
+    return html.Div(detail)
+
+
 app.layout = html.Div([
     dcc.Interval(id="tick", interval=REFRESH_MS, n_intervals=0),
     dcc.Store(id="modal-current"),
     _chart_modal(),
+    _trade_modal(),
     html.Div([
         html.H1("AiTrader",
                 style={"color": _FG, "margin": "0", "fontSize": "22px"}),
@@ -831,13 +1000,7 @@ def _trades_paper(_n):
         df = df[df["mode"] == "paper"]
     if df.empty:
         return html.P("No paper trades yet.", style={"color": _MUTED})
-    cols = [c for c in ["ts", "symbol", "side", "qty", "price", "pnl",
-                        "outcome"] if c in df]
-    d = df[cols].copy()
-    for c in ("qty", "price", "pnl"):
-        if c in d:
-            d[c] = d[c].round(4)
-    return _table(d, 12)
+    return _trade_table(df, "paper", 12)
 
 
 # --- Live page callbacks ----------------------------------------------------
@@ -970,13 +1133,7 @@ def _trades_live(_n):
     if df.empty:
         return html.P("No live activity — live trading is disabled.",
                       style={"color": _MUTED})
-    cols = [c for c in ["ts", "symbol", "side", "qty", "price", "pnl",
-                        "outcome"] if c in df]
-    d = df[cols].copy()
-    for c in ("qty", "price", "pnl"):
-        if c in d:
-            d[c] = d[c].round(4)
-    return _table(d, 12)
+    return _trade_table(df, "live", 12)
 
 
 # --- Advanced: chart callbacks ----------------------------------------------
@@ -1243,10 +1400,7 @@ def _trades(_n):
     df = db.trades(TRADE_PAGE * 4)
     if df.empty:
         return html.P("no trades yet", style={"color": _MUTED})
-    for c in ("qty", "price", "notional", "pnl", "combined_conf", "combined_edge"):
-        if c in df:
-            df[c] = df[c].round(4)
-    return _table(df.drop(columns=["market"], errors="ignore"), 12)
+    return _trade_table(df, "all", 12)
 
 
 @app.callback(Output("t-positions", "children"), Input("tick", "n_intervals"))
@@ -1295,7 +1449,7 @@ def _whaleact(_n):
                       style={"color": _MUTED})
     if "value_usd" in df:
         df["value_usd"] = df["value_usd"].round(0)
-    return _table(df, 12)
+    return _table(_fmt_ts_col(df), 12)
 
 
 @app.callback(Output("t-events", "children"), Input("tick", "n_intervals"))
@@ -1303,7 +1457,7 @@ def _events(_n):
     df = db.events(300)
     if df.empty:
         return html.P("no events", style={"color": _MUTED})
-    return _table(df, 15)
+    return _table(_fmt_ts_col(df), 15)
 
 
 # --- Weight control panel (the UI's only writer) ----------------------------
@@ -1335,6 +1489,39 @@ def _apply_weights(_apply, _reset, values, value_ids, lock_vals, lock_ids):
     norm = db.normalize(weights)
     summary = ", ".join(f"{_factor_label(k)}={v:.2f}" for k, v in norm.items())
     return f"Applied (normalized): {summary}"
+
+
+@app.callback(Output("w-live", "children"), Input("tick", "n_intervals"))
+def _auto_tune(n):
+    """Run the adaptive tuner on a slow tick multiple and render the live panel.
+
+    Locked/manual factors always win — they are excluded from adjustment by the
+    tuner. The displayed values are the effective weights (post-persist), so the
+    panel visibly tracks what the bot learns.
+    """
+    try:
+        if n and n % AUTO_TUNE_EVERY == 0:
+            res = weight_tuner.run_auto_tune()
+            weights, accs, locks = res["weights"], res["accuracies"], res["locks"]
+        else:
+            weights = db.load_weight_overrides()
+            locks = db.load_locks()
+            accs = weight_tuner.compute_factor_accuracy()
+    except Exception:
+        weights, locks, accs = db.load_weight_overrides(), db.load_locks(), {}
+
+    rows = []
+    for f in db.DEFAULT_WEIGHTS:
+        a = accs.get(f)
+        rows.append({
+            "factor": _factor_label(f),
+            "effective weight": round(float(weights.get(f, 0.0)), 3),
+            "recent accuracy": (f"{a * 100:.0f}%" if a is not None else "—"),
+            "status": "locked / manual" if locks.get(f) else "auto",
+        })
+    df = pd.DataFrame(rows, columns=["factor", "effective weight",
+                                     "recent accuracy", "status"])
+    return _table(df, 8)
 
 
 # --- Accounts / Connections callbacks ---------------------------------------
@@ -1463,6 +1650,40 @@ def _chart_modal_cb(_expands, _close, _tick, current, *graph_figs):
         fig = figs.get(current) or _empty_fig()
         return _MODAL_SHOWN, fig, _GRAPH_TITLES.get(current, current), current
     return _MODAL_HIDDEN, dash.no_update, dash.no_update, dash.no_update
+
+
+@app.callback(
+    Output("trade-modal", "style"),
+    Output("trade-modal-body", "children"),
+    Input({"type": "trade-tbl", "scope": ALL}, "active_cell"),
+    Input("trade-modal-close", "n_clicks"),
+    State({"type": "trade-tbl", "scope": ALL}, "derived_viewport_data"),
+    State({"type": "trade-tbl", "scope": ALL}, "id"),
+    prevent_initial_call=True,
+)
+def _trade_modal_cb(active_cells, _close, viewports, ids):
+    trigger = ctx.triggered_id
+    if trigger == "trade-modal-close":
+        return _MODAL_HIDDEN, dash.no_update
+
+    if isinstance(trigger, dict) and trigger.get("type") == "trade-tbl":
+        # Locate the table that fired among the pattern-matched group.
+        idx = next((i for i, ident in enumerate(ids) if ident == trigger), None)
+        if idx is None:
+            return dash.no_update, dash.no_update
+        cell = active_cells[idx] if idx < len(active_cells) else None
+        vp = viewports[idx] if idx < len(viewports) else None
+        if not cell or not vp:
+            return dash.no_update, dash.no_update
+        row = cell.get("row")
+        if row is None or row >= len(vp):
+            return dash.no_update, dash.no_update
+        tid = vp[row].get("id")
+        if tid is None:
+            return dash.no_update, dash.no_update
+        return _MODAL_SHOWN, _trade_detail(tid)
+
+    return dash.no_update, dash.no_update
 
 
 # --- Level 1 risk-gate editor (writes config + event log) -------------------

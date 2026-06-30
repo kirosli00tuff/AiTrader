@@ -115,7 +115,7 @@ expectancy, drawdown below threshold, explicit manual confirmation).
 | `tests/` | CTest C++ unit tests + pytest Python tests | C++/Py |
 | `llm_consensus/` | multi-LLM consensus advisory service | Python |
 | `ml_factor/` | NumPy DNN advisory factor + registry + trainer | Python |
-| `whale_signal/` | Apify / Whale Alert / SEC-13F adapters + scoring | Python |
+| `whale_signal/` | ClankApp / Apify / SEC-EDGAR-13F (+ optional Whale Alert) adapters + scoring | Python |
 | `python_bridge/` | JSON-over-HTTP RPC server + client | Python |
 | `ui/` | Plotly Dash control board | Python |
 | `ops/` | `run_demo.sh`/`demo.py` offline demo; `start.sh`/`start.bat`/`stop.sh` 24/7 local launchers | Bash/Bat/Py |
@@ -429,15 +429,21 @@ deterministic RiskGate.
 
 ## Whale / smart-money sources
 
+Free-first by default — the app runs with **no paid keys**:
+
 | Source | Adapter | Notes |
 |--------|---------|-------|
+| **ClankApp** (free crypto/on-chain) | `ClankAppAdapter` (**default**) | fully free (~10 calls/min, ~21 chains); `CLANKAPP_API_KEY` optional (email signup); mock fallback |
 | Apify Polymarket whale-tracker | `ApifyWhaleAdapter` (`apimie/polymarket-whales-trader`) | needs `APIFY_TOKEN`; mock otherwise |
-| Whale Alert API | `WhaleAlertAdapter` | crypto-only, ≥ $500k; needs `WHALE_ALERT_API_KEY` |
-| SEC 13F | `Sec13FAdapter` | **DELAYED** disclosure, equity-only, down-weighted; needs `SEC_API_KEY` |
+| **SEC EDGAR 13F** (free) | `Sec13FAdapter` (**default**) | official `data.sec.gov` / `efts.sec.gov` REST — **no key**, just a descriptive `User-Agent`; **DELAYED**, equity-only, down-weighted; `SEC_API_KEY` optional override only |
+| Whale Alert API | `WhaleAlertAdapter` (optional) | crypto-only, ≥ $500k; limited free tier; needs `WHALE_ALERT_API_KEY`; **not** in the default chain |
 
-Each adapter mocks deterministically when its key is absent, so the demo always
-runs. 13F rows are flagged `delayed=1` everywhere and labelled **DELAYED** in the
-UI — context, not live trade flow.
+Live fetches use `requests` with a ~10 s timeout and descriptive User-Agent; any
+network error, HTTP 429 (rate limit), or parse failure falls back to a
+deterministic mock, so the demo always runs offline. 13F rows are flagged
+`delayed=1` everywhere and labelled **DELAYED** in the UI — context, not live
+trade flow. These signals are advisory research data for paper/model-training
+only — never live order flow.
 
 ## Configuration & secrets
 
@@ -457,8 +463,9 @@ Credentials can be entered two ways, with a single runtime resolver
 
 1. **In-app** — the dashboard's **Accounts / Connections** tab lets you type and
    save keys/secrets per venue (Alpaca, Binance, IBKR, Polymarket) with
-   **separate paper and live fields**, and per data source (Apify, Whale Alert,
-   SEC API). Secret inputs are masked (`type=password`).
+   **separate paper and live fields**, and per data source (ClankApp — free,
+   default; Apify; SEC EDGAR — free, no key needed; Whale Alert — optional,
+   limited free tier). Secret inputs are masked (`type=password`).
 2. **Environment / .env** — the existing `*_env` names, plus paper/live-specific
    variants (e.g. `ALPACA_LIVE_API_KEY`, falling back to `ALPACA_API_KEY`).
 

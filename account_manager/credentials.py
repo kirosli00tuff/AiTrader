@@ -77,14 +77,20 @@ def _build_registry() -> dict[str, CredentialSpec]:
                            "venue", False,
                            (f"IBKR_{m}_ACCOUNT", "IBKR_ACCOUNT"), mode),
         ]
-    # Data sources (single credential each).
+    # Data sources (single credential each). Free-first: ClankApp (crypto) and
+    # SEC EDGAR (institutional) are the defaults and need no paid key.
     specs += [
+        CredentialSpec("clankapp_key", "API key (optional, free signup)",
+                       "clankapp", "ClankApp (free, default)", "source", True,
+                       ("CLANKAPP_API_KEY",)),
         CredentialSpec("apify_token", "API token", "apify", "Apify", "source",
                        True, ("APIFY_TOKEN",)),
         CredentialSpec("whale_alert_key", "API key", "whale_alert",
-                       "Whale Alert", "source", True, ("WHALE_ALERT_API_KEY",)),
-        CredentialSpec("sec_api_key", "API key", "sec_api", "SEC API",
-                       "source", True, ("SEC_API_KEY",)),
+                       "Whale Alert (optional, limited free tier)", "source",
+                       True, ("WHALE_ALERT_API_KEY",)),
+        CredentialSpec("sec_api_key", "API key (optional override only)",
+                       "sec_api", "SEC EDGAR (free, no key needed)", "source",
+                       True, ("SEC_API_KEY",)),
     ]
     return {s.name: s for s in specs}
 
@@ -97,6 +103,7 @@ _REQUIRED_FIELDS: dict[str, tuple[str, ...]] = {
     "binance": ("key", "secret"),
     "polymarket": ("key", "secret"),
     "ibkr": ("host", "port", "account"),
+    "clankapp": ("key",),
     "apify": ("token",),
     "whale_alert": ("key",),
     "sec_api": ("key",),
