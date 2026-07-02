@@ -1,176 +1,123 @@
-"""Multi-LLM consensus ensemble.
+"""Multi-LLM consensus ensemble (the "council").
 
-Produces a consensus directional verdict from several LLM "providers". Real
-providers (OpenAI / Anthropic / etc.) plug in behind API keys; for the offline
-demo every provider is a deterministic MOCK so no keys are required. Output is
-ADVISORY ONLY — it enters the C++ factor-combination engine as weighted factors
-and can never bypass Layer-1 risk.
+Produces a consensus directional verdict from several LLM providers. Three real
+providers (OpenAI / Anthropic / Google) plug in behind API keys; when a key is
+absent that provider degrades to a clearly-labelled deterministic mock, so the
+offline demo needs no keys. A cheap Gemini-Flash base-check gate can skip the
+whole council for low-signal setups (cost control).
+
+Output is ADVISORY ONLY — it enters the C++ factor-combination engine as
+weighted factors and can never bypass Layer-1 risk.
+
+Which council runs is controlled by config (``config/default_config.yaml``):
+  * llm.use_real_council (default false) -> real providers vs mock.
+  * llm.gate_enabled     (default true)  -> run the base-check gate first.
+The engine only swaps in the real council when use_real_council is true AND it
+is launched with ``--bridge`` (see core/main.cpp + python_bridge).
 """
 from __future__ import annotations
 
-import hashlib
-import math
-import os
-from dataclasses import dataclass, field
-from typing import Protocol
+# Re-exported here so existing imports (`from llm_consensus.consensus import ...`)
+# keep working after the split into focused modules.
+from .config_access import (  # noqa: F401
+    gate_enabled, llm_model_names, slot_weight, use_real_council,
+)
+from .gate import AlwaysProceedGate, GateDecision, GeminiFlashGate  # noqa: F401
+from .providers import (  # noqa: F401
+    AnthropicProvider, GeminiProvider, LLMProvider, MockLLMProvider,
+    OpenAIProvider,
+)
+from .verdicts import (  # noqa: F401
+    ConsensusResult, ModelVerdict, _det_unit, bias_to_verdict,
+)
+
+# Provider "personality" skews — kept identical to the original ensemble so the
+# offline mock behaviour (and its tests) are unchanged.
+_SLOT_SKEW: dict[str, float] = {
+    "llm_primary": 0.10,
+    "llm_secondary": -0.05,
+    "llm_tertiary": 0.0,
+}
 
 
-def _det_unit(seed: str) -> float:
-    h = int(hashlib.sha256(seed.encode()).hexdigest(), 16)
-    return (h % 1_000_000) / 1_000_000.0
-
-
-def bias_to_verdict(bias: float) -> str:
-    if bias <= -0.6:
-        return "strong_sell"
-    if bias <= -0.2:
-        return "sell"
-    if bias < 0.2:
-        return "hold"
-    if bias < 0.6:
-        return "buy"
-    return "strong_buy"
-
-
-@dataclass
-class ModelVerdict:
-    model: str
-    bias: float          # signed [-1, 1]
-    confidence: float    # [0, 1]
-    edge: float          # expected edge
-    verdict: str
-    rationale: str = ""
-
-
-@dataclass
-class ConsensusResult:
-    bias: float
-    confidence: float
-    edge: float
-    verdict: str
-    agreement_count: int
-    per_model: list[ModelVerdict] = field(default_factory=list)
-
-    def to_dict(self) -> dict:
-        return {
-            "bias": round(self.bias, 4),
-            "confidence": round(self.confidence, 4),
-            "edge": round(self.edge, 4),
-            "verdict": self.verdict,
-            "agreement_count": self.agreement_count,
-            "per_model": [vars(m) for m in self.per_model],
-        }
-
-
-class LLMProvider(Protocol):
-    name: str
-    weight: float
-
-    def score(self, state: dict) -> ModelVerdict: ...
-
-
-@dataclass
-class MockLLMProvider:
-    """Deterministic offline LLM stand-in.
-
-    Derives a stable directional read from the market-state features plus a
-    provider-specific perturbation, so different "models" mildly disagree —
-    which is what makes the consensus + agreement count meaningful.
-    """
-
-    name: str
-    weight: float = 0.2
-    skew: float = 0.0  # provider personality (bull/bear lean)
-    model_id: str = ""  # concrete model identity (e.g. "gpt-5.5"), from config
-
-    def score(self, state: dict) -> ModelVerdict:
-        sym = str(state.get("symbol", "?"))
-        ret5 = float(state.get("ret_5", 0.0))
-        imbalance = float(state.get("imbalance", 0.0))
-        catalyst = float(state.get("catalyst", 0.0))
-        vol = float(state.get("volatility", 0.0))
-        noise = _det_unit(self.name + sym) - 0.5
-        raw = ret5 * 22.0 + imbalance * 0.3 + catalyst * 0.4 + self.skew + noise
-        bias = math.tanh(raw)
-        confidence = max(0.0, min(1.0, 0.55 + 0.4 * abs(bias) - vol * 0.8))
-        edge = max(0.0, 0.03 * abs(bias) + 0.005)
-        return ModelVerdict(
-            model=self.name,
-            bias=round(bias, 4),
-            confidence=round(confidence, 4),
-            edge=round(edge, 4),
-            verdict=bias_to_verdict(bias),
-            rationale=f"mock read on {sym}",
-        )
-
-
-class OpenAIProvider:
-    """TODO: real OpenAI-backed provider. Requires OPENAI_API_KEY.
-
-    Kept structurally so a real key can be dropped in. Falls back to mock when
-    no key is configured so the demo always runs.
-    """
-
-    def __init__(self, name: str = "gpt", weight: float = 0.2):
-        self.name = name
-        self.weight = weight
-        self._fallback = MockLLMProvider(name=name, weight=weight)
-
-    def score(self, state: dict) -> ModelVerdict:
-        if not os.environ.get("OPENAI_API_KEY"):
-            return self._fallback.score(state)
-        # TODO: implement real chat-completion call + structured parsing.
-        raise NotImplementedError("Live OpenAI provider not implemented.")
-
-
-def llm_model_names(cfg_path: str | None = None) -> dict[str, str]:
-    """Return the configured concrete model id per LLM ensemble slot.
-
-    Single source of truth = the ``llm_models`` block in the engine config
-    (overridable via ``MAL_CONFIG_PATH``). Never hardcoded here so the names
-    stay accurate whenever the config changes. Empty dict if unavailable.
-    """
-    path = cfg_path or os.environ.get("MAL_CONFIG_PATH")
-    if not path:
-        path = os.path.join(
-            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-            "config", "default_config.yaml")
-    try:
-        import yaml
-        with open(path) as fh:
-            cfg = yaml.safe_load(fh) or {}
-        names = cfg.get("llm_models", {}) or {}
-        return {str(k): str(v) for k, v in names.items()}
-    except Exception:
-        return {}
-
-
-def default_providers() -> list[LLMProvider]:
-    """The three ensemble LLM slots, mapped to the C++ weight factor names.
-
-    Each slot's concrete model id is sourced from the config's ``llm_models``
-    block so the live identity is recorded on every provider/verdict.
-    """
-    names = llm_model_names()
+def default_providers(cfg_path: str | None = None) -> list[LLMProvider]:
+    """The three ensemble slots as deterministic offline MOCK providers."""
+    names = llm_model_names(cfg_path)
     return [
-        MockLLMProvider(name="llm_primary", weight=0.27, skew=0.10,
-                        model_id=names.get("llm_primary", "")),
-        MockLLMProvider(name="llm_secondary", weight=0.18, skew=-0.05,
-                        model_id=names.get("llm_secondary", "")),
-        MockLLMProvider(name="llm_tertiary", weight=0.12, skew=0.0,
-                        model_id=names.get("llm_tertiary", "")),
+        MockLLMProvider(name=slot, weight=slot_weight(slot, cfg_path),
+                        skew=_SLOT_SKEW[slot], model_id=names.get(slot, ""))
+        for slot in ("llm_primary", "llm_secondary", "llm_tertiary")
     ]
 
 
-def consensus(state: dict, providers: list[LLMProvider] | None = None) -> ConsensusResult:
-    """Weighted ensemble of provider verdicts into one consensus."""
-    providers = providers or default_providers()
-    verdicts = [p.score(state) for p in providers]
-    wsum = sum(p.weight for p in providers) or 1.0
+def real_providers(cfg_path: str | None = None) -> list[LLMProvider]:
+    """The three ensemble slots as REAL API-backed providers.
 
-    bias = sum(v.bias * p.weight for v, p in zip(verdicts, providers)) / wsum
-    conf = sum(v.confidence * p.weight for v, p in zip(verdicts, providers)) / wsum
-    edge = sum(v.edge * p.weight for v, p in zip(verdicts, providers)) / wsum
+    Slot -> provider mapping matches the ``llm_models`` config block:
+      llm_primary   = OpenAI    (gpt-5.5)
+      llm_secondary = Anthropic (claude-opus-4-8)
+      llm_tertiary  = Google    (gemini-3.1-pro)
+    Each still degrades to a labelled mock when its key is absent.
+    """
+    names = llm_model_names(cfg_path)
+    return [
+        OpenAIProvider(name="llm_primary",
+                       weight=slot_weight("llm_primary", cfg_path),
+                       model_id=names.get("llm_primary", "gpt-5.5"),
+                       skew=_SLOT_SKEW["llm_primary"]),
+        AnthropicProvider(name="llm_secondary",
+                          weight=slot_weight("llm_secondary", cfg_path),
+                          model_id=names.get("llm_secondary", "claude-opus-4-8"),
+                          skew=_SLOT_SKEW["llm_secondary"]),
+        GeminiProvider(name="llm_tertiary",
+                       weight=slot_weight("llm_tertiary", cfg_path),
+                       model_id=names.get("llm_tertiary", "gemini-3.1-pro"),
+                       skew=_SLOT_SKEW["llm_tertiary"]),
+    ]
+
+
+def build_council(cfg_path: str | None = None) -> list[LLMProvider]:
+    """Real council when llm.use_real_council is set, else the mock council."""
+    if use_real_council(cfg_path):
+        return real_providers(cfg_path)
+    return default_providers(cfg_path)
+
+
+def build_gate(cfg_path: str | None = None):
+    """The base-check gate, or a no-op AlwaysProceedGate when disabled."""
+    if not gate_enabled(cfg_path):
+        return AlwaysProceedGate(reason="gate disabled by config", source="disabled")
+    return GeminiFlashGate(model_id=llm_model_names(cfg_path).get(
+        "llm_gate", "gemini-3-flash"))
+
+
+def _flat_consensus(gate: GateDecision) -> ConsensusResult:
+    """Neutral council verdict returned when the gate skips the review."""
+    return ConsensusResult(
+        bias=0.0, confidence=0.0, edge=0.0, verdict=bias_to_verdict(0.0),
+        agreement_count=0, per_model=[], gate=gate.to_dict())
+
+
+def consensus(state: dict, providers: list[LLMProvider] | None = None,
+              gate=None, cfg_path: str | None = None) -> ConsensusResult:
+    """Weighted ensemble of provider verdicts into one consensus.
+
+    Runs the base-check gate first; if it declines, returns a flat verdict and
+    skips the (expensive) providers entirely. The ensemble math itself is
+    unchanged from the original mock-only implementation.
+    """
+    g = gate if gate is not None else build_gate(cfg_path)
+    decision = g.should_review(state)
+    if not decision.proceed:
+        return _flat_consensus(decision)
+
+    prov = providers if providers is not None else build_council(cfg_path)
+    verdicts = [p.score(state) for p in prov]
+    wsum = sum(p.weight for p in prov) or 1.0
+
+    bias = sum(v.bias * p.weight for v, p in zip(verdicts, prov)) / wsum
+    conf = sum(v.confidence * p.weight for v, p in zip(verdicts, prov)) / wsum
+    edge = sum(v.edge * p.weight for v, p in zip(verdicts, prov)) / wsum
 
     net = 1 if bias > 0 else (-1 if bias < 0 else 0)
     agreement = sum(
@@ -183,11 +130,34 @@ def consensus(state: dict, providers: list[LLMProvider] | None = None) -> Consen
         verdict=bias_to_verdict(bias),
         agreement_count=agreement,
         per_model=verdicts,
+        gate=decision.to_dict(),
     )
+
+
+def council_status_line(cfg_path: str | None = None) -> str:
+    """One-line, unambiguous statement of which council + gate are active.
+
+    Printed at bridge startup so it is never ambiguous whether the REAL council
+    or the MOCK council is running (see Task 5 startup requirement).
+    """
+    real = use_real_council(cfg_path)
+    names = llm_model_names(cfg_path)
+    if real:
+        council = (f"REAL council [{names.get('llm_primary', 'gpt-5.5')}, "
+                   f"{names.get('llm_secondary', 'claude-opus-4-8')}, "
+                   f"{names.get('llm_tertiary', 'gemini-3.1-pro')}]")
+    else:
+        council = "MOCK council (deterministic offline stand-ins)"
+    if gate_enabled(cfg_path):
+        gate = f"base-check gate ON ({names.get('llm_gate', 'gemini-3-flash')})"
+    else:
+        gate = "base-check gate OFF"
+    return f"LLM council: {council}; {gate}"
 
 
 if __name__ == "__main__":
     import json
 
     s = {"symbol": "BTC-USD", "ret_5": 0.02, "imbalance": 0.3, "catalyst": 0.4}
+    print(council_status_line())
     print(json.dumps(consensus(s).to_dict(), indent=2))

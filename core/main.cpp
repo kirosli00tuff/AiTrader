@@ -86,6 +86,15 @@ int main(int argc, char** argv) {
         std::cout << "  source: " << source << "\n"
                   << "  bridge: " << (opts.use_bridge ? bridge : "off (mock)")
                   << "\n";
+        // Make it unambiguous which LLM council scores the llm_ factors. The
+        // REAL council only runs via the Python bridge with llm.use_real_council
+        // = true; the bridge itself prints the authoritative real-vs-mock line.
+        std::cout << "  llm:    "
+                  << (opts.use_bridge
+                          ? "via python bridge (see bridge log: REAL vs mock council)"
+                          : "in-process C++ mock (real council needs --bridge + "
+                            "llm.use_real_council=true)")
+                  << "\n";
 
         mal::core::Engine engine(std::move(cfg), opts);
 

@@ -24,7 +24,7 @@ _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
-from llm_consensus import consensus           # noqa: E402
+from llm_consensus import consensus, council_status_line, use_real_council  # noqa: E402
 from ml_factor import score_state             # noqa: E402
 from whale_signal import whale_signal_for     # noqa: E402
 from market_data import alpaca_source         # noqa: E402
@@ -87,7 +87,10 @@ class Handler(BaseHTTPRequestHandler):
 
 def serve(host: str = "127.0.0.1", port: int = 8765) -> None:
     httpd = ThreadingHTTPServer((host, port), Handler)
-    print(f"python_bridge serving on http://{host}:{port} (offline mock mode)")
+    mode = "REAL council ACTIVE" if use_real_council() else "mock council"
+    print(f"python_bridge serving on http://{host}:{port} ({mode})")
+    # Unambiguous, single source of truth for which council + gate are running.
+    print(f"  {council_status_line()}")
     httpd.serve_forever()
 
 

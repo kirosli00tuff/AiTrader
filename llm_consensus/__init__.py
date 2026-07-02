@@ -1,9 +1,23 @@
-"""Multi-LLM consensus advisory factor (Layer-3 sibling, advisory only)."""
+"""Multi-LLM consensus advisory factor (Layer-2 council, advisory only)."""
 from .consensus import (  # noqa: F401
+    AlwaysProceedGate,
+    AnthropicProvider,
+    ConsensusResult,
+    GateDecision,
+    GeminiFlashGate,
+    GeminiProvider,
     LLMProvider,
     MockLLMProvider,
     ModelVerdict,
-    ConsensusResult,
+    OpenAIProvider,
+    bias_to_verdict,
+    build_council,
+    build_gate,
     consensus,
+    council_status_line,
     default_providers,
+    gate_enabled,
+    llm_model_names,
+    real_providers,
+    use_real_council,
 )

@@ -169,11 +169,33 @@ model_weights:
 # This is the single source of truth for the model names; the consensus engine
 # and the dashboard's advisory panels both read these strings, so the UI always
 # shows the exact model in use and stays accurate when you swap a model here.
+# `llm_gate` is the cheap free-tier model used for the pre-council base-check.
+# These are the only approved model strings (see CLAUDE.md); do not invent others.
 # -----------------------------------------------------------------------------
 llm_models:
-  llm_primary: gpt-5.5
-  llm_secondary: claude-opus-4.8
-  llm_tertiary: gemini-2.5-pro
+  llm_primary: gpt-5.5              # OpenAI    (env OPENAI_API_KEY)
+  llm_secondary: claude-opus-4-8   # Anthropic (env ANTHROPIC_API_KEY)
+  llm_tertiary: gemini-3.1-pro     # Google    (env GEMINI_API_KEY)
+  llm_gate: gemini-3-flash         # free base-check gate (env GEMINI_API_KEY)
+
+# -----------------------------------------------------------------------------
+# LLM council (Layer 2 advisory) — real multi-provider consensus.
+#
+#   use_real_council: when TRUE *and* the engine is launched with --bridge, the
+#     llm_ ensemble factors are scored by the REAL council (OpenAI / Anthropic /
+#     Google) instead of the in-process C++ mock. Default FALSE so the offline
+#     paper loop stays deterministic and key-free. Any provider whose API key
+#     env var is absent returns a clearly-labelled MOCK verdict (never crashes),
+#     so turning this on never forces the system offline.
+#   gate_enabled: run the cheap Gemini-Flash base-check before the three
+#     expensive providers. If the gate says "not worth a full review" the council
+#     is skipped and a flat/neutral verdict is returned (cost control). Default
+#     TRUE. Without GEMINI_API_KEY the gate runs in permissive mock mode (always
+#     proceeds) so offline behaviour is unchanged.
+# -----------------------------------------------------------------------------
+llm:
+  use_real_council: false
+  gate_enabled: true
 
 # -----------------------------------------------------------------------------
 # External data sources (set credentials on the in-app Accounts/Connections
