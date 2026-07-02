@@ -4,6 +4,8 @@
 
 AiTrader (Market AI Lab) is a **C++20-first, multi-venue algorithmic trading platform**.
 
+Read PROGRESS.md and CONTEXT.md at the start of each session. Update PROGRESS.md at the end of each session with a dated log entry, newest at top. Update CONTEXT.md when a significant decision or API quirk is discovered. Log every user prompt to RETURN.md before starting work, newest at top, recording the prompt, model, changes, and commit message.
+
 - **C++20 is the primary language** for the engine core: the deterministic risk gate, execution/mode router, signal combination, adaptive tuner, account/venue state, storage DAO, and the run loop. Python is the secondary tier: advisory services (LLM consensus, DNN factor, whale signals), the market-data/execution bridge to Alpaca, and the dashboard.
 - **Paper trading is the default and the continuous training environment.** The engine runs a 24/7 paper loop offline with deterministic mocks and needs no API keys.
 - **The dashboard is a first-class control surface**, not an afterthought — a Plotly Dash app (Paper / Live / Advanced / Accounts tabs) that reads the shared SQLite database and exposes the kill switch, weight controls, the L1 risk-gate editor, and the live-approval readiness view.

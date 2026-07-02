@@ -1,5 +1,29 @@
 # Claude Code Prompt Returns
 
+Every prompt gets logged here before work starts. Newest at top. Each entry records the prompt, the model, what changed, and the commit message.
+
+Format:
+
+## Prompt: [short title]
+
+Date:
+Model:
+Prompt summary: one line.
+Changes: what changed.
+Commit message:
+
+---
+
+## Prompt: Add CONTEXT.md
+
+Date: 2026-07-02
+Model: Sonnet 5
+Prompt summary: Owner provided CONTEXT.md content covering project rationale, key decisions, strategy rationale, whale tracking decisions, API notes, cost notes, working style, model selection guide.
+Changes: Created CONTEXT.md at repo root with the provided content. No code changes.
+Commit message: Add CONTEXT.md and log prompt in RETURN.md.
+
+---
+
 ## Prompt: Real LLM Council
 
 **Date finished:** 2026-07-02
