@@ -20,6 +20,7 @@ weaken the deterministic Layer-1 RiskGate.
 """
 from __future__ import annotations
 
+import json
 import os
 import sys
 from datetime import datetime, timezone
@@ -1392,6 +1393,19 @@ def _registry(_n):
     if df.empty:
         return html.P("no registry entries (champion auto-trains on first run)",
                       style={"color": _MUTED})
+
+    # Surface training provenance (synthetic | real-data) as its own column so a
+    # real-data challenger is visibly distinct from the synthetic bootstrap
+    # champion. Legacy rows with no provenance are shown as "synthetic".
+    def _prov(mj):
+        try:
+            return json.loads(mj).get("provenance", "synthetic")
+        except (TypeError, ValueError):
+            return "synthetic"
+
+    if "metrics_json" in df.columns:
+        prov = df["metrics_json"].map(_prov)
+        df.insert(df.columns.get_loc("metrics_json"), "provenance", prov)
     return _table(df, 6)
 
 

@@ -63,6 +63,35 @@ def evaluate_and_maybe_promote(conn: sqlite3.Connection, champion_metric: float,
     }
 
 
+def meets_promotion_criteria(champion_metrics: dict, challenger_metrics: dict,
+                             min_real_samples: int = 200) -> tuple[bool, str]:
+    """Return (ok, reason) for promoting a REAL-data challenger over the champion.
+
+    Task 5 gate — a real-data challenger may only be promoted when ALL hold:
+      1. it was trained on real data (provenance == "real-data"),
+      2. it has >= `min_real_samples` real samples,
+      3. it beats the champion on walk-forward validation Sharpe, and
+      4. its max drawdown is no worse than the champion's.
+    Promotion still requires an explicit operator action even when this is True;
+    nothing here auto-promotes. Advisory-only layer; the 0.5 sizing cap is
+    unchanged regardless of which model serves.
+    """
+    if challenger_metrics.get("provenance") != "real-data":
+        return False, "challenger is not real-data provenance"
+    n = int(challenger_metrics.get("n_samples", 0))
+    if n < min_real_samples:
+        return False, f"only {n} real samples (< {min_real_samples})"
+    ch_sharpe = float(challenger_metrics.get("validation_sharpe", 0.0))
+    champ_sharpe = float(champion_metrics.get("validation_sharpe", 0.0))
+    if ch_sharpe <= champ_sharpe:
+        return False, f"sharpe {ch_sharpe} not better than champion {champ_sharpe}"
+    ch_dd = float(challenger_metrics.get("max_drawdown", float("inf")))
+    champ_dd = float(champion_metrics.get("max_drawdown", float("inf")))
+    if ch_dd > champ_dd:
+        return False, f"max drawdown {ch_dd} worse than champion {champ_dd}"
+    return True, "meets all promotion criteria (still requires explicit promotion)"
+
+
 def rollback(conn: sqlite3.Connection, reason: str) -> str | None:
     """Roll back to the most recent retired model (previous champion)."""
     row = conn.execute(
