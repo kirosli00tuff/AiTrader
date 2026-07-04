@@ -138,6 +138,9 @@ class _RealLLMProvider:
     model_id: str = ""
     skew: float = 0.0
     timeout: float = http_json.DEFAULT_TIMEOUT
+    # Per-provider response token cap (Task 4 cost control). Default matches the
+    # council config default; the builder passes the configured value.
+    max_tokens: int = 400
 
     ENV_VAR: ClassVar[str] = ""
     LABEL: ClassVar[str] = "provider"
@@ -198,7 +201,8 @@ class _RealLLMProvider:
 # --- Google Gemini transport (shared by the tertiary provider AND the gate) --
 
 def gemini_request(model_id: str, key: str, system_prompt: str,
-                   user_prompt: str) -> tuple[str, dict, dict]:
+                   user_prompt: str, max_tokens: int = 400
+                   ) -> tuple[str, dict, dict]:
     model = model_id or "gemini-3.1-pro"
     url = ("https://generativelanguage.googleapis.com/v1beta/models/"
            f"{model}:generateContent")
@@ -211,6 +215,7 @@ def gemini_request(model_id: str, key: str, system_prompt: str,
         "generationConfig": {
             "response_mime_type": "application/json",  # force JSON output
             "temperature": 0.2,
+            "maxOutputTokens": max_tokens,  # cost cap (Task 4)
         },
     }
     return url, headers, payload
@@ -247,6 +252,7 @@ class OpenAIProvider(_RealLLMProvider):
             ],
             "response_format": {"type": "json_object"},  # force JSON output
             "temperature": 0.2,
+            "max_tokens": self.max_tokens,  # cost cap (Task 4)
         }
         return url, headers, payload
 
@@ -273,7 +279,7 @@ class AnthropicProvider(_RealLLMProvider):
         }
         payload = {
             "model": self.model_id or "claude-opus-4-8",
-            "max_tokens": 300,
+            "max_tokens": self.max_tokens,  # cost cap (Task 4)
             # Prompt caching: explicit ephemeral cache_control on the fixed
             # system prefix caches it across calls.
             "system": [{"type": "text", "text": SYSTEM_PROMPT,
@@ -298,7 +304,8 @@ class GeminiProvider(_RealLLMProvider):
 
     def _request(self, state: dict, key: str) -> tuple[str, dict, dict]:
         return gemini_request(self.model_id or "gemini-3.1-pro", key,
-                              SYSTEM_PROMPT, build_user_prompt(state))
+                              SYSTEM_PROMPT, build_user_prompt(state),
+                              max_tokens=self.max_tokens)
 
     def _text_from_response(self, resp: dict) -> str:
         return gemini_text(resp)

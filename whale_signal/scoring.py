@@ -6,7 +6,6 @@ Advisory only: the result is one weighted factor downstream, never a controller.
 """
 from __future__ import annotations
 
-import hashlib
 import math
 from dataclasses import dataclass, asdict
 
@@ -36,19 +35,45 @@ class WhaleSignal:
         return d
 
 
-def actor_usefulness(entity: str) -> float:
-    """Deterministic historical-usefulness score in [0,1] for an actor.
+# Transparent tx-size buckets (USD notional). Larger on-chain / disclosed flows
+# carry more information than dust, so they weight more. This is a documented,
+# auditable function of the observation — NOT an opaque hash of the actor name.
+_SIZE_BUCKETS: tuple[tuple[float, float], ...] = (
+    (100_000_000.0, 1.0),   # >= $100M
+    (10_000_000.0, 0.8),    # >= $10M
+    (1_000_000.0, 0.6),     # >= $1M
+    (100_000.0, 0.4),       # >= $100k
+    (0.0, 0.2),             # smaller / dust
+)
 
-    Stands in for a learned per-actor hit-rate. Used to weight + filter actors.
+
+def size_bucket(value_usd: float) -> float:
+    """Transparent notional-size score in [0.2, 1.0] (larger tx => higher)."""
+    for threshold, score in _SIZE_BUCKETS:
+        if value_usd >= threshold:
+            return score
+    return 0.2
+
+
+def activity_usefulness(activity: WhaleActivity) -> float:
+    """Transparent per-observation usefulness heuristic in [0.1, 1.0].
+
+    Combines the tx-size bucket with exchange inflow/outflow direction clarity:
+    a clearly directional flow (inflow/outflow/long/short) is more informative
+    than an ambiguous one. This replaces the former opaque SHA-256 actor
+    stand-in with an explainable, auditable score.
     """
-    h = int(hashlib.sha256(("useful:" + entity).encode()).hexdigest(), 16)
-    return (h % 1000) / 1000.0
+    directional = activity.direction in _BULLISH or activity.direction in _BEARISH
+    clarity = 1.0 if directional else 0.5
+    return round(size_bucket(activity.value_usd) * clarity, 4)
 
 
 def rank_actors(activities: list[WhaleActivity],
                 min_usefulness: float = 0.0) -> list[tuple[str, float]]:
-    """Rank distinct actors by usefulness, optionally filtering noisy ones."""
-    scores = {a.entity: actor_usefulness(a.entity) for a in activities}
+    """Rank distinct actors by their most useful observation, filtering noise."""
+    scores: dict[str, float] = {}
+    for a in activities:
+        scores[a.entity] = max(scores.get(a.entity, 0.0), activity_usefulness(a))
     ranked = sorted(scores.items(), key=lambda kv: kv[1], reverse=True)
     return [(e, s) for e, s in ranked if s >= min_usefulness]
 
@@ -68,9 +93,9 @@ def score_whales(activities: list[WhaleActivity], symbol: str,
     total_value = 0.0
     delayed_count = 0
     for a in relevant:
-        usefulness = actor_usefulness(a.entity)
+        usefulness = activity_usefulness(a)
         if usefulness < min_actor_usefulness:
-            continue  # drop noisy actor
+            continue  # drop low-signal observation (small and/or ambiguous)
         sign = 1.0 if a.direction in _BULLISH else (-1.0 if a.direction in _BEARISH else 0.0)
         w = math.log10(max(10.0, a.value_usd)) * usefulness
         # DELAYED disclosures (13F) get down-weighted — context, not live flow.

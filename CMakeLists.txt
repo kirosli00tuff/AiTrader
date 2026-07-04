@@ -56,8 +56,11 @@ target_link_libraries(mal_storage PUBLIC ${MAL_SQLITE_LIB})
 add_library(mal_risk STATIC risk/risk_gate.cpp)
 target_link_libraries(mal_risk PUBLIC mal_config)
 
-# --- Signal engine (factor combination + weights) ---
-add_library(mal_signal_engine STATIC signal_engine/factor_engine.cpp)
+# --- Signal engine (factor combination + weights + native strategy layer) ---
+add_library(mal_signal_engine STATIC
+  signal_engine/factor_engine.cpp signal_engine/strategy.cpp
+  signal_engine/council_gate.cpp)
+target_link_libraries(mal_signal_engine PUBLIC mal_config)
 
 # --- Learning (Layer 2) ---
 add_library(mal_learning STATIC learning/adaptive.cpp)

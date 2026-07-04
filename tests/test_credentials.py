@@ -18,7 +18,7 @@ def creds(tmp_path, monkeypatch):
     # Clear any env that could leak into resolution.
     for var in ("APIFY_TOKEN", "WHALE_ALERT_API_KEY", "SEC_API_KEY",
                 "ALPACA_API_KEY", "ALPACA_API_SECRET", "ALPACA_LIVE_API_KEY",
-                "ALPACA_LIVE_API_SECRET", "BINANCE_API_KEY", "BINANCE_API_SECRET",
+                "ALPACA_LIVE_API_SECRET", "COINBASE_API_KEY", "COINBASE_API_SECRET",
                 "IBKR_HOST", "IBKR_PORT", "IBKR_ACCOUNT"):
         monkeypatch.delenv(var, raising=False)
     sys.modules.pop("account_manager.credentials", None)
@@ -114,10 +114,10 @@ def test_validate_connection_offline(creds):
 
 
 def test_venue_live_credentials_ok(creds, monkeypatch):
-    assert creds.venue_live_credentials_ok("binance") is False
-    monkeypatch.setenv("BINANCE_API_KEY", "k")
-    monkeypatch.setenv("BINANCE_API_SECRET", "s")
-    assert creds.venue_live_credentials_ok("binance") is True
+    assert creds.venue_live_credentials_ok("coinbase") is False
+    monkeypatch.setenv("COINBASE_API_KEY", "k")
+    monkeypatch.setenv("COINBASE_API_SECRET", "s")
+    assert creds.venue_live_credentials_ok("coinbase") is True
 
 
 def test_unknown_credential_raises(creds):

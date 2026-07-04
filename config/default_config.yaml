@@ -32,6 +32,7 @@ engine:
 # -----------------------------------------------------------------------------
 market_data:
   source: mock                          # mock | alpaca
+  data_staleness_seconds: 60            # Level-1: reject price snapshots older than this
 
 # -----------------------------------------------------------------------------
 # Venues — each supports: disabled | recommendation_only | paper | live
@@ -55,11 +56,11 @@ venues:
                                            # fall back to a simulated fill at the
                                            # live market price (e.g. if Alpaca
                                            # paper is geo-blocked / unreachable).
-  binance:
-    mode: paper                            # simulated/test first
+  coinbase:                                # replaces Binance (not available in Canada)
+    mode: paper                            # simulated/paper only
     live_enabled: false
-    paper_adapter: binance_sim
-    live_adapter: binance_live             # live-ready adapter structure, disabled
+    paper_adapter: coinbase_sim
+    live_adapter: coinbase_live            # reserved; live adapter not implemented
     whale_source: whale_alert_api
   ibkr:
     mode: recommendation_only              # scaffold/data only for now
@@ -82,11 +83,14 @@ risk:
   max_exposure_per_market_pct: 0.02
   max_exposure_per_category_pct: 0.05
   max_consecutive_losses: 3
-  cooldown_minutes_after_loss_breach: 120
-  min_confidence_default: 0.65
+  cooldown_minutes_after_loss_breach: 240   # Level-1 (longer/tighter than prior 120)
+  min_confidence_default: 0.65              # gate threshold; council has its own (see council:)
   min_edge_default: 0.02
   required_model_agreement_count: 2
-  stale_signal_reject_minutes: 10
+  stale_signal_reject_minutes: 1            # Level-1 (~60s; tighter than prior 10)
+  max_trades_per_day: 10                    # Level-1 ceiling, enforced in the run loop
+  max_trade_notional_cap_pct: 0.05          # Level-1 notional ceiling; the 0.005 per-trade
+                                            # risk cap above stays the binding, tighter limit
   kill_switch_enabled: true
   hard_stop_live_if_loss_breach: true
   manual_resume_required_after_kill_switch: true
@@ -100,6 +104,62 @@ sizing:
   default_position_scale_cap: 1.0
   dnn_position_scale_cap: 0.5
   whale_position_scale_cap: 0.35
+
+# -----------------------------------------------------------------------------
+# Native strategy layer — two signal factors + a regime detector, evaluated
+# ONLY on CLOSED bars (never per tick). Entries set native ATR stop / target /
+# time-stop at order creation; exits run natively without the council.
+#   whitelist is a comma-separated scalar (the minimal YAML parser has no lists).
+# -----------------------------------------------------------------------------
+strategy:
+  momentum_enabled: true
+  reversion_enabled: true
+  # Strategy A — trend / momentum
+  ema_fast: 20
+  ema_slow: 100
+  adx_min: 20.0
+  atr_period: 14
+  atr_vol_floor: 0.0
+  # Strategy B — mean reversion (whitelisted symbols only)
+  bb_period: 20
+  bb_std: 2.0
+  rsi_period: 14
+  rsi_oversold: 30.0
+  rsi_overbought: 70.0
+  vol_lookback: 20
+  # Regime detector (ADX + realized volatility)
+  regime_adx_trend: 25.0
+  regime_rvol_high: 0.02
+  # Direction policy (equities long-only in paper; crypto short behind this flag)
+  crypto_allow_short: false
+  # Native exits
+  atr_stop_mult: 2.0
+  atr_target_mult: 3.0
+  time_stop_bars: 24
+  # Regime -> (momentum, reversion) blend weights
+  trending_momentum_weight: 0.70
+  trending_reversion_weight: 0.30
+  range_momentum_weight: 0.30
+  range_reversion_weight: 0.70
+  neutral_momentum_weight: 0.50
+  neutral_reversion_weight: 0.50
+  bar_timeframe: 5min
+  whitelist: "BTC/USD,ETH/USD,SPY,QQQ"
+
+# -----------------------------------------------------------------------------
+# Council cost controls — the full LLM council runs ONLY on a native strategy
+# entry candidate that passes the Flash gate; never on a timer, tick, or exit.
+# council_min_confidence / council_min_agreement are SEPARATE from the Layer-1
+# gate thresholds (risk.min_confidence_default / required_model_agreement_count)
+# so they can never weaken the deterministic gate.
+# -----------------------------------------------------------------------------
+council:
+  council_daily_budget: 30
+  per_symbol_council_cooldown_minutes: 60
+  council_max_tokens: 400
+  council_min_confidence: 0.6
+  council_min_agreement: 2
+  neutral_skip_strength_threshold: 0.5
 
 # -----------------------------------------------------------------------------
 # Adaptive learning (Layer 2) — bounded, logged, rollback-capable
@@ -160,7 +220,7 @@ model_weights:
   llm_secondary_weight: 0.18
   llm_tertiary_weight: 0.12
   rule_based_factor_weight: 0.18
-  dnn_rl_factor_weight: 0.15
+  dnn_advisory_factor_weight: 0.15
   whale_signal_factor_weight: 0.10
   # sum = 1.00
 

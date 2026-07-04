@@ -43,6 +43,11 @@ The C++ safety spine builds clean and runs the offline paper loop. The real LLM 
 ## Known Issues and Caveats
 
 - Adaptive tuner learns from simulate_outcome, a seeded-RNG toy PnL simulator, not real fills. Ignore improvement signals until real-fill feedback lands.
+
+## Open Flags / Follow-ups (raised 2026-07-03, fix later)
+
+- **pytest not runnable in the base environment.** The base `python3` has no `pytest` module, so the Python test suite (credentials, LLM consensus, ml_factor, whale, and the new bridge/council/whale tests) cannot be executed in-session. Only the C++ ctest suite runs here. TODO: run `pip install -r python_bridge/requirements.txt` (or the ui reqs) in a venv and confirm `pytest tests/ -q` is green before commit. Until then Python-side changes are verified by `py_compile` only.
+- **Session cost / scope.** The Task 2–12 build is large and cross-cutting (bars, strategy, engine rewire, dnn_advisory rename, Coinbase, whale feeds, security). GateGuard fires a fact-forcing preamble on every edit; leaving it on is deliberate but adds cost per file. If a future session needs to move faster, `ECC_GATEGUARD=off` disables it. Not a code defect — tracked so the spend is visible.
 - Advisory layers run only with --bridge. Default path uses C++ mocks.
 - Whale adapters use assumed payload shapes. Verify against real responses before trusting.
 - Live-approval workflow not wired. try_enable_live never called. Safe, but incomplete.

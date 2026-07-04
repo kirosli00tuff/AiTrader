@@ -2,6 +2,7 @@
 
 #include <sqlite3.h>
 
+#include <algorithm>
 #include <fstream>
 #include <sstream>
 #include <stdexcept>
@@ -209,6 +210,62 @@ void Storage::upsert_position(const std::string& venue, const std::string& symbo
     s.bind(1, venue).bind(2, symbol).bind(3, market).bind(4, category)
         .bind(5, side).bind(6, qty).bind(7, avg_price).bind(8, notional)
         .bind(9, opened_ts);
+    s.step_done();
+}
+
+void Storage::upsert_bar(const BarRow& b) {
+    Stmt s(db_,
+           "INSERT INTO bars(venue,symbol,timeframe,timestamp,open,high,low,"
+           "close,volume) VALUES(?,?,?,?,?,?,?,?,?)"
+           " ON CONFLICT(venue,symbol,timeframe,timestamp) DO UPDATE SET"
+           " open=excluded.open, high=excluded.high, low=excluded.low,"
+           " close=excluded.close, volume=excluded.volume");
+    s.bind(1, b.venue).bind(2, b.symbol).bind(3, b.timeframe).bind(4, b.timestamp)
+        .bind(5, b.open).bind(6, b.high).bind(7, b.low).bind(8, b.close)
+        .bind(9, b.volume);
+    s.step_done();
+}
+
+std::vector<BarRow> Storage::recent_bars(const std::string& symbol,
+                                         const std::string& timeframe,
+                                         int limit) {
+    Stmt s(db_,
+           "SELECT venue,symbol,timeframe,timestamp,open,high,low,close,volume"
+           " FROM bars WHERE symbol=? AND timeframe=?"
+           " ORDER BY timestamp DESC LIMIT ?");
+    s.bind(1, symbol).bind(2, timeframe).bind(3, limit);
+    auto col_text = [&](int i) -> std::string {
+        const unsigned char* t = sqlite3_column_text(s.raw(), i);
+        return t ? reinterpret_cast<const char*>(t) : "";
+    };
+    std::vector<BarRow> rows;
+    while (sqlite3_step(s.raw()) == SQLITE_ROW) {
+        BarRow b;
+        b.venue = col_text(0);
+        b.symbol = col_text(1);
+        b.timeframe = col_text(2);
+        b.timestamp = col_text(3);
+        b.open = sqlite3_column_double(s.raw(), 4);
+        b.high = sqlite3_column_double(s.raw(), 5);
+        b.low = sqlite3_column_double(s.raw(), 6);
+        b.close = sqlite3_column_double(s.raw(), 7);
+        b.volume = sqlite3_column_double(s.raw(), 8);
+        rows.push_back(std::move(b));
+    }
+    std::reverse(rows.begin(), rows.end());  // oldest-first for indicator math
+    return rows;
+}
+
+void Storage::upsert_regime(const std::string& symbol, const std::string& regime,
+                            double adx, double rvol,
+                            const std::string& updated_ts) {
+    Stmt s(db_,
+           "INSERT INTO regime_state(symbol,regime,adx,rvol,updated_ts)"
+           " VALUES(?,?,?,?,?)"
+           " ON CONFLICT(symbol) DO UPDATE SET regime=excluded.regime,"
+           " adx=excluded.adx, rvol=excluded.rvol,"
+           " updated_ts=excluded.updated_ts");
+    s.bind(1, symbol).bind(2, regime).bind(3, adx).bind(4, rvol).bind(5, updated_ts);
     s.step_done();
 }
 

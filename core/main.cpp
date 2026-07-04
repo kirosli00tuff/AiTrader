@@ -50,6 +50,12 @@ int main(int argc, char** argv) {
         int interval_seconds = std::atoi(
             arg_value(argc, argv, "--interval-seconds", "0").c_str());
         std::string data_source = arg_value(argc, argv, "--data-source", "");
+        // Bootstrap-sim: legacy generic factor loop with simulated PnL (OFF by
+        // default). native-bar-seconds: bar bucket size; <=0 = one bar per tick
+        // (testability — exercises the native entry/exit path quickly).
+        bool bootstrap_sim = arg_flag(argc, argv, "--bootstrap-sim");
+        long native_bar_seconds = std::atol(
+            arg_value(argc, argv, "--native-bar-seconds", "300").c_str());
 
         auto cfg = mal::config::load_config(cfg_path);
 
@@ -59,6 +65,8 @@ int main(int argc, char** argv) {
         opts.continuous = continuous;
         opts.interval_seconds = interval_seconds;
         opts.data_source = data_source;
+        opts.bootstrap_sim = bootstrap_sim;
+        opts.native_bar_seconds = native_bar_seconds;
         if (!bridge.empty()) {
             auto colon = bridge.find(':');
             opts.bridge_host = bridge.substr(0, colon);

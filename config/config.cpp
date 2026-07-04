@@ -30,14 +30,14 @@ std::map<std::string, double> ModelWeights::as_map() const {
         {"llm_secondary", llm_secondary_weight},
         {"llm_tertiary", llm_tertiary_weight},
         {"rule_based", rule_based_factor_weight},
-        {"dnn_rl", dnn_rl_factor_weight},
+        {"dnn_advisory", dnn_advisory_factor_weight},
         {"whale_signal", whale_signal_factor_weight},
     };
 }
 
 double ModelWeights::sum() const {
     return llm_primary_weight + llm_secondary_weight + llm_tertiary_weight +
-           rule_based_factor_weight + dnn_rl_factor_weight +
+           rule_based_factor_weight + dnn_advisory_factor_weight +
            whale_signal_factor_weight;
 }
 
@@ -99,6 +99,29 @@ int get_int(const std::shared_ptr<YamlNode>& root, const std::string& path,
     }
 }
 
+std::string trim(const std::string& s) {
+    size_t a = s.find_first_not_of(" \t");
+    if (a == std::string::npos) return "";
+    size_t b = s.find_last_not_of(" \t");
+    return s.substr(a, b - a + 1);
+}
+
+// The minimal YAML parser has no sequence support, so list-valued config (the
+// strategy whitelist) is expressed as a comma-separated scalar and split here.
+std::vector<std::string> split_csv(const std::string& s) {
+    std::vector<std::string> out;
+    size_t start = 0;
+    while (start <= s.size()) {
+        size_t comma = s.find(',', start);
+        size_t len = comma == std::string::npos ? std::string::npos : comma - start;
+        std::string tok = trim(s.substr(start, len));
+        if (!tok.empty()) out.push_back(tok);
+        if (comma == std::string::npos) break;
+        start = comma + 1;
+    }
+    return out;
+}
+
 }  // namespace
 
 Config load_config(const std::string& path) {
@@ -126,6 +149,8 @@ Config load_config(const std::string& path) {
     // market data source
     c.market_data.source =
         get_str(root, "market_data.source", c.market_data.source);
+    c.market_data.data_staleness_seconds = get_int(
+        root, "market_data.data_staleness_seconds", c.market_data.data_staleness_seconds);
 
     // venues
     auto venues_node = root->at("venues");
@@ -164,6 +189,8 @@ Config load_config(const std::string& path) {
     r.min_edge_default = get_double(root, "risk.min_edge_default", r.min_edge_default);
     r.required_model_agreement_count = get_int(root, "risk.required_model_agreement_count", r.required_model_agreement_count);
     r.stale_signal_reject_minutes = get_int(root, "risk.stale_signal_reject_minutes", r.stale_signal_reject_minutes);
+    r.max_trades_per_day = get_int(root, "risk.max_trades_per_day", r.max_trades_per_day);
+    r.max_trade_notional_cap_pct = get_double(root, "risk.max_trade_notional_cap_pct", r.max_trade_notional_cap_pct);
     r.kill_switch_enabled = get_bool(root, "risk.kill_switch_enabled", r.kill_switch_enabled);
     r.hard_stop_live_if_loss_breach = get_bool(root, "risk.hard_stop_live_if_loss_breach", r.hard_stop_live_if_loss_breach);
     r.manual_resume_required_after_kill_switch = get_bool(root, "risk.manual_resume_required_after_kill_switch", r.manual_resume_required_after_kill_switch);
@@ -175,6 +202,48 @@ Config load_config(const std::string& path) {
     s.default_position_scale_cap = get_double(root, "sizing.default_position_scale_cap", s.default_position_scale_cap);
     s.dnn_position_scale_cap = get_double(root, "sizing.dnn_position_scale_cap", s.dnn_position_scale_cap);
     s.whale_position_scale_cap = get_double(root, "sizing.whale_position_scale_cap", s.whale_position_scale_cap);
+
+    // strategy (native signal layer — evaluated on closed bars only)
+    auto& st = c.strategy;
+    st.momentum_enabled = get_bool(root, "strategy.momentum_enabled", st.momentum_enabled);
+    st.reversion_enabled = get_bool(root, "strategy.reversion_enabled", st.reversion_enabled);
+    st.ema_fast = get_int(root, "strategy.ema_fast", st.ema_fast);
+    st.ema_slow = get_int(root, "strategy.ema_slow", st.ema_slow);
+    st.adx_min = get_double(root, "strategy.adx_min", st.adx_min);
+    st.atr_period = get_int(root, "strategy.atr_period", st.atr_period);
+    st.atr_vol_floor = get_double(root, "strategy.atr_vol_floor", st.atr_vol_floor);
+    st.bb_period = get_int(root, "strategy.bb_period", st.bb_period);
+    st.bb_std = get_double(root, "strategy.bb_std", st.bb_std);
+    st.rsi_period = get_int(root, "strategy.rsi_period", st.rsi_period);
+    st.rsi_oversold = get_double(root, "strategy.rsi_oversold", st.rsi_oversold);
+    st.rsi_overbought = get_double(root, "strategy.rsi_overbought", st.rsi_overbought);
+    st.vol_lookback = get_int(root, "strategy.vol_lookback", st.vol_lookback);
+    st.regime_adx_trend = get_double(root, "strategy.regime_adx_trend", st.regime_adx_trend);
+    st.regime_rvol_high = get_double(root, "strategy.regime_rvol_high", st.regime_rvol_high);
+    st.crypto_allow_short = get_bool(root, "strategy.crypto_allow_short", st.crypto_allow_short);
+    st.atr_stop_mult = get_double(root, "strategy.atr_stop_mult", st.atr_stop_mult);
+    st.atr_target_mult = get_double(root, "strategy.atr_target_mult", st.atr_target_mult);
+    st.time_stop_bars = get_int(root, "strategy.time_stop_bars", st.time_stop_bars);
+    st.trending_momentum_weight = get_double(root, "strategy.trending_momentum_weight", st.trending_momentum_weight);
+    st.trending_reversion_weight = get_double(root, "strategy.trending_reversion_weight", st.trending_reversion_weight);
+    st.range_momentum_weight = get_double(root, "strategy.range_momentum_weight", st.range_momentum_weight);
+    st.range_reversion_weight = get_double(root, "strategy.range_reversion_weight", st.range_reversion_weight);
+    st.neutral_momentum_weight = get_double(root, "strategy.neutral_momentum_weight", st.neutral_momentum_weight);
+    st.neutral_reversion_weight = get_double(root, "strategy.neutral_reversion_weight", st.neutral_reversion_weight);
+    st.bar_timeframe = get_str(root, "strategy.bar_timeframe", st.bar_timeframe);
+    {
+        auto parsed = split_csv(get_str(root, "strategy.whitelist", ""));
+        if (!parsed.empty()) st.whitelist = parsed;
+    }
+
+    // council cost controls (entries-only full council; gate + budget + cooldown)
+    auto& co = c.council;
+    co.council_daily_budget = get_int(root, "council.council_daily_budget", co.council_daily_budget);
+    co.per_symbol_council_cooldown_minutes = get_int(root, "council.per_symbol_council_cooldown_minutes", co.per_symbol_council_cooldown_minutes);
+    co.council_max_tokens = get_int(root, "council.council_max_tokens", co.council_max_tokens);
+    co.council_min_confidence = get_double(root, "council.council_min_confidence", co.council_min_confidence);
+    co.council_min_agreement = get_int(root, "council.council_min_agreement", co.council_min_agreement);
+    co.neutral_skip_strength_threshold = get_double(root, "council.neutral_skip_strength_threshold", co.neutral_skip_strength_threshold);
 
     // adaptive
     auto& a = c.adaptive;
@@ -224,7 +293,7 @@ Config load_config(const std::string& path) {
     mw.llm_secondary_weight = get_double(root, "model_weights.llm_secondary_weight", mw.llm_secondary_weight);
     mw.llm_tertiary_weight = get_double(root, "model_weights.llm_tertiary_weight", mw.llm_tertiary_weight);
     mw.rule_based_factor_weight = get_double(root, "model_weights.rule_based_factor_weight", mw.rule_based_factor_weight);
-    mw.dnn_rl_factor_weight = get_double(root, "model_weights.dnn_rl_factor_weight", mw.dnn_rl_factor_weight);
+    mw.dnn_advisory_factor_weight = get_double(root, "model_weights.dnn_advisory_factor_weight", mw.dnn_advisory_factor_weight);
     mw.whale_signal_factor_weight = get_double(root, "model_weights.whale_signal_factor_weight", mw.whale_signal_factor_weight);
 
     auto problems = validate_config(c);
@@ -254,7 +323,12 @@ std::vector<std::string> validate_config(const Config& cfg) {
     pct("risk.max_exposure_per_category_pct", r.max_exposure_per_category_pct);
     pct("risk.min_confidence_default", r.min_confidence_default);
     pct("risk.min_edge_default", r.min_edge_default);
+    pct("risk.max_trade_notional_cap_pct", r.max_trade_notional_cap_pct);
 
+    if (r.max_trades_per_day < 0)
+        problems.push_back("risk.max_trades_per_day must be >= 0");
+    if (cfg.market_data.data_staleness_seconds < 1)
+        problems.push_back("market_data.data_staleness_seconds must be >= 1");
     if (r.max_open_positions_total < 0)
         problems.push_back("risk.max_open_positions_total must be >= 0");
     if (r.max_open_positions_per_venue < 0)
@@ -321,6 +395,34 @@ std::vector<std::string> validate_config(const Config& cfg) {
                                "' paper_execution must be 'api', "
                                "'sim_live_price', or 'auto', got '" + pe + "'");
     }
+
+    // Native strategy layer sanity.
+    const auto& st = cfg.strategy;
+    pct("strategy.atr_vol_floor", st.atr_vol_floor);
+    if (st.ema_fast >= st.ema_slow)
+        problems.push_back("strategy.ema_fast must be < strategy.ema_slow");
+    if (st.rsi_oversold >= st.rsi_overbought)
+        problems.push_back("strategy.rsi_oversold must be < strategy.rsi_overbought");
+    if (st.time_stop_bars < 1)
+        problems.push_back("strategy.time_stop_bars must be >= 1");
+    if (st.atr_stop_mult <= 0.0 || st.atr_target_mult <= 0.0)
+        problems.push_back("strategy ATR stop/target multipliers must be > 0");
+    if (st.whitelist.empty())
+        problems.push_back("strategy.whitelist must not be empty");
+
+    // Council cost controls. Thresholds are separate knobs and must be sane
+    // fractions; they never relax the Layer-1 gate.
+    const auto& co = cfg.council;
+    pct("council.council_min_confidence", co.council_min_confidence);
+    pct("council.neutral_skip_strength_threshold", co.neutral_skip_strength_threshold);
+    if (co.council_daily_budget < 0)
+        problems.push_back("council.council_daily_budget must be >= 0");
+    if (co.council_max_tokens < 1)
+        problems.push_back("council.council_max_tokens must be >= 1");
+    if (co.council_min_agreement < 0)
+        problems.push_back("council.council_min_agreement must be >= 0");
+    if (co.per_symbol_council_cooldown_minutes < 0)
+        problems.push_back("council.per_symbol_council_cooldown_minutes must be >= 0");
 
     return problems;
 }

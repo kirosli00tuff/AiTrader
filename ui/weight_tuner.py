@@ -36,7 +36,7 @@ _BULLISH = {"buy", "strong_buy"}
 _BEARISH = {"sell", "strong_sell"}
 # Non-whale factors recorded per-model in model_outputs.model.
 _MODEL_FACTORS = ("llm_primary", "llm_secondary", "llm_tertiary",
-                  "rule_based", "dnn_rl")
+                  "rule_based", "dnn_advisory")
 
 
 # --- Pure tuner -------------------------------------------------------------

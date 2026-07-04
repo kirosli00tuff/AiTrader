@@ -63,7 +63,7 @@ CREATE TABLE IF NOT EXISTS signals (
     ts        TEXT NOT NULL,
     venue     TEXT,
     symbol    TEXT,
-    factor    TEXT NOT NULL,                 -- llm_primary | rule_based | dnn_rl | whale_signal ...
+    factor    TEXT NOT NULL,                 -- llm_primary | rule_based | dnn_advisory | whale_signal ...
     bias      REAL NOT NULL,                 -- signed [-1,1]
     confidence REAL NOT NULL,                -- [0,1]
     edge      REAL,                          -- expected edge
@@ -192,3 +192,31 @@ CREATE TABLE IF NOT EXISTS blocked_trades (
     layer     TEXT                          -- which layer blocked (Layer1/Layer2)
 );
 CREATE INDEX IF NOT EXISTS idx_blocked_ts ON blocked_trades(ts);
+
+-- Historical OHLCV bars per venue/symbol/timeframe. Feeds the native strategy
+-- layer, dnn_advisory training, and backtests. UNIQUE(venue,symbol,timeframe,
+-- timestamp) so a re-fetch upserts in place instead of duplicating.
+CREATE TABLE IF NOT EXISTS bars (
+    id        INTEGER PRIMARY KEY AUTOINCREMENT,
+    venue     TEXT NOT NULL,
+    symbol    TEXT NOT NULL,
+    timeframe TEXT NOT NULL,               -- e.g. 1Day | 5Min
+    timestamp TEXT NOT NULL,               -- ISO-8601 UTC bar open time
+    open      REAL NOT NULL,
+    high      REAL NOT NULL,
+    low       REAL NOT NULL,
+    close     REAL NOT NULL,
+    volume    REAL NOT NULL,
+    UNIQUE(venue, symbol, timeframe, timestamp)
+);
+CREATE INDEX IF NOT EXISTS idx_bars_lookup ON bars(symbol, timeframe, timestamp);
+
+-- Current market regime per symbol (trending | range_bound | neutral). Written
+-- by the regime detector; read by the dashboard to show the per-symbol regime.
+CREATE TABLE IF NOT EXISTS regime_state (
+    symbol     TEXT PRIMARY KEY,
+    regime     TEXT NOT NULL,              -- trending | range_bound | neutral
+    adx        REAL,
+    rvol       REAL,
+    updated_ts TEXT NOT NULL
+);

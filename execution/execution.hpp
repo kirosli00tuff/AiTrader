@@ -3,8 +3,9 @@
 // The mode router decides, per venue, whether an approved order is: shown only
 // (recommendation_only), simulated (paper), or sent live (live — disabled by
 // default, gated). Live adapters are present but refuse to operate unless
-// explicitly enabled. Binance + IBKR live paths are intentionally incomplete
-// (TODO markers) per the build spec.
+// explicitly enabled. Coinbase + IBKR live paths are intentionally incomplete
+// (TODO markers) per the build spec. (Coinbase replaces Binance for crypto
+// market access — Binance does not operate in Canada.)
 #pragma once
 
 #include <memory>
@@ -75,9 +76,12 @@ private:
     int bridge_port_;
 };
 
-class BinanceSimAdapter : public VenueAdapter {
+// Coinbase paper/sim adapter. Paper-only: simulates a fill at the proposal
+// price. Live Coinbase execution is intentionally not implemented (disabled),
+// and credential env vars (COINBASE_API_KEY/SECRET) are reserved only.
+class CoinbaseSimAdapter : public VenueAdapter {
 public:
-    std::string name() const override { return "binance_sim"; }
+    std::string name() const override { return "coinbase_sim"; }
     bool is_live() const override { return false; }
     Fill place(const risk::OrderProposal& o) override;
 };

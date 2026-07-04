@@ -63,8 +63,8 @@ def _build_registry() -> dict[str, CredentialSpec]:
     for mode in ("paper", "live"):
         specs += _venue_keypair("alpaca", "Alpaca", mode,
                                 ("ALPACA_API_KEY", "ALPACA_API_SECRET"))
-        specs += _venue_keypair("binance", "Binance", mode,
-                                ("BINANCE_API_KEY", "BINANCE_API_SECRET"))
+        specs += _venue_keypair("coinbase", "Coinbase", mode,
+                                ("COINBASE_API_KEY", "COINBASE_API_SECRET"))
         specs += _venue_keypair("polymarket", "Polymarket", mode,
                                 ("POLYMARKET_API_KEY", "POLYMARKET_API_SECRET"))
         m = mode.upper()
@@ -100,7 +100,7 @@ CREDENTIALS: dict[str, CredentialSpec] = _build_registry()
 # Required fields per group for a connection to count as "configured".
 _REQUIRED_FIELDS: dict[str, tuple[str, ...]] = {
     "alpaca": ("key", "secret"),
-    "binance": ("key", "secret"),
+    "coinbase": ("key", "secret"),
     "polymarket": ("key", "secret"),
     "ibkr": ("host", "port", "account"),
     "clankapp": ("key",),

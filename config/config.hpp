@@ -49,6 +49,8 @@ struct EngineConfig {
 // Market-data source selection.
 struct MarketDataConfig {
     std::string source = "mock";          // "mock" (offline) | "alpaca" (live)
+    // A price snapshot older than this is considered stale (Level-1 default 60s).
+    int data_staleness_seconds = 60;
 };
 
 // Layer-1 hard limits. Never weakened by adaptive logic.
@@ -63,11 +65,17 @@ struct RiskConfig {
     double max_exposure_per_market_pct = 0.02;
     double max_exposure_per_category_pct = 0.05;
     int max_consecutive_losses = 3;
-    int cooldown_minutes_after_loss_breach = 120;
+    int cooldown_minutes_after_loss_breach = 240;
     double min_confidence_default = 0.65;
     double min_edge_default = 0.02;
     int required_model_agreement_count = 2;
-    int stale_signal_reject_minutes = 10;
+    int stale_signal_reject_minutes = 1;
+    // Level-1 ceilings enforced OUTSIDE the deterministic gate (engine/sizing):
+    //   max_trades_per_day    — per-day trade counter in the run loop.
+    //   max_trade_notional_cap_pct — documented notional ceiling; the gate's own
+    //     max_trade_risk_pct_of_equity (0.005) stays the binding, tighter cap.
+    int max_trades_per_day = 10;
+    double max_trade_notional_cap_pct = 0.05;
     bool kill_switch_enabled = true;
     bool hard_stop_live_if_loss_breach = true;
     bool manual_resume_required_after_kill_switch = true;
@@ -123,13 +131,69 @@ struct DashboardConfig {
     bool show_whale_panel_by_default = true;
 };
 
+// Native strategy layer. Signals are generated ONLY on closed bars (never per
+// tick). Two factors (trend/momentum + mean reversion) blended by a regime
+// detector. Entries set native ATR stop / target / time-stop at order creation;
+// exits execute natively without the council.
+struct StrategyConfig {
+    bool momentum_enabled = true;
+    bool reversion_enabled = true;
+    // Strategy A — trend / momentum.
+    int ema_fast = 20;
+    int ema_slow = 100;
+    double adx_min = 20.0;             // ADX filter floor
+    int atr_period = 14;
+    double atr_vol_floor = 0.0;        // min ATR/price to allow an entry
+    // Strategy B — mean reversion (whitelisted symbols only).
+    int bb_period = 20;
+    double bb_std = 2.0;
+    int rsi_period = 14;
+    double rsi_oversold = 30.0;
+    double rsi_overbought = 70.0;
+    int vol_lookback = 20;            // bars for average-volume confirmation
+    // Regime detector thresholds (ADX + realized volatility).
+    double regime_adx_trend = 25.0;   // ADX above => trending
+    double regime_rvol_high = 0.02;   // realized vol above => volatile/range-bound
+    // Direction policy. Equities are always long-only in paper.
+    bool crypto_allow_short = false;
+    // Native exits (set at order creation; NO council on exit).
+    double atr_stop_mult = 2.0;
+    double atr_target_mult = 3.0;
+    int time_stop_bars = 24;          // force-close after N unresolved bars
+    // Regime -> (momentum, reversion) blend weights.
+    double trending_momentum_weight = 0.70;
+    double trending_reversion_weight = 0.30;
+    double range_momentum_weight = 0.30;
+    double range_reversion_weight = 0.70;
+    double neutral_momentum_weight = 0.50;
+    double neutral_reversion_weight = 0.50;
+    // Tradable universe for native strategies (parsed from a comma-separated
+    // scalar in YAML — the minimal parser has no sequence support).
+    std::vector<std::string> whitelist{"BTC/USD", "ETH/USD", "SPY", "QQQ"};
+    std::string bar_timeframe = "5min";  // strategies evaluate on closed bars
+};
+
+// Council cost controls. The full LLM council runs ONLY on a native strategy
+// entry candidate that passes the Flash gate — never on a timer, tick, or exit.
+struct CouncilConfig {
+    int council_daily_budget = 30;                // max full-council calls per day
+    int per_symbol_council_cooldown_minutes = 60;
+    int council_max_tokens = 400;                 // per-provider response cap
+    // Council-side thresholds. SEPARATE from the gate's risk.min_confidence_default
+    // / required_model_agreement_count so they never weaken the Layer-1 gate.
+    double council_min_confidence = 0.6;
+    int council_min_agreement = 2;
+    // Skip the council when regime is neutral AND signal strength is below this.
+    double neutral_skip_strength_threshold = 0.5;
+};
+
 // Ensemble weights. Editable in UI, auto-normalized, lockable.
 struct ModelWeights {
     double llm_primary_weight = 0.27;
     double llm_secondary_weight = 0.18;
     double llm_tertiary_weight = 0.12;
     double rule_based_factor_weight = 0.18;
-    double dnn_rl_factor_weight = 0.15;
+    double dnn_advisory_factor_weight = 0.15;
     double whale_signal_factor_weight = 0.10;
 
     std::map<std::string, double> as_map() const;
@@ -143,6 +207,8 @@ struct Config {
     std::vector<VenueConfig> venues;
     RiskConfig risk;
     SizingConfig sizing;
+    StrategyConfig strategy;
+    CouncilConfig council;
     AdaptiveConfig adaptive;
     WhaleConfig whale;
     LiveApprovalConfig live_approval;

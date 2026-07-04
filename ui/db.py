@@ -30,7 +30,7 @@ DEFAULT_WEIGHTS: dict[str, float] = {
     "llm_secondary": 0.18,
     "llm_tertiary": 0.12,
     "rule_based": 0.18,
-    "dnn_rl": 0.15,
+    "dnn_advisory": 0.15,
     "whale_signal": 0.10,
 }
 

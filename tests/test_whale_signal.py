@@ -1,6 +1,6 @@
 """Tests for the whale / smart-money advisory module."""
 from whale_signal.adapters import WhaleActivity, default_adapters
-from whale_signal.scoring import score_whales, actor_usefulness, rank_actors
+from whale_signal.scoring import score_whales, activity_usefulness, rank_actors
 from whale_signal.service import whale_signal_for
 
 
@@ -74,9 +74,14 @@ def test_noisy_actors_filtered():
     assert len(ranked_all) >= len(ranked_strict)
 
 
-def test_actor_usefulness_bounded():
-    u = actor_usefulness("some-actor")
-    assert 0.0 <= u <= 1.0
+def test_activity_usefulness_transparent_and_bounded():
+    # Larger, clearly-directional flows score higher than small/ambiguous ones.
+    big = activity_usefulness(_act("clankapp", "whale", "outflow", 50_000_000.0))
+    small = activity_usefulness(_act("clankapp", "minnow", "outflow", 5_000.0))
+    ambiguous = activity_usefulness(_act("clankapp", "x", "unknown", 50_000_000.0))
+    assert 0.0 <= small <= big <= 1.0
+    assert ambiguous < big  # unclear direction is down-weighted
+    assert 0.0 <= ambiguous <= 1.0
 
 
 def test_default_adapters_present():

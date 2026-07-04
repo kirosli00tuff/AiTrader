@@ -14,6 +14,16 @@ Commit message:
 
 ---
 
+## Prompt: Strategy Layer, Bars Storage, Real-Fill Learning, Council Cost Controls, Coinbase, Whale Feeds, Level 1 Defaults, Security Hardening
+
+Date: 2026-07-02
+Model: Opus 4.8
+Prompt summary: 12-task master prompt. Add bars storage + Alpaca backfill; native strategy layer (trend/momentum + mean reversion + regime detector) evaluated on closed 5m bars only with native ATR exits; remove simulate_outcome from default path so tuner learns from real closed-trade PnL (min 30 trades/factor); council cost controls (entries-only, Flash gate, daily budget, per-symbol cooldown, token cap, neutral-regime skip, compressed context, skip logging); rename dnn_advisory + drop RL claim + walk-forward training pipeline + provenance; replace Binance with Coinbase adapter; wire ClankApp + SEC EDGAR free whale feeds with real fixtures and transparent heuristic; Level 1 config defaults; security hardening (pinned deps, bind-address test, credential masking, pre-commit secrets hook, .gitignore); startup transparency block; C++ ctest + pytest coverage; document and commit. Constraints: do not touch RiskGate logic, live-trading gate, or adaptive limit-weakening invariant; risk values change through config only; live trading stays off.
+Changes: (in progress — completed in Task 12)
+Commit message: (in progress — completed in Task 12)
+
+---
+
 ## Prompt: Add CONTEXT.md
 
 Date: 2026-07-02

@@ -20,7 +20,9 @@
 #include "market_data/market_data.hpp"
 #include "news_ingestion/news_ingestion.hpp"
 #include "risk/risk_gate.hpp"
+#include "signal_engine/council_gate.hpp"
 #include "signal_engine/factor_engine.hpp"
+#include "signal_engine/strategy.hpp"
 #include "storage/storage.hpp"
 
 namespace mal::core {
@@ -36,6 +38,13 @@ struct EngineOptions {
     bool continuous = false;
     int interval_seconds = 0;        // 0 -> use cfg.engine.loop_interval_seconds
     std::string data_source;          // "mock" | "alpaca"; empty -> use config
+    // Bootstrap-only: run the legacy generic factor loop with simulated PnL
+    // (simulate_outcome). OFF by default — the native strategy layer is the
+    // default trading path and learns from REAL closed-trade fills (Task 3).
+    bool bootstrap_sim = false;
+    // Seconds per native bar bucket (default 5 min). <= 0 means one bar per tick
+    // (testability lever so the native entry/exit path can be exercised quickly).
+    long native_bar_seconds = 300;
 };
 
 class Engine {
@@ -60,7 +69,8 @@ public:
 
 private:
     std::vector<signal_engine::FactorSignal> gather_factors(
-        const market_data::MarketState& ms, const news::CatalystScore& cat);
+        const market_data::MarketState& ms, const news::CatalystScore& cat,
+        bool council_allowed = true);
     signal_engine::FactorSignal mock_factor(const std::string& name,
                                             const market_data::MarketState& ms,
                                             const news::CatalystScore& cat);
@@ -68,6 +78,19 @@ private:
     void snapshot_balances();
     double simulate_outcome(const signal_engine::CombinedVerdict& v,
                             double notional);
+    // Feed one market-data tick into the 5-min bar aggregator. On a bar close
+    // for a whitelisted symbol: persist the bar, update in-memory history, and
+    // recompute + persist the symbol's regime. Advisory only — never trades.
+    void update_bars(const market_data::MarketState& ms, long epoch_seconds);
+    bool is_whitelisted(const std::string& symbol) const;
+    // Native trading on a CLOSED bar for a whitelisted symbol: manage the open
+    // position's native exit first, else consider a new strategy entry (council
+    // gate -> factors/verdict -> RiskGate -> open). Never runs on ticks.
+    void handle_bar_close(const market_data::MarketState& ms,
+                          const strategy::Bar& bar, long now_epoch);
+    // Rebuild aggregate portfolio/exposure state from currently open native
+    // positions so the RiskGate sees true open risk when judging a new entry.
+    void sync_portfolio_state();
 
     config::Config cfg_;
     EngineOptions opts_;
@@ -88,6 +111,24 @@ private:
     uint64_t rng_;
     int trade_count_ = 0;
     std::map<std::string, double> factor_perf_;  // running perf per factor
+
+    // Native strategy inputs: 5-min bar aggregation + bounded per-symbol history
+    // ("venue|symbol" -> bars, oldest-first) seeded from storage on startup.
+    strategy::BarAggregator bar_agg_;
+    std::map<std::string, std::vector<strategy::Bar>> bar_history_;
+
+    // An open native position plus the advisory context captured at ENTRY, so
+    // realized PnL can be attributed back to the factors when it closes.
+    struct ActivePosition {
+        strategy::OpenPosition pos;
+        std::vector<signal_engine::FactorSignal> entry_signals;
+        double entry_bias = 0.0;
+    };
+    std::map<std::string, ActivePosition> open_positions_;  // key "venue|symbol"
+    signal_engine::CouncilGateState council_state_;
+    int trades_today_ = 0;              // native entries today (max_trades_per_day)
+    std::string trades_today_day_;      // UTC day bucket for the counter above
+    long closed_trade_count_ = 0;       // closed native trades (min-sample gate)
 
     // Continuous-mode state.
     bool continuous_ = false;          // gate equity by market hours when true

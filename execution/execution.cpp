@@ -88,8 +88,9 @@ Fill AlpacaPaperAdapter::place(const risk::OrderProposal& o) {
         o, "paper (sim @ live price; alpaca paper unavailable)");
 }
 
-Fill BinanceSimAdapter::place(const risk::OrderProposal& o) {
-    // TODO: Binance — replace simulation with testnet/live adapter integration.
+Fill CoinbaseSimAdapter::place(const risk::OrderProposal& o) {
+    // Coinbase paper/sim: immediate simulated fill at the proposal price.
+    // TODO: Coinbase — add a real (disabled-by-default) live adapter later.
     return make_paper_fill(o, "paper", 0.0001);
 }
 

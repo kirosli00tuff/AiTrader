@@ -74,7 +74,7 @@ FACTOR_LABELS = {
     "llm_secondary": "LLM Secondary",
     "llm_tertiary": "LLM Tertiary",
     "rule_based": "Rule-Based",
-    "dnn_rl": "DNN / RL",
+    "dnn_advisory": "DNN Advisory",
     "whale_signal": "Whale Signal",
 }
 
@@ -683,7 +683,7 @@ def _advanced_page() -> html.Div:
 
 # --- Page: Accounts / Connections -------------------------------------------
 
-VENUE_GROUPS = [("alpaca", "Alpaca"), ("binance", "Binance"),
+VENUE_GROUPS = [("alpaca", "Alpaca"), ("coinbase", "Coinbase"),
                 ("ibkr", "IBKR"), ("polymarket", "Polymarket")]
 SOURCE_GROUPS = [("clankapp", "ClankApp (free, default)"),
                  ("apify", "Apify"),
@@ -1298,9 +1298,9 @@ def _learning(_n):
 
 @app.callback(Output("g-dnn", "figure"), Input("tick", "n_intervals"))
 def _dnn(_n):
-    # Use model_outputs for the dnn_rl factor to show advisory confidence/edge.
+    # Use model_outputs for the dnn_advisory factor to show advisory confidence/edge.
     df = db.query(
-        "SELECT ts, confidence, edge FROM model_outputs WHERE model='dnn_rl' "
+        "SELECT ts, confidence, edge FROM model_outputs WHERE model='dnn_advisory' "
         "ORDER BY id"
     )
     if df.empty:
@@ -1591,7 +1591,7 @@ def _test_connection(_n, target):
     # C++ approval gate (live_requires_connected_credentials) sees it. Never
     # enables live by itself.
     note = ""
-    if mode == "live" and group in {"alpaca", "binance", "ibkr", "polymarket"}:
+    if mode == "live" and group in {"alpaca", "coinbase", "ibkr", "polymarket"}:
         db.set_venue_credentials_connected(group, result["ok"])
         note = "  •  venue_state.credentials_connected updated for approval gate"
     color = "#3fb950" if result["ok"] else "#f85149"

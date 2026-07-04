@@ -20,7 +20,8 @@ from __future__ import annotations
 # Re-exported here so existing imports (`from llm_consensus.consensus import ...`)
 # keep working after the split into focused modules.
 from .config_access import (  # noqa: F401
-    gate_enabled, llm_model_names, slot_weight, use_real_council,
+    council_max_tokens, gate_enabled, llm_model_names, slot_weight,
+    use_real_council,
 )
 from .gate import AlwaysProceedGate, GateDecision, GeminiFlashGate  # noqa: F401
 from .providers import (  # noqa: F401
@@ -60,19 +61,20 @@ def real_providers(cfg_path: str | None = None) -> list[LLMProvider]:
     Each still degrades to a labelled mock when its key is absent.
     """
     names = llm_model_names(cfg_path)
+    max_tok = council_max_tokens(cfg_path)
     return [
         OpenAIProvider(name="llm_primary",
                        weight=slot_weight("llm_primary", cfg_path),
                        model_id=names.get("llm_primary", "gpt-5.5"),
-                       skew=_SLOT_SKEW["llm_primary"]),
+                       skew=_SLOT_SKEW["llm_primary"], max_tokens=max_tok),
         AnthropicProvider(name="llm_secondary",
                           weight=slot_weight("llm_secondary", cfg_path),
                           model_id=names.get("llm_secondary", "claude-opus-4-8"),
-                          skew=_SLOT_SKEW["llm_secondary"]),
+                          skew=_SLOT_SKEW["llm_secondary"], max_tokens=max_tok),
         GeminiProvider(name="llm_tertiary",
                        weight=slot_weight("llm_tertiary", cfg_path),
                        model_id=names.get("llm_tertiary", "gemini-3.1-pro"),
-                       skew=_SLOT_SKEW["llm_tertiary"]),
+                       skew=_SLOT_SKEW["llm_tertiary"], max_tokens=max_tok),
     ]
 
 

@@ -40,11 +40,11 @@ venues:
     live_adapter: alpaca_live
     institutional_context: sec_api_13f
     paper_execution: auto                # api | sim_live_price | auto
-  binance:
-    mode: recommendation_only            # TODO: complete Binance support
+  coinbase:                              # replaces Binance (not available in Canada)
+    mode: recommendation_only            # paper/sim only; live not implemented
     live_enabled: false
-    paper_adapter: binance_sim
-    live_adapter: binance_live
+    paper_adapter: coinbase_sim
+    live_adapter: coinbase_live          # reserved
     whale_source: whale_alert_api
   ibkr:
     mode: recommendation_only            # TODO: complete IBKR support
@@ -123,7 +123,7 @@ model_weights:
   llm_secondary_weight: 0.18
   llm_tertiary_weight: 0.12
   rule_based_factor_weight: 0.18
-  dnn_rl_factor_weight: 0.15
+  dnn_advisory_factor_weight: 0.15
   whale_signal_factor_weight: 0.10
 
 data_sources:

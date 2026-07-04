@@ -75,3 +75,59 @@ def slot_weight(slot: str, cfg_path: str | None = None) -> float:
         return float(mw.get(f"{slot}_weight", default))
     except (TypeError, ValueError):
         return default
+
+
+# --- Council cost controls (Task 4) -----------------------------------------
+# Mirrors the C++ ``council:`` config block. The engine owns budget/cooldown/
+# neutral-skip enforcement; the Python side uses ``council_max_tokens`` to cap
+# every provider response so a full council call stays cheap.
+_COUNCIL_DEFAULTS: dict[str, float] = {
+    "council_daily_budget": 30,
+    "per_symbol_council_cooldown_minutes": 60,
+    "council_max_tokens": 400,
+    "council_min_confidence": 0.6,
+    "council_min_agreement": 2,
+    "neutral_skip_strength_threshold": 0.5,
+}
+
+
+def _council(cfg_path: str | None) -> dict:
+    return _cfg(cfg_path).get("council", {}) or {}
+
+
+def _council_num(key: str, cfg_path: str | None):
+    default = _COUNCIL_DEFAULTS[key]
+    try:
+        return type(default)(_council(cfg_path).get(key, default))
+    except (TypeError, ValueError):
+        return default
+
+
+def council_max_tokens(cfg_path: str | None = None) -> int:
+    """Per-provider response token cap for a full council call (default 400)."""
+    return int(_council_num("council_max_tokens", cfg_path))
+
+
+def council_daily_budget(cfg_path: str | None = None) -> int:
+    """Max full-council calls per day (default 30)."""
+    return int(_council_num("council_daily_budget", cfg_path))
+
+
+def per_symbol_council_cooldown_minutes(cfg_path: str | None = None) -> int:
+    """Minutes between full-council calls for the same symbol (default 60)."""
+    return int(_council_num("per_symbol_council_cooldown_minutes", cfg_path))
+
+
+def council_min_confidence(cfg_path: str | None = None) -> float:
+    """Council-side confidence threshold (separate from the Layer-1 gate)."""
+    return float(_council_num("council_min_confidence", cfg_path))
+
+
+def council_min_agreement(cfg_path: str | None = None) -> int:
+    """Council-side minimum provider agreement (separate from the gate)."""
+    return int(_council_num("council_min_agreement", cfg_path))
+
+
+def neutral_skip_strength_threshold(cfg_path: str | None = None) -> float:
+    """Skip the council when regime is neutral and strength is below this."""
+    return float(_council_num("neutral_skip_strength_threshold", cfg_path))

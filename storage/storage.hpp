@@ -69,6 +69,12 @@ struct ParamHistoryRow {
     std::string ts, param, old_value, new_value, source, reason;
 };
 
+// One historical OHLCV bar. `timestamp` is the bar's open time (ISO-8601 UTC).
+struct BarRow {
+    std::string venue, symbol, timeframe, timestamp;
+    double open = 0, high = 0, low = 0, close = 0, volume = 0;
+};
+
 // RAII SQLite wrapper. Non-copyable.
 class Storage {
 public:
@@ -103,6 +109,17 @@ public:
                          const std::string& market, const std::string& category,
                          const std::string& side, double qty, double avg_price,
                          double notional, const std::string& opened_ts);
+
+    // Historical bars. upsert_bar is idempotent on (venue,symbol,timeframe,
+    // timestamp). recent_bars returns up to `limit` most-recent bars for a
+    // symbol+timeframe, ordered oldest-first (ascending) for indicator math.
+    void upsert_bar(const BarRow& b);
+    std::vector<BarRow> recent_bars(const std::string& symbol,
+                                    const std::string& timeframe, int limit);
+
+    // Persist the current regime for a symbol (single row per symbol).
+    void upsert_regime(const std::string& symbol, const std::string& regime,
+                       double adx, double rvol, const std::string& updated_ts);
 
     // Count rows in a table (used by tests/demo verification).
     long long count(const std::string& table);

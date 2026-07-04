@@ -15,7 +15,7 @@ namespace mal::signal_engine {
 
 // One advisory factor's structured output.
 struct FactorSignal {
-    std::string factor;       // llm_primary | rule_based | dnn_rl | whale_signal ...
+    std::string factor;       // llm_primary | rule_based | dnn_advisory | whale_signal ...
     double bias = 0.0;        // signed directional bias [-1,1]
     double confidence = 0.0;  // [0,1]
     double edge = 0.0;        // expected edge (return net of fees)
