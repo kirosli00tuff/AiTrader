@@ -89,7 +89,7 @@ llm_models:
 |---|---|---|
 | **Alpaca** | **REAL — paper + market data only** | `market_data/alpaca_source.py`: real HTTP to `data.alpaca.markets` (latest trades, equities `/v2/stocks/trades/latest` + crypto `/v1beta3/crypto`) and `paper-api.alpaca.markets` (`POST /v2/orders`), APCA auth headers, graceful degradation. Reached via bridge `/marketdata/alpaca` + `/execute/alpaca_paper` and `AlpacaPaperAdapter` (`execution/execution.cpp:42-89`). **No live-brokerage path** — paper/data key only. |
 | **Polymarket** | **Placeholder** | `PolymarketPaperAdapter::place` returns a simulated immediate fill (`execution/execution.cpp:29-32`). No real Polymarket API. (Whale data via Apify actor is a separate, unverified fetch.) |
-| **Binance** | **Placeholder** | `BinanceSimAdapter` = sim fill; `// TODO: Binance …` (`execution/execution.cpp:91-94`). Env vars reserved in `.env.example`. |
+| **Coinbase** | **Placeholder** | `CoinbaseSimAdapter` = sim fill; `// TODO: Coinbase …` (`execution/execution.cpp:91-94`). Env vars (`COINBASE_API_KEY/SECRET`) reserved in `.env.example`. Coinbase replaces Binance (Binance does not operate in Canada). |
 | **IBKR** | **Placeholder** | `IbkrSimPlaceholderAdapter` = sim; `recommendation_only` mode; `// TODO: IBKR …` (`execution/execution.cpp:96-99`). |
 
 Every venue's **live** adapter is `DisabledLiveAdapter` (refuses). No venue has a working live path.
@@ -139,7 +139,7 @@ Live is blocked by **four independent mechanisms**, and is currently **unreachab
 2. **LLM council is 100% mock.** No provider integration of any kind (not even OpenRouter). This is the biggest gap versus the pitch. Also fix the drifted/incorrect model strings (§4).
 3. **DNN is a synthetic toy.** Supervised-only (no RL), trained on synthetic labels, missing `train_torch.py`; no real retrain / champion-challenger pipeline exercised.
 4. **Live-approval workflow not wired.** `try_enable_live` is never called; the 7 `live_requires_*` checks are never evaluated into a decision. Safe today, but the feature is incomplete.
-5. **Real execution is Alpaca-paper only.** Polymarket/Binance/IBKR are sims; no live path anywhere. Live HTTP paths (Alpaca + all whale adapters) are unverified against real payloads and have no integration tests.
+5. **Real execution is Alpaca-paper only.** Polymarket/Coinbase/IBKR are sims; no live path anywhere. Live HTTP paths (Alpaca + all whale adapters) are unverified against real payloads and have no integration tests.
 6. **Adaptive layer learns from a toy simulator.** `simulate_outcome` is seeded RNG, not realized fills — the "learning" optimizes against noise on the default path.
 7. **Test/coverage holes.** No tests for the engine loop, storage, bridge, UI, or HTTP clients; Python suite needs the venv; no coverage gate; below 80% overall.
 8. **`news_ingestion` is a stub.** Mock catalyst scoring only; real providers are TODO (`news_ingestion/fetchers.py:7, 32`). Minor.

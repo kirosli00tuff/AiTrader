@@ -16,6 +16,11 @@ A 24/7 paper and live AI auto-trading platform. Four layers: static safety, adap
 - Native strategy layer blends momentum and mean reversion with a regime detector. Research shows the blend delivers smoother risk-adjusted returns across regimes than either alone.
 - Whitelist limited to high-liquidity majors: BTC, ETH, SPY, QQQ. Mean reversion holds up best in liquid assets. Both strategy families fail on thin alts.
 - Whale layer capped at 0.35 advisory weight. Never decisive.
+- Adaptive tuner learns from REAL closed-trade PnL, not a simulator. `simulate_outcome` was removed from the default path (Task 3); the tuner may not nudge weights until ≥30 closed native trades have accumulated (thin-evidence guard). That ≥30 rule is a pure predicate (`learning/adapt_gate.hpp`) so it is unit-testable without a full Engine.
+- The DNN factor is named `dnn_advisory`, not `dnn_rl`: it is a supervised advisory factor today. True RL is deferred until ≥500 real closed fills (Task 5). Advisory sizing cap stays 0.5 regardless of which model serves.
+- Model promotion is GATED: a real-data challenger only becomes champion on an explicit operator action, and only if it was trained on real data with ≥200 samples, beats the champion on walk-forward Sharpe, and has no worse drawdown (`registry.meets_promotion_criteria`). Walk-forward validation is chronological (expanding folds) — never a random split.
+- Cost controls are split by owner: the C++ engine enforces daily budget + per-symbol cooldown + neutral-regime skip (`signal_engine/council_gate.cpp`); the Python side caps every provider response at `council_max_tokens`. Config surfaced via the `council:` block.
+- Bridge binds loopback-only by default; remote bind requires an explicit `BRIDGE_ALLOW_REMOTE=1` opt-in. All log output is passed through credential masking (`account_manager/log_safety.py`), and a pre-commit hook scans staged content for credential shapes (Task 9).
 
 ## Strategy Rationale
 

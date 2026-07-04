@@ -19,14 +19,14 @@ See `AUDIT.md` for the current honest state of each layer (what is real vs. scaf
 
 1. Static safety layer with working kill switch and live-trading gate
 2. Alpaca paper trading integration only
-3. One trivial strategy (e.g. moving-average cross) to exercise the loop
+3. Two native strategies (trend/momentum + mean reversion) plus a regime detector, evaluated on closed bars, to exercise the loop
 4. Basic dashboard showing live trades, P&L, win/loss, kill-switch control
-5. STOP. Verify the full loop is stable before adding any other venue, the LLM council, DNN/RL, or whale tracking.
+5. STOP. Verify the full loop is stable before adding any other venue, the LLM council, the `dnn_advisory` factor, or whale tracking.
 
 ## Hard rules
 
 - Live trading off by default, behind explicit in-app approval gate
-- DNN/RL and whale signals are advisory, never sole execution controllers
+- The `dnn_advisory` (advisory DNN; RL deferred) factor and whale signals are advisory, never sole execution controllers
 - Never hardcode API keys; use env vars or a key-gated config
 - LLM council model strings: `claude-opus-4-8` (Anthropic), `gpt-5.5` (OpenAI), `gemini-3.1-pro` (Google). Free base-check gate: `gemini-3-flash`. These are the only approved model strings; do not invent others.
 - Paper trading is the continuous default training environment

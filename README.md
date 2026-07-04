@@ -1,8 +1,8 @@
 # Market AI Lab
 
 A C++20-first, modular, multi-venue **24/7 paper-trading research + execution
-system**. It blends a multi-LLM consensus, a rule-based factor, a DNN/RL
-advisory factor, and a whale/smart-money advisory factor into one weighted
+system**. It blends a multi-LLM consensus, a rule-based factor, a `dnn_advisory`
+(supervised DNN; RL deferred) advisory factor, and a whale/smart-money advisory factor into one weighted
 ensemble — then routes every proposed order through a **deterministic Layer-1
 RiskGate** before (paper) execution. A Plotly Dash control board visualizes and
 controls everything from the shared SQLite database.
@@ -30,7 +30,7 @@ source has a deterministic mock fallback.
 - [Configuration & secrets](#configuration--secrets)
 - [Testing](#testing)
 - [Database schema](#database-schema)
-- [TODOs (Binance / IBKR)](#todos-binance--ibkr)
+- [TODOs (Coinbase / IBKR)](#todos-coinbase--ibkr)
 
 ---
 
@@ -390,7 +390,7 @@ clean, broker-style app with **four top-level tabs**:
 - **Advanced** — every dense/technical panel, grouped under section headers:
   equity curve, daily realized PnL, drawdown %, trade-by-trade PnL, win/loss
   calendar heatmap, venue allocation, exposure by symbol/market, factor-weight
-  contribution, Layer-2 param before/after, DNN/RL performance, whale-signal
+  contribution, Layer-2 param before/after, dnn_advisory performance, whale-signal
   history, whale-agreement-vs-outcome, the model verdict board, the
   **adjustable model-weight control panel** (numeric inputs, per-factor lock,
   reset-to-defaults; auto-normalized), live-approval readiness, venue state,
@@ -462,7 +462,7 @@ Credentials can be entered two ways, with a single runtime resolver
 (`account_manager/credentials.py`) used everywhere a key is consumed:
 
 1. **In-app** — the dashboard's **Accounts / Connections** tab lets you type and
-   save keys/secrets per venue (Alpaca, Binance, IBKR, Polymarket) with
+   save keys/secrets per venue (Alpaca, Coinbase, IBKR, Polymarket) with
    **separate paper and live fields**, and per data source (ClankApp — free,
    default; Apify; SEC EDGAR — free, no key needed; Whale Alert — optional,
    limited free tier). Secret inputs are masked (`type=password`).
@@ -538,14 +538,15 @@ credential resolver (encryption round-trip + in-app-overrides-env precedence).
 `account_balances`, `blocked_trades`. SQLite is the single source of truth shared
 by the C++ writer and the Python/Dash readers.
 
-## TODOs (Binance / IBKR)
+## TODOs (Coinbase / IBKR)
 
 The architecture is venue-agnostic; two venues are scaffolded but not yet
 complete (search the codebase for `TODO:`):
 
-- **Binance** — `execution/` `BinanceSimAdapter` runs simulated/paper only; the
+- **Coinbase** — `execution/` `CoinbaseSimAdapter` runs simulated/paper only; the
   live adapter structure exists but live trading is not implemented. Env vars
-  `BINANCE_API_KEY` / `BINANCE_API_SECRET` are reserved in `.env.example`.
+  `COINBASE_API_KEY` / `COINBASE_API_SECRET` are reserved in `.env.example`.
+  (Coinbase replaces Binance for crypto — Binance does not operate in Canada.)
 - **IBKR** — `IbkrSimPlaceholderAdapter` is data/recommendation-only; full IBKR
   support (paper + live) is a follow-up. See `docs/FOLLOWUP_CREDENTIALS.md`.
 

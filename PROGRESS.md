@@ -4,7 +4,7 @@ Status tracker for AiTrader. Read at the start of each session. Update at the en
 
 ## Current State
 
-The C++ safety spine builds clean and runs the offline paper loop. The real LLM council is merged (Opus 4.8, GPT-5.5, Gemini 3.1 Pro) with a free Gemini Flash gate and prompt caching. Council stays behind config flags and the bridge. Live trading disabled. Next up: native strategy layer, historical bars storage, real-fill feedback, whale feeds, Coinbase venue.
+The C++ safety spine builds clean and runs the offline paper loop (`ctest` 5/5). The real LLM council is merged (Opus 4.8, GPT-5.5, Gemini 3.1 Pro) with a free Gemini Flash gate, prompt caching, and cost controls (budget, per-symbol cooldown, token cap, neutral skip). The native strategy layer (momentum + reversion + regime detector, closed-bar eval, native ATR exits) is in; the adaptive tuner learns from real closed-trade PnL (≥30-trade gate); the `dnn_advisory` factor has a real-data walk-forward training pipeline with gated promotion; Coinbase replaces Binance; free-first whale feeds (ClankApp + SEC EDGAR) are wired live-OFF by default; security hardening (loopback bridge, credential masking, pre-commit secrets hook, pinned deps) landed. Council/whale live paths stay behind config/env flags and the bridge. Live trading disabled by default. Next up: venv pytest + real numpy training run, real whale fixtures, residual doc-consistency sweep + AUDIT refresh (see Open Flags).
 
 ## Stable and Working
 
@@ -20,18 +20,13 @@ The C++ safety spine builds clean and runs the offline paper loop. The real LLM 
 
 ## In Progress
 
-- None active. Awaiting second master prompt.
+- None active. 12-task master prompt complete (2026-07-04). Follow-up flags open (venv pytest/training run, real whale fixtures, residual doc sweep + AUDIT refresh) — see RETURN.md and "Open Flags / Follow-ups".
 
 ## Not Started
 
-- Native strategy layer (momentum, mean reversion, regime detector)
-- Historical bars storage
-- Real-fill feedback to adaptive tuner
-- ClankApp crypto whale feed (adapter stubbed)
-- SEC EDGAR equities feed (adapter stubbed)
-- Coinbase venue (replacing Binance)
-- DNN advisory real-data training pipeline
-- Live-approval workflow end to end
+- Live-approval workflow end to end (`try_enable_live` still never called by design)
+- Real (disabled-by-default) live adapters for Coinbase + IBKR
+- True RL for the advisory factor (deferred until ≥500 real closed fills; supervised `dnn_advisory` only today)
 - Frontend rebuild in React
 
 ## Next Up
@@ -56,6 +51,15 @@ The C++ safety spine builds clean and runs the offline paper loop. The real LLM 
 ## Session Log
 
 Newest entries at top. One entry per session. Format: date, model used, what changed, what is stable, what is next.
+
+### 2026-07-04 (Opus 4.8)
+
+- **Completed the 12-task master prompt** on `feat/native-strategy-council-cost-controls`; fast-forwarded onto `origin/main`.
+- Task 1 bars OHLCV storage + Alpaca historical backfill; Task 2 native strategy layer (momentum + reversion + regime detector, closed-bar eval, native ATR exits); Task 3 real-fill learning (dropped `simulate_outcome` from the default path, tuner gated at ≥30 closed trades); Task 4 council cost controls (entries-only, Flash gate, daily budget, per-symbol cooldown, token cap, neutral skip, skip logging); Task 5 `dnn_advisory` rename + real-data walk-forward training pipeline + provenance + gated promotion; Task 6 `CoinbaseSimAdapter` replaces Binance; Task 7 free-first whale feeds (ClankApp + SEC EDGAR) live-OFF by default; Task 8 Level-1 config defaults; Task 9 security hardening (loopback bridge, credential masking, pre-commit secrets hook, pinned deps); Task 10 startup transparency block.
+- Task 11 (this turn): extracted the tuner ≥30-sample gate into `learning/adapt_gate.hpp` (pure predicate) so it is unit-testable; added `tests/test_tuner_minsample.cpp` (registered in CTest — **5/5 C++ suites green**) and `tests/test_council_cost_controls.py`. Native-exit + council-gate decision logic already covered by `tests/test_strategy.cpp`. Council cost-control test logic verified live (yaml present); pytest itself not runnable in-session (no pytest).
+- Task 12 (this turn): CLAUDE.md build-order step 3 + hard-rule aligned to native strategies / `dnn_advisory`; README.md + AUDIT.md corrected Binance→Coinbase and `dnn_advisory`; RETURN.md entry finalized; CONTEXT.md decisions logged.
+- **Stable:** C++ safety spine + native strategy + council gate build clean, `ctest` 5/5. Engine refactor (adapt-gate extraction) is behaviour-preserving. RiskGate / live-gate / limit-weakening invariant untouched; live trading OFF by default.
+- **Next / flags:** run full `pytest` + real numpy training in a venv; record real ClankApp/SEC-EDGAR fixtures; finish the residual doc-consistency sweep (`docs/ARCHITECTURE.md`, `docs/BUILD_SPEC.md`, `docs/FOLLOWUP_CREDENTIALS.md`, `docs/DNN_RL_DESIGN.md`) + AUDIT honest-state refresh. See RETURN.md + "Open Flags / Follow-ups".
 
 ### 2026-07-02 (Opus)
 

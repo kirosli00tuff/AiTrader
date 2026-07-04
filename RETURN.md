@@ -19,8 +19,8 @@ Commit message:
 Date: 2026-07-02
 Model: Opus 4.8
 Prompt summary: 12-task master prompt. Add bars storage + Alpaca backfill; native strategy layer (trend/momentum + mean reversion + regime detector) evaluated on closed 5m bars only with native ATR exits; remove simulate_outcome from default path so tuner learns from real closed-trade PnL (min 30 trades/factor); council cost controls (entries-only, Flash gate, daily budget, per-symbol cooldown, token cap, neutral-regime skip, compressed context, skip logging); rename dnn_advisory + drop RL claim + walk-forward training pipeline + provenance; replace Binance with Coinbase adapter; wire ClankApp + SEC EDGAR free whale feeds with real fixtures and transparent heuristic; Level 1 config defaults; security hardening (pinned deps, bind-address test, credential masking, pre-commit secrets hook, .gitignore); startup transparency block; C++ ctest + pytest coverage; document and commit. Constraints: do not touch RiskGate logic, live-trading gate, or adaptive limit-weakening invariant; risk values change through config only; live trading stays off.
-Changes: (in progress — completed in Task 12)
-Commit message: (in progress — completed in Task 12)
+Changes: 12-task master prompt delivered on branch `feat/native-strategy-council-cost-controls`, fast-forwarded onto `origin/main`. **Task 1** bars OHLCV storage + Alpaca historical backfill. **Task 2** native strategy layer (`signal_engine/strategy.*`): trend/momentum + mean reversion + regime detector, evaluated on CLOSED bars only, native ATR stop/target/time-stop set at entry, exits run without the council. **Task 3** removed `simulate_outcome` from the default path; the adaptive tuner now learns from real closed-trade PnL, gated at ≥30 closed trades (`learning/adapt_gate.hpp` — extracted pure predicate). **Task 4** council cost controls (`signal_engine/council_gate.*` + `llm_consensus/config_access.py`): council only on candidate ENTRY, Flash base-check gate, daily budget, per-symbol cooldown, per-provider token cap, neutral-regime skip, every skip logged as `council_skip`. **Task 5** `dnn_advisory` factor rename + RL claim dropped; real-data walk-forward training pipeline + provenance + GATED promotion (`ml_factor/real_dataset.py`, `train_real.py`, `registry.meets_promotion_criteria`). **Task 6** `CoinbaseSimAdapter` replaces Binance (Canada). **Task 7** free-first whale feeds (ClankApp + SEC EDGAR), live OFF by default behind `WHALE_LIVE_ENABLED`/`SEC_EDGAR_ENABLED`, env-built SEC User-Agent, synthetic fixtures + parser tests. **Task 8** Level-1 config defaults. **Task 9** security hardening: loopback-only bridge bind (`resolve_bind_host`), credential masking (`account_manager/log_safety.py`), pre-commit secrets hook (`ops/check_secrets.sh` + `install_git_hooks.sh`), pinned deps, `.gitignore`. **Task 10** startup transparency block. **Task 11** C++ `ctest` (`test_tuner_minsample`, native-exit + council-gate in `test_strategy`) — 5/5 green; Python council cost-control + bridge-bind + whale-fixture pytest. **Task 12** docs: CLAUDE.md build-order/hard-rules, README.md + AUDIT.md Binance→Coinbase + `dnn_advisory` alignment, PROGRESS.md session entry, CONTEXT.md decisions. NOT touched: RiskGate logic, live-trading gate, adaptive limit-weakening invariant; risk changes via config only; live trading stays OFF by default.
+Commit message: `docs: finalize Task 12 — align docs to native strategy, dnn_advisory, Coinbase; close 12-task master prompt`
 
 Known flags / verification status (raised 2026-07-04, fix AFTER all 12 tasks per user):
 - **py_compile-only verification for Python.** The in-session base `python3` has neither
@@ -38,6 +38,15 @@ Known flags / verification status (raised 2026-07-04, fix AFTER all 12 tasks per
   its `User-Agent` (SEC fair-access) supplied via `SEC_EDGAR_CONTACT_EMAIL` (never committed). TODO
   before trusting live whale data: set `SEC_EDGAR_CONTACT_EMAIL`, run the adapters live once,
   replace the synthetic fixtures with the real responses, and confirm the parsers still pass.
+- **Residual doc-consistency sweep (Task 12 partial).** The code migration is complete
+  (`CoinbaseSimAdapter`, `dnn_advisory_factor_weight`), and the two primary docs (README.md,
+  AUDIT.md) plus CLAUDE.md were corrected. Still carrying pre-migration wording, deferred to the
+  cleanup phase: `docs/ARCHITECTURE.md`, `docs/BUILD_SPEC.md`, `docs/FOLLOWUP_CREDENTIALS.md`, and
+  `docs/DNN_RL_DESIGN.md` (Binance→Coinbase; "DNN/RL" concept vs the `dnn_advisory` factor name;
+  design-doc filename still `DNN_RL_DESIGN.md`, referenced by code comments in `ml_factor/*.py`).
+  AUDIT.md also still asserts pre-Task-3/5 claims ("DNN is a synthetic toy… no real retrain /
+  champion-challenger pipeline", "adaptive layer learns from `simulate_outcome`") that Tasks 3+5
+  superseded — a full honest-state AUDIT refresh is its own follow-up pass.
 - Full flag list lives in PROGRESS.md "Open Flags / Follow-ups"; this note is the RETURN.md pointer.
 - Policy (user, 2026-07-04): finish the whole master prompt first, then fix every flag/issue.
 
