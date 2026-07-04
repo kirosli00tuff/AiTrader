@@ -43,6 +43,34 @@ def _requests():
     return requests
 
 
+# Live network fetches are OFF by default (Task 7): the whole app runs offline on
+# deterministic mocks unless an operator explicitly opts in. Crypto/on-chain
+# whale feeds (ClankApp, Apify, Whale Alert) are gated by WHALE_LIVE_ENABLED;
+# SEC EDGAR is gated separately by SEC_EDGAR_ENABLED. Both default false.
+WHALE_LIVE_ENABLED_ENV = "WHALE_LIVE_ENABLED"
+SEC_EDGAR_ENABLED_ENV = "SEC_EDGAR_ENABLED"
+
+
+def _flag(name: str, default: bool = False) -> bool:
+    """Read a boolean opt-in flag from the environment (default OFF)."""
+    val = os.environ.get(name)
+    if val is None:
+        return default
+    return val.strip().lower() in ("1", "true", "yes", "on")
+
+
+def _user_agent() -> str:
+    """Descriptive User-Agent; SEC fair-access needs a real contact.
+
+    The contact email comes from SEC_EDGAR_CONTACT_EMAIL (env only — NEVER
+    committed to YAML). When unset we send an explicit self-describing note
+    instead of a fake address so the header is honest.
+    """
+    contact = os.environ.get("SEC_EDGAR_CONTACT_EMAIL", "").strip()
+    who = f"contact {contact}" if contact else "contact: set SEC_EDGAR_CONTACT_EMAIL"
+    return f"MarketAiLab/1.0 (paper-training research; {who})"
+
+
 @dataclass
 class WhaleActivity:
     source: str          # clankapp | apify | whale_alert | sec_13f
@@ -103,7 +131,9 @@ class ClankAppAdapter:
         # ClankApp covers crypto/on-chain only.
         if not _is_crypto(symbol):
             return []
-        if not self.is_live():
+        # Live is OFF unless the operator opts in (WHALE_LIVE_ENABLED). Default
+        # path is deterministic mock — no network, no keys.
+        if not _flag(WHALE_LIVE_ENABLED_ENV):
             return self._mock(symbol)
         try:
             return self._fetch_live(symbol)
@@ -117,7 +147,7 @@ class ClankAppAdapter:
         token = symbol.upper().replace("-", "").replace("USDT", "").replace(
             "USDC", "").replace("USD", "").lower() or symbol.lower()
         params = {"symbol": token, "size": 25}
-        headers = {"User-Agent": _USER_AGENT, "Accept": "application/json"}
+        headers = {"User-Agent": _user_agent(), "Accept": "application/json"}
         if self.key:
             headers["x-api-key"] = self.key
         resp = requests.get(self.BASE_URL, params=params, headers=headers,
@@ -125,8 +155,15 @@ class ClankAppAdapter:
         if resp.status_code == 429:  # rate-limited this cycle -> mock
             return self._mock(symbol)
         resp.raise_for_status()
-        payload = resp.json()
-        # Response shape is defensively probed: list under common keys.
+        parsed = self._parse(resp.json(), symbol)
+        return parsed if parsed else self._mock(symbol)
+
+    def _parse(self, payload, symbol: str) -> list[WhaleActivity]:
+        """Parse a ClankApp JSON payload into WhaleActivity rows (pure).
+
+        Extracted so fixtures can exercise parsing without a live call.
+        Response shape is defensively probed: list under common keys.
+        """
         rows = payload
         if isinstance(payload, dict):
             for key in ("transactions", "data", "result", "txs", "items"):
@@ -134,7 +171,7 @@ class ClankAppAdapter:
                     rows = payload[key]
                     break
         if not isinstance(rows, list):
-            return self._mock(symbol)
+            return []
         out: list[WhaleActivity] = []
         for row in rows:
             if not isinstance(row, dict):
@@ -168,8 +205,6 @@ class ClankAppAdapter:
                 delayed=False,
                 ts=_ts_from_epoch(ts) if ts is not None else _now(),
             ))
-        if not out:
-            return self._mock(symbol)
         return out
 
     def _mock(self, symbol: str) -> list[WhaleActivity]:
@@ -210,7 +245,8 @@ class ApifyWhaleAdapter:
         return bool(self.token)
 
     def fetch(self, symbol: str) -> list[WhaleActivity]:
-        if not self.is_live():
+        # Live requires BOTH an operator opt-in and a token; default is mock.
+        if not (_flag(WHALE_LIVE_ENABLED_ENV) and self.is_live()):
             return self._mock(symbol)
         try:
             return self._fetch_live(symbol)
@@ -222,7 +258,7 @@ class ApifyWhaleAdapter:
         # Read the actor's last run dataset items (no new run triggered).
         actor_path = self.actor.replace("/", "~")
         url = f"{self.BASE_URL}/{actor_path}/runs/last/dataset/items"
-        headers = {"User-Agent": _USER_AGENT, "Accept": "application/json"}
+        headers = {"User-Agent": _user_agent(), "Accept": "application/json"}
         resp = requests.get(url, params={"token": self.token, "limit": 50},
                             headers=headers, timeout=_TIMEOUT)
         if resp.status_code == 429:
@@ -295,7 +331,8 @@ class WhaleAlertAdapter:
         return bool(self.key)
 
     def fetch(self, symbol: str) -> list[WhaleActivity]:
-        if not self.is_live():
+        # Optional paid feed: live requires the opt-in flag AND a key.
+        if not (_flag(WHALE_LIVE_ENABLED_ENV) and self.is_live()):
             return self._mock(symbol)
         try:
             return self._fetch_live(symbol)
@@ -311,7 +348,7 @@ class WhaleAlertAdapter:
             "start": int(time.time()) - 3600,  # last hour
             "limit": 50,
         }
-        headers = {"User-Agent": _USER_AGENT, "Accept": "application/json"}
+        headers = {"User-Agent": _user_agent(), "Accept": "application/json"}
         resp = requests.get(self.BASE_URL, params=params, headers=headers,
                             timeout=_TIMEOUT)
         if resp.status_code == 429:
@@ -406,6 +443,9 @@ class Sec13FAdapter:
         # Equity-style symbols only.
         if any(c in symbol.upper() for c in ("USD", "BTC", "ETH", "-")):
             return []
+        # SEC EDGAR live is OFF unless the operator opts in (SEC_EDGAR_ENABLED).
+        if not _flag(SEC_EDGAR_ENABLED_ENV):
+            return self._mock(symbol)
         try:
             return self._fetch_live(symbol)
         except Exception:
@@ -413,19 +453,28 @@ class Sec13FAdapter:
 
     def _fetch_live(self, symbol: str) -> list[WhaleActivity]:
         requests = _requests()
-        # A proper, identifying User-Agent is mandatory for EDGAR fair-access.
-        headers = {"User-Agent": _USER_AGENT, "Accept": "application/json"}
+        # A proper, identifying User-Agent is mandatory for EDGAR fair-access;
+        # the contact email comes from SEC_EDGAR_CONTACT_EMAIL (env, never YAML).
+        headers = {"User-Agent": _user_agent(), "Accept": "application/json"}
         params = {"q": symbol, "forms": "13F-HR"}
         resp = requests.get(self.EDGAR_FTS_URL, params=params, headers=headers,
                             timeout=_TIMEOUT)
         if resp.status_code == 429:
             return self._mock(symbol)
         resp.raise_for_status()
-        payload = resp.json()
+        parsed = self._parse(resp.json(), symbol)
+        return parsed if parsed else self._mock(symbol)
+
+    def _parse(self, payload, symbol: str) -> list[WhaleActivity]:
+        """Parse an EDGAR full-text-search payload into WhaleActivity rows (pure).
+
+        Extracted so fixtures exercise parsing without a live call. All 13F
+        evidence is delayed=True (quarterly, ~45-day lag) — context, not flow.
+        """
         hits = (((payload or {}).get("hits") or {}).get("hits")
                 if isinstance(payload, dict) else None)
         if not isinstance(hits, list) or not hits:
-            return self._mock(symbol)
+            return []
         out: list[WhaleActivity] = []
         for hit in hits[:8]:
             if not isinstance(hit, dict):
@@ -447,8 +496,6 @@ class Sec13FAdapter:
                 delayed=True,       # DELAYED quarterly disclosure
                 ts=ts,
             ))
-        if not out:
-            return self._mock(symbol)
         return out
 
     def _mock(self, symbol: str) -> list[WhaleActivity]:

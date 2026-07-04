@@ -30,6 +30,14 @@ Known flags / verification status (raised 2026-07-04, fix AFTER all 12 tasks per
   NOT validated by a full `pytest` run or an actual numpy training run. Before merge, in a venv:
   `pip install -r python_bridge/requirements.txt -r ui/requirements.txt && pytest tests/ -q`, and
   run the real-data trainer once. Mirrored in PROGRESS.md "Open Flags / Follow-ups".
+- **Task 7 whale fixtures are SYNTHETIC, not recorded from live responses.** Per user decision
+  (2026-07-04), the ClankApp + SEC EDGAR adapters were wired and tested against **synthetic**
+  fixtures built from each API's documented response shape — NO live network calls were made from
+  this session. Real-fixture recording + shape verification is deferred: it needs live read-only
+  GETs to `api.clankapp.com` and `efts.sec.gov`, and the SEC request needs a real contact email in
+  its `User-Agent` (SEC fair-access) supplied via `SEC_EDGAR_CONTACT_EMAIL` (never committed). TODO
+  before trusting live whale data: set `SEC_EDGAR_CONTACT_EMAIL`, run the adapters live once,
+  replace the synthetic fixtures with the real responses, and confirm the parsers still pass.
 - Full flag list lives in PROGRESS.md "Open Flags / Follow-ups"; this note is the RETURN.md pointer.
 - Policy (user, 2026-07-04): finish the whole master prompt first, then fix every flag/issue.
 
