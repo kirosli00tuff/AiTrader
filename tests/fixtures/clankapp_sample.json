@@ -1,0 +1,26 @@
+{
+  "_provenance": "SYNTHETIC — hand-built to match ClankApp's documented /v2/explorer/tx response shape. NOT a recorded live response. Replace with a real capture once WHALE_LIVE_ENABLED live fetch is verified (see RETURN.md flag).",
+  "transactions": [
+    {
+      "hash": "0xaa11",
+      "amount_usd": 12500000,
+      "timestamp": 1751000000,
+      "from": {"owner_type": "wallet", "address": "0xdeadbeef01"},
+      "to": {"owner_type": "exchange", "owner": "binance"}
+    },
+    {
+      "hash": "0xbb22",
+      "amount_usd": 31000000,
+      "timestamp": 1751000600,
+      "from": {"owner_type": "exchange", "owner": "coinbase"},
+      "to": {"owner_type": "wallet", "address": "0xcafef00d02"}
+    },
+    {
+      "hash": "0xcc33",
+      "amount_usd": 900,
+      "timestamp": 1751000900,
+      "from": {"owner_type": "wallet", "address": "0x03"},
+      "to": {"owner_type": "wallet", "address": "0x04"}
+    }
+  ]
+}

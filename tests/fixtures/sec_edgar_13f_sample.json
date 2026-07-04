@@ -1,0 +1,22 @@
+{
+  "_provenance": "SYNTHETIC — hand-built to match SEC EDGAR full-text-search (efts.sec.gov) response shape. NOT a recorded live response. Replace with a real capture once SEC_EDGAR_ENABLED + SEC_EDGAR_CONTACT_EMAIL live fetch is verified (see RETURN.md flag).",
+  "hits": {
+    "total": {"value": 2},
+    "hits": [
+      {
+        "_source": {
+          "display_names": ["BERKSHIRE HATHAWAY INC (CIK 0001067983)"],
+          "file_date": "2026-05-15",
+          "forms": ["13F-HR"]
+        }
+      },
+      {
+        "_source": {
+          "display_names": ["CITADEL ADVISORS LLC (CIK 0001423053)"],
+          "file_date": "2026-05-14",
+          "forms": ["13F-HR"]
+        }
+      }
+    ]
+  }
+}
