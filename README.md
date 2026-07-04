@@ -488,6 +488,34 @@ which is exactly what the C++ approval gate
 honors the **resolved** live credential (in-app or env). This only reports
 readiness; live trading remains disabled by default behind the full approval gate.
 
+### Security hardening
+
+Defence-in-depth for a public repo that touches money and API keys:
+
+- **Pre-commit secrets scan.** `ops/check_secrets.sh` blocks a commit that stages
+  a credential-shaped string (`sk-…`, `AKIA…`, `github_pat_…`, `AIza…`, PEM
+  private-key blocks, or a real-looking `api_key=` / `secret=` value). Wire it
+  once per clone:
+
+  ```bash
+  ops/install_git_hooks.sh          # installs .git/hooks/pre-commit
+  ops/check_secrets.sh              # or run the scan by hand
+  ```
+
+  Placeholders in `.env.example` are ignored; bypass only with
+  `git commit --no-verify` (discouraged).
+- **Loopback-only bridge.** `python_bridge/server.py` binds `127.0.0.1` and
+  *refuses* a non-loopback host (e.g. `0.0.0.0`) unless an operator sets
+  `BRIDGE_ALLOW_REMOTE=1`. The advisory bridge is for the local C++ engine only.
+- **Masked logs.** `account_manager/log_safety.py` (`mask_secrets` / `safe_print`)
+  redacts credential-shaped substrings before anything reaches stdout/stderr, so
+  a stray key in an error message is never printed.
+- **Pinned dependencies.** `python_bridge/requirements.txt`, `ui/requirements.txt`,
+  and `ui/requirements-desktop.txt` use exact `==` pins for reproducible installs
+  and no silent supply-chain drift.
+- **Git-ignored secrets.** `.gitignore` excludes `.env`, `*.pem`, `*.key`,
+  `.keystore/`, and all `*.db*` files.
+
 ## Testing
 
 ```bash

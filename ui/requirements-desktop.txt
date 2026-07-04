@@ -12,10 +12,13 @@
 # pywebview uses the platform's native webview (WebView2/EdgeChromium on
 # Windows — built into Windows 10/11; WebKit/GTK on Linux, where you may also
 # need system packages e.g. python3-gi, gir1.2-webkit2-4.1, or the Qt backend).
-pywebview>=4.4
-pystray>=0.19
-pillow>=10.0
-pyinstaller>=6.3
+#
+# EXACT version pins (Task 9 security hardening): reproducible installs, no
+# silent supply-chain drift. Bump deliberately after review.
+pywebview==5.3.2
+pystray==0.19.5
+pillow==10.4.0
+pyinstaller==6.11.1
 
 # --- Linux backend note ---------------------------------------------------- #
 # pywebview needs a native webview backend. Two options on Linux:
@@ -26,6 +29,6 @@ pyinstaller>=6.3
 # install the Qt backend and ops/run_desktop.sh will prefer it automatically:
 #   pip install pyqt6 pyqt6-webengine qtpy
 # (uncomment the next three lines to make Qt part of the default desktop install)
-# pyqt6>=6.6
-# pyqt6-webengine>=6.6
-# qtpy>=2.4
+# pyqt6==6.7.1
+# pyqt6-webengine==6.7.0
+# qtpy==2.4.1

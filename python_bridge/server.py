@@ -28,6 +28,12 @@ from llm_consensus import consensus, council_status_line, use_real_council  # no
 from ml_factor import score_state             # noqa: E402
 from whale_signal import whale_signal_for     # noqa: E402
 from market_data import alpaca_source         # noqa: E402
+from account_manager.log_safety import safe_print  # noqa: E402
+
+# Loopback addresses are the only bind targets allowed by default. The bridge
+# carries advisory scoring for a LOCAL C++ engine and must never be exposed on a
+# routable interface unless an operator explicitly opts in (BRIDGE_ALLOW_REMOTE).
+_LOOPBACK_HOSTS = frozenset({"127.0.0.1", "::1", "localhost"})
 
 
 def _handle(path: str, payload: dict) -> dict:
@@ -85,12 +91,33 @@ class Handler(BaseHTTPRequestHandler):
             self._send(500, {"error": str(e)})
 
 
+def resolve_bind_host(host: str, allow_remote: bool | None = None) -> str:
+    """Return the host to bind, refusing non-loopback unless explicitly allowed.
+
+    Defence-in-depth: the advisory bridge is loopback-only. A non-loopback host
+    (e.g. 0.0.0.0) is rejected with a clear error unless BRIDGE_ALLOW_REMOTE=1
+    (or an explicit ``allow_remote=True``) is set by an operator who accepts the
+    exposure.
+    """
+    if host in _LOOPBACK_HOSTS:
+        return host
+    if allow_remote is None:
+        allow_remote = os.environ.get("BRIDGE_ALLOW_REMOTE", "0") == "1"
+    if allow_remote:
+        return host
+    raise ValueError(
+        f"refusing to bind python_bridge to non-loopback host {host!r}; "
+        f"set BRIDGE_ALLOW_REMOTE=1 to override (not recommended)"
+    )
+
+
 def serve(host: str = "127.0.0.1", port: int = 8765) -> None:
+    host = resolve_bind_host(host)
     httpd = ThreadingHTTPServer((host, port), Handler)
     mode = "REAL council ACTIVE" if use_real_council() else "mock council"
-    print(f"python_bridge serving on http://{host}:{port} ({mode})")
+    safe_print(f"python_bridge serving on http://{host}:{port} ({mode})")
     # Unambiguous, single source of truth for which council + gate are running.
-    print(f"  {council_status_line()}")
+    safe_print(f"  {council_status_line()}")
     httpd.serve_forever()
 
 
