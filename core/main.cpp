@@ -104,6 +104,50 @@ int main(int argc, char** argv) {
                             "llm.use_real_council=true)")
                   << "\n";
 
+        // --- Startup transparency block (Task 10) ---------------------------
+        // One honest snapshot of what is actually active this run.
+        {
+            const auto& st = cfg.strategy;
+            const auto& co = cfg.council;
+            const auto& rk = cfg.risk;
+            std::string wl;
+            for (size_t i = 0; i < st.whitelist.size(); ++i)
+                wl += (i ? ", " : "") + st.whitelist[i];
+            std::string strategies;
+            if (st.momentum_enabled) strategies += "momentum ";
+            if (st.reversion_enabled) strategies += "reversion ";
+            if (strategies.empty()) strategies = "(none) ";
+            std::cout
+                << "  ----------------------------------------------------\n"
+                << "  council:   "
+                << (opts.bootstrap_sim ? "N/A (bootstrap-sim legacy loop)"
+                    : opts.use_bridge  ? "entries-only, gated (real via bridge)"
+                                       : "entries-only, gated (in-process mock)")
+                << "\n"
+                << "  strategies: " << strategies
+                << (st.crypto_allow_short ? "[crypto short ON]" : "[long-only]")
+                << "\n"
+                << "  regime:    ADX>=" << st.regime_adx_trend
+                << " trending / rvol>=" << st.regime_rvol_high << " range-bound\n"
+                << "  whitelist: " << wl << "  (bars " << st.bar_timeframe << ")\n"
+                << "  whale:     tracking "
+                << (cfg.whale.whale_tracking_enabled ? "on" : "off")
+                << ", live feeds default OFF (free-first)\n"
+                << "  exits:     ATR stop x" << st.atr_stop_mult << " / target x"
+                << st.atr_target_mult << " / time-stop " << st.time_stop_bars
+                << " bars (native, no council)\n"
+                << "  council $:  budget " << co.council_daily_budget
+                << "/day, cooldown " << co.per_symbol_council_cooldown_minutes
+                << "m, max_tokens " << co.council_max_tokens << "\n"
+                << "  L1 risk:   daily-loss " << (rk.max_daily_loss_total_pct * 100)
+                << "% / per-trade " << (rk.max_trade_risk_pct_of_equity * 100)
+                << "% / max " << rk.max_trades_per_day << " trades/day / "
+                << rk.max_open_positions_total << " open / cooldown "
+                << rk.cooldown_minutes_after_loss_breach << "m\n"
+                << "  live:      DISABLED (gated, off by default)\n"
+                << "  ----------------------------------------------------\n";
+        }
+
         mal::core::Engine engine(std::move(cfg), opts);
 
         if (continuous) {
