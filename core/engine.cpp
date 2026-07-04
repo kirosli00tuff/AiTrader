@@ -8,14 +8,15 @@
 
 #include "core/bridge_client.hpp"
 #include "core/util.hpp"
+#include "learning/adapt_gate.hpp"
 
 namespace mal::core {
 
 namespace {
-// Bounded per-symbol bar history kept in memory for indicators; minimum closed
-// native trades required before the adaptive tuner may nudge weights (Task 3).
+// Bounded per-symbol bar history kept in memory for indicators. (The minimum
+// closed-trade adapt gate now lives in learning/adapt_gate.hpp so it is
+// unit-testable without a full Engine — see kMinClosedTradesForAdapt there.)
 constexpr size_t kBarHistoryCap = 300;
-constexpr long kMinClosedTradesForAdapt = 30;
 double clamp01(double x) { return std::clamp(x, 0.0, 1.0); }
 double det_unit(const std::string& s, unsigned salt) {
     std::size_t h = std::hash<std::string>{}(s) ^ (salt * 2654435761u);
@@ -591,12 +592,12 @@ void Engine::maybe_adapt(int iteration) {
     if (!cfg_.adaptive.adaptive_weight_updates_enabled) return;
     // Real-fill learning gate (Task 3): the native path must accumulate a
     // minimum number of CLOSED trades before any weight nudge. The bootstrap
-    // sim path keeps its legacy trade-count gate.
-    if (opts_.bootstrap_sim) {
-        if (trade_count_ == 0) return;
-    } else if (closed_trade_count_ < kMinClosedTradesForAdapt) {
+    // sim path keeps its legacy trade-count gate. Pure predicate lives in
+    // learning/adapt_gate.hpp so it is unit-testable in isolation.
+    if (!learning::has_enough_samples_to_adapt(
+            opts_.bootstrap_sim, static_cast<long>(trade_count_),
+            static_cast<long>(closed_trade_count_)))
         return;
-    }
     if (iteration % 3 != 0) return;  // periodic cadence for the demo
 
     const std::string ts = util::now_iso8601();

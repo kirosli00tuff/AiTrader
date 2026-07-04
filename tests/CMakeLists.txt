@@ -17,3 +17,8 @@ add_test(NAME weights COMMAND test_weights WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
 add_executable(test_strategy test_strategy.cpp)
 target_link_libraries(test_strategy PRIVATE mal_signal_engine mal_config)
 add_test(NAME strategy COMMAND test_strategy WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+# Header-only pure predicate (learning/adapt_gate.hpp) — no library link needed.
+add_executable(test_tuner_minsample test_tuner_minsample.cpp)
+add_test(NAME tuner_minsample COMMAND test_tuner_minsample
+         WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
