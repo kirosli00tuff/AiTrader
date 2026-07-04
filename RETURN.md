@@ -22,6 +22,17 @@ Prompt summary: 12-task master prompt. Add bars storage + Alpaca backfill; nativ
 Changes: (in progress — completed in Task 12)
 Commit message: (in progress — completed in Task 12)
 
+Known flags / verification status (raised 2026-07-04, fix AFTER all 12 tasks per user):
+- **py_compile-only verification for Python.** The in-session base `python3` has neither
+  `pytest` nor `numpy`. So Python changes this session (Task 9 security, Task 5 dnn_advisory
+  training pipeline, Task 7 whale wiring, Task 11 pytest additions) are verified by `py_compile`
+  + isolated logic checks + direct execution only where deps allow (stdlib/`requests`); they are
+  NOT validated by a full `pytest` run or an actual numpy training run. Before merge, in a venv:
+  `pip install -r python_bridge/requirements.txt -r ui/requirements.txt && pytest tests/ -q`, and
+  run the real-data trainer once. Mirrored in PROGRESS.md "Open Flags / Follow-ups".
+- Full flag list lives in PROGRESS.md "Open Flags / Follow-ups"; this note is the RETURN.md pointer.
+- Policy (user, 2026-07-04): finish the whole master prompt first, then fix every flag/issue.
+
 ---
 
 ## Prompt: Add CONTEXT.md
