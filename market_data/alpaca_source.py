@@ -16,10 +16,13 @@ Paper API: https://paper-api.alpaca.markets
 """
 from __future__ import annotations
 
+import datetime
 import json
 import os
+import sqlite3
 import sys
 import urllib.error
+import urllib.parse
 import urllib.request
 
 # Make repo-root packages importable when imported from the bridge.
@@ -203,3 +206,127 @@ def submit_paper_order(symbol: str, side: str, qty: float,
         "filled_qty": filled_qty,
         "broker_status": str(resp.get("status", "")),
     }
+
+
+# --- Historical bar backfill (Task 1) ---------------------------------------
+# Populates the shared ``bars`` table for the native-strategy whitelist so the
+# C++ engine, DNN training, and backtests have real history. Timeframe labels
+# ("1day", "5min") match the engine's ``strategy.bar_timeframe``. Idempotent
+# (upsert). Offline / no key => no-op marker.
+_WHITELIST_CRYPTO = ("BTC/USD", "ETH/USD")
+_WHITELIST_EQUITY = ("SPY", "QQQ")
+
+_BARS_DDL = (
+    "CREATE TABLE IF NOT EXISTS bars ("
+    "id INTEGER PRIMARY KEY AUTOINCREMENT, venue TEXT NOT NULL, symbol TEXT NOT NULL,"
+    " timeframe TEXT NOT NULL, timestamp TEXT NOT NULL, open REAL NOT NULL,"
+    " high REAL NOT NULL, low REAL NOT NULL, close REAL NOT NULL, volume REAL NOT NULL,"
+    " UNIQUE(venue, symbol, timeframe, timestamp))"
+)
+
+
+def _iso_days_ago(days: int) -> str:
+    dt = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=days)
+    return dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _fetch_bars(url_base: str, headers: dict[str, str], symbols: list[str],
+                api_timeframe: str, start: str) -> dict[str, list]:
+    """Fetch bars for symbols, following Alpaca ``next_page_token`` pagination."""
+    out: dict[str, list] = {s: [] for s in symbols}
+    q = urllib.parse.quote(",".join(symbols), safe=",")
+    page_token: str | None = None
+    for _ in range(100):  # hard page cap to bound the loop
+        url = (f"{url_base}?symbols={q}&timeframe={api_timeframe}"
+               f"&start={start}&limit=10000")
+        if page_token:
+            url += f"&page_token={urllib.parse.quote(page_token)}"
+        resp = _http("GET", url, headers)
+        if not isinstance(resp, dict):
+            break
+        bars = resp.get("bars") or {}
+        for s in symbols:
+            out[s].extend(bars.get(s, []) or [])
+        page_token = resp.get("next_page_token")
+        if not page_token:
+            break
+    return out
+
+
+def _upsert_bars(conn: sqlite3.Connection, venue: str, symbol: str,
+                 timeframe: str, bars: list) -> int:
+    written = 0
+    for b in bars:
+        ts, o, h, l, c = b.get("t"), b.get("o"), b.get("h"), b.get("l"), b.get("c")
+        if ts is None or o is None or h is None or l is None or c is None:
+            continue
+        conn.execute(
+            "INSERT INTO bars(venue,symbol,timeframe,timestamp,open,high,low,"
+            "close,volume) VALUES(?,?,?,?,?,?,?,?,?) "
+            "ON CONFLICT(venue,symbol,timeframe,timestamp) DO UPDATE SET "
+            "open=excluded.open, high=excluded.high, low=excluded.low, "
+            "close=excluded.close, volume=excluded.volume",
+            (venue, symbol, timeframe, ts, float(o), float(h), float(l),
+             float(c), float(b.get("v", 0) or 0)))
+        written += 1
+    return written
+
+
+def backfill(db_path: str = "market_ai_lab.db",
+             symbols: list[str] | None = None) -> dict:
+    """Backfill 1yr daily + 30d 5-min bars for the whitelist into ``bars``.
+
+    Idempotent (upsert on venue,symbol,timeframe,timestamp). With no data key
+    resolvable it is a no-op returning ``{"status": "unavailable"}`` so it is
+    safe to call in the offline paper environment.
+    """
+    key, secret = _data_keys()
+    if not key or not secret:
+        return {"status": "unavailable", "reason": "no data credentials"}
+    headers = _auth_headers(key, secret)
+
+    if symbols is None:
+        crypto, equity = list(_WHITELIST_CRYPTO), list(_WHITELIST_EQUITY)
+    else:
+        crypto = [s for s in symbols if _is_crypto(s)]
+        equity = [s for s in symbols if not _is_crypto(s)]
+
+    # (Alpaca timeframe param, DB timeframe label, lookback start).
+    plan = (("1Day", "1day", _iso_days_ago(365)),
+            ("5Min", "5min", _iso_days_ago(30)))
+
+    conn = sqlite3.connect(db_path)
+    written: dict[str, int] = {}
+    try:
+        conn.execute(_BARS_DDL)
+        for api_tf, db_tf, start in plan:
+            if equity:
+                got = _fetch_bars(f"{_DATA_BASE}/v2/stocks/bars", headers,
+                                  equity, api_tf, start)
+                for s in equity:
+                    written[f"{s}:{db_tf}"] = _upsert_bars(
+                        conn, "alpaca", s, db_tf, got.get(s, []))
+            if crypto:
+                pairs = [_crypto_pair(s) for s in crypto]
+                got = _fetch_bars(f"{_DATA_BASE}/v1beta3/crypto/us/bars", headers,
+                                  pairs, api_tf, start)
+                for s in crypto:
+                    written[f"{s}:{db_tf}"] = _upsert_bars(
+                        conn, "alpaca", s, db_tf, got.get(_crypto_pair(s), []))
+        conn.commit()
+    finally:
+        conn.close()
+    return {"status": "ok", "written": written}
+
+
+if __name__ == "__main__":
+    import argparse
+
+    ap = argparse.ArgumentParser(
+        description="Backfill Alpaca historical bars into the bars table.")
+    ap.add_argument("--db", default="market_ai_lab.db")
+    ap.add_argument("--symbols", default="",
+                    help="comma-separated; default = strategy whitelist")
+    args = ap.parse_args()
+    syms = [s.strip() for s in args.symbols.split(",") if s.strip()] or None
+    print(json.dumps(backfill(db_path=args.db, symbols=syms)))
