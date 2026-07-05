@@ -1,4 +1,4 @@
-"""Compact supervised advisory DNN (Stage A of DNN_RL_DESIGN.md).
+"""Compact supervised advisory DNN (Stage A of DNN_ADVISORY_DESIGN.md).
 
 A small MLP trunk feeds multiple heads producing the required structured
 outputs. Implemented in NumPy so the model trains + serves with no heavy

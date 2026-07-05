@@ -1,6 +1,6 @@
 # Market AI Lab — Architecture
 
-> One-line principle: The DNN/RL model is a core advisory intelligence layer, the
+> One-line principle: The dnn_advisory model is a core advisory intelligence layer, the
 > whale/smart-money system is a second advanced advisory layer powered specifically by
 > free-first sources (ClankApp, Apify, SEC EDGAR 13F; Whale Alert optional), the visual dashboard is a first-class control
 > surface, every model's verdict and weight must be visible and adjustable in the app,
@@ -11,8 +11,8 @@
 
 Market AI Lab is a 24/7 multi-venue trading **research + execution** system that runs
 continuously in **paper-trading mode**. Paper trading is the primary training and
-evaluation environment. The system learns from outcomes over time, uses a DNN/RL
-advisory factor as part of (not the controller of) its decision system, exposes a highly
+evaluation environment. The system learns from outcomes over time, uses a dnn_advisory
+factor as part of (not the controller of) its decision system, exposes a highly
 visual real-time dashboard / control board, and only permits **live** trading through an
 explicit, multi-step, in-app approval gate.
 
@@ -36,7 +36,7 @@ explicit, multi-step, in-app approval gate.
    │        │ structure/liq/vol │   │  (manual / adaptive / default weights)       │    │
    │        │ news/catalyst     │   └───────────────┬──────────────────────────────┘    │
    │        │ LLM consensus ◀───┼── python_bridge          │                            │
-   │        │ DNN/RL factor ◀───┼── ml_factor (Py svc)     │ proposed action            │
+   │        │ dnn_advisory ◀────┼── ml_factor (Py svc)     │ proposed action            │
    │        │ whale/smart-money◀┼── whale_signal (Py svc)  ▼                            │
    │        │ perf/regime ctx   │   ┌──────────────────────────────────────────────┐    │
    │        └──────────────────┘   │   LAYER 2: ADAPTIVE STRATEGY (learns, tunes)  │    │
@@ -51,7 +51,7 @@ explicit, multi-step, in-app approval gate.
    │        │                                                                            │
    │        ├─ Polymarket → polymarket-paper-trader (paper) / live adapter (disabled)    │
    │        ├─ Alpaca     → Alpaca paper API (paper)        / live adapter (disabled)    │
-   │        ├─ Binance    → simulated/test (paper)          / live adapter (disabled)    │
+   │        ├─ Coinbase   → simulated/test (paper)          / live adapter (disabled)    │
    │        └─ IBKR       → scaffold/sim placeholder        / live adapter (disabled)    │
    │                                                                                    │
    │   storage (SQLite, source of truth) · account_manager · config · logging           │
@@ -61,13 +61,13 @@ explicit, multi-step, in-app approval gate.
 
 ## 2. Four-Layer Decision Architecture
 
-The DNN/RL is **important but not sovereign**. Authority flows downward; safety wins.
+The dnn_advisory factor is **important but not sovereign**. Authority flows downward; safety wins.
 
 | Layer | Name | Role | Authority |
 |-------|------|------|-----------|
 | **1** | **Static Safety** | Enforces hard risk limits, kill switch, hard stops. | **FINAL — never bypassable** by LLMs, DNN, RL, whale logic, adaptive logic, or execution adapters. |
 | **2** | **Adaptive Strategy** | Learns gradually from logged paper results; tunes weights/thresholds/sizing within safe ranges. | May propose/adjust, but cannot weaken Layer-1 limits. Every change logged + rollback-able. |
-| **3** | **DNN / RL Advisory Factor** | Outputs structured advisory signals; evolves via continual learning. | **Advisory only.** Cannot bypass risk or self-enable live. |
+| **3** | **dnn_advisory Factor** (RL split into the separate `rl_advisory` module, shipped OFF behind the `rl_min_real_fills` gate) | Outputs structured advisory signals; evolves via continual learning. | **Advisory only.** Cannot bypass risk or self-enable live. |
 | **4** | **Smart-Money / Whale Signal** | Tracks large investor behaviour via ClankApp / Apify / SEC EDGAR 13F (Whale Alert optional). | **Advisory only.** Input, not controller. |
 
 ### Layer 1 — Static Safety (C++, `risk/`)
@@ -86,9 +86,11 @@ whale-signal weight, consensus weighting, cooldown behaviour. Logs every paramet
 update, supports rollback, compares old vs new sets, preserves auditable history, and is
 **structurally incapable of lowering Layer-1 hard limits** (validation rejects it).
 
-### Layer 3 — DNN/RL Advisory Factor (Python service, `ml_factor/`)
-See `DNN_RL_DESIGN.md`. Outputs: `dnn_action_bias`, `dnn_confidence`,
+### Layer 3 — dnn_advisory Factor (Python service, `ml_factor/`)
+See `DNN_ADVISORY_DESIGN.md`. Outputs: `dnn_action_bias`, `dnn_confidence`,
 `dnn_expected_edge`, `dnn_regime_label`, `dnn_risk_flag`, `dnn_position_scale_hint`.
+RL is now a separate advisory module (`rl_advisory`, PPO), shipped OFF behind the
+`rl_min_real_fills` gate; it trains only on real fills and shares the 0.5 sizing cap.
 
 ### Layer 4 — Whale / Smart-Money (Python service, `whale_signal/`)
 Outputs: `whale_bias`, `whale_confidence`, `whale_flow_direction`,
@@ -114,7 +116,7 @@ alternative.
 | `account_manager/` | **C++20** | Venue/credential/mode state machine. |
 | `storage/` (SQLite, event log) | **C++20** | Single source of truth; shared with Python via the same DB file. |
 | `llm_consensus/` | **Python bridge** | LLM client libraries + multi-model ensemble live in Python. |
-| `ml_factor/` (DNN/RL) | **Python** | PyTorch/sklearn ecosystem. Justified ML service. |
+| `ml_factor/` (dnn_advisory) | **Python** | PyTorch/sklearn ecosystem. Justified ML service. |
 | `whale_signal/` | **Python** | ClankApp / Apify / SEC EDGAR 13F integrations (Whale Alert optional) + scoring. |
 | `python_bridge/` | **Python** | Thin RPC/IPC between C++ core and Python services. |
 | `ui/` (dashboard / control board) | **Python (Dash/Plotly)** | Fastest path to a rich live web dashboard. |
@@ -147,7 +149,7 @@ Defaults: every venue `paper` or `recommendation_only`; **live disabled by defau
 | Mode | Behaviour |
 |------|-----------|
 | `recommendation_only` | Show trade ideas only; no orders placed. |
-| `paper` | Polymarket→polymarket-paper-trader · Alpaca→Alpaca paper API · Binance→sim/test · IBKR→placeholder/sim. |
+| `paper` | Polymarket→polymarket-paper-trader · Alpaca→Alpaca paper API · Coinbase→sim/test · IBKR→placeholder/sim. |
 | `live` | **Only if** credentials present **and** explicitly enabled in-app **and** approval gate passed **and** risk engine allows **and** kill-switch conditions clear. |
 
 ## 6. Continuous Learning Loop (paper = training ground)
@@ -157,7 +159,7 @@ market state + news + decision + outcome ──▶ storage (event log, SQLite)
         ▲                                            │
         │                                            ▼
    execution (paper)                         learning/ + ml_factor/
-        ▲                                  param tuning (Layer 2)  ·  DNN/RL retrain (Layer 3)
+        ▲                                  param tuning (Layer 2)  ·  dnn_advisory retrain (Layer 3)
         │                                  champion/challenger eval · promotion (manual gate) · rollback
    factor-combination engine ◀──────────── updated weights / promoted model (subordinate to Layer 1)
 ```
@@ -166,9 +168,9 @@ Controlled · versioned · auditable · rollback-capable · always subordinate t
 
 ## 7. Build Order (Phases)
 
-1. **Phase 1** — Architecture summary, DNN/RL design, dashboard stack, C++/Python map. *(this doc set)*
+1. **Phase 1** — Architecture summary, dnn_advisory design, dashboard stack, C++/Python map. *(this doc set)*
 2. **Phase 2** — config, logging, storage, Layer-1 safety, Layer-2 adaptive, account/venue models, dashboard scaffold, default config + validation.
-3. **Phase 3** — market/news ingestion, multi-LLM consensus, DNN/RL factor, whale integrations, factor-combination engine, model-weight control logic.
+3. **Phase 3** — market/news ingestion, multi-LLM consensus, dnn_advisory factor, whale integrations, factor-combination engine, model-weight control logic.
 4. **Phase 4** — Polymarket paper route, Alpaca paper route, full live dashboard (trades/PnL/exposure/risk/learning/approval/model-verdict/weights/whale).
-5. **Phase 5** — Binance sim/test, IBKR scaffold/data, expanded analytics + learning views.
+5. **Phase 5** — Coinbase sim/test, IBKR scaffold/data, expanded analytics + learning views.
 6. **Phase 6** — in-app live-mode switching, live config forms, approval-gate workflow, venue safety checks, disabled-by-default live adapters.

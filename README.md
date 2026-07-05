@@ -72,7 +72,7 @@ services are reached either in-process (demo seeding) or over a small
 JSON-over-HTTP **python_bridge**. The Dash UI is a reader (its only write path
 is manual ensemble-weight overrides, which never touch the RiskGate).
 
-See `docs/ARCHITECTURE.md` and `docs/DNN_RL_DESIGN.md` for the authoritative
+See `docs/ARCHITECTURE.md` and `docs/DNN_ADVISORY_DESIGN.md` for the authoritative
 design.
 
 ## Safety model (the four layers)

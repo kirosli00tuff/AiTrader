@@ -1,10 +1,14 @@
-"""Parser tests for the whale live adapters against recorded-shape fixtures.
+"""Parser tests for the whale live adapters against recorded fixtures.
 
-The fixtures under tests/fixtures/ are SYNTHETIC (hand-built to the documented
-ClankApp / SEC EDGAR response shapes; see each file's `_provenance` and the
-RETURN.md follow-up flag). They exercise the pure `_parse` methods so parsing is
-verified with NO network call. Swap in a real capture later without touching the
-test logic.
+Provenance is now MIXED (see each file's `_provenance`):
+  - tests/fixtures/sec_edgar_13f_sample.json is a REAL capture recorded
+    2026-07-05 from SEC EDGAR full-text search (efts.sec.gov, q=Apple,
+    forms=13F-HR), trimmed to the first 5 hits with the full real _source shape.
+  - tests/fixtures/clankapp_sample.json stays SYNTHETIC: api.clankapp.com was
+    unreachable from this environment on 2026-07-05 (DNS failure), so the
+    documented-shape synthetic fixture is retained (Task 2 fallback).
+Both exercise the pure `_parse` methods so parsing is verified with NO network
+call. Swap the ClankApp fixture for a real capture once the host is reachable.
 """
 import json
 import os
@@ -34,14 +38,17 @@ def test_clankapp_parse_exchange_flows():
 
 
 def test_sec_edgar_parse_is_delayed_and_clean():
+    # Fixture is a REAL efts.sec.gov capture (q=Apple, forms=13F-HR), 5 hits.
     payload = _load("sec_edgar_13f_sample.json")
     rows = Sec13FAdapter()._parse(payload, "AAPL")
-    assert len(rows) == 2
-    # CIK noise stripped, all 13F evidence flagged delayed.
+    assert len(rows) == 5
+    # CIK noise stripped, all 13F evidence flagged delayed, no position value.
     assert all(r.delayed for r in rows)
     assert all("(CIK" not in r.entity for r in rows)
-    assert rows[0].entity == "BERKSHIRE HATHAWAY INC"
-    assert rows[0].ts.startswith("2026-05-15")
+    assert all(r.direction == "long" and r.value_usd == 0.0 for r in rows)
+    # First real hit in the recorded payload.
+    assert rows[0].entity == "THURSTON, SPRINGER, MILLER, HERD & TITAK, INC."
+    assert rows[0].ts.startswith("2024-05-14")
 
 
 def test_empty_payload_yields_no_rows():

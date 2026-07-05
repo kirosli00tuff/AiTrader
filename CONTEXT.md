@@ -17,10 +17,12 @@ A 24/7 paper and live AI auto-trading platform. Four layers: static safety, adap
 - Whitelist limited to high-liquidity majors: BTC, ETH, SPY, QQQ. Mean reversion holds up best in liquid assets. Both strategy families fail on thin alts.
 - Whale layer capped at 0.35 advisory weight. Never decisive.
 - Adaptive tuner learns from REAL closed-trade PnL, not a simulator. `simulate_outcome` was removed from the default path (Task 3); the tuner may not nudge weights until ≥30 closed native trades have accumulated (thin-evidence guard). That ≥30 rule is a pure predicate (`learning/adapt_gate.hpp`) so it is unit-testable without a full Engine.
-- The DNN factor is named `dnn_advisory`, not `dnn_rl`: it is a supervised advisory factor today. True RL is deferred until ≥500 real closed fills (Task 5). Advisory sizing cap stays 0.5 regardless of which model serves.
+- The DNN factor is named `dnn_advisory`, not `dnn_rl`: it is a supervised advisory factor today. RL is now built as a SEPARATE module (`rl_advisory`, Stable-Baselines3 PPO) but is SHIPPED OFF — it trains only on real fills and activates only past the `rl_min_real_fills` gate (default 500), with no synthetic-data training path. Advisory sizing cap stays 0.5 regardless of which model serves.
 - Model promotion is GATED: a real-data challenger only becomes champion on an explicit operator action, and only if it was trained on real data with ≥200 samples, beats the champion on walk-forward Sharpe, and has no worse drawdown (`registry.meets_promotion_criteria`). Walk-forward validation is chronological (expanding folds) — never a random split.
 - Cost controls are split by owner: the C++ engine enforces daily budget + per-symbol cooldown + neutral-regime skip (`signal_engine/council_gate.cpp`); the Python side caps every provider response at `council_max_tokens`. Config surfaced via the `council:` block.
 - Bridge binds loopback-only by default; remote bind requires an explicit `BRIDGE_ALLOW_REMOTE=1` opt-in. All log output is passed through credential masking (`account_manager/log_safety.py`), and a pre-commit hook scans staged content for credential shapes (Task 9).
+- RL advisory was BUILT NOW but SHIPPED OFF (2026-07-05). We build the full `rl_advisory` PPO module — gym env, real-fill training gate, walk-forward eval, `/score/rl` bridge endpoint — while leaving `rl_enabled` false so the engine never calls it and the factor stays out of the ensemble entirely (`rl_advisory_factor_weight = 0.0`). Rationale: land the whole apparatus, reviewed and tested, so enabling it later is a config toggle past a real-fill gate — not a rushed build against live money. There is deliberately NO synthetic-data training path for RL: it either trains on ≥`rl_min_real_fills` real fills or it refuses. It is a separate factor from `dnn_advisory` and shares the same 0.5 advisory cap; it can never be a sole controller.
+- Two council cost cuts run BEFORE the Flash gate and providers (2026-07-05), where the API spend is. (1) Risk pre-check: the C++ engine evaluates the cheap RiskGate preconditions READ-ONLY and, when a hard limit already blocks the trade, marks the payload so the council is skipped entirely (logged `risk_precheck`) — a doomed trade cannot be rescued by the council, so paying for it is waste. This reuses the existing gate result; it does not duplicate or modify gate logic. (2) Market-hours skip: equities (SPY, QQQ) skip the gate+council outside US regular trading hours (`engine.equities_market_hours_only`, default true; logged `market_hours`), while crypto trades 24/7 and is never skipped. Both are pure cost controls — they can only *skip* spend, never widen risk.
 
 ## Strategy Rationale
 
@@ -50,6 +52,18 @@ A 24/7 paper and live AI auto-trading platform. Four layers: static safety, adap
 - Prompt caching used for fixed system prefixes to lower repeat-call cost.
 - Council daily budget capped at 30 calls. Per-symbol cooldown 60 minutes.
 - Bot 24/7 usage needs API billing, not a Pro subscription. Machine traffic, not human chat.
+
+## GUI Plan (dashboard/control-surface overhaul — next major effort)
+
+The dashboard is a first-class control surface, not a read-out. The overhaul (after paper-loop stability is proven) exposes the layered decision system as direct controls, with one inviolable rule: **no control in the UI can weaken the RiskGate.** Layer-1 hard limits are editable only through the typed-`CONFIRM` L1 editor and are still validated at load (a change that would enlarge a loss/exposure ceiling, shrink a quality gate, or disable a safety toggle is rejected); every other control is subordinate.
+
+- **Per-layer enable toggles, safety ALWAYS ON.** Each decision layer (adaptive, LLM council, `dnn_advisory`, whale, `rl_advisory`) gets an on/off toggle. The Layer-1 static-safety layer has NO off switch — it is rendered on and locked. Turning a layer off drops its factor from the ensemble; it can never turn off the gate.
+- **Per-model council toggles.** Each council slot (OpenAI / Anthropic / Google) toggles independently, plus the free Flash base-check gate, so the operator can run a cheaper or narrower council without code changes.
+- **Champion/challenger controls with MANUAL promote + rollback.** For `dnn_advisory` (and `rl_advisory` when enabled): view champion vs challenger metrics (walk-forward Sharpe, drawdown, provenance, n_samples), a **manual Promote** button gated on `meets_promotion_criteria`, and a **Rollback** to the prior champion. Promotion is never automatic.
+- **RL enable toggle, default OFF, behind the 500-fill gate.** A dedicated `rl_enabled` switch that stays off by default and is disabled in the UI until the real closed-fill count reaches `rl_min_real_fills` (default 500); the panel shows current fills / gate. No synthetic-data training path is ever offered.
+- **Weight sliders grouped by layer.** Ensemble weights presented grouped by layer (rule-based, LLM, dnn_advisory, whale, rl_advisory), each with lock-against-adaptive and enable/disable, and a live "preview verdict on weight change" before applying.
+- **Regime override.** Manual override of the detected regime (trend / range / neutral) for testing and for operator judgement, with a clear "auto" default and a visible banner when overridden.
+- **Budget dial.** Operator-adjustable council daily budget + per-symbol cooldown (the cost controls), surfaced as a dial with the current spend against it.
 
 ## Owner Working Style
 

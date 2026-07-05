@@ -2,7 +2,7 @@
 
 Writes to the shared SQLite `model_registry` table. Promotion is GATED by
 default (`dnn_auto_promote_if_better=false`): a better challenger is recorded
-but only promoted on an explicit call, matching DNN_RL_DESIGN.md. Rollback
+but only promoted on an explicit call, matching DNN_ADVISORY_DESIGN.md. Rollback
 reverts to the prior champion on metric degradation.
 """
 from __future__ import annotations

@@ -1,9 +1,9 @@
 # AiTrader / Market AI Lab — Repository Audit
 
-**Date:** 2026-07-01
-**Method:** Read the actual source (not the README claims), built the C++ core, ran the C++ tests, executed the stdlib Python modules, and grepped the tree for wiring. Findings below cite `file:line`.
+**Date:** 2026-07-05 (refreshed; originally audited 2026-07-01)
+**Method:** Read the actual source (not the README claims), built the C++ core, ran the C++ tests, ran the full Python suite in the project venv, executed the trainers against the demo DB, and grepped the tree for wiring. Findings below cite `file:line`.
 
-**One-paragraph verdict (blunt):** The **C++ safety-and-execution spine is real, clean, warning-free, and tested** — it builds and the offline paper loop runs today. The **"AI" is mostly scaffolding**: the multi-LLM "council" makes *zero* external API calls (100% deterministic mock), the DNN is a small NumPy MLP trained on *synthetic* data with no RL, and the whale layer is the only advisory module with real network code (unverified against live payloads). Crucially, **in the default run none of the sophisticated Python advisors are even on the path** — the engine uses in-process C++ mocks unless launched with `--bridge`. **Live trading is gated to the point of being unreachable** (the enable function exists but is never called). This is a solid skeleton with honest TODOs — not blanket vaporware — but the headline "multi-LLM + DNN/RL + whale intelligence" is largely aspirational in the running system.
+**One-paragraph verdict (blunt):** The **C++ safety-and-execution spine is real, clean, warning-free, and tested** — it builds and the offline paper loop runs today. The intelligence layers have moved from scaffolding toward real-data plumbing, but the *default running system is still mostly deterministic*: the multi-LLM "council" makes *zero* external API calls out of the box (real providers exist behind keys + `--bridge` + `use_real_council`, otherwise labelled mocks); the adaptive tuner now learns from **real closed-trade PnL** (gated until ≥30 closed trades) rather than a toy RNG; `dnn_advisory` now has a **real-data trainer with expanding walk-forward validation and gated (manual) promotion**, but the *shipped* champion is still the synthetic NumPy MLP because the demo DB does not yet hold enough real labelled samples (trainer correctly refuses: 0 real samples < 200). RL is now a **separate `rl_advisory` PPO module, shipped OFF** behind a `rl_min_real_fills` gate (default 500) with **no synthetic-data training path**. The whale layer has real network code, now **live-OFF by default** behind `WHALE_LIVE_ENABLED` / `SEC_EDGAR_ENABLED`, still **unverified against most live payloads** (one real SEC 13F capture is recorded as a fixture; ClankApp remains synthetic — DNS-unreachable here). Coinbase replaced Binance (Binance is unavailable in Canada). Two council cost cuts now short-circuit doomed/after-hours setups before any provider spend. **Live trading remains gated to the point of being unreachable** (the enable function exists but is never called). This is an honest skeleton growing real muscle — not vaporware, and not yet the full "multi-LLM + dnn_advisory + whale intelligence" headline in the running system.
 
 ---
 
@@ -37,9 +37,9 @@ error:/warning: count = 0        # clean under -Wall -Wextra
 -> produces mal_engine + test_config + test_risk_gate + test_weights
 ```
 
-**C++ unit tests:** `ctest` → **3/3 pass** (`risk_gate`, `config`, `weights`).
+**C++ unit tests:** `ctest` → **5/5 pass** (`risk_gate`, `config`, `weights`, `strategy`, `tuner_minsample`).
 
-**Python:** the stdlib-only modules run (`python3 -m llm_consensus.consensus` and `-m whale_signal.service` both produce valid structured output). The **full Python suite could not be executed in this environment** — the system interpreter is Python 3.14.4 and lacks `numpy`, `pandas`, `dash`, `cryptography`, `pytest` (they install into the project venv per `README.md:352-354`).
+**Python:** the **full suite now runs green in the project venv — 124 passed** (Python 3.14.4 with the pinned `python_bridge/requirements.txt` + `ui/requirements.txt`; `rl_advisory` env tests need only `gymnasium`, torch/SB3 stay lazy/optional). Both trainers were exercised against the demo DB: `python -m ml_factor.train_real` refuses with `insufficient_real_data` (0 real samples < 200; synthetic champion retained), and the RL trainer refuses below its real-fill gate — both with clear messages and no synthetic fallback for RL.
 
 ## 3. The four layers
 
@@ -50,21 +50,24 @@ error:/warning: count = 0        # clean under -Wall -Wextra
 - **Live-trading gate:** `ModeRouter::route` refuses the `Live` branch unless `live_enabled` is true, and `DisabledLiveAdapter::place` refuses unconditionally (`execution/execution.cpp:101-116`, `:148-162`). See §6.
 - **Tested:** 12 scenarios incl. the kill-switch state machine, all passing (`tests/test_risk_gate.cpp`).
 
-### Layer 2 — Adaptive strategy — **IMPLEMENTED (bounded)** ✅ (with a caveat)
+### Layer 2 — Adaptive strategy — **IMPLEMENTED (bounded, real-fill gated)** ✅
 - `learning/adaptive.{hpp,cpp}`. Nudges ensemble weights toward better-performing factors (clamped to `max_single_weight`, skips locked/disabled), records every change to `param_history`, supports `rollback_last`.
-- **Structural safety invariant:** `validate_not_weakening_limits` rejects any risk-config change that would enlarge a loss/exposure ceiling, shrink a quality gate, or disable a safety toggle (`learning/adaptive.cpp:17-70`). Wired at `core/engine.cpp:307-338` (every 3rd iteration).
-- **Caveat:** in the default/mock path the "performance" driving the tuner comes from `simulate_outcome`, a **seeded-RNG toy PnL simulator** (`core/engine.cpp:142-152`), not real fills. It learns against noise.
+- **Structural safety invariant:** `validate_not_weakening_limits` rejects any risk-config change that would enlarge a loss/exposure ceiling, shrink a quality gate, or disable a safety toggle (`learning/adaptive.cpp:17-70`).
+- **Now learns from real fills:** the toy `simulate_outcome` RNG driver is gone. The tuner attributes the **realized win/loss of each closed paper trade** to the factors whose direction agreed with the move (`core/engine.cpp:297+`), and it only runs once at least **30 closed trades** exist — `learning/adapt_gate.hpp:15` (`kMinClosedTradesForAdapt = 30`), enforced at `core/engine.cpp:652`. Below the gate it stays inert rather than learning against noise (covered by the `tuner_minsample` C++ test).
 
-### Layer 3 — DNN/RL advisory — **PARTIALLY IMPLEMENTED** ⚠️
-- `ml_factor/model.py`: a **real NumPy MLP** — shared ReLU trunk + 5 heads (direction softmax, edge regression, regime softmax, risk logistic, scale sigmoid). Trains via `train_synthetic` and ships a committed champion (`ml_factor/models/champion.npz`). Advisory sizing hint hard-capped at 0.5 (`ml_factor/factor.py:36-52`).
-- **What's missing / misleading:** despite the "DNN/**RL**" name there is **no reinforcement learning** — it is supervised "Stage A" only. It is trained on **synthetic labels**, not market/paper data (`ml_factor/model.py:88-96`). The referenced optional PyTorch trainer (`train_torch.py`) does **not exist**. Champion/challenger promotion is disabled by default (`dnn_auto_promote_if_better: false`).
+### Layer 3 — dnn_advisory (supervised) + rl_advisory (PPO, shipped off) — **PARTIALLY IMPLEMENTED** ⚠️
+- `ml_factor/model.py`: a **real NumPy MLP** — shared ReLU trunk + 5 heads (direction softmax, edge regression, regime softmax, risk logistic, scale sigmoid). Ships a committed champion (`ml_factor/models/champion.npz`). Advisory sizing hint hard-capped at 0.5 (`ml_factor/factor.py:36-52`).
+- **Real-data trainer now exists:** `ml_factor/train_real.py` builds a labelled dataset from real closed trades, validates it **walk-forward** (expanding chronological folds — never a random split), records a *challenger* in `model_registry` with explicit `provenance="real-data"`, and promotes only via `registry.meets_promotion_criteria` + an explicit operator call (`dnn_auto_promote_if_better: false`). Verified: against the demo DB it refuses with `insufficient_real_data` (0 real samples < 200) and keeps the synthetic champion — an honest refusal, not a silent synthetic promotion.
+- **RL is now its own module — `rl_advisory/` (Stable-Baselines3 PPO), SHIPPED OFF.** Gym `TradingEnv` (rolling-window obs, discrete flat/long/short, reward = realized PnL − mandatory txn cost − drawdown penalty), a hard `rl_min_real_fills` gate (default 500) that **refuses before importing any backend**, **no synthetic-data training path**, walk-forward eval + champion/challenger via the shared promotion gate, and a `/score/rl` bridge endpoint with a labelled mock fallback. `rl_enabled` defaults false → the engine never calls it and the factor stays out of the ensemble entirely (`rl_advisory_factor_weight = 0.0`).
+- **Still honest about the ceiling:** the *shipped* Layer-3 signal is the synthetic-trained MLP; no real-data DNN challenger has been promoted (not enough real samples yet), and no RL policy has been trained (real-fill gate unmet). The referenced optional PyTorch trainer for the MLP (`train_torch.py`) still does not exist.
 
 ### Layer 4 — Whale / smart-money advisory — **PARTIALLY IMPLEMENTED** (most complete Python advisor) ⚠️
 - `whale_signal/adapters.py`: **4 adapters** (ClankApp default, Apify Polymarket, Whale Alert optional, SEC EDGAR 13F) each with a **real `requests` live-fetch path** *and* a deterministic mock fallback that never raises offline. `whale_signal/scoring.py`: real scorer — value×actor-usefulness weighting, noisy-actor filtering, delayed-disclosure down-weighting (×0.4), contradiction flag, regime label. Advisory cap 0.35.
-- **Caveats:** the live-fetch parsers defensively probe **undocumented/assumed response shapes** and are **unverified against real API payloads** (no integration test, no recorded fixtures). `actor_usefulness` is a **SHA-256 hash stand-in**, not a learned hit-rate (`whale_signal/scoring.py:39-45`).
+- **Live is OFF by default:** every live fetch is gated — ClankApp/Apify/Whale Alert behind `WHALE_LIVE_ENABLED`, SEC EDGAR behind `SEC_EDGAR_ENABLED`, both default false (`whale_signal/adapters.py:48-51`). The SEC User-Agent contact is read from the environment (`SEC_EDGAR_CONTACT_EMAIL`), never committed.
+- **Caveats:** the live-fetch parsers defensively probe **undocumented/assumed response shapes** and are **still unverified against most live payloads**. There is now **one real recorded fixture** — a genuine SEC EDGAR 13F capture (`tests/fixtures/sec_edgar_13f_sample.json`, 5 hits, delayed-disclosure), and the parser test asserts against it; **ClankApp remains synthetic** (its host was DNS-unreachable here, marked SYNTHETIC in the fixture header). `actor_usefulness` is still a **SHA-256 hash stand-in**, not a learned hit-rate (`whale_signal/scoring.py:39-45`).
 
 ### ⚠️ Cross-cutting reality check for Layers 3–4 (and the LLM council)
-In the **default engine run (no `--bridge`), all six factors — including `llm_*`, `dnn_rl`, `whale_signal` — are in-process deterministic C++ mocks** (`core/engine.cpp:78-140`, `mock_factor`). The sophisticated Python implementations above are reached **only** when the engine is started with `--bridge` and `python_bridge/server.py` is running. Out of the box, the "4-layer intelligence" is hash-based noise shaped by momentum.
+In the **default engine run (no `--bridge`), the factor *scores* — `llm_*`, `dnn_advisory`, `whale_signal` — are still in-process deterministic C++ mocks** (`core/engine.cpp`, `mock_factor`). The sophisticated Python implementations are reached **only** when the engine is started with `--bridge` and `python_bridge/server.py` is running. What *has* become real on the default path is the **learning signal**: the tuner now trains on realized closed-trade PnL (§Layer 2), not a toy simulator. So out of the box the *advisory verdicts* are momentum-shaped deterministic stand-ins, but the *adaptation* they feed is grounded in real fills. `rl_advisory` is absent from this path entirely until `rl_enabled` is turned on.
 
 ## 4. LLM council integration
 
@@ -74,14 +77,17 @@ In the **default engine run (no `--bridge`), all six factors — including `llm_
 - `OpenAIProvider.score()` **raises `NotImplementedError`** if `OPENAI_API_KEY` is present, and returns a mock otherwise (`llm_consensus/consensus.py:107-123`). It is never selected by `default_providers()` anyway.
 - **It does NOT use OpenRouter** — nor any direct provider API. It uses nothing. The ensemble math (weighted bias/confidence/edge, agreement count, per-model verdicts) is real; the "intelligence" is not.
 
-**Exact model strings found** (labels only — config-driven "single source of truth", surfaced in the UI and attached to verdicts, but they never reach any API): `config/default_config.yaml:173-176`
+**Exact model strings found** (labels only — config-driven "single source of truth", surfaced in the UI and attached to verdicts; they reach a real API only with keys + `--bridge` + `use_real_council`): `config/default_config.yaml:255-259`
 ```
 llm_models:
   llm_primary:   gpt-5.5
-  llm_secondary: claude-opus-4.8
-  llm_tertiary:  gemini-2.5-pro
+  llm_secondary: claude-opus-4-8
+  llm_tertiary:  gemini-3.1-pro
+  llm_gate:      gemini-3-flash   # free base-check gate
 ```
-**Model-string drift** (flag): these do not match the project's intended strings. `claude-opus-4.8` should be `claude-opus-4-8`; `gemini-2.5-pro` should be `gemini-3.1-pro`; there is **no free base-check `gemini-3-flash`** anywhere. Because nothing calls an API, this is cosmetic today — but the UI advertises stale/incorrect model names as the "model in use."
+**Model strings now correct** (the earlier drift is fixed): they match the four approved strings in `CLAUDE.md` exactly, and the free base-check gate `gemini-3-flash` is present.
+
+**Council cost controls (real, tested):** beyond the token cap / daily budget / per-symbol cooldown, two cuts now fire **before any provider spend** in `llm_consensus/consensus.py`: (1) a **risk pre-check** — when the engine's read-only RiskGate already blocks the trade, the council is skipped entirely (logged `risk_precheck`); (2) a **market-hours skip** — equities (SPY, QQQ) skip the gate+council outside US regular trading hours while crypto stays 24/7 (logged `market_hours`, config `engine.equities_market_hours_only`, default true). Covered by `tests/test_council_cost_cuts.py`.
 
 ## 5. Venue integrations
 
@@ -136,12 +142,12 @@ Live is blocked by **four independent mechanisms**, and is currently **unreachab
 > Note: the **default offline paper loop already works** (mock feed, deterministic) — so little *blocks* the mock loop. These gaps are ordered by what stands between the current state and a *meaningful* paper-trading loop (real data + real advisors) that matches the advertised architecture.
 
 1. **Advisory layers are off the default path.** Real LLM/DNN/whale run only with `--bridge` + the bridge server up; otherwise the engine uses C++ mocks (`core/engine.cpp:105-127`). Either make the bridge the default or state plainly that "AI engages only with the bridge." Highest-leverage fix.
-2. **LLM council is 100% mock.** No provider integration of any kind (not even OpenRouter). This is the biggest gap versus the pitch. Also fix the drifted/incorrect model strings (§4).
-3. **DNN is a synthetic toy.** Supervised-only (no RL), trained on synthetic labels, missing `train_torch.py`; no real retrain / champion-challenger pipeline exercised.
+2. **LLM council is mock on the default path.** Real OpenAI/Anthropic/Google providers exist behind keys + `--bridge` + `use_real_council`, but the out-of-box run is deterministic mocks. Model strings are now correct (§4); the remaining gap is exercising the real providers against live keys. Biggest gap versus the pitch.
+3. **dnn_advisory ships the synthetic champion.** A real-data trainer with walk-forward validation + gated promotion now exists (`train_real.py`), but no real challenger has been promoted yet because the DB lacks enough real labelled samples; the shipped MLP is still synthetic-trained, and `train_torch.py` still does not exist. RL (`rl_advisory`) is built but shipped off and untrained (real-fill gate unmet).
 4. **Live-approval workflow not wired.** `try_enable_live` is never called; the 7 `live_requires_*` checks are never evaluated into a decision. Safe today, but the feature is incomplete.
 5. **Real execution is Alpaca-paper only.** Polymarket/Coinbase/IBKR are sims; no live path anywhere. Live HTTP paths (Alpaca + all whale adapters) are unverified against real payloads and have no integration tests.
-6. **Adaptive layer learns from a toy simulator.** `simulate_outcome` is seeded RNG, not realized fills — the "learning" optimizes against noise on the default path.
-7. **Test/coverage holes.** No tests for the engine loop, storage, bridge, UI, or HTTP clients; Python suite needs the venv; no coverage gate; below 80% overall.
+6. **~~Adaptive layer learns from a toy simulator.~~ RESOLVED.** The tuner now learns from realized closed-trade PnL, gated until ≥30 closed trades (`learning/adapt_gate.hpp`); the `simulate_outcome` RNG driver is gone (`tuner_minsample` test covers the gate).
+7. **Test/coverage holes (narrowing).** The Python suite now runs green in the venv (**124 passed**) and RL-env / cost-cut / real-fill-gate paths are covered with mocked HTTP. Still no tests for the C++ engine loop, storage DAO, bridge server, Dash UI callbacks, or the Alpaca/whale **live HTTP clients** (one recorded SEC fixture aside); no coverage gate wired; overall still below 80%.
 8. **`news_ingestion` is a stub.** Mock catalyst scoring only; real providers are TODO (`news_ingestion/fetchers.py:7, 32`). Minor.
 
 ---

@@ -1,8 +1,14 @@
-# DNN / RL Advisory Factor — Design
+# dnn_advisory Factor — Design
 
-> Research-backed design for Layer 3. The DNN/RL module is a **core product feature**,
+> Research-backed design for Layer 3. The dnn_advisory module is a **core product feature**,
 > implemented early, but remains an **advisory factor**, never the direct controller of
 > execution and never able to bypass risk or self-enable live trading.
+>
+> **Naming note:** what this doc originally called the "DNN/RL" layer has been split. The
+> shipped supervised factor is **dnn_advisory** (`ml_factor/`, Stage A below). The RL policy
+> (Stage B below) is now its own module, **`rl_advisory`** (Stable-Baselines3 PPO), shipped
+> OFF behind the `rl_min_real_fills` gate — it trains only on real fills, shares the same 0.5
+> sizing cap, and is never a sole controller.
 
 ## 1. Research summary
 
@@ -48,14 +54,22 @@ enough paper-trading episodes accumulate. Both remain advisory.
   - `dnn_risk_flag` (binary head: elevated-risk / abstain recommendation),
   - `dnn_position_scale_hint` ∈ [0,1] (sizing hint; **capped by `dnn_position_scale_cap` = 0.5**).
 
-### Stage B — RL Policy Wrapper (added after sufficient paper episodes)
-- **Algorithm:** start with tabular/contextual Q-learning over discretized DNN outputs +
-  regime + risk state (matches IJSAT Q-learning result; simple, auditable), with a path to
-  DQN/PPO later. Action space = {no_trade, enter_long, enter_short, scale_up, scale_down,
-  exit}. **`no_trade` is a first-class action** so the system can *learn when not to trade.*
-- **Reward:** risk-adjusted (realized PnL net fees, penalized by drawdown and by
-  Layer-1-limit proximity; large penalty for actions that would have breached a hard limit).
-- **Output:** refines `dnn_action_bias` / `dnn_position_scale_hint` only — still advisory.
+### Stage B — RL Policy (now the separate `rl_advisory` module)
+- **Status:** built as its own module (`rl_advisory/`, Stable-Baselines3 PPO) and shipped
+  OFF; the engine never calls it and it stays out of the ensemble until an operator toggles
+  `rl_enabled` AND the `rl_min_real_fills` gate (default 500 real fills) is met. There is no
+  synthetic-data training path.
+- **Algorithm:** PPO (`MlpPolicy`) over a rolling feature window (recent returns, ATR, RSI,
+  volume z-score, regime one-hot, current position). Discrete action space = {flat, long,
+  short}; equities respect the long-only flag. Flat is a first-class action so the policy can
+  *learn when not to trade.*
+- **Reward:** realized step PnL minus a mandatory per-trade transaction cost minus a
+  drawdown penalty — risk-adjusted, and never rewarding churn.
+- **Evaluation:** walk-forward chronological windows (matching dnn_advisory) with a separate
+  deterministic eval env averaging 5–20 episodes/window; a challenger competes against the
+  supervised champion on validation Sharpe + no-worse drawdown via the shared promotion gate.
+- **Output:** an advisory `rl_position_scale_hint` (hard-capped at 0.5) — still advisory.
+  Promotion stays OFF by default and requires an explicit operator action.
 
 ## 3. Training & evaluation pipeline (`ml_factor/`)
 
@@ -88,18 +102,20 @@ champion serves signals    promote if better AND dnn_auto_promote_if_better=true
 
 ## 4. Wiring into the decision engine
 
-The DNN/RL outputs enter the **factor-combination engine** as **one weighted factor**
-(default `dnn_rl_factor_weight = 0.15`), alongside LLM consensus, rule-based factors, and the
-whale signal. Its weight is:
+The dnn_advisory outputs enter the **factor-combination engine** as **one weighted factor**
+(`dnn_advisory_factor_weight`), alongside LLM consensus, rule-based factors, and the whale
+signal. When enabled, `rl_advisory` enters as its own separate weighted factor
+(`rl_advisory_factor_weight`, default 0.0 = inert). Each weight is:
 - visible in the model-verdict board and weight-control panel,
 - editable (slider / numeric), enable/disable-able, and lock-able against adaptive change,
-- subject to `dnn_position_scale_cap = 0.5`,
-- **always downstream of Layer-1 safety** — the DNN can lower exposure but its sizing hint can
-  never raise a position beyond hard limits.
+- subject to `dnn_position_scale_cap = 0.5` (RL shares the same 0.5 cap),
+- **always downstream of Layer-1 safety** — a factor can lower exposure but its sizing hint
+  can never raise a position beyond hard limits.
 
 ## 5. Hard constraints (must-nots)
 
-The DNN/RL module **must not**: directly bypass risk controls · directly self-enable live
-trading · become the sole authority over execution. It **must**: detect patterns, score
+The dnn_advisory and rl_advisory modules **must not**: directly bypass risk controls ·
+directly self-enable live trading · become the sole authority over execution. They **must**:
+detect patterns, score
 directional bias, estimate edge, classify regimes, improve over repeated paper trades, and
 **learn when not to trade**.

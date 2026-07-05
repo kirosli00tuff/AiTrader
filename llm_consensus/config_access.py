@@ -59,6 +59,17 @@ def gate_enabled(cfg_path: str | None = None) -> bool:
     return bool((_cfg(cfg_path).get("llm", {}) or {}).get("gate_enabled", True))
 
 
+def equities_market_hours_only(cfg_path: str | None = None) -> bool:
+    """True when US equities skip the council outside regular trading hours.
+
+    Sourced from ``engine.equities_market_hours_only`` (default True). Council
+    cost cut (Task 5): equity symbols (SPY, QQQ) skip the Flash gate + council
+    outside US RTH; crypto trades 24/7 and is never skipped for market hours.
+    """
+    return bool((_cfg(cfg_path).get("engine", {}) or {}).get(
+        "equities_market_hours_only", True))
+
+
 # Ensemble slot -> default weight (matches config model_weights defaults).
 _DEFAULT_SLOT_WEIGHTS: dict[str, float] = {
     "llm_primary": 0.27,

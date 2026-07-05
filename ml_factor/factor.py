@@ -2,7 +2,7 @@
 
 Loads the champion model (training + saving a tiny one on first use so the demo
 always has a real model), scores a market state, and applies the advisory
-sizing cap. Output fields match DNN_RL_DESIGN.md exactly.
+sizing cap. Output fields match DNN_ADVISORY_DESIGN.md exactly.
 """
 from __future__ import annotations
 

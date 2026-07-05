@@ -116,9 +116,14 @@ std::vector<signal_engine::FactorSignal> Engine::gather_factors(
     const market_data::MarketState& ms, const news::CatalystScore& cat,
     bool council_allowed) {
     std::vector<signal_engine::FactorSignal> out;
-    const std::vector<std::string> factors = {
+    std::vector<std::string> factors = {
         "llm_primary", "llm_secondary", "llm_tertiary",
         "rule_based",  "dnn_advisory",  "whale_signal"};
+    // RL advisory (Task 4) is DEFERRED and ships OFF. Only when rl_enabled does
+    // it join the ensemble and get scored via /score/rl; while off it never
+    // appears as a factor and the RL service is never called. Advisory only —
+    // its ensemble weight defaults to 0.0 so it can never be decisive.
+    if (cfg_.rl.rl_enabled) factors.push_back("rl_advisory");
 
     // Rule-based is always computed in C++.
     // LLM/DNN/whale come from the bridge if enabled, else mocks. The three LLM
@@ -135,6 +140,7 @@ std::vector<signal_engine::FactorSignal> Engine::gather_factors(
             std::string endpoint = "/score/llm";
             if (f == "dnn_advisory") endpoint = "/score/dnn";
             else if (f == "whale_signal") endpoint = "/score/whale";
+            else if (f == "rl_advisory") endpoint = "/score/rl";
             std::string body = util::to_json(
                 {{"symbol", ms.symbol}, {"venue", ms.venue}, {"factor", f}},
                 {{"price", ms.price},
@@ -329,29 +335,9 @@ void Engine::handle_bar_close(const market_data::MarketState& ms,
     const auto& sig = decision.signal;
     if (!sig.has_signal) return;
 
-    // Council cost-control gate: decide whether the full council may run.
-    reset_if_new_day(council_state_, utc_day);
-    auto cdec = signal_engine::decide_council(cfg_.council, council_state_,
-                                              decision.regime.regime, sig.strength,
-                                              ms.symbol, now_epoch);
-    const bool council_allowed = cdec == signal_engine::CouncilDecision::Proceed;
-    if (!council_allowed) {
-        storage_->append_event(
-            {ts, "council_skip", ms.venue, ms.symbol, "info",
-             "Council skipped: " + signal_engine::council_decision_to_string(cdec),
-             util::to_json(
-                 {{"reason", signal_engine::council_decision_to_string(cdec)},
-                  {"regime", strategy::regime_to_string(decision.regime.regime)}},
-                 {{"strength", sig.strength}})});
-    } else {
-        signal_engine::record_council_call(council_state_, ms.symbol, now_epoch);
-    }
-
-    auto cat = news_->score_for(ms.symbol);
-    auto signals = gather_factors(ms, cat, council_allowed);
-    auto verdict = signal_engine::combine(signals, weights_);
-
-    // Sizing: native signal strength drives scale, bounded by the config cap.
+    // ---------- Council cost cuts (Task 5) — decided BEFORE any council call --
+    // Sizing is a function of the native signal alone (independent of the
+    // council), so the order + the cheap risk pre-check can run first.
     double base = cfg_.sizing.default_risk_per_trade_pct * equity_;
     double scale = std::min(clamp01(sig.strength),
                             cfg_.sizing.default_position_scale_cap);
@@ -362,11 +348,78 @@ void Engine::handle_bar_close(const market_data::MarketState& ms,
     risk::OrderProposal o;
     o.venue = ms.venue; o.symbol = ms.symbol; o.market = ms.market;
     o.category = ms.category; o.side = side; o.qty = qty; o.price = sig.entry_price;
-    o.notional = notional; o.confidence = verdict.confidence; o.edge = verdict.edge;
-    o.model_agreement_count = verdict.agreement_count; o.signal_age_minutes = 0;
-    o.is_live = false;
+    o.notional = notional; o.signal_age_minutes = 0; o.is_live = false;
+    // confidence / edge / agreement are filled from the council verdict below.
 
     sync_portfolio_state();  // reflect currently-open native positions
+
+    // Cut A — risk pre-check: run the EXISTING RiskGate read-only on a
+    // provisional order whose QUALITY fields are set to pass, so only the hard
+    // preconditions (kill switch, daily loss, position/exposure/notional caps)
+    // can fire. When a hard limit already blocks the trade the council cannot
+    // change that, so skip the Flash gate + council + execution entirely. This
+    // REUSES RiskGate read-only; it does not modify or duplicate any gate logic.
+    {
+        risk::OrderProposal pre = o;
+        pre.confidence = 1.0;
+        pre.edge = 1.0;
+        pre.model_agreement_count = cfg_.risk.required_model_agreement_count;
+        auto pre_dec = gate_->evaluate(pre, pstate_);
+        if (!pre_dec.allowed) {
+            storage_->append_event(
+                {ts, "risk_precheck", ms.venue, ms.symbol, "info",
+                 "Council skipped (risk pre-check): " + pre_dec.reason,
+                 util::to_json({{"reason", pre_dec.reason},
+                                {"layer", pre_dec.layer}}, {})});
+            return;
+        }
+    }
+
+    // Cut B — market-hours skip: US equities skip the Flash gate + council
+    // outside regular US trading hours (crypto stays 24/7). Only the expensive
+    // council call is suppressed; native factors + execution still run.
+    const bool market_hours_skip =
+        cfg_.engine.equities_market_hours_only && ms.category == "equity" &&
+        !util::us_equity_market_open();
+
+    // Council cost-control gate: decide whether the full council may run.
+    reset_if_new_day(council_state_, utc_day);
+    bool council_allowed;
+    if (market_hours_skip) {
+        council_allowed = false;
+        storage_->append_event(
+            {ts, "market_hours", ms.venue, ms.symbol, "info",
+             "Council skipped: equities outside US regular trading hours",
+             util::to_json({{"reason", "market_hours"}, {"symbol", ms.symbol}},
+                           {})});
+    } else {
+        auto cdec = signal_engine::decide_council(
+            cfg_.council, council_state_, decision.regime.regime, sig.strength,
+            ms.symbol, now_epoch);
+        council_allowed = cdec == signal_engine::CouncilDecision::Proceed;
+        if (!council_allowed) {
+            storage_->append_event(
+                {ts, "council_skip", ms.venue, ms.symbol, "info",
+                 "Council skipped: " +
+                     signal_engine::council_decision_to_string(cdec),
+                 util::to_json(
+                     {{"reason", signal_engine::council_decision_to_string(cdec)},
+                      {"regime",
+                       strategy::regime_to_string(decision.regime.regime)}},
+                     {{"strength", sig.strength}})});
+        } else {
+            signal_engine::record_council_call(council_state_, ms.symbol,
+                                               now_epoch);
+        }
+    }
+
+    auto cat = news_->score_for(ms.symbol);
+    auto signals = gather_factors(ms, cat, council_allowed);
+    auto verdict = signal_engine::combine(signals, weights_);
+    o.confidence = verdict.confidence;
+    o.edge = verdict.edge;
+    o.model_agreement_count = verdict.agreement_count;
+
     auto gate = gate_->evaluate(o, pstate_);
     if (!gate.allowed) {
         storage_->insert_blocked({ts, o.venue, o.symbol, o.side, o.qty,

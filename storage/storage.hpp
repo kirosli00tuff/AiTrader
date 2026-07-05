@@ -124,6 +124,10 @@ public:
     // Count rows in a table (used by tests/demo verification).
     long long count(const std::string& table);
 
+    // Count CLOSED real fills (trades with a realized win/loss/flat outcome).
+    // Used by the RL training gate + startup transparency (fills vs gate).
+    long long count_closed_trades();
+
     sqlite3* handle() { return db_; }
 
 private:

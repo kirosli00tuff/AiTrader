@@ -44,6 +44,21 @@ struct VenueConfig {
 struct EngineConfig {
     int loop_interval_seconds = 15;       // wall-clock seconds between ticks
     bool respect_market_hours = true;     // skip equity ticks when US RTH closed
+    // Council cost cut (Task 5): while true, US-equity symbols skip the Flash
+    // gate + council calls outside regular US trading hours. Crypto stays 24/7.
+    // Distinct from respect_market_hours (which gates whether equity TICKS run at
+    // all in continuous mode); this only suppresses the expensive council call.
+    bool equities_market_hours_only = true;
+};
+
+// RL advisory (Layer 3, deferred). SHIPS OFF: while rl_enabled is false the
+// engine never scores an RL factor and it stays out of the ensemble entirely.
+// The PPO trainer refuses to run until at least rl_min_real_fills REAL closed
+// fills exist (no synthetic-data training path). Advisory only; the 0.5 sizing
+// cap (sizing.dnn_position_scale_cap) applies exactly as it does to dnn_advisory.
+struct RlConfig {
+    bool rl_enabled = false;              // OFF by default (ships toggled off)
+    int rl_min_real_fills = 500;          // training gate: real closed fills required
 };
 
 // Market-data source selection.
@@ -195,6 +210,10 @@ struct ModelWeights {
     double rule_based_factor_weight = 0.18;
     double dnn_advisory_factor_weight = 0.15;
     double whale_signal_factor_weight = 0.10;
+    // RL advisory factor. 0.0 by default so RL is NON-DECISIVE even once enabled
+    // (it can never move the ensemble unless an operator raises this via the UI).
+    // Keeps the 6-factor sum at 1.00; excluded from normalization while zero.
+    double rl_advisory_factor_weight = 0.0;
 
     std::map<std::string, double> as_map() const;
     double sum() const;
@@ -209,6 +228,7 @@ struct Config {
     SizingConfig sizing;
     StrategyConfig strategy;
     CouncilConfig council;
+    RlConfig rl;
     AdaptiveConfig adaptive;
     WhaleConfig whale;
     LiveApprovalConfig live_approval;

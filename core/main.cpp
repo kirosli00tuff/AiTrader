@@ -139,6 +139,14 @@ int main(int argc, char** argv) {
                 << "  council $:  budget " << co.council_daily_budget
                 << "/day, cooldown " << co.per_symbol_council_cooldown_minutes
                 << "m, max_tokens " << co.council_max_tokens << "\n"
+                << "  cost cuts: risk pre-check ON; equities market-hours-only "
+                << (cfg.engine.equities_market_hours_only ? "ON" : "off")
+                << " (crypto 24/7)\n"
+                << "  rl:        "
+                << (cfg.rl.rl_enabled ? "ON" : "OFF (ships off)")
+                << " — advisory cap 0.5, real-fills gate "
+                << cfg.rl.rl_min_real_fills
+                << ", trains on real fills only\n"
                 << "  L1 risk:   daily-loss " << (rk.max_daily_loss_total_pct * 100)
                 << "% / per-trade " << (rk.max_trade_risk_pct_of_equity * 100)
                 << "% / max " << rk.max_trades_per_day << " trades/day / "
@@ -148,7 +156,21 @@ int main(int argc, char** argv) {
                 << "  ----------------------------------------------------\n";
         }
 
+        // Capture the RL gate before the config is moved into the engine so the
+        // startup can report the live fill count vs the gate when RL is ON.
+        const bool rl_on = cfg.rl.rl_enabled;
+        const int rl_gate = cfg.rl.rl_min_real_fills;
+
         mal::core::Engine engine(std::move(cfg), opts);
+
+        if (rl_on) {
+            long long fills = engine.storage().count_closed_trades();
+            std::cout << "  rl fills:  " << fills << " / " << rl_gate
+                      << (fills >= rl_gate ? " (gate met — challenger training "
+                                             "allowed; promotion still manual)"
+                                           : " (below gate — trainer refuses)")
+                      << "\n";
+        }
 
         if (continuous) {
             std::signal(SIGINT, handle_stop);

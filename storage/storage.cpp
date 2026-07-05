@@ -276,4 +276,12 @@ long long Storage::count(const std::string& table) {
     return sqlite3_column_int64(s.raw(), 0);
 }
 
+long long Storage::count_closed_trades() {
+    Stmt s(db_,
+           "SELECT COUNT(*) FROM trades WHERE outcome IN ('win','loss','flat')"
+           " AND pnl IS NOT NULL");
+    if (sqlite3_step(s.raw()) != SQLITE_ROW) return 0;
+    return sqlite3_column_int64(s.raw(), 0);
+}
+
 }  // namespace mal::storage

@@ -22,6 +22,10 @@ engine:
   loop_interval_seconds: 15              # wall-clock seconds between ticks
   respect_market_hours: true            # skip equity ticks when US RTH is closed
                                         # (crypto + prediction markets stay 24/7)
+  equities_market_hours_only: true      # council cost cut: US equities (SPY, QQQ)
+                                        # skip the Flash gate + council outside
+                                        # regular US trading hours; crypto stays
+                                        # 24/7. Skips logged as `market_hours`.
 
 # -----------------------------------------------------------------------------
 # Market data — where price snapshots come from.
@@ -162,6 +166,18 @@ council:
   neutral_skip_strength_threshold: 0.5
 
 # -----------------------------------------------------------------------------
+# RL advisory (Layer 3, DEFERRED). Ships toggled OFF. While rl_enabled is false
+# the engine never scores an RL factor and it stays out of the ensemble entirely.
+# The PPO trainer (rl_advisory/) refuses to run until at least rl_min_real_fills
+# REAL closed fills exist — there is NO synthetic-data training path for RL.
+# Advisory only: the 0.5 sizing cap (sizing.dnn_position_scale_cap) applies, and
+# RL can never be a sole execution controller. Promotion stays gated + manual.
+# -----------------------------------------------------------------------------
+rl:
+  rl_enabled: false                      # OFF by default (ships toggled off)
+  rl_min_real_fills: 500                 # training gate: real closed fills required
+
+# -----------------------------------------------------------------------------
 # Adaptive learning (Layer 2) — bounded, logged, rollback-capable
 # -----------------------------------------------------------------------------
 adaptive:
@@ -222,7 +238,11 @@ model_weights:
   rule_based_factor_weight: 0.18
   dnn_advisory_factor_weight: 0.15
   whale_signal_factor_weight: 0.10
-  # sum = 1.00
+  # sum = 1.00 (the six factors above)
+  rl_advisory_factor_weight: 0.0         # deferred RL factor; 0.0 = non-decisive
+                                         # even once rl_enabled — operator-tunable
+                                         # in the UI; excluded from normalization
+                                         # while zero, so the sum stays 1.00.
 
 # -----------------------------------------------------------------------------
 # LLM advisory model identities — the concrete model each ensemble slot uses.

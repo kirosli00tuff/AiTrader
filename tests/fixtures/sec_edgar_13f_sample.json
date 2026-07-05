@@ -1,20 +1,208 @@
 {
-  "_provenance": "SYNTHETIC — hand-built to match SEC EDGAR full-text-search (efts.sec.gov) response shape. NOT a recorded live response. Replace with a real capture once SEC_EDGAR_ENABLED + SEC_EDGAR_CONTACT_EMAIL live fetch is verified (see RETURN.md flag).",
+  "_provenance": "REAL \u2014 recorded live 2026-07-05 from SEC EDGAR full-text search https://efts.sec.gov/LATEST/search-index?q=Apple&forms=13F-HR (read-only GET, descriptive User-Agent with contact email supplied via SEC_EDGAR_CONTACT_EMAIL, not committed). Trimmed to the first 5 hits; full real _source structure preserved.",
+  "took": 530,
+  "timed_out": false,
   "hits": {
-    "total": {"value": 2},
+    "total": {
+      "value": 10000,
+      "relation": "gte"
+    },
     "hits": [
       {
+        "_index": "edgar_file",
+        "_id": "0000319933-24-000002:03.31.24thurston.xml",
+        "_score": 8.267542,
         "_source": {
-          "display_names": ["BERKSHIRE HATHAWAY INC (CIK 0001067983)"],
-          "file_date": "2026-05-15",
-          "forms": ["13F-HR"]
+          "ciks": [
+            "0000319933"
+          ],
+          "period_ending": "2024-03-31",
+          "file_num": [
+            "028-24140"
+          ],
+          "display_names": [
+            "THURSTON, SPRINGER, MILLER, HERD & TITAK, INC.  (CIK 0000319933)"
+          ],
+          "xsl": "xslForm13F_X02",
+          "sequence": 2,
+          "root_forms": [
+            "13F-HR"
+          ],
+          "file_date": "2024-05-14",
+          "biz_states": [
+            "IN"
+          ],
+          "sics": [],
+          "form": "13F-HR",
+          "adsh": "0000319933-24-000002",
+          "film_num": [
+            "24942441"
+          ],
+          "biz_locations": [
+            "Indianapolis, IN"
+          ],
+          "file_type": "INFORMATION TABLE",
+          "file_description": null,
+          "inc_states": [
+            "IN"
+          ],
+          "items": []
         }
       },
       {
+        "_index": "edgar_file",
+        "_id": "0001580642-21-000721:infotable.xml",
+        "_score": 8.224382,
         "_source": {
-          "display_names": ["CITADEL ADVISORS LLC (CIK 0001423053)"],
-          "file_date": "2026-05-14",
-          "forms": ["13F-HR"]
+          "ciks": [
+            "0001661762"
+          ],
+          "period_ending": "2020-12-31",
+          "file_num": [
+            "028-18380"
+          ],
+          "display_names": [
+            "Oak Grove Capital LLC  (CIK 0001661762)"
+          ],
+          "xsl": "xslForm13F_X01",
+          "sequence": 2,
+          "root_forms": [
+            "13F-HR"
+          ],
+          "file_date": "2021-02-17",
+          "biz_states": [
+            "PA"
+          ],
+          "sics": [],
+          "form": "13F-HR",
+          "adsh": "0001580642-21-000721",
+          "film_num": [
+            "21643401"
+          ],
+          "biz_locations": [
+            "Allison Park, PA"
+          ],
+          "file_type": "INFORMATION TABLE",
+          "file_description": null,
+          "inc_states": [
+            "PA"
+          ],
+          "items": []
+        }
+      },
+      {
+        "_index": "edgar_file",
+        "_id": "0001398344-21-018572:fp0067493_13fhr-table.xml",
+        "_score": 8.219446,
+        "_source": {
+          "ciks": [
+            "0001875202"
+          ],
+          "period_ending": "2021-03-31",
+          "file_num": [
+            "028-21367"
+          ],
+          "display_names": [
+            "J Arnold Wealth Management Co  (CIK 0001875202)"
+          ],
+          "xsl": "xslForm13F_X01",
+          "sequence": 2,
+          "root_forms": [
+            "13F-HR"
+          ],
+          "file_date": "2021-09-08",
+          "biz_states": [
+            "OH"
+          ],
+          "sics": [],
+          "form": "13F-HR",
+          "adsh": "0001398344-21-018572",
+          "film_num": [
+            "211241109"
+          ],
+          "biz_locations": [
+            "Canfield, OH"
+          ],
+          "file_type": "INFORMATION TABLE",
+          "file_description": "13F INFORMATION TABLE",
+          "inc_states": [],
+          "items": []
+        }
+      },
+      {
+        "_index": "edgar_file",
+        "_id": "0001606587-22-000582:form13InfoTable.xml",
+        "_score": 8.199747,
+        "_source": {
+          "ciks": [
+            "0001911400"
+          ],
+          "period_ending": "2021-12-31",
+          "file_num": [
+            "028-22249"
+          ],
+          "display_names": [
+            "Carroll Investors, Inc  (CIK 0001911400)"
+          ],
+          "xsl": "xslForm13F_X01",
+          "sequence": 2,
+          "root_forms": [
+            "13F-HR"
+          ],
+          "file_date": "2022-02-16",
+          "biz_states": [
+            "SC"
+          ],
+          "sics": [],
+          "form": "13F-HR",
+          "adsh": "0001606587-22-000582",
+          "film_num": [
+            "22642512"
+          ],
+          "biz_locations": [
+            "Mt Pleasant, SC"
+          ],
+          "file_type": "INFORMATION TABLE",
+          "file_description": "DESCRIPTION FOR INFORMATION TABLE",
+          "inc_states": [
+            "SC"
+          ],
+          "items": []
+        }
+      },
+      {
+        "_index": "edgar_file",
+        "_id": "0001597694-14-000011:septemberfinalrev.xml",
+        "_score": 8.195166,
+        "_source": {
+          "ciks": [
+            "0001597694"
+          ],
+          "period_ending": "2014-09-30",
+          "file_num": [
+            "028-15731"
+          ],
+          "display_names": [
+            "Mitsubishi UFJ Securities International PLC  (CIK 0001597694)"
+          ],
+          "xsl": "xslForm13F_X01",
+          "sequence": 2,
+          "root_forms": [
+            "13F-HR"
+          ],
+          "file_date": "2014-11-17",
+          "biz_states": [],
+          "sics": [],
+          "form": "13F-HR/A",
+          "adsh": "0001597694-14-000011",
+          "film_num": [
+            "141227011"
+          ],
+          "biz_locations": [],
+          "file_type": "INFORMATION TABLE",
+          "file_description": null,
+          "inc_states": [],
+          "items": []
         }
       }
     ]

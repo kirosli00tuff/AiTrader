@@ -2,7 +2,8 @@
 
 Exposes advisory scoring to the C++ core:
   POST /score/llm        -> multi-LLM consensus verdict
-  POST /score/dnn        -> DNN/RL advisory factor
+  POST /score/dnn        -> supervised dnn_advisory factor
+  POST /score/rl         -> RL advisory factor (deferred; disabled/mock fallback)
   POST /score/whale      -> whale / smart-money signal
   POST /marketdata/alpaca -> latest prices for requested symbols (real-time)
   POST /execute/alpaca_paper -> submit an Alpaca PAPER trading order
@@ -26,6 +27,7 @@ if _ROOT not in sys.path:
 
 from llm_consensus import consensus, council_status_line, use_real_council  # noqa: E402
 from ml_factor import score_state             # noqa: E402
+from rl_advisory import rl_enabled, rl_min_real_fills, score_rl  # noqa: E402  (light: no torch/gym)
 from whale_signal import whale_signal_for     # noqa: E402
 from market_data import alpaca_source         # noqa: E402
 from account_manager.log_safety import safe_print  # noqa: E402
@@ -41,6 +43,11 @@ def _handle(path: str, payload: dict) -> dict:
         return consensus(payload).to_dict()
     if path == "/score/dnn":
         return score_state(payload)
+    if path == "/score/rl":
+        # Deferred RL factor: neutral when disabled, labelled mock when enabled
+        # with no artifact, real policy when a trained artifact exists. Never
+        # raises, so offline runs are unaffected.
+        return score_rl(payload)
     if path == "/score/whale":
         symbol = str(payload.get("symbol", "?"))
         market_bias = float(payload.get("bias", payload.get("catalyst", 0.0)))
@@ -118,6 +125,9 @@ def serve(host: str = "127.0.0.1", port: int = 8765) -> None:
     safe_print(f"python_bridge serving on http://{host}:{port} ({mode})")
     # Unambiguous, single source of truth for which council + gate are running.
     safe_print(f"  {council_status_line()}")
+    safe_print(
+        f"  RL advisory: {'ON' if rl_enabled() else 'OFF (ships off)'} "
+        f"(real-fills gate {rl_min_real_fills()}, advisory cap 0.5)")
     httpd.serve_forever()
 
 

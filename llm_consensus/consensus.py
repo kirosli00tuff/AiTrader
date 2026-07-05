@@ -20,8 +20,8 @@ from __future__ import annotations
 # Re-exported here so existing imports (`from llm_consensus.consensus import ...`)
 # keep working after the split into focused modules.
 from .config_access import (  # noqa: F401
-    council_max_tokens, gate_enabled, llm_model_names, slot_weight,
-    use_real_council,
+    council_max_tokens, equities_market_hours_only, gate_enabled,
+    llm_model_names, slot_weight, use_real_council,
 )
 from .gate import AlwaysProceedGate, GateDecision, GeminiFlashGate  # noqa: F401
 from .providers import (  # noqa: F401
@@ -100,6 +100,68 @@ def _flat_consensus(gate: GateDecision) -> ConsensusResult:
         agreement_count=0, per_model=[], gate=gate.to_dict())
 
 
+# The system's only equities (native-strategy whitelist). The market-hours cost
+# cut targets exactly these; crypto (BTC/USD, ETH/USD) trades 24/7.
+_EQUITY_SYMBOLS = frozenset({"SPY", "QQQ"})
+
+
+def _risk_precheck_skip(state: dict) -> GateDecision | None:
+    """Cost cut 1 (Task 5): skip the council when the trade is already blocked.
+
+    The C++ engine evaluates the cheap RiskGate preconditions READ-ONLY and, when
+    a hard limit already blocks the trade, marks the /score/llm payload. The
+    council then never runs (no Flash gate, no providers) — a doomed trade cannot
+    be rescued by the council. This honours the engine's gate result; it does not
+    re-implement or modify any gate logic. Returns a skip decision or None.
+    """
+    if not (state.get("risk_precheck_block") or state.get("risk_blocked")):
+        return None
+    reason = str(state.get("risk_precheck_reason")
+                 or state.get("risk_reason") or "risk precondition blocks trade")
+    return GateDecision(False, f"risk pre-check: {reason}", "risk_precheck",
+                        "risk_precheck")
+
+
+def _market_hours_skip(state: dict, cfg_path: str | None) -> GateDecision | None:
+    """Cost cut 2 (Task 5): equities skip the council outside US trading hours.
+
+    Fires only for the whitelisted equities (SPY, QQQ) when the US session is
+    closed; crypto is never skipped for market hours. The caller may pass an
+    explicit ``market_open`` bool (deterministic for tests); otherwise it is
+    computed from the current UTC time. Returns a skip decision or None.
+    """
+    if not equities_market_hours_only(cfg_path):
+        return None
+    symbol = str(state.get("symbol", "")).strip().upper()
+    if symbol not in _EQUITY_SYMBOLS:
+        return None                      # crypto / unknown -> never a MH skip
+    if _market_open(state):
+        return None
+    return GateDecision(False, "equities outside US regular trading hours",
+                        "market_hours", "market_hours")
+
+
+def _market_open(state: dict) -> bool:
+    if "market_open" in state:
+        return bool(state["market_open"])
+    return _us_equity_market_open_now()
+
+
+def _us_equity_market_open_now(now=None) -> bool:
+    """Approximate US regular trading hours in UTC (~13:30-20:00, Mon-Fri).
+
+    DST is not modelled — this is an advisory cost-cut heuristic, not a risk
+    control. The C++ engine owns the authoritative market-hours check for the
+    running loop; this fallback exists so a direct Python caller behaves sanely.
+    """
+    from datetime import datetime, timezone
+    now = now or datetime.now(timezone.utc)
+    if now.weekday() >= 5:               # Saturday / Sunday
+        return False
+    minutes = now.hour * 60 + now.minute
+    return 13 * 60 + 30 <= minutes < 20 * 60
+
+
 def consensus(state: dict, providers: list[LLMProvider] | None = None,
               gate=None, cfg_path: str | None = None) -> ConsensusResult:
     """Weighted ensemble of provider verdicts into one consensus.
@@ -107,7 +169,19 @@ def consensus(state: dict, providers: list[LLMProvider] | None = None,
     Runs the base-check gate first; if it declines, returns a flat verdict and
     skips the (expensive) providers entirely. The ensemble math itself is
     unchanged from the original mock-only implementation.
+
+    Two council cost cuts run BEFORE the Flash gate + providers (Task 5): a risk
+    pre-check (skip when the engine's read-only RiskGate already blocks the
+    trade) and a market-hours skip (equities outside US RTH). Each returns a flat
+    verdict whose gate reason the engine logs as ``risk_precheck`` / ``market_hours``.
     """
+    risk_skip = _risk_precheck_skip(state)
+    if risk_skip is not None:
+        return _flat_consensus(risk_skip)
+    mh_skip = _market_hours_skip(state, cfg_path)
+    if mh_skip is not None:
+        return _flat_consensus(mh_skip)
+
     g = gate if gate is not None else build_gate(cfg_path)
     decision = g.should_review(state)
     if not decision.proceed:

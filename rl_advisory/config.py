@@ -1,0 +1,70 @@
+"""Read-only access to the RL-advisory settings in the engine config (Task 4).
+
+Single source of truth = ``config/default_config.yaml`` (overridable via
+``MAL_CONFIG_PATH``). Every getter degrades to a safe default when the file,
+block, or key is absent, so nothing depends on these being present.
+
+RL SHIPS OFF: ``rl_enabled`` defaults False. The trainer refuses to run until at
+least ``rl_min_real_fills`` REAL closed fills exist (no synthetic-data path).
+"""
+from __future__ import annotations
+
+import os
+from functools import lru_cache
+
+# Advisory sizing cap for the RL factor — identical to the dnn_advisory cap so a
+# swap of which advisory model serves never changes the ceiling.
+RL_ADVISORY_CAP = 0.5
+
+_DEFAULT_MIN_REAL_FILLS = 500
+
+
+def _default_config_path() -> str:
+    return os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        "config", "default_config.yaml")
+
+
+def _config_path(cfg_path: str | None) -> str:
+    return cfg_path or os.environ.get("MAL_CONFIG_PATH") or _default_config_path()
+
+
+@lru_cache(maxsize=8)
+def _load(path: str) -> dict:
+    try:
+        import yaml
+        with open(path) as fh:
+            return yaml.safe_load(fh) or {}
+    except Exception:
+        return {}
+
+
+def _cfg(cfg_path: str | None) -> dict:
+    return _load(_config_path(cfg_path))
+
+
+def _rl(cfg_path: str | None) -> dict:
+    return _cfg(cfg_path).get("rl", {}) or {}
+
+
+def rl_enabled(cfg_path: str | None = None) -> bool:
+    """True only when the operator has explicitly toggled RL on (default False)."""
+    return bool(_rl(cfg_path).get("rl_enabled", False))
+
+
+def rl_min_real_fills(cfg_path: str | None = None) -> int:
+    """Real closed fills required before the PPO trainer may run (default 500)."""
+    try:
+        return int(_rl(cfg_path).get("rl_min_real_fills", _DEFAULT_MIN_REAL_FILLS))
+    except (TypeError, ValueError):
+        return _DEFAULT_MIN_REAL_FILLS
+
+
+def crypto_allow_short(cfg_path: str | None = None) -> bool:
+    """Whether crypto may go short (from strategy.crypto_allow_short, default False).
+
+    Equities are ALWAYS long-only in paper regardless of this flag; the RL env
+    uses this only to decide whether a short action is permitted on crypto.
+    """
+    strat = _cfg(cfg_path).get("strategy", {}) or {}
+    return bool(strat.get("crypto_allow_short", False))

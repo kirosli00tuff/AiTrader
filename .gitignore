@@ -37,6 +37,9 @@ ui/weight_overrides.json
 # --- Local 24/7 launcher runtime state (ops/start.sh) ---
 .run/
 
+# --- Scratch API captures (whale-fixture recording; not a deliverable) ---
+scratch_captures/
+
 # --- Editor / OS ---
 .vscode/
 .idea/

@@ -4,7 +4,7 @@ Status tracker for AiTrader. Read at the start of each session. Update at the en
 
 ## Current State
 
-The C++ safety spine builds clean and runs the offline paper loop (`ctest` 5/5). The real LLM council is merged (Opus 4.8, GPT-5.5, Gemini 3.1 Pro) with a free Gemini Flash gate, prompt caching, and cost controls (budget, per-symbol cooldown, token cap, neutral skip). The native strategy layer (momentum + reversion + regime detector, closed-bar eval, native ATR exits) is in; the adaptive tuner learns from real closed-trade PnL (≥30-trade gate); the `dnn_advisory` factor has a real-data walk-forward training pipeline with gated promotion; Coinbase replaces Binance; free-first whale feeds (ClankApp + SEC EDGAR) are wired live-OFF by default; security hardening (loopback bridge, credential masking, pre-commit secrets hook, pinned deps) landed. Council/whale live paths stay behind config/env flags and the bridge. Live trading disabled by default. Next up: venv pytest + real numpy training run, real whale fixtures, residual doc-consistency sweep + AUDIT refresh (see Open Flags).
+The C++ safety spine builds clean and runs the offline paper loop (`ctest` 5/5). The real LLM council is merged (Opus 4.8, GPT-5.5, Gemini 3.1 Pro) with a free Gemini Flash gate, prompt caching, and cost controls (budget, per-symbol cooldown, token cap, neutral skip). The native strategy layer (momentum + reversion + regime detector, closed-bar eval, native ATR exits) is in; the adaptive tuner learns from real closed-trade PnL (≥30-trade gate); the `dnn_advisory` factor has a real-data walk-forward training pipeline with gated promotion; Coinbase replaces Binance; free-first whale feeds (ClankApp + SEC EDGAR) are wired live-OFF by default; security hardening (loopback bridge, credential masking, pre-commit secrets hook, pinned deps) landed. A separate `rl_advisory` PPO module (gym env, real-fill training gate, walk-forward eval, `/score/rl` bridge endpoint) is built but **shipped OFF** — it never touches the ensemble until an operator toggles `rl_enabled` past the `rl_min_real_fills` gate. Two council cost cuts (risk pre-check + equities market-hours skip) short-circuit doomed/after-hours setups before any provider spend. Council/whale live paths stay behind config/env flags and the bridge. Live trading disabled by default. Next up: prove paper-loop stability, then the GUI overhaul (see Next Up).
 
 ## Stable and Working
 
@@ -20,37 +20,49 @@ The C++ safety spine builds clean and runs the offline paper loop (`ctest` 5/5).
 
 ## In Progress
 
-- None active. 12-task master prompt complete (2026-07-04). Follow-up flags open (venv pytest/training run, real whale fixtures, residual doc sweep + AUDIT refresh) — see RETURN.md and "Open Flags / Follow-ups".
+- None active. The "close open flags + RL advisory (shipped off) + council cost cuts" prompt is complete (2026-07-05): every follow-up flag from the 12-task prompt is cleared, `rl_advisory` (PPO, shipped off) is built, and the two council cost cuts (risk pre-check + market-hours) are in. See "Open Flags / Follow-ups" and RETURN.md.
 
 ## Not Started
 
 - Live-approval workflow end to end (`try_enable_live` still never called by design)
 - Real (disabled-by-default) live adapters for Coinbase + IBKR
-- True RL for the advisory factor (deferred until ≥500 real closed fills; supervised `dnn_advisory` only today)
-- Frontend rebuild in React
+- Training the RL advisory policy: the `rl_advisory` PPO module is built but shipped OFF and untrained (activates only past the `rl_min_real_fills` gate, default 500 real fills; no synthetic-data path). Supervised `dnn_advisory` is the only Layer-3 signal serving today.
+- Frontend rebuild / GUI overhaul (see Next Up + CONTEXT.md GUI Plan)
 
 ## Next Up
 
-1. Run second master prompt: strategy layer, bars storage, real-fill learning, council cost controls, Level 1 defaults, Coinbase, ClankApp, SEC EDGAR
-2. Verify paper loop stability over time
-3. Then consider frontend rebuild
+1. **Paper-loop stability.** Run the offline paper loop continuously and confirm it stays stable over time — no drift, no leaks, tuner behaving sanely once ≥30 closed trades accumulate, DB growing cleanly. This is the gate before any new capability.
+2. **GUI overhaul.** Once the loop is proven stable, rebuild the dashboard/control surface (per-layer toggles with safety always on, per-model council toggles, champion/challenger + RL enable controls behind their gates, weight sliders grouped by layer, regime override, budget dial) — see the GUI Plan in CONTEXT.md.
 
 ## Known Issues and Caveats
 
-- Adaptive tuner learns from simulate_outcome, a seeded-RNG toy PnL simulator, not real fills. Ignore improvement signals until real-fill feedback lands.
+- Advisory factor *scores* on the default (no-`--bridge`) path are deterministic C++ mocks; the real LLM/dnn/whale scores engage only with `--bridge` + the bridge server up. The learning signal the tuner consumes is real (closed-trade PnL), but the verdicts feeding it out-of-box are stand-ins.
+- Shipped `dnn_advisory` champion is still synthetic-trained; the real-data trainer refuses (`insufficient_real_data`) until the DB holds ≥200 real labelled samples. `rl_advisory` is untrained (real-fill gate unmet) and shipped off.
 
-## Open Flags / Follow-ups (raised 2026-07-03, fix later)
+## Open Flags / Follow-ups
 
-- **pytest AND numpy not runnable in the base environment (py_compile-only verification).** The base `python3` has neither `pytest` nor `numpy`, so (a) the whole Python test suite (credentials, LLM consensus, ml_factor, whale, bridge/council/whale, and the new `test_bridge_bind.py`) cannot be executed in-session, and (b) anything importing numpy — the DNN advisory model (`ml_factor/model.py`) and the new **Task 5 real-data training pipeline** — cannot be *run* here, only `py_compile`-checked and logic-reviewed. Only the C++ ctest suite executes in-session. Consequently, every Python change in the 2026-07-04 session (Task 9 security, Task 5 dnn_advisory pipeline, Task 7 whale wiring, Task 11 pytest additions) is verified by `py_compile` + isolated logic checks + (where deps allow, e.g. `log_safety`, stdlib dataset readers) direct execution — NOT by a full `pytest`/training run. **TODO before merge:** in a venv, `pip install -r python_bridge/requirements.txt -r ui/requirements.txt`, then confirm `pytest tests/ -q` is green and `python -m ml_factor.train_real --db market_ai_lab.db` trains a real-data challenger without error. Master-prompt policy (user, 2026-07-04): finish all 12 tasks first, then fix every flag listed here / in RETURN.md.
-- **Session cost / scope.** The Task 2–12 build is large and cross-cutting (bars, strategy, engine rewire, dnn_advisory rename, Coinbase, whale feeds, security). GateGuard fires a fact-forcing preamble on every edit; leaving it on is deliberate but adds cost per file. If a future session needs to move faster, `ECC_GATEGUARD=off` disables it. Not a code defect — tracked so the spend is visible.
-- Advisory layers run only with --bridge. Default path uses C++ mocks.
-- Whale adapters use assumed payload shapes. Verify against real responses before trusting.
-- Live-approval workflow not wired. try_enable_live never called. Safe, but incomplete.
-- No historical price data persisted. Bars storage needed before honest backtests or DNN retraining.
+Cleared 2026-07-05 (all verified this session): venv created and full `pytest tests/ -q` green (**124 passed**); `python -m ml_factor.train_real` run against the demo DB (refuses cleanly with `insufficient_real_data`, synthetic champion retained); real SEC EDGAR 13F fixture recorded (ClankApp left SYNTHETIC — host DNS-unreachable); residual doc-consistency sweep done (`docs/ARCHITECTURE.md`, `docs/BUILD_SPEC.md`, `docs/FOLLOWUP_CREDENTIALS.md`, `DNN_RL_DESIGN.md`→`DNN_ADVISORY_DESIGN.md`) + AUDIT honest-state refresh; bars OHLCV storage landed (was "no historical price data persisted").
+
+Still open (not defects — known limits):
+
+- Advisory factor scores run through real Python services only with `--bridge`; the default path uses deterministic C++ mocks.
+- Whale live-fetch parsers are verified against one recorded SEC 13F payload only; the other feeds' assumed shapes are still unverified against live responses (and live is off by default behind `WHALE_LIVE_ENABLED` / `SEC_EDGAR_ENABLED`).
+- Live-approval workflow not wired end to end (`try_enable_live` never called). Safe, but incomplete.
+- Real LLM providers untested against live keys; `rl_advisory` untrained (real-fill gate unmet); `dnn_advisory` still shipping the synthetic champion until enough real labelled samples exist.
 
 ## Session Log
 
 Newest entries at top. One entry per session. Format: date, model used, what changed, what is stable, what is next.
+
+### 2026-07-05 (Opus 4.8)
+
+- **Closed every open follow-up flag from the 12-task prompt, built the RL advisory module (shipped off), and added two council cost cuts.** RiskGate / live-trading gate / adaptive limit-weakening invariant untouched; live trading stays off.
+- **Flags cleared:** created a Python 3.14.4 venv, installed both pinned requirements files, ran the full suite — **124 pytest passed** (pandas pin reconciled to 2.2.3 so it builds against numpy 1.26.4). Ran `python -m ml_factor.train_real` against the demo DB: refuses cleanly (`insufficient_real_data`, 0 real samples < 200, synthetic champion retained). Recorded a **real SEC EDGAR 13F fixture** (5 hits, delayed-disclosure) and updated the parser test; ClankApp left SYNTHETIC (host DNS-unreachable, blocker logged). Residual doc sweep done: Binance→Coinbase and DNN/RL→`dnn_advisory` across `docs/ARCHITECTURE.md`, `docs/BUILD_SPEC.md`, `docs/FOLLOWUP_CREDENTIALS.md`; `git mv docs/DNN_RL_DESIGN.md docs/DNN_ADVISORY_DESIGN.md` + updated every code/README reference; **AUDIT.md refreshed** to honest current state.
+- **RL advisory (`rl_advisory/`, Stable-Baselines3 PPO), shipped OFF:** gym `TradingEnv` (rolling-window obs; discrete flat/long/short; equities long-only; reward = realized PnL − mandatory txn cost − drawdown penalty), a hard `rl_min_real_fills` gate (default 500) that refuses **before importing any backend** with **no synthetic-data path**, walk-forward eval + champion/challenger via the shared promotion gate, `/score/rl` bridge endpoint with labelled mock fallback, artifacts registered with provenance. `rl_enabled` defaults false → engine never calls it and the factor (`rl_advisory_factor_weight = 0.0`) stays out of the ensemble. Advisory only, hard-capped at 0.5, never a sole controller.
+- **Council cost cuts (in `llm_consensus/consensus.py`, before the Flash gate + providers):** (1) risk pre-check — the engine evaluates cheap RiskGate preconditions read-only and, when already blocked, skips the whole council (logged `risk_precheck`); (2) equities market-hours skip — SPY/QQQ skip the gate+council outside US RTH while crypto stays 24/7 (logged `market_hours`, config `engine.equities_market_hours_only` default true). C++ engine short-circuits before the bridge call; config adds `rl_enabled`/`rl_min_real_fills`/`equities_market_hours_only`; startup block prints RL + market-hours state.
+- **Tests added:** `tests/test_rl_advisory.py` (env contract, txn-cost reward, long-only clamp, trainer refuses below gate, `/score/rl` disabled/mock, factor stays out when disabled, walk-forward + challenger gate) and `tests/test_council_cost_cuts.py` (both skips fire before any provider/gate; never skips crypto; disabled-by-config no-op). No network in any test.
+- **Stable:** C++ safety spine builds clean, `ctest` **5/5**; full Python suite **124 passed**; RL package stays import-light (torch/SB3 lazy) so the bridge and suite run without them.
+- **Next:** prove paper-loop stability over time, then the GUI overhaul (CONTEXT.md GUI Plan).
 
 ### 2026-07-04 (Opus 4.8)
 

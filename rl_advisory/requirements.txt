@@ -1,0 +1,16 @@
+# RL advisory backend (Layer 3, DEFERRED — ships toggled OFF).
+#
+# EXACT version pins (Task 4). These are the PPO training backend and are
+# INTENTIONALLY separate from python_bridge/requirements.txt + ui/requirements.txt:
+# the RL factor ships OFF, so its heavy deps are OPT-IN. The gym env, the scoring
+# service, the real-fill training gate, and the whole pytest suite run WITHOUT
+# torch/stable-baselines3 installed — those are imported lazily only on the
+# actual PPO training path, which is itself gated behind rl_min_real_fills (500)
+# real closed fills. Install these only when you intend to train RL:
+#
+#     pip install -r rl_advisory/requirements.txt
+#
+# gymnasium is the only one imported eagerly (by rl_advisory/env.py); it is light.
+gymnasium==1.0.0
+stable-baselines3==2.4.1
+torch==2.5.1

@@ -32,13 +32,16 @@ std::map<std::string, double> ModelWeights::as_map() const {
         {"rule_based", rule_based_factor_weight},
         {"dnn_advisory", dnn_advisory_factor_weight},
         {"whale_signal", whale_signal_factor_weight},
+        {"rl_advisory", rl_advisory_factor_weight},
     };
 }
 
 double ModelWeights::sum() const {
+    // rl_advisory_factor_weight is 0.0 by default so this stays 1.00; it is only
+    // non-zero once an operator explicitly weights the (deferred) RL factor.
     return llm_primary_weight + llm_secondary_weight + llm_tertiary_weight +
            rule_based_factor_weight + dnn_advisory_factor_weight +
-           whale_signal_factor_weight;
+           whale_signal_factor_weight + rl_advisory_factor_weight;
 }
 
 const VenueConfig* Config::find_venue(const std::string& name) const {
@@ -145,6 +148,9 @@ Config load_config(const std::string& path) {
         get_int(root, "engine.loop_interval_seconds", c.engine.loop_interval_seconds);
     c.engine.respect_market_hours =
         get_bool(root, "engine.respect_market_hours", c.engine.respect_market_hours);
+    c.engine.equities_market_hours_only =
+        get_bool(root, "engine.equities_market_hours_only",
+                 c.engine.equities_market_hours_only);
 
     // market data source
     c.market_data.source =
@@ -245,6 +251,11 @@ Config load_config(const std::string& path) {
     co.council_min_agreement = get_int(root, "council.council_min_agreement", co.council_min_agreement);
     co.neutral_skip_strength_threshold = get_double(root, "council.neutral_skip_strength_threshold", co.neutral_skip_strength_threshold);
 
+    // rl advisory (deferred; ships OFF, trains only past the real-fill gate)
+    auto& rl = c.rl;
+    rl.rl_enabled = get_bool(root, "rl.rl_enabled", rl.rl_enabled);
+    rl.rl_min_real_fills = get_int(root, "rl.rl_min_real_fills", rl.rl_min_real_fills);
+
     // adaptive
     auto& a = c.adaptive;
     a.adaptive_learning_enabled = get_bool(root, "adaptive.adaptive_learning_enabled", a.adaptive_learning_enabled);
@@ -295,6 +306,7 @@ Config load_config(const std::string& path) {
     mw.rule_based_factor_weight = get_double(root, "model_weights.rule_based_factor_weight", mw.rule_based_factor_weight);
     mw.dnn_advisory_factor_weight = get_double(root, "model_weights.dnn_advisory_factor_weight", mw.dnn_advisory_factor_weight);
     mw.whale_signal_factor_weight = get_double(root, "model_weights.whale_signal_factor_weight", mw.whale_signal_factor_weight);
+    mw.rl_advisory_factor_weight = get_double(root, "model_weights.rl_advisory_factor_weight", mw.rl_advisory_factor_weight);
 
     auto problems = validate_config(c);
     if (!problems.empty()) {
@@ -423,6 +435,11 @@ std::vector<std::string> validate_config(const Config& cfg) {
         problems.push_back("council.council_min_agreement must be >= 0");
     if (co.per_symbol_council_cooldown_minutes < 0)
         problems.push_back("council.per_symbol_council_cooldown_minutes must be >= 0");
+
+    // RL advisory (deferred). The real-fill training gate must be non-negative;
+    // rl_enabled defaults false so the factor stays out of the ensemble.
+    if (cfg.rl.rl_min_real_fills < 0)
+        problems.push_back("rl.rl_min_real_fills must be >= 0");
 
     return problems;
 }
