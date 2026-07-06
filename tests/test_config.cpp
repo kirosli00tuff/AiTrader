@@ -15,7 +15,8 @@ int main() {
                   "starting balance parsed");
             check(!cfg.system.live_mode_default_enabled,
                   "live disabled by default");
-            check(cfg.venues.size() >= 4, "all venues parsed");
+            // Polymarket removed. Remaining venues: alpaca, coinbase, ibkr.
+            check(cfg.venues.size() >= 3, "all venues parsed");
             check(cfg.risk.max_daily_loss_total_pct == 0.03,
                   "risk limit parsed");
             check(validate_config(cfg).empty(), "default config is valid");

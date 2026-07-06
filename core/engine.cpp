@@ -40,22 +40,27 @@ Engine::Engine(config::Config cfg, EngineOptions opts)
 
     continuous_ = opts_.continuous;
 
-    // Build a small instrument universe spanning the demo's paper venues.
-    // Alpaca instruments are the native-strategy whitelist (crypto + equities).
-    // Polymarket instruments remain for the generic factor loop (not whitelisted,
-    // so they get no native bars/strategy).
+    // Resolve the offline feed mode early so alpaca_paper can force the online
+    // Alpaca feed below. feed_mode never affects live: Alpaca is paper + data
+    // only, IBKR live stays gated off.
+    feed_mode_ = !opts_.feed_mode.empty() ? opts_.feed_mode
+                                          : cfg_.simulation.feed_mode;
+
+    // Instrument universe. Alpaca is the only trading venue in the loop and its
+    // instruments are the native-strategy whitelist (crypto + equities). Alpaca
+    // is paper and market data only. IBKR is live only and is not traded here.
     std::vector<market_data::Instrument> instruments = {
-        {"polymarket", "PRES-2028-YES", "PRES-2028", "politics", 0.52},
-        {"polymarket", "FED-CUT-Q3", "FED-CUT", "macro", 0.40},
         {"alpaca", "BTC/USD", "BTC/USD", "crypto", 64000.0},
         {"alpaca", "ETH/USD", "ETH/USD", "crypto", 3400.0},
         {"alpaca", "SPY", "SPY", "equity", 545.0},
         {"alpaca", "QQQ", "QQQ", "equity", 470.0},
     };
 
-    // Select the market-data source: CLI override else config.
+    // Select the market-data source: CLI override else config. feed_mode
+    // alpaca_paper forces the online Alpaca feed (the primary online loop).
     std::string source =
         !opts_.data_source.empty() ? opts_.data_source : cfg_.market_data.source;
+    if (feed_mode_ == "alpaca_paper") source = "alpaca";
     if (source == "alpaca") {
         feed_ = std::make_unique<market_data::AlpacaFeed>(
             instruments, opts_.bridge_host, opts_.bridge_port, opts_.seed);
@@ -80,11 +85,10 @@ Engine::Engine(config::Config cfg, EngineOptions opts)
         bar_history_["alpaca|" + sym] = std::move(hist);
     }
 
-    // --- Offline feed / clock resolution (Tasks 2-4) --------------------------
-    // These control ONLY how the offline loop is driven; they never affect live
-    // trading (Alpaca is paper + market-data only, with no live path).
-    feed_mode_ = !opts_.feed_mode.empty() ? opts_.feed_mode
-                                          : cfg_.simulation.feed_mode;
+    // --- Offline clock resolution + bar-mode setup ----------------------------
+    // feed_mode_ was resolved above. These control ONLY how the offline loop is
+    // driven; they never affect live trading (Alpaca is paper + market-data only,
+    // IBKR live stays gated off).
     const std::string clock = !opts_.clock_mode.empty() ? opts_.clock_mode
                                                         : cfg_.simulation.clock_mode;
     simulated_clock_ = (clock == "simulated");
@@ -557,13 +561,15 @@ void Engine::handle_bar_close(const market_data::MarketState& ms,
 
     execution::AlpacaPaperAdapter alp(venue_cfg->paper_execution,
                                       opts_.bridge_host, opts_.bridge_port);
-    execution::PolymarketPaperAdapter poly;
-    execution::DisabledLiveAdapter live(o.venue);
-    execution::VenueAdapter* paper =
-        (o.venue == "polymarket")
-            ? static_cast<execution::VenueAdapter*>(&poly)
-            : static_cast<execution::VenueAdapter*>(&alp);
-    auto fill = router_.route(venue_cfg->mode, *paper, live, o,
+    // IBKR is the only live venue. Every other venue gets a disabled live
+    // adapter. Live stays off regardless: route() refuses the Live branch while
+    // live_enabled is false, so no live adapter is ever invoked here.
+    execution::IbkrLiveAdapter ibkr_live(opts_.bridge_host, opts_.bridge_port);
+    execution::DisabledLiveAdapter disabled_live(o.venue);
+    execution::VenueAdapter& live =
+        (o.venue == "ibkr") ? static_cast<execution::VenueAdapter&>(ibkr_live)
+                            : static_cast<execution::VenueAdapter&>(disabled_live);
+    auto fill = router_.route(venue_cfg->mode, alp, live, o,
                               /*live_enabled=*/false);
     if (!fill.executed) {
         storage_->append_event({ts, "no_execution", o.venue, o.symbol, "info",
@@ -647,8 +653,8 @@ int Engine::run_iteration() {
 
         const auto* venue_cfg = cfg_.find_venue(ms.venue);
         if (!venue_cfg) continue;
-        // Demo trades only the two primary paper venues.
-        if (ms.venue != "polymarket" && ms.venue != "alpaca") continue;
+        // Alpaca is the only paper trading venue in the loop.
+        if (ms.venue != "alpaca") continue;
         // Skip equities while the US session is closed (crypto stays 24/7).
         if (!equity_open && ms.category == "equity") continue;
 
@@ -699,15 +705,17 @@ int Engine::run_iteration() {
         }
 
         // --- Mode router (paper) ---
-        execution::PolymarketPaperAdapter poly;
+        // Alpaca is the only paper venue. IBKR is the live-only venue and stays
+        // disabled behind the approval gate. live_enabled is false on this path.
         execution::AlpacaPaperAdapter alp(venue_cfg->paper_execution,
                                           opts_.bridge_host, opts_.bridge_port);
-        execution::DisabledLiveAdapter live(o.venue);
-        execution::VenueAdapter* paper =
-            (o.venue == "polymarket")
-                ? static_cast<execution::VenueAdapter*>(&poly)
-                : static_cast<execution::VenueAdapter*>(&alp);
-        auto fill = router_.route(venue_cfg->mode, *paper, live, o,
+        execution::IbkrLiveAdapter ibkr_live(opts_.bridge_host, opts_.bridge_port);
+        execution::DisabledLiveAdapter disabled_live(o.venue);
+        execution::VenueAdapter& live =
+            (o.venue == "ibkr")
+                ? static_cast<execution::VenueAdapter&>(ibkr_live)
+                : static_cast<execution::VenueAdapter&>(disabled_live);
+        auto fill = router_.route(venue_cfg->mode, alp, live, o,
                                   /*live_enabled=*/false);
         if (!fill.executed) {
             storage_->append_event({ts, "no_execution", o.venue, o.symbol, "info",

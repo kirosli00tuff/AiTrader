@@ -4,14 +4,14 @@
 Runs entirely offline with NO API keys and live trading DISABLED:
 
   1. (Re)seed the shared SQLite DB by running the compiled C++ engine
-     (Polymarket-paper + Alpaca-paper instruments, mock market/news data).
+     (Alpaca-paper instruments, mock market/news data).
      The engine produces multi-LLM consensus + DNN advisory + rule-based
      factors, blends them, and routes each proposal through the deterministic
      Layer-1 RiskGate before paper execution.
   2. Populate the whale advisory tables (whale_activity + whale_signal_history)
      from the Python whale service so the dashboard's whale panels have data.
-     (These adapters are offline mocks unless APIFY_TOKEN / WHALE_ALERT_API_KEY
-     / SEC_API_KEY are set; 13F rows are flagged DELAYED.)
+     (These adapters are offline mocks unless CLANKAPP_API_KEY /
+     WHALE_ALERT_API_KEY / SEC_API_KEY are set; 13F rows are flagged DELAYED.)
   3. Seed a model_registry champion row for the DNN factor.
   4. Launch the Plotly Dash control board (unless --no-dash).
 

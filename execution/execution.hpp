@@ -1,11 +1,14 @@
 // Market AI Lab — execution mode router + venue adapters.
 //
-// The mode router decides, per venue, whether an approved order is: shown only
-// (recommendation_only), simulated (paper), or sent live (live — disabled by
+// The mode router decides, per venue, whether an approved order is shown only
+// (recommendation_only), simulated (paper), or sent live (live, disabled by
 // default, gated). Live adapters are present but refuse to operate unless
-// explicitly enabled. Coinbase + IBKR live paths are intentionally incomplete
-// (TODO markers) per the build spec. (Coinbase replaces Binance for crypto
-// market access — Binance does not operate in Canada.)
+// explicitly enabled.
+//
+// Venue roles. Alpaca handles all paper trading and paper market data. Alpaca
+// has no live path and must never be wired to one. Coinbase is paper/sim only.
+// IBKR handles live trading only. IBKR routes through the gated Live branch and
+// stays disabled behind the approval gate.
 #pragma once
 
 #include <memory>
@@ -35,14 +38,7 @@ public:
     virtual Fill place(const risk::OrderProposal& o) = 0;
 };
 
-// --- Paper adapters (used in the demo) ---
-
-class PolymarketPaperAdapter : public VenueAdapter {
-public:
-    std::string name() const override { return "polymarket-paper-trader"; }
-    bool is_live() const override { return false; }
-    Fill place(const risk::OrderProposal& o) override;
-};
+// --- Paper adapters ---
 
 // Alpaca paper-trading adapter.
 //
@@ -86,11 +82,24 @@ public:
     Fill place(const risk::OrderProposal& o) override;
 };
 
-class IbkrSimPlaceholderAdapter : public VenueAdapter {
+// IBKR live adapter. IBKR is live only. It connects to a locally run IB Gateway
+// session that the operator starts and authenticates. No IBKR credentials pass
+// through this app. This is a LIVE adapter. It routes only through the mode
+// router Live branch, which stays gated by the four safety mechanisms, so it
+// cannot execute until the operator passes the approval gate and turns live on.
+// It places orders over the Python bridge (POST /execute/ibkr_live), which talks
+// to IB Gateway. A dropped Gateway session fails the order safely and logs it.
+class IbkrLiveAdapter : public VenueAdapter {
 public:
-    std::string name() const override { return "ibkr_sim_placeholder"; }
-    bool is_live() const override { return false; }
+    IbkrLiveAdapter(std::string bridge_host = "127.0.0.1", int bridge_port = 8765)
+        : bridge_host_(std::move(bridge_host)), bridge_port_(bridge_port) {}
+    std::string name() const override { return "ibkr_live"; }
+    bool is_live() const override { return true; }
     Fill place(const risk::OrderProposal& o) override;
+
+private:
+    std::string bridge_host_;
+    int bridge_port_;
 };
 
 // --- Live adapters (DISABLED by default; refuse unless explicitly enabled) ---

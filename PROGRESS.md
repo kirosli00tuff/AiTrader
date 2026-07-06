@@ -4,7 +4,7 @@ Status tracker for AiTrader. Read at the start of each session. Update at the en
 
 ## Current State
 
-The C++ safety spine builds clean and runs the offline paper loop (`ctest` 5/5). The real LLM council is merged (Opus 4.8, GPT-5.5, Gemini 3.1 Pro) with a free Gemini Flash gate, prompt caching, and cost controls (budget, per-symbol cooldown, token cap, neutral skip). The native strategy layer (momentum + reversion + regime detector, closed-bar eval, native ATR exits) is in; the adaptive tuner learns from real closed-trade PnL (≥30-trade gate); the `dnn_advisory` factor has a real-data walk-forward training pipeline with gated promotion; Coinbase replaces Binance; free-first whale feeds (ClankApp + SEC EDGAR) are wired live-OFF by default; security hardening (loopback bridge, credential masking, pre-commit secrets hook, pinned deps) landed. A separate `rl_advisory` PPO module (gym env, real-fill training gate, walk-forward eval, `/score/rl` bridge endpoint) is built but **shipped OFF** — it never touches the ensemble until an operator toggles `rl_enabled` past the `rl_min_real_fills` gate. Two council cost cuts (risk pre-check + equities market-hours skip) short-circuit doomed/after-hours setups before any provider spend. Council/whale live paths stay behind config/env flags and the bridge. Live trading disabled by default. Next up: prove paper-loop stability, then the GUI overhaul (see Next Up).
+The C++ safety spine builds clean and runs the offline paper loop (`ctest` 7/7). Polymarket is fully removed (region). Alpaca paper is the primary online loop (`feed_mode: alpaca_paper`, paper + market-data only, no live path). IBKR is wired as the live-only venue via a locally run IB Gateway but stays DISABLED behind the approval gate. The real LLM council is merged (Opus 4.8, GPT-5.5, Gemini 3.1 Pro) with a free Gemini Flash gate, prompt caching, and cost controls (budget, per-symbol cooldown, token cap, neutral skip). The native strategy layer (momentum + reversion + regime detector, closed-bar eval, native ATR exits) is in; the adaptive tuner learns from real closed-trade PnL (≥30-trade gate); the `dnn_advisory` factor has a real-data walk-forward training pipeline with gated promotion; Coinbase replaces Binance; free-first whale feeds (ClankApp + SEC EDGAR) are wired live-OFF by default; security hardening (loopback bridge, credential masking, pre-commit secrets hook, pinned deps) landed. A separate `rl_advisory` PPO module (gym env, real-fill training gate, walk-forward eval, `/score/rl` bridge endpoint) is built but **shipped OFF** — it never touches the ensemble until an operator toggles `rl_enabled` past the `rl_min_real_fills` gate. Two council cost cuts (risk pre-check + equities market-hours skip) short-circuit doomed/after-hours setups before any provider spend. Council/whale live paths stay behind config/env flags and the bridge. Live trading disabled by default. Next up: prove paper-loop stability, then the GUI overhaul (see Next Up).
 
 ## Stable and Working
 
@@ -25,7 +25,7 @@ The C++ safety spine builds clean and runs the offline paper loop (`ctest` 5/5).
 ## Not Started
 
 - Live-approval workflow end to end (`try_enable_live` still never called by design)
-- Real (disabled-by-default) live adapters for Coinbase + IBKR
+- Real (disabled-by-default) live adapter for Coinbase (IBKR live adapter is now wired behind the gate, 2026-07-06)
 - Training the RL advisory policy: the `rl_advisory` PPO module is built but shipped OFF and untrained (activates only past the `rl_min_real_fills` gate, default 500 real fills; no synthetic-data path). Supervised `dnn_advisory` is the only Layer-3 signal serving today.
 - Frontend rebuild / GUI overhaul (see Next Up + CONTEXT.md GUI Plan)
 
@@ -63,6 +63,15 @@ New flags from the feed-work session (2026-07-05, `369b6a6`):
 ## Session Log
 
 Newest entries at top. One entry per session. Format: date, model used, what changed, what is stable, what is next.
+
+### 2026-07-06 (Opus 4.8) — remove Polymarket, Alpaca paper as primary online loop, IBKR wired live behind the gate
+
+- **Removed Polymarket fully.** Deleted PolymarketPaperAdapter and all Polymarket routing (execution + engine, both the native and legacy bootstrap-sim paths), the Apify Polymarket whale adapter, and every Polymarket/Apify reference in config, credentials, the dashboard groups, schema comments, and the demo. Added tests/test_no_polymarket.py as a regression guard.
+- **Alpaca paper is the primary ONLINE loop.** `feed_mode: alpaca_paper` forces the online AlpacaFeed (real 5-minute bars over the bridge, paper orders to Alpaca paper) through the same closed-bar path. Startup now prints an alpaca line and an online-mode note. Alpaca still has NO live path (live_adapter none).
+- **IBKR wired as the live-only venue behind the gate.** IbkrLiveAdapter replaced the sim placeholder and POSTs to the bridge /execute/ibkr_live only through the gated Live branch. New execution/ibkr_adapter.py maps orders to IBKR contracts/orders and places/cancels/reports status via ib_insync (imported lazily, pinned optional). A missing IB Gateway or dropped socket returns unavailable and never simulates. Startup probes IB Gateway reachability when ibkr.connection_enabled is true. Live stays DISABLED behind the approval gate.
+- **Verified (synthetic_regimes + simulated clock, 4000 iterations):** 16000 bars closed, 31 native entries (reversion 28, momentum 3), 31 exits (target 30, stop 1), tuner 623 weight changes within clamps, train_real challenger_recorded (15900 samples, sharpe 0.9392).
+- **Stable:** C++ ctest 7/7 (added test_ibkr_routing), Python pytest 137 passed (added test_ibkr_adapter, test_no_polymarket). No network or socket in any test.
+- **Next:** wire the live-approval workflow end to end, then the GUI overhaul (CONTEXT.md GUI Plan).
 
 ### 2026-07-05 (Opus 4.8) — offline loop becomes a real training environment
 

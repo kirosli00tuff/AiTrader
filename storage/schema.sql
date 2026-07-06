@@ -120,7 +120,7 @@ CREATE TABLE IF NOT EXISTS weight_changes (
 CREATE TABLE IF NOT EXISTS whale_activity (
     id        INTEGER PRIMARY KEY AUTOINCREMENT,
     ts        TEXT NOT NULL,
-    source    TEXT NOT NULL,               -- apify | whale_alert | sec_13f
+    source    TEXT NOT NULL,               -- clankapp | whale_alert | sec_13f
     delayed   INTEGER DEFAULT 0,           -- 1 => DELAYED disclosure (e.g. 13F)
     entity    TEXT,
     symbol    TEXT,

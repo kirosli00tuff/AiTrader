@@ -36,7 +36,7 @@ _STORE_PATH = os.path.join(KEYSTORE_DIR, "credentials.sqlite")
 class CredentialSpec:
     name: str               # stable storage key
     label: str              # field label in the UI
-    group: str              # venue/source id (e.g. "alpaca", "apify")
+    group: str              # venue/source id (e.g. "alpaca", "clankapp")
     group_label: str        # human group name
     kind: str               # "venue" | "source"
     secret: bool            # mask in UI + never echo
@@ -65,8 +65,6 @@ def _build_registry() -> dict[str, CredentialSpec]:
                                 ("ALPACA_API_KEY", "ALPACA_API_SECRET"))
         specs += _venue_keypair("coinbase", "Coinbase", mode,
                                 ("COINBASE_API_KEY", "COINBASE_API_SECRET"))
-        specs += _venue_keypair("polymarket", "Polymarket", mode,
-                                ("POLYMARKET_API_KEY", "POLYMARKET_API_SECRET"))
         m = mode.upper()
         specs += [
             CredentialSpec(f"ibkr_{mode}_host", "Host", "ibkr", "IBKR", "venue",
@@ -83,8 +81,6 @@ def _build_registry() -> dict[str, CredentialSpec]:
         CredentialSpec("clankapp_key", "API key (optional, free signup)",
                        "clankapp", "ClankApp (free, default)", "source", True,
                        ("CLANKAPP_API_KEY",)),
-        CredentialSpec("apify_token", "API token", "apify", "Apify", "source",
-                       True, ("APIFY_TOKEN",)),
         CredentialSpec("whale_alert_key", "API key", "whale_alert",
                        "Whale Alert (optional, limited free tier)", "source",
                        True, ("WHALE_ALERT_API_KEY",)),
@@ -101,10 +97,8 @@ CREDENTIALS: dict[str, CredentialSpec] = _build_registry()
 _REQUIRED_FIELDS: dict[str, tuple[str, ...]] = {
     "alpaca": ("key", "secret"),
     "coinbase": ("key", "secret"),
-    "polymarket": ("key", "secret"),
     "ibkr": ("host", "port", "account"),
     "clankapp": ("key",),
-    "apify": ("token",),
     "whale_alert": ("key",),
     "sec_api": ("key",),
 }

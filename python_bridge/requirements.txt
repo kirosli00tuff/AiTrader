@@ -13,3 +13,10 @@ cryptography==46.0.5
 # docs/DNN_ADVISORY_DESIGN.md. The shipped Stage-A model is NumPy-based so the demo
 # and tests run without it. Uncomment to enable the optional torch trainer:
 # torch==2.4.1
+
+# IBKR LIVE only. ib_insync is the client for the local IB Gateway. It is
+# imported lazily by execution/ibkr_adapter.py, so the bridge and all tests run
+# offline without it. Install it ONLY when the operator intends to place live
+# orders through a locally run IB Gateway. Live stays disabled behind the
+# approval gate regardless. Exact pin (no supply-chain drift):
+# ib_insync==0.9.86

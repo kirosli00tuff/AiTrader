@@ -30,3 +30,11 @@ target_link_libraries(test_feed_modes PRIVATE mal_core mal_market_data
                       mal_signal_engine mal_storage mal_config mal_util)
 add_test(NAME feed_modes COMMAND test_feed_modes
          WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+# IBKR routing safety: live refused while the gate is closed, and every IBKR
+# order passes the RiskGate in the routing path (no bypass). No socket opened.
+add_executable(test_ibkr_routing test_ibkr_routing.cpp)
+target_link_libraries(test_ibkr_routing PRIVATE mal_execution mal_risk
+                      mal_config mal_util)
+add_test(NAME ibkr_routing COMMAND test_ibkr_routing
+         WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})

@@ -26,11 +26,6 @@ Fill make_paper_fill(const risk::OrderProposal& o, const std::string& mode,
 }
 }  // namespace
 
-Fill PolymarketPaperAdapter::place(const risk::OrderProposal& o) {
-    // Polymarket paper trader bridge: simulate immediate fill at quoted price.
-    return make_paper_fill(o, "paper", 0.0);  // Polymarket has no maker fee here
-}
-
 Fill AlpacaPaperAdapter::sim_at_live_price(const risk::OrderProposal& o,
                                            const std::string& note) {
     // Simulated fill at the live market price carried on the proposal.
@@ -94,9 +89,49 @@ Fill CoinbaseSimAdapter::place(const risk::OrderProposal& o) {
     return make_paper_fill(o, "paper", 0.0001);
 }
 
-Fill IbkrSimPlaceholderAdapter::place(const risk::OrderProposal& o) {
-    // TODO: IBKR — this is a placeholder/sim only; complete real IBKR support.
-    return make_paper_fill(o, "paper", 0.0002);
+Fill IbkrLiveAdapter::place(const risk::OrderProposal& o) {
+    // IBKR is live only. This is reached only through the gated Live branch with
+    // live enabled, which stays off this session, so it does not execute now.
+    // When enabled, it forwards the order to IB Gateway over the Python bridge.
+    // A missing bridge or a dropped Gateway session fails the order safely and
+    // is logged by the caller. It never simulates or silently fills.
+    Fill f;
+    f.venue = o.venue;
+    f.symbol = o.symbol;
+    f.side = o.side;
+    f.mode = "live";
+    f.qty = o.qty;
+    f.price = o.price;
+    f.notional = o.notional;
+    f.ts = util::now_iso8601();
+    f.executed = false;
+
+    std::ostringstream body;
+    body << "{\"symbol\":\"" << util::json_escape(o.symbol) << "\","
+         << "\"side\":\"" << util::json_escape(o.side) << "\","
+         << "\"qty\":" << o.qty << ","
+         << "\"price\":" << o.price << "}";
+    auto resp = bridge::http_post_json(bridge_host_, bridge_port_,
+                                       "/execute/ibkr_live", body.str());
+    if (!resp) {
+        f.note = "IBKR live failed safely: IB Gateway bridge unreachable";
+        return f;
+    }
+    std::string status = bridge::json_get_string(*resp, "status", "");
+    if (status != "ok") {
+        std::string err = bridge::json_get_string(*resp, "error", "refused");
+        f.note = "IBKR live failed safely: " + err;
+        return f;
+    }
+    double fp = bridge::json_get_number(*resp, "filled_price", o.price);
+    double fq = bridge::json_get_number(*resp, "filled_qty", o.qty);
+    if (fq > 0.0) f.qty = fq;
+    f.price = fp > 0.0 ? fp : o.price;
+    f.notional = f.qty * f.price;
+    f.executed = true;
+    std::string id = bridge::json_get_string(*resp, "order_id", "");
+    f.note = "IBKR live fill" + (id.empty() ? "" : " (id=" + id + ")");
+    return f;
 }
 
 Fill DisabledLiveAdapter::place(const risk::OrderProposal& o) {

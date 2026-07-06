@@ -13,6 +13,13 @@
 #include <iostream>
 #include <string>
 
+#include <cerrno>
+#include <fcntl.h>
+#include <netdb.h>
+#include <sys/select.h>
+#include <sys/socket.h>
+#include <unistd.h>
+
 #include "config/config.hpp"
 #include "core/engine.hpp"
 
@@ -22,6 +29,48 @@ std::string arg_value(int argc, char** argv, const std::string& flag,
     for (int i = 1; i + 1 < argc; ++i)
         if (flag == argv[i]) return argv[i + 1];
     return def;
+}
+
+// Best-effort TCP reachability probe for the local IB Gateway. Non-blocking
+// connect with a short timeout. It never throws and returns false on any error.
+// It opens no data channel and places no order. It only reports whether the
+// Gateway socket accepts a connection. IBKR live stays gated off regardless.
+bool ibkr_gateway_reachable(const std::string& host, int port, int timeout_ms) {
+    struct addrinfo hints {};
+    hints.ai_family = AF_UNSPEC;
+    hints.ai_socktype = SOCK_STREAM;
+    struct addrinfo* res = nullptr;
+    const std::string port_s = std::to_string(port);
+    if (getaddrinfo(host.c_str(), port_s.c_str(), &hints, &res) != 0 || !res)
+        return false;
+    bool ok = false;
+    for (struct addrinfo* ai = res; ai && !ok; ai = ai->ai_next) {
+        int fd = ::socket(ai->ai_family, ai->ai_socktype, ai->ai_protocol);
+        if (fd < 0) continue;
+        int flags = ::fcntl(fd, F_GETFL, 0);
+        ::fcntl(fd, F_SETFL, flags | O_NONBLOCK);
+        int rc = ::connect(fd, ai->ai_addr, ai->ai_addrlen);
+        if (rc == 0) {
+            ok = true;
+        } else if (errno == EINPROGRESS) {
+            fd_set wset;
+            FD_ZERO(&wset);
+            FD_SET(fd, &wset);
+            struct timeval tv;
+            tv.tv_sec = timeout_ms / 1000;
+            tv.tv_usec = (timeout_ms % 1000) * 1000;
+            if (::select(fd + 1, nullptr, &wset, nullptr, &tv) > 0) {
+                int err = 0;
+                socklen_t len = sizeof(err);
+                if (::getsockopt(fd, SOL_SOCKET, SO_ERROR, &err, &len) == 0 &&
+                    err == 0)
+                    ok = true;
+            }
+        }
+        ::close(fd);
+    }
+    freeaddrinfo(res);
+    return ok;
 }
 
 bool arg_flag(int argc, char** argv, const std::string& flag) {
@@ -127,6 +176,26 @@ int main(int argc, char** argv) {
             if (st.momentum_enabled) strategies += "momentum ";
             if (st.reversion_enabled) strategies += "reversion ";
             if (strategies.empty()) strategies = "(none) ";
+            // IBKR is the live-only venue. Probe the local IB Gateway only when
+            // the operator opted in (connection_enabled). Reachable or not, live
+            // stays disabled behind the approval gate. An unreachable Gateway is
+            // logged and the engine continues in Alpaca/offline mode.
+            const auto& ib = cfg.ibkr;
+            const std::string ib_addr =
+                ib.gateway_host + ":" + std::to_string(ib.gateway_port);
+            std::string ibkr_status;
+            if (ib.connection_enabled) {
+                const bool up =
+                    ibkr_gateway_reachable(ib.gateway_host, ib.gateway_port, 800);
+                ibkr_status = std::string("IB Gateway ") +
+                              (up ? "REACHABLE" : "UNREACHABLE") + " at " + ib_addr +
+                              (up ? "" : " (continuing in Alpaca/offline mode)") +
+                              ", live-only, DISABLED behind approval gate";
+            } else {
+                ibkr_status = "connection check off (set ibkr.connection_enabled="
+                              "true to probe " + ib_addr + "), live-only, DISABLED"
+                              " behind approval gate";
+            }
             std::cout
                 << "  ----------------------------------------------------\n"
                 << "  council:   "
@@ -140,10 +209,19 @@ int main(int argc, char** argv) {
                 << "  regime:    ADX>=" << st.regime_adx_trend
                 << " trending / rvol>=" << st.regime_rvol_high << " range-bound\n"
                 << "  feed:      " << eff_feed << " / clock " << eff_clock
-                << (eff_feed == "replay"
+                << (eff_feed == "alpaca_paper"
+                        ? " (PRIMARY online paper loop)"
+                    : eff_feed == "replay"
                         ? " (Alpaca = paper + market-data only, no live path)"
                         : "")
                 << "\n"
+                << "  alpaca:    PAPER + market-data ONLY, no live path"
+                << (eff_feed == "alpaca_paper"
+                        ? " (ONLINE loop active: real Alpaca bars, paper orders to"
+                          " Alpaca paper)"
+                        : " (offline feed this run)")
+                << "\n"
+                << "  ibkr:      " << ibkr_status << "\n"
                 << "  thresholds: adx_min " << st.adx_min << " ema " << st.ema_fast
                 << "/" << st.ema_slow << " atr_floor " << st.atr_vol_floor
                 << " bb " << st.bb_period << "/" << st.bb_std << "sd rsi "

@@ -268,6 +268,13 @@ Config load_config(const std::string& path) {
     sim.replay_end_date = get_str(root, "simulation.replay_end_date", sim.replay_end_date);
     sim.replay_speed = get_str(root, "simulation.replay_speed", sim.replay_speed);
 
+    // ibkr live venue (connects to a locally run IB Gateway; disabled by default)
+    auto& ib = c.ibkr;
+    ib.gateway_host = get_str(root, "ibkr.gateway_host", ib.gateway_host);
+    ib.gateway_port = get_int(root, "ibkr.gateway_port", ib.gateway_port);
+    ib.connection_enabled = get_bool(root, "ibkr.connection_enabled", ib.connection_enabled);
+    ib.market_data = get_bool(root, "ibkr.market_data", ib.market_data);
+
     // adaptive
     auto& a = c.adaptive;
     a.adaptive_learning_enabled = get_bool(root, "adaptive.adaptive_learning_enabled", a.adaptive_learning_enabled);
@@ -444,9 +451,10 @@ std::vector<std::string> validate_config(const Config& cfg) {
     // Offline simulation controls (never affect live behavior).
     const auto& sim = cfg.simulation;
     if (sim.feed_mode != "flat_random_walk" &&
-        sim.feed_mode != "synthetic_regimes" && sim.feed_mode != "replay")
-        problems.push_back("simulation.feed_mode must be flat_random_walk, "
-                           "synthetic_regimes, or replay");
+        sim.feed_mode != "synthetic_regimes" && sim.feed_mode != "replay" &&
+        sim.feed_mode != "alpaca_paper")
+        problems.push_back("simulation.feed_mode must be alpaca_paper, "
+                           "flat_random_walk, synthetic_regimes, or replay");
     if (sim.clock_mode != "real" && sim.clock_mode != "simulated")
         problems.push_back("simulation.clock_mode must be real or simulated");
     if (sim.replay_speed != "fast" && sim.replay_speed != "realtime")

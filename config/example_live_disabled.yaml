@@ -27,17 +27,12 @@ market_data:
   source: mock
 
 venues:
-  polymarket:
-    mode: paper
-    live_enabled: false
-    paper_adapter: polymarket-paper-trader
-    live_adapter: polymarket_live        # TODO: real trading (not enabled)
-    whale_source: apify_polymarket_whale_tracker
+  # Alpaca handles all paper trading and paper market data. It has NO live path.
   alpaca:
     mode: paper
-    live_enabled: false
+    live_enabled: false                  # Alpaca has no live path; stays false
     paper_adapter: alpaca_paper
-    live_adapter: alpaca_live
+    live_adapter: none                   # NO live path for Alpaca, ever
     institutional_context: sec_api_13f
     paper_execution: auto                # api | sim_live_price | auto
   coinbase:                              # replaces Binance (not available in Canada)
@@ -46,11 +41,12 @@ venues:
     paper_adapter: coinbase_sim
     live_adapter: coinbase_live          # reserved
     whale_source: whale_alert_api
+  # IBKR handles live trading only. It stays disabled behind the approval gate.
   ibkr:
-    mode: recommendation_only            # TODO: complete IBKR support
+    mode: recommendation_only            # no orders placed; live stays gated off
     live_enabled: false
-    paper_adapter: ibkr_sim_placeholder
-    live_adapter: ibkr_live
+    live_adapter: ibkr_live              # live-only venue
+    institutional_context: sec_api_13f
 
 # Layer 1 — STATIC SAFETY (HARD LIMITS). Identical to default_config.yaml.
 risk:
@@ -127,11 +123,6 @@ model_weights:
   whale_signal_factor_weight: 0.10
 
 data_sources:
-  apify:
-    enabled: true
-    actor: "apimie/polymarket-whales-trader"
-    base_url: "https://api.apify.com/v2"
-    token_env: APIFY_TOKEN
   whale_alert:
     enabled: true
     base_url: "https://api.whale-alert.io/v1"

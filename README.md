@@ -58,7 +58,7 @@ source has a deterministic mock fallback.
                    ModeRouter (execution/)  disabled│reco│paper│live
                              │ live guarded by approval gate + kill switch
                              ▼
-                   Paper adapters (Polymarket, Alpaca, …)
+                   Paper adapters (Alpaca, Coinbase)
                              │
                              ▼
                    SQLite (storage/) ── single source of truth
@@ -115,7 +115,7 @@ expectancy, drawdown below threshold, explicit manual confirmation).
 | `tests/` | CTest C++ unit tests + pytest Python tests | C++/Py |
 | `llm_consensus/` | multi-LLM consensus advisory service | Python |
 | `ml_factor/` | NumPy DNN advisory factor + registry + trainer | Python |
-| `whale_signal/` | ClankApp / Apify / SEC-EDGAR-13F (+ optional Whale Alert) adapters + scoring | Python |
+| `whale_signal/` | ClankApp / SEC-EDGAR-13F (+ optional Whale Alert) adapters + scoring | Python |
 | `python_bridge/` | JSON-over-HTTP RPC server + client | Python |
 | `ui/` | Plotly Dash control board | Python |
 | `ops/` | `run_demo.sh`/`demo.py` offline demo; `start.sh`/`start.bat`/`stop.sh` 24/7 local launchers | Bash/Bat/Py |
@@ -434,7 +434,6 @@ Free-first by default — the app runs with **no paid keys**:
 | Source | Adapter | Notes |
 |--------|---------|-------|
 | **ClankApp** (free crypto/on-chain) | `ClankAppAdapter` (**default**) | fully free (~10 calls/min, ~21 chains); `CLANKAPP_API_KEY` optional (email signup); mock fallback |
-| Apify Polymarket whale-tracker | `ApifyWhaleAdapter` (`apimie/polymarket-whales-trader`) | needs `APIFY_TOKEN`; mock otherwise |
 | **SEC EDGAR 13F** (free) | `Sec13FAdapter` (**default**) | official `data.sec.gov` / `efts.sec.gov` REST — **no key**, just a descriptive `User-Agent`; **DELAYED**, equity-only, down-weighted; `SEC_API_KEY` optional override only |
 | Whale Alert API | `WhaleAlertAdapter` (optional) | crypto-only, ≥ $500k; limited free tier; needs `WHALE_ALERT_API_KEY`; **not** in the default chain |
 
@@ -462,9 +461,9 @@ Credentials can be entered two ways, with a single runtime resolver
 (`account_manager/credentials.py`) used everywhere a key is consumed:
 
 1. **In-app** — the dashboard's **Accounts / Connections** tab lets you type and
-   save keys/secrets per venue (Alpaca, Coinbase, IBKR, Polymarket) with
+   save keys/secrets per venue (Alpaca, Coinbase, IBKR) with
    **separate paper and live fields**, and per data source (ClankApp — free,
-   default; Apify; SEC EDGAR — free, no key needed; Whale Alert — optional,
+   default; SEC EDGAR — free, no key needed; Whale Alert — optional,
    limited free tier). Secret inputs are masked (`type=password`).
 2. **Environment / .env** — the existing `*_env` names, plus paper/live-specific
    variants (e.g. `ALPACA_LIVE_API_KEY`, falling back to `ALPACA_API_KEY`).

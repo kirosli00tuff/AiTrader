@@ -43,17 +43,14 @@ market_data:
 # Live defaults to disabled. Paper/recommendation_only only, out of the box.
 # -----------------------------------------------------------------------------
 venues:
-  polymarket:
-    mode: paper
-    live_enabled: false
-    paper_adapter: polymarket-paper-trader
-    live_adapter: polymarket_live          # TODO: implement real trading later
-    whale_source: apify_polymarket_whale_tracker
+  # Alpaca handles all paper trading and paper market data. It has NO live path
+  # and must never be wired to one. It is the primary online loop (feed_mode
+  # alpaca_paper).
   alpaca:
     mode: paper                            # primary continuous testing/training venue
-    live_enabled: false
+    live_enabled: false                    # Alpaca has no live path; stays false
     paper_adapter: alpaca_paper            # Alpaca paper API (stocks + crypto)
-    live_adapter: alpaca_live              # architecture ready, disabled
+    live_adapter: none                     # NO live path for Alpaca, ever
     institutional_context: sec_api_13f     # delayed disclosure context, NOT live flow
     paper_execution: auto                  # api | sim_live_price | auto
                                            # auto: use Alpaca paper API, else
@@ -66,11 +63,13 @@ venues:
     paper_adapter: coinbase_sim
     live_adapter: coinbase_live            # reserved; live adapter not implemented
     whale_source: whale_alert_api
+  # IBKR handles live trading only. It routes through the gated Live branch and
+  # stays disabled behind the approval gate. See the ibkr block below for the IB
+  # Gateway connection settings.
   ibkr:
-    mode: recommendation_only              # scaffold/data only for now
-    live_enabled: false
-    paper_adapter: ibkr_sim_placeholder    # TODO: complete IBKR support
-    live_adapter: ibkr_live                # TODO
+    mode: recommendation_only              # no orders placed; live stays gated off
+    live_enabled: false                    # gated off; operator flips live, not this app
+    live_adapter: ibkr_live                # live-only venue
     institutional_context: sec_api_13f
 
 # -----------------------------------------------------------------------------
@@ -184,12 +183,19 @@ rl:
 # let it generate real native fills that feed the real-fill tuner, train_real,
 # and (once enabled + past its gate) RL. NOTE: Alpaca is a PAPER + MARKET-DATA
 # venue only. It has no live brokerage path and must never be wired to one.
-#   feed_mode  : flat_random_walk (default, unchanged) | synthetic_regimes | replay
-#     - synthetic_regimes: deterministic trending/range/volatile legs that cross
-#       the ADX + realized-vol thresholds so momentum AND reversion enter.
-#     - replay: drives the loop from real bars already in the 'bars' table (run
-#       the Alpaca historical backfill first); fails loudly if the range is empty.
-#   clock_mode : real (wall-clock; continuous live-adjacent loop) | simulated
+#   feed_mode  : alpaca_paper (primary ONLINE loop) | flat_random_walk (default) |
+#                synthetic_regimes | replay
+#     - alpaca_paper: the primary online loop. Pulls live market data from Alpaca
+#       and routes paper orders to Alpaca paper (needs --bridge). Alpaca is paper
+#       and market data only, with no live path.
+#     - synthetic_regimes: TEST tool. Deterministic trending/range/volatile legs
+#       that cross the ADX + realized-vol thresholds so momentum AND reversion
+#       enter. For tests and threshold tuning.
+#     - replay: TEST tool. Drives the loop from real bars already in the 'bars'
+#       table (run the Alpaca historical backfill first). Fails loudly if the
+#       range is empty.
+#     - flat_random_walk: retained for existing tests. Default so tests do not shift.
+#   clock_mode : real (wall-clock; online Alpaca loop + continuous mode) | simulated
 #     (bar time advances internally so finite/synthetic runs actually close bars).
 # -----------------------------------------------------------------------------
 simulation:
@@ -199,6 +205,20 @@ simulation:
   replay_start_date: ""                  # inclusive YYYY-MM-DD ("" = earliest stored)
   replay_end_date: ""                    # inclusive YYYY-MM-DD ("" = latest stored)
   replay_speed: fast                     # fast (ignore wall-clock) | realtime
+
+# -----------------------------------------------------------------------------
+# IBKR live venue. IBKR handles live trading only. It connects to a locally run
+# IB Gateway session that the operator starts and authenticates. No IBKR
+# credentials pass through this app. IBKR stays disabled behind the approval
+# gate. connection_enabled only allows a health check and, when the operator
+# later opens the live gate, live routing. It does NOT enable live trading by
+# itself. Default false.
+# -----------------------------------------------------------------------------
+ibkr:
+  gateway_host: 127.0.0.1
+  gateway_port: 4001                     # IB Gateway live socket (4002 = paper GW)
+  connection_enabled: false              # health check + future live routing; OFF
+  market_data: false                     # use Alpaca for market data; IBKR data off
 
 # -----------------------------------------------------------------------------
 # Adaptive learning (Layer 2) — bounded, logged, rollback-capable
@@ -306,11 +326,6 @@ llm:
 # in this file.
 # -----------------------------------------------------------------------------
 data_sources:
-  apify:
-    enabled: true
-    actor: "apimie/polymarket-whales-trader"   # Polymarket whale-tracker
-    base_url: "https://api.apify.com/v2"
-    token_env: APIFY_TOKEN
   whale_alert:
     enabled: true
     base_url: "https://api.whale-alert.io/v1"

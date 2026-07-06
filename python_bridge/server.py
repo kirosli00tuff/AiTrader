@@ -7,7 +7,11 @@ Exposes advisory scoring to the C++ core:
   POST /score/whale      -> whale / smart-money signal
   POST /marketdata/alpaca -> latest prices for requested symbols (real-time)
   POST /execute/alpaca_paper -> submit an Alpaca PAPER trading order
+  POST /execute/ibkr_live -> submit an IBKR LIVE order via local IB Gateway
+                             (live-only venue, gated off; reached only when the
+                             operator enables live and the C++ gate allows it)
   GET  /health           -> liveness
+  GET  /health/ibkr      -> whether the local IB Gateway socket is reachable
 
 Each handler returns a flat JSON object that includes bridge-compatible
 {bias, confidence, edge} aliases so the C++ engine's minimal JSON reader can
@@ -30,6 +34,7 @@ from ml_factor import score_state             # noqa: E402
 from rl_advisory import rl_enabled, rl_min_real_fills, score_rl  # noqa: E402  (light: no torch/gym)
 from whale_signal import whale_signal_for     # noqa: E402
 from market_data import alpaca_source         # noqa: E402
+from execution import ibkr_adapter             # noqa: E402  (lazy ib_insync inside)
 from account_manager.log_safety import safe_print  # noqa: E402
 
 # Loopback addresses are the only bind targets allowed by default. The bridge
@@ -64,6 +69,16 @@ def _handle(path: str, payload: dict) -> dict:
             qty=float(payload.get("qty", 0.0)),
             price=float(payload.get("price", 0.0)),
         )
+    if path == "/execute/ibkr_live":
+        # IBKR live order via the local IB Gateway. This runs only when the C++
+        # gate and mode router have already allowed a live order (gated off this
+        # session). A missing Gateway returns an unavailable marker, never a fill.
+        return ibkr_adapter.place_order(
+            symbol=str(payload.get("symbol", "")),
+            side=str(payload.get("side", "buy")),
+            qty=float(payload.get("qty", 0.0)),
+            price=float(payload.get("price", 0.0)),
+        )
     raise KeyError(path)
 
 
@@ -82,6 +97,13 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path == "/health":
             self._send(200, {"status": "ok"})
+        elif self.path == "/health/ibkr":
+            # Raw socket probe of the local IB Gateway. Reports reachability only.
+            # It never places an order and never enables live.
+            reachable = ibkr_adapter.gateway_reachable()
+            self._send(200, {"status": "ok", "reachable": reachable,
+                             "host": ibkr_adapter._env_host(),
+                             "port": ibkr_adapter._env_port()})
         else:
             self._send(404, {"error": "not found"})
 

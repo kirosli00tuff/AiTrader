@@ -8,7 +8,7 @@ at `/home/user/workspace/market-ai-lab` (directory skeleton already created).
 - Core: **C++20**, build with **CMake** (+ CTest). Storage: **SQLite** (single DB file =
   source of truth, shared between C++ core and Python services).
 - Python services: **llm_consensus**, **ml_factor** (dnn_advisory, PyTorch), **whale_signal**
-  (Apify / Whale Alert / SEC 13F), **python_bridge** (thin JSON-over-HTTP/stdio RPC), and
+  (ClankApp / Whale Alert / SEC 13F), **python_bridge** (thin JSON-over-HTTP/stdio RPC), and
   **ui** = **Plotly Dash** dashboard (refresh via `dcc.Interval`, default 5s).
 - Python deps go in `python_bridge/requirements.txt` and `ui/requirements.txt`.
 
@@ -25,7 +25,7 @@ at `/home/user/workspace/market-ai-lab` (directory skeleton already created).
    the fields named in the design docs. dnn_advisory sizing capped by `dnn_position_scale_cap`,
    whale by `whale_position_scale_cap`. (RL is a separate advisory module, `rl_advisory`, shipped
    OFF behind the `rl_min_real_fills` gate — same 0.5 cap, never a sole controller.)
-5. Whale module uses ONLY: Apify Polymarket whale-tracker, Whale Alert API, SEC API 13F
+5. Whale module uses ONLY: ClankApp, Whale Alert API, SEC API 13F
    (13F clearly labelled DELAYED disclosure, not live flow). Wrap each in `whale_signal/` with
    a clean adapter + a MOCK/offline fallback so the demo runs without live keys.
 6. Every model's verdict + confidence + edge + weight must be visible AND adjustable in the UI.
@@ -47,7 +47,7 @@ at `/home/user/workspace/market-ai-lab` (directory skeleton already created).
 - `market_data/` C++: streaming/poll ingestion abstraction (mock feed for demo).
 - `news_ingestion/` C++ core + python fetchers: catalyst score.
 - `execution/` C++: mode router (recommendation_only|paper|live) + per-venue adapter
-  interface. Paper adapters: Polymarket→polymarket-paper-trader bridge, Alpaca→paper API,
+  interface. Paper adapters: Alpaca→paper API,
   Coinbase→sim, IBKR→placeholder/sim. Live adapters present but DISABLED by default with
   clear TODO markers for Coinbase + IBKR.
 - `account_manager/` C++: venue/credential/mode state machine + connections model.
@@ -56,7 +56,7 @@ at `/home/user/workspace/market-ai-lab` (directory skeleton already created).
 - `ml_factor/` Python: dnn_advisory factor per DNN_ADVISORY_DESIGN.md — Stage A supervised DNN
   first (PyTorch), training/eval pipeline, model versioning, champion/challenger, rollback,
   logged outputs. Ship a tiny trained/initialized model so the demo emits real signals.
-- `whale_signal/` Python: Apify + Whale Alert + SEC 13F adapters (with mocks) → whale outputs
+- `whale_signal/` Python: ClankApp + Whale Alert + SEC 13F adapters (with mocks) → whale outputs
   + actor ranking + useful-vs-noisy scoring.
 - `python_bridge/` Python: RPC server exposing llm/ml/whale scoring to C++ core over local
   JSON; also a Python client the C++ side calls.
@@ -73,7 +73,7 @@ at `/home/user/workspace/market-ai-lab` (directory skeleton already created).
 
 ## Demo (must run end-to-end, offline, no live keys)
 Provide `ops/run_demo.sh` (or `ops/demo.py`) that: seeds the SQLite DB, runs a paper loop
-across Polymarket(paper) + Alpaca(paper) with mock market data, produces multi-LLM consensus,
+across Alpaca(paper) with mock market data, produces multi-LLM consensus,
 dnn_advisory signal, whale signal, risk-gated paper execution, and launches the Dash
 dashboard. README documents exact build + run steps.
 
@@ -83,9 +83,9 @@ dashboard. README documents exact build + run steps.
 - `README.md` covering EVERY topic in the user's deliverables list (build, run, venue setup,
   dashboard overview, model-weight control, whale signal, paper/live behaviour, live
   approval-gate behaviour, account connection setup, 4-layer architecture, dnn_advisory explanation,
-  kill-switch behaviour, default control values, external data-source setup for Apify / Whale
+  kill-switch behaviour, default control values, external data-source setup for ClankApp / Whale
   Alert / SEC API 13F).
-- `.env.example` with APIFY_TOKEN, WHALE_ALERT_API_KEY, SEC_API_KEY, ALPACA_* etc.
+- `.env.example` with WHALE_ALERT_API_KEY, SEC_API_KEY, ALPACA_* etc.
 - Example configs with safe defaults (already at `config/default_config.yaml`; add a
   `config/example_live_disabled.yaml` showing a fully-paper safe profile).
 - Clear `TODO:` markers for incomplete Coinbase + IBKR features.

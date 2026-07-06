@@ -85,12 +85,12 @@ def test_activity_usefulness_transparent_and_bounded():
 
 
 def test_default_adapters_present():
-    # Free-first: ClankApp is the default crypto whale source; Apify + free
-    # EDGAR 13F round out coverage. Whale Alert is optional (key-gated) and not
-    # in the default chain.
+    # Free-first. ClankApp is the default crypto whale source. The free EDGAR 13F
+    # adapter adds delayed institutional context. Whale Alert is optional
+    # (key-gated) and not in the default chain. Apify/Polymarket is removed.
     sources = {a.source for a in default_adapters()}
-    assert {"clankapp", "apify", "sec_13f"} <= sources
-    assert sources.isdisjoint({"whale_alert"})
+    assert {"clankapp", "sec_13f"} <= sources
+    assert sources.isdisjoint({"whale_alert", "apify"})
 
 
 def test_clankapp_is_default_primary():

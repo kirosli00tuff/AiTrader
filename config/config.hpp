@@ -238,6 +238,17 @@ struct SimulationConfig {
     std::string replay_speed = "fast";       // fast (ignore wall-clock) | realtime
 };
 
+// IBKR live venue connection settings. IBKR is live only and connects to a
+// locally run IB Gateway session the operator starts and authenticates. No IBKR
+// credentials pass through this app. connection_enabled default false: IBKR
+// stays disabled behind the approval gate this session.
+struct IbkrConfig {
+    std::string gateway_host = "127.0.0.1";
+    int gateway_port = 4001;          // IB Gateway live socket
+    bool connection_enabled = false;  // health check + future live routing; OFF
+    bool market_data = false;         // Alpaca serves market data; IBKR data off
+};
+
 struct Config {
     SystemConfig system;
     EngineConfig engine;
@@ -253,6 +264,7 @@ struct Config {
     LiveApprovalConfig live_approval;
     DashboardConfig dashboard;
     SimulationConfig simulation;
+    IbkrConfig ibkr;
     ModelWeights model_weights;
 
     const VenueConfig* find_venue(const std::string& name) const;

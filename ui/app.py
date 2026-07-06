@@ -685,9 +685,8 @@ def _advanced_page() -> html.Div:
 # --- Page: Accounts / Connections -------------------------------------------
 
 VENUE_GROUPS = [("alpaca", "Alpaca"), ("coinbase", "Coinbase"),
-                ("ibkr", "IBKR"), ("polymarket", "Polymarket")]
+                ("ibkr", "IBKR")]
 SOURCE_GROUPS = [("clankapp", "ClankApp (free, default)"),
-                 ("apify", "Apify"),
                  ("sec_api", "SEC EDGAR (free, no key needed)"),
                  ("whale_alert", "Whale Alert (optional, limited free tier)")]
 
@@ -1605,7 +1604,7 @@ def _test_connection(_n, target):
     # C++ approval gate (live_requires_connected_credentials) sees it. Never
     # enables live by itself.
     note = ""
-    if mode == "live" and group in {"alpaca", "coinbase", "ibkr", "polymarket"}:
+    if mode == "live" and group in {"alpaca", "coinbase", "ibkr"}:
         db.set_venue_credentials_connected(group, result["ok"])
         note = "  •  venue_state.credentials_connected updated for approval gate"
     color = "#3fb950" if result["ok"] else "#f85149"

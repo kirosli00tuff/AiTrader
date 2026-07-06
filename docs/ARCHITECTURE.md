@@ -2,7 +2,7 @@
 
 > One-line principle: The dnn_advisory model is a core advisory intelligence layer, the
 > whale/smart-money system is a second advanced advisory layer powered specifically by
-> free-first sources (ClankApp, Apify, SEC EDGAR 13F; Whale Alert optional), the visual dashboard is a first-class control
+> free-first sources (ClankApp, SEC EDGAR 13F; Whale Alert optional), the visual dashboard is a first-class control
 > surface, every model's verdict and weight must be visible and adjustable in the app,
 > paper trading is the continuously updating training ground, and **live trading is
 > disabled by default behind an explicit in-app approval gate.**
@@ -49,7 +49,6 @@ explicit, multi-step, in-app approval gate.
    │                                                ▼ (approved order only)              │
    │   execution ◀── mode router: recommendation_only | paper | live (gated)            │
    │        │                                                                            │
-   │        ├─ Polymarket → polymarket-paper-trader (paper) / live adapter (disabled)    │
    │        ├─ Alpaca     → Alpaca paper API (paper)        / live adapter (disabled)    │
    │        ├─ Coinbase   → simulated/test (paper)          / live adapter (disabled)    │
    │        └─ IBKR       → scaffold/sim placeholder        / live adapter (disabled)    │
@@ -68,7 +67,7 @@ The dnn_advisory factor is **important but not sovereign**. Authority flows down
 | **1** | **Static Safety** | Enforces hard risk limits, kill switch, hard stops. | **FINAL — never bypassable** by LLMs, DNN, RL, whale logic, adaptive logic, or execution adapters. |
 | **2** | **Adaptive Strategy** | Learns gradually from logged paper results; tunes weights/thresholds/sizing within safe ranges. | May propose/adjust, but cannot weaken Layer-1 limits. Every change logged + rollback-able. |
 | **3** | **dnn_advisory Factor** (RL split into the separate `rl_advisory` module, shipped OFF behind the `rl_min_real_fills` gate) | Outputs structured advisory signals; evolves via continual learning. | **Advisory only.** Cannot bypass risk or self-enable live. |
-| **4** | **Smart-Money / Whale Signal** | Tracks large investor behaviour via ClankApp / Apify / SEC EDGAR 13F (Whale Alert optional). | **Advisory only.** Input, not controller. |
+| **4** | **Smart-Money / Whale Signal** | Tracks large investor behaviour via ClankApp / SEC EDGAR 13F (Whale Alert optional). | **Advisory only.** Input, not controller. |
 
 ### Layer 1 — Static Safety (C++, `risk/`)
 Enforces, as hard config, all of:
@@ -96,7 +95,7 @@ RL is now a separate advisory module (`rl_advisory`, PPO), shipped OFF behind th
 Outputs: `whale_bias`, `whale_confidence`, `whale_flow_direction`,
 `whale_activity_score`, `whale_follow_signal`, `whale_contradiction_flag`,
 `whale_regime_label`. Free-first sources: **ClankApp** (free crypto/on-chain
-large transfers — default), **Apify Polymarket whale-tracker**, **SEC EDGAR 13F**
+large transfers — default), **SEC EDGAR 13F**
 (free `data.sec.gov` REST, no key — institutional holdings labelled as **delayed
 disclosure**, not live trade flow). **Whale Alert API** is an optional key-gated
 alternative.
@@ -117,7 +116,7 @@ alternative.
 | `storage/` (SQLite, event log) | **C++20** | Single source of truth; shared with Python via the same DB file. |
 | `llm_consensus/` | **Python bridge** | LLM client libraries + multi-model ensemble live in Python. |
 | `ml_factor/` (dnn_advisory) | **Python** | PyTorch/sklearn ecosystem. Justified ML service. |
-| `whale_signal/` | **Python** | ClankApp / Apify / SEC EDGAR 13F integrations (Whale Alert optional) + scoring. |
+| `whale_signal/` | **Python** | ClankApp / SEC EDGAR 13F integrations (Whale Alert optional) + scoring. |
 | `python_bridge/` | **Python** | Thin RPC/IPC between C++ core and Python services. |
 | `ui/` (dashboard / control board) | **Python (Dash/Plotly)** | Fastest path to a rich live web dashboard. |
 | `ops/`, `tests/`, `docs/` | mixed | CMake/CTest (C++) + pytest (Python). |
@@ -149,7 +148,7 @@ Defaults: every venue `paper` or `recommendation_only`; **live disabled by defau
 | Mode | Behaviour |
 |------|-----------|
 | `recommendation_only` | Show trade ideas only; no orders placed. |
-| `paper` | Polymarket→polymarket-paper-trader · Alpaca→Alpaca paper API · Coinbase→sim/test · IBKR→placeholder/sim. |
+| `paper` | Alpaca→Alpaca paper API · Coinbase→sim/test. IBKR is live-only (gated off), not a paper route. |
 | `live` | **Only if** credentials present **and** explicitly enabled in-app **and** approval gate passed **and** risk engine allows **and** kill-switch conditions clear. |
 
 ## 6. Continuous Learning Loop (paper = training ground)
@@ -171,6 +170,6 @@ Controlled · versioned · auditable · rollback-capable · always subordinate t
 1. **Phase 1** — Architecture summary, dnn_advisory design, dashboard stack, C++/Python map. *(this doc set)*
 2. **Phase 2** — config, logging, storage, Layer-1 safety, Layer-2 adaptive, account/venue models, dashboard scaffold, default config + validation.
 3. **Phase 3** — market/news ingestion, multi-LLM consensus, dnn_advisory factor, whale integrations, factor-combination engine, model-weight control logic.
-4. **Phase 4** — Polymarket paper route, Alpaca paper route, full live dashboard (trades/PnL/exposure/risk/learning/approval/model-verdict/weights/whale).
+4. **Phase 4** — Alpaca paper route, full live dashboard (trades/PnL/exposure/risk/learning/approval/model-verdict/weights/whale).
 5. **Phase 5** — Coinbase sim/test, IBKR scaffold/data, expanded analytics + learning views.
 6. **Phase 6** — in-app live-mode switching, live config forms, approval-gate workflow, venue safety checks, disabled-by-default live adapters.

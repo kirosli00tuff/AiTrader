@@ -2,7 +2,6 @@
 
 Each adapter targets exactly one allowed source:
   - ClankAppAdapter    -> ClankApp free crypto/on-chain whale API (DEFAULT)
-  - ApifyWhaleAdapter  -> Apify Polymarket whale-tracker actor
   - WhaleAlertAdapter  -> Whale Alert API (crypto on-chain large transfers, key-gated)
   - Sec13FAdapter      -> SEC EDGAR 13F (free, DELAYED institutional holdings)
 
@@ -45,7 +44,7 @@ def _requests():
 
 # Live network fetches are OFF by default (Task 7): the whole app runs offline on
 # deterministic mocks unless an operator explicitly opts in. Crypto/on-chain
-# whale feeds (ClankApp, Apify, Whale Alert) are gated by WHALE_LIVE_ENABLED;
+# whale feeds (ClankApp, Whale Alert) are gated by WHALE_LIVE_ENABLED.
 # SEC EDGAR is gated separately by SEC_EDGAR_ENABLED. Both default false.
 WHALE_LIVE_ENABLED_ENV = "WHALE_LIVE_ENABLED"
 SEC_EDGAR_ENABLED_ENV = "SEC_EDGAR_ENABLED"
@@ -73,7 +72,7 @@ def _user_agent() -> str:
 
 @dataclass
 class WhaleActivity:
-    source: str          # clankapp | apify | whale_alert | sec_13f
+    source: str          # clankapp | whale_alert | sec_13f
     entity: str          # actor / wallet / exchange / institution
     symbol: str
     direction: str       # inflow | outflow | long | short
@@ -224,88 +223,6 @@ class ClankAppAdapter:
                 symbol=symbol,
                 direction=direction,
                 value_usd=value,
-                delayed=False,
-                ts=_now(),
-            ))
-        return out
-
-
-class ApifyWhaleAdapter:
-    """Apify Polymarket whale-tracker actor adapter."""
-
-    source = "apify"
-    BASE_URL = "https://api.apify.com/v2/acts"
-
-    def __init__(self, token_env: str = "APIFY_TOKEN",
-                 actor: str = "apimie/polymarket-whales-trader"):
-        self.token = _resolve(token_env)
-        self.actor = actor
-
-    def is_live(self) -> bool:
-        return bool(self.token)
-
-    def fetch(self, symbol: str) -> list[WhaleActivity]:
-        # Live requires BOTH an operator opt-in and a token; default is mock.
-        if not (_flag(WHALE_LIVE_ENABLED_ENV) and self.is_live()):
-            return self._mock(symbol)
-        try:
-            return self._fetch_live(symbol)
-        except Exception:
-            return self._mock(symbol)
-
-    def _fetch_live(self, symbol: str) -> list[WhaleActivity]:
-        requests = _requests()
-        # Read the actor's last run dataset items (no new run triggered).
-        actor_path = self.actor.replace("/", "~")
-        url = f"{self.BASE_URL}/{actor_path}/runs/last/dataset/items"
-        headers = {"User-Agent": _user_agent(), "Accept": "application/json"}
-        resp = requests.get(url, params={"token": self.token, "limit": 50},
-                            headers=headers, timeout=_TIMEOUT)
-        if resp.status_code == 429:
-            return self._mock(symbol)
-        resp.raise_for_status()
-        rows = resp.json()
-        if not isinstance(rows, list):
-            return self._mock(symbol)
-        out: list[WhaleActivity] = []
-        for row in rows:
-            if not isinstance(row, dict):
-                continue
-            row_sym = str(row.get("market") or row.get("symbol") or symbol)
-            value = _num(row.get("size_usd"), row.get("value_usd"),
-                        row.get("usd"), row.get("amount"), row.get("size"))
-            if value is None:
-                continue
-            side = str(row.get("side") or row.get("outcome") or "").lower()
-            direction = "long" if side in ("buy", "yes", "long") else "short"
-            entity = (row.get("trader") or row.get("user") or row.get("wallet")
-                      or "poly_whale")
-            ts = row.get("timestamp") or row.get("ts")
-            out.append(WhaleActivity(
-                source=self.source,
-                entity=str(entity),
-                symbol=row_sym,
-                direction=direction,
-                value_usd=float(value),
-                delayed=False,
-                ts=_ts_from_epoch(ts) if isinstance(ts, (int, float)) else (str(ts) if ts else _now()),
-            ))
-        if not out:
-            return self._mock(symbol)
-        return out
-
-    def _mock(self, symbol: str) -> list[WhaleActivity]:
-        out = []
-        n = 1 + _det("apify_n" + symbol, 3)
-        for i in range(n):
-            seed = f"apify{symbol}{i}"
-            direction = "long" if _det(seed, 2) else "short"
-            out.append(WhaleActivity(
-                source=self.source,
-                entity=f"poly_whale_{_det('e' + seed, 50):02d}",
-                symbol=symbol,
-                direction=direction,
-                value_usd=float(50_000 + _det("v" + seed, 950_000)),
                 delayed=False,
                 ts=_now(),
             ))
@@ -535,9 +452,9 @@ def _num(*candidates):
 def default_adapters() -> list:
     """Free-first default chain.
 
-    ClankApp (free, keyless-capable crypto) is the primary whale source; Apify
-    and the free EDGAR 13F adapter round out coverage. Whale Alert stays
-    available as an OPTIONAL key-gated alternative but is not in the default
-    chain (its free tier is limited) — add it explicitly if a key is present.
+    ClankApp is the primary crypto whale source. The free EDGAR 13F adapter adds
+    delayed institutional context. Whale Alert stays available as an optional
+    key-gated alternative but is not in the default chain, since its free tier is
+    limited. Add it explicitly if a key is present.
     """
-    return [ClankAppAdapter(), ApifyWhaleAdapter(), Sec13FAdapter()]
+    return [ClankAppAdapter(), Sec13FAdapter()]
