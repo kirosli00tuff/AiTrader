@@ -53,6 +53,13 @@ Still open (not defects — known limits):
 - Live-approval workflow not wired end to end (`try_enable_live` never called). Safe, but incomplete.
 - Real LLM providers untested against live keys; `rl_advisory` untrained (real-fill gate unmet); `dnn_advisory` still shipping the synthetic champion until enough real labelled samples exist.
 
+New flags from the feed-work session (2026-07-05, `369b6a6`):
+
+- **`rule_based` now carries the native signal's conviction on ALL native runs, not just synthetic** — a real decision-path change (previously the gate's confidence/edge came only from advisory factors). It is what makes fills flow, but with a real LLM council + trained `dnn_advisory` the native setup then contributes to BOTH direction/sizing AND the gate's confidence/edge (mild double-counting). Confirm this is intended before any live-adjacent use. This is the one that matters for future live work.
+- **"≥30 closed trades per factor" (Task-5 wording) is not met for momentum:** the real tuner gate is ≥30 TOTAL closed (`learning/adapt_gate.hpp`), and EMA20/100 crossovers are rare (3 fired in the verified run). Total-closed is what the tuner uses; the per-factor phrasing is not satisfied.
+- **Cut B (equities market-hours council skip) still uses real wall-clock** (`util::us_equity_market_open()`) even under `clock_mode: simulated`. Benign offline (mock factor values don't depend on the skip), but inconsistent — under simulated time the skip should key off the simulated timestamp.
+- **Replay uses a synthetic sequential epoch for council-cooldown timing** (`base + index*bar_seconds`), not the true historical epoch. The per-day trade cap correctly uses the real historical `ts`; only the cooldown spacing is approximate.
+
 ## Session Log
 
 Newest entries at top. One entry per session. Format: date, model used, what changed, what is stable, what is next.
