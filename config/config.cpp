@@ -224,6 +224,7 @@ Config load_config(const std::string& path) {
     st.rsi_oversold = get_double(root, "strategy.rsi_oversold", st.rsi_oversold);
     st.rsi_overbought = get_double(root, "strategy.rsi_overbought", st.rsi_overbought);
     st.vol_lookback = get_int(root, "strategy.vol_lookback", st.vol_lookback);
+    st.vol_multiple = get_double(root, "strategy.vol_multiple", st.vol_multiple);
     st.regime_adx_trend = get_double(root, "strategy.regime_adx_trend", st.regime_adx_trend);
     st.regime_rvol_high = get_double(root, "strategy.regime_rvol_high", st.regime_rvol_high);
     st.crypto_allow_short = get_bool(root, "strategy.crypto_allow_short", st.crypto_allow_short);
@@ -255,6 +256,17 @@ Config load_config(const std::string& path) {
     auto& rl = c.rl;
     rl.rl_enabled = get_bool(root, "rl.rl_enabled", rl.rl_enabled);
     rl.rl_min_real_fills = get_int(root, "rl.rl_min_real_fills", rl.rl_min_real_fills);
+
+    // offline simulation (feed generation + clock; no effect on live behavior)
+    auto& sim = c.simulation;
+    sim.feed_mode = get_str(root, "simulation.feed_mode", sim.feed_mode);
+    sim.clock_mode = get_str(root, "simulation.clock_mode", sim.clock_mode);
+    sim.synthetic_seed = static_cast<unsigned long long>(
+        get_int(root, "simulation.synthetic_seed",
+                static_cast<int>(sim.synthetic_seed)));
+    sim.replay_start_date = get_str(root, "simulation.replay_start_date", sim.replay_start_date);
+    sim.replay_end_date = get_str(root, "simulation.replay_end_date", sim.replay_end_date);
+    sim.replay_speed = get_str(root, "simulation.replay_speed", sim.replay_speed);
 
     // adaptive
     auto& a = c.adaptive;
@@ -421,6 +433,24 @@ std::vector<std::string> validate_config(const Config& cfg) {
         problems.push_back("strategy ATR stop/target multipliers must be > 0");
     if (st.whitelist.empty())
         problems.push_back("strategy.whitelist must not be empty");
+    if (st.vol_multiple <= 0.0)
+        problems.push_back("strategy.vol_multiple must be > 0");
+    if (st.ema_fast < 1 || st.atr_period < 1 || st.bb_period < 1 ||
+        st.rsi_period < 1 || st.vol_lookback < 1)
+        problems.push_back("strategy periods (ema/atr/bb/rsi/vol) must be >= 1");
+    if (st.bb_std <= 0.0)
+        problems.push_back("strategy.bb_std must be > 0");
+
+    // Offline simulation controls (never affect live behavior).
+    const auto& sim = cfg.simulation;
+    if (sim.feed_mode != "flat_random_walk" &&
+        sim.feed_mode != "synthetic_regimes" && sim.feed_mode != "replay")
+        problems.push_back("simulation.feed_mode must be flat_random_walk, "
+                           "synthetic_regimes, or replay");
+    if (sim.clock_mode != "real" && sim.clock_mode != "simulated")
+        problems.push_back("simulation.clock_mode must be real or simulated");
+    if (sim.replay_speed != "fast" && sim.replay_speed != "realtime")
+        problems.push_back("simulation.replay_speed must be fast or realtime");
 
     // Council cost controls. Thresholds are separate knobs and must be sane
     // fractions; they never relax the Layer-1 gate.

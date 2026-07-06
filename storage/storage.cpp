@@ -256,6 +256,45 @@ std::vector<BarRow> Storage::recent_bars(const std::string& symbol,
     return rows;
 }
 
+std::vector<BarRow> Storage::bars_in_range(const std::string& symbol,
+                                           const std::string& timeframe,
+                                           const std::string& start_ts,
+                                           const std::string& end_ts) {
+    // ISO-8601 timestamps sort lexicographically, so string bounds work as time
+    // bounds. Each bound is optional (empty => unbounded on that side).
+    std::string sql =
+        "SELECT venue,symbol,timeframe,timestamp,open,high,low,close,volume"
+        " FROM bars WHERE symbol=? AND timeframe=?";
+    if (!start_ts.empty()) sql += " AND timestamp>=?";
+    if (!end_ts.empty()) sql += " AND timestamp<=?";
+    sql += " ORDER BY timestamp ASC";
+    Stmt s(db_, sql.c_str());
+    int idx = 1;
+    s.bind(idx++, symbol);
+    s.bind(idx++, timeframe);
+    if (!start_ts.empty()) s.bind(idx++, start_ts);
+    if (!end_ts.empty()) s.bind(idx++, end_ts);
+    auto col_text = [&](int i) -> std::string {
+        const unsigned char* t = sqlite3_column_text(s.raw(), i);
+        return t ? reinterpret_cast<const char*>(t) : "";
+    };
+    std::vector<BarRow> rows;
+    while (sqlite3_step(s.raw()) == SQLITE_ROW) {
+        BarRow b;
+        b.venue = col_text(0);
+        b.symbol = col_text(1);
+        b.timeframe = col_text(2);
+        b.timestamp = col_text(3);
+        b.open = sqlite3_column_double(s.raw(), 4);
+        b.high = sqlite3_column_double(s.raw(), 5);
+        b.low = sqlite3_column_double(s.raw(), 6);
+        b.close = sqlite3_column_double(s.raw(), 7);
+        b.volume = sqlite3_column_double(s.raw(), 8);
+        rows.push_back(std::move(b));
+    }
+    return rows;
+}
+
 void Storage::upsert_regime(const std::string& symbol, const std::string& regime,
                             double adx, double rvol,
                             const std::string& updated_ts) {

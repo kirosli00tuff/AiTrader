@@ -297,7 +297,7 @@ StrategySignal evaluate_reversion(const std::vector<Bar>& bars,
     double rsi_now = rs[n - 1], rsi_prev = rs[n - 2];
     double price = closes[n - 1], prev_price = closes[n - 2];
     double vavg = avg_volume(bars, cfg.vol_lookback);
-    bool vol_ok = vavg > 0 && bars[n - 1].volume > vavg;
+    bool vol_ok = vavg > 0 && bars[n - 1].volume > cfg.vol_multiple * vavg;
     double atr_v = atr(bars, cfg.atr_period);
     // Long reentry: prior bar stretched below the lower band, now back inside,
     // RSI leaving oversold. Short reentry is the mirror at the upper band.

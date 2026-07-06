@@ -10,6 +10,11 @@ namespace mal::util {
 // Current UTC time as ISO-8601 (e.g. 2026-06-29T12:34:56Z).
 std::string now_iso8601();
 
+// Format an explicit UTC epoch-second as ISO-8601. Used by the simulated-clock
+// feed modes so generated/replayed bars carry an advancing timestamp (drives the
+// per-day trade-cap bucket) independent of wall-clock time.
+std::string epoch_to_iso8601(long epoch_seconds);
+
 // True if the US equity regular trading session (09:30–16:00 America/New_York,
 // Mon–Fri) is open at the given UTC time. Used by the continuous engine loop to
 // skip equity ticks when the market is closed (crypto + prediction markets are

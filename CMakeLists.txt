@@ -67,7 +67,8 @@ add_library(mal_learning STATIC learning/adaptive.cpp)
 target_link_libraries(mal_learning PUBLIC mal_config mal_signal_engine)
 
 # --- Market data / news / execution / account_manager ---
-add_library(mal_market_data STATIC market_data/market_data.cpp)
+add_library(mal_market_data STATIC
+  market_data/market_data.cpp market_data/synthetic_feed.cpp)
 target_link_libraries(mal_market_data PUBLIC mal_util mal_bridge)
 
 add_library(mal_news STATIC news_ingestion/news_ingestion.cpp)

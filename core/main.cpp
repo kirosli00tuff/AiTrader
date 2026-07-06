@@ -56,6 +56,10 @@ int main(int argc, char** argv) {
         bool bootstrap_sim = arg_flag(argc, argv, "--bootstrap-sim");
         long native_bar_seconds = std::atol(
             arg_value(argc, argv, "--native-bar-seconds", "300").c_str());
+        // Offline feed/clock overrides (empty => config). These only change how
+        // the OFFLINE loop is driven; Alpaca stays paper + market-data only.
+        std::string feed_mode = arg_value(argc, argv, "--feed-mode", "");
+        std::string clock_mode = arg_value(argc, argv, "--clock-mode", "");
 
         auto cfg = mal::config::load_config(cfg_path);
 
@@ -67,6 +71,8 @@ int main(int argc, char** argv) {
         opts.data_source = data_source;
         opts.bootstrap_sim = bootstrap_sim;
         opts.native_bar_seconds = native_bar_seconds;
+        opts.feed_mode = feed_mode;
+        opts.clock_mode = clock_mode;
         if (!bridge.empty()) {
             auto colon = bridge.find(':');
             opts.bridge_host = bridge.substr(0, colon);
@@ -81,6 +87,10 @@ int main(int argc, char** argv) {
         int eff_interval =
             interval_seconds > 0 ? interval_seconds
                                  : cfg.engine.loop_interval_seconds;
+        std::string eff_feed =
+            !feed_mode.empty() ? feed_mode : cfg.simulation.feed_mode;
+        std::string eff_clock =
+            !clock_mode.empty() ? clock_mode : cfg.simulation.clock_mode;
 
         std::cout << "Market AI Lab engine starting (live DISABLED by default)\n"
                   << "  config: " << cfg_path << "\n"
@@ -129,6 +139,16 @@ int main(int argc, char** argv) {
                 << "\n"
                 << "  regime:    ADX>=" << st.regime_adx_trend
                 << " trending / rvol>=" << st.regime_rvol_high << " range-bound\n"
+                << "  feed:      " << eff_feed << " / clock " << eff_clock
+                << (eff_feed == "replay"
+                        ? " (Alpaca = paper + market-data only, no live path)"
+                        : "")
+                << "\n"
+                << "  thresholds: adx_min " << st.adx_min << " ema " << st.ema_fast
+                << "/" << st.ema_slow << " atr_floor " << st.atr_vol_floor
+                << " bb " << st.bb_period << "/" << st.bb_std << "sd rsi "
+                << st.rsi_period << " [" << st.rsi_oversold << "-"
+                << st.rsi_overbought << "] vol_x " << st.vol_multiple << "\n"
                 << "  whitelist: " << wl << "  (bars " << st.bar_timeframe << ")\n"
                 << "  whale:     tracking "
                 << (cfg.whale.whale_tracking_enabled ? "on" : "off")

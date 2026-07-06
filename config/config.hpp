@@ -166,6 +166,7 @@ struct StrategyConfig {
     double rsi_oversold = 30.0;
     double rsi_overbought = 70.0;
     int vol_lookback = 20;            // bars for average-volume confirmation
+    double vol_multiple = 1.0;        // reversion needs volume > vol_multiple * avg
     // Regime detector thresholds (ADX + realized volatility).
     double regime_adx_trend = 25.0;   // ADX above => trending
     double regime_rvol_high = 0.02;   // realized vol above => volatile/range-bound
@@ -219,6 +220,24 @@ struct ModelWeights {
     double sum() const;
 };
 
+// Offline simulation controls (feed generation + clock). These NEVER affect live
+// behavior: Alpaca remains a paper + market-data venue only, with no live path.
+// They exist so the offline paper loop can be a real training environment —
+// generating native fills that feed the real-fill tuner, train_real, and RL.
+struct SimulationConfig {
+    // flat_random_walk (default, unchanged) | synthetic_regimes | replay.
+    std::string feed_mode = "flat_random_walk";
+    // real (wall-clock, for the continuous live-adjacent loop) | simulated
+    // (bar time advances internally so finite/synthetic runs close bars fast).
+    std::string clock_mode = "real";
+    unsigned long long synthetic_seed = 42;  // deterministic synthetic feed
+    // Historical replay window (inclusive YYYY-MM-DD; empty => earliest/latest
+    // stored bar). Replay drives the loop from real bars in the bars table.
+    std::string replay_start_date;
+    std::string replay_end_date;
+    std::string replay_speed = "fast";       // fast (ignore wall-clock) | realtime
+};
+
 struct Config {
     SystemConfig system;
     EngineConfig engine;
@@ -233,6 +252,7 @@ struct Config {
     WhaleConfig whale;
     LiveApprovalConfig live_approval;
     DashboardConfig dashboard;
+    SimulationConfig simulation;
     ModelWeights model_weights;
 
     const VenueConfig* find_venue(const std::string& name) const;

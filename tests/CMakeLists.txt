@@ -22,3 +22,11 @@ add_test(NAME strategy COMMAND test_strategy WORKING_DIRECTORY ${CMAKE_SOURCE_DI
 add_executable(test_tuner_minsample test_tuner_minsample.cpp)
 add_test(NAME tuner_minsample COMMAND test_tuner_minsample
          WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+# Feed modes + simulated clock (synthetic-regime feed, replay). Links the full
+# engine so it can drive finite synthetic + replay runs against temp SQLite DBs.
+add_executable(test_feed_modes test_feed_modes.cpp)
+target_link_libraries(test_feed_modes PRIVATE mal_core mal_market_data
+                      mal_signal_engine mal_storage mal_config mal_util)
+add_test(NAME feed_modes COMMAND test_feed_modes
+         WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})

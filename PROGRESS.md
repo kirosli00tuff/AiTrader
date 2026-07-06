@@ -37,11 +37,14 @@ The C++ safety spine builds clean and runs the offline paper loop (`ctest` 5/5).
 ## Known Issues and Caveats
 
 - Advisory factor *scores* on the default (no-`--bridge`) path are deterministic C++ mocks; the real LLM/dnn/whale scores engage only with `--bridge` + the bridge server up. The learning signal the tuner consumes is real (closed-trade PnL), but the verdicts feeding it out-of-box are stand-ins.
-- Shipped `dnn_advisory` champion is still synthetic-trained; the real-data trainer refuses (`insufficient_real_data`) until the DB holds ≥200 real labelled samples. `rl_advisory` is untrained (real-fill gate unmet) and shipped off.
+- Shipped `dnn_advisory` champion is still synthetic-trained; `rl_advisory` is untrained (real-fill gate unmet) and shipped off. The real-data trainer now DOES train a challenger once enough history exists (verified against a synthetic-regime run: 47,900 samples, `challenger_recorded`).
+- Native fills now flow offline via `feed_mode: synthetic_regimes` (or `replay`) + `clock_mode: simulated` — the flat random-walk still produces ~zero native trades by design. **Residual:** in a long synthetic run the adaptive tuner drives the `rule_based` weight toward zero (0.17 → ~2.7e-11), so native entries plateau after ~30 fills / ~2 simulated days. That is enough to exercise the ≥30-trade tuner gate and `train_real`, but sustained fill generation would want a minimum-weight floor for the native factor (or running training with `adaptive_weight_updates_enabled: false`). Follow-up, not a safety issue.
 
 ## Open Flags / Follow-ups
 
 Cleared 2026-07-05 (all verified this session): venv created and full `pytest tests/ -q` green (**124 passed**); `python -m ml_factor.train_real` run against the demo DB (refuses cleanly with `insufficient_real_data`, synthetic champion retained); real SEC EDGAR 13F fixture recorded (ClankApp left SYNTHETIC — host DNS-unreachable); residual doc-consistency sweep done (`docs/ARCHITECTURE.md`, `docs/BUILD_SPEC.md`, `docs/FOLLOWUP_CREDENTIALS.md`, `DNN_RL_DESIGN.md`→`DNN_ADVISORY_DESIGN.md`) + AUDIT honest-state refresh; bars OHLCV storage landed (was "no historical price data persisted").
+
+**Paper-loop-stability flag CLEARED 2026-07-05 (feed work):** the offline loop now generates real native fills. Config-tunable strategy thresholds, a deterministic synthetic-regime feed, a historical replay mode, and a simulated clock landed; a verified synthetic run produced 31 closed native trades (momentum + reversion, ATR exits) and `train_real` trained a real-data challenger (47,900 samples). Replaced by the tuner-throttle residual noted in Known Issues above (native entries plateau after ~30 fills as the tuner de-weights `rule_based`).
 
 Still open (not defects — known limits):
 
@@ -53,6 +56,19 @@ Still open (not defects — known limits):
 ## Session Log
 
 Newest entries at top. One entry per session. Format: date, model used, what changed, what is stable, what is next.
+
+### 2026-07-05 (Opus 4.8) — offline loop becomes a real training environment
+
+- **Made the offline paper loop generate real native fills** so it can train the tuner / `dnn_advisory` / (eventually) RL. RiskGate logic, the live-trading gate, and the adaptive limit-weakening invariant untouched; live trading stays off; Alpaca remains paper + market-data only.
+- **Config-tunable entry thresholds:** the last hardcoded strategy literal (reversion volume multiple) moved to `strategy.vol_multiple`; the ADX/rvol/ATR/EMA/Bollinger/RSI thresholds were already config-backed. Added load-time validation (periods ≥1, bb_std/vol_multiple >0).
+- **Volatility-aware synthetic feed** (`market_data/synthetic_feed.*`, `feed_mode: synthetic_regimes`): a deterministic warmup→uptrend→range→downtrend generator that crosses the ADX + realized-vol thresholds so BOTH momentum and mean-reversion enter. Verified standalone: 3 momentum + 17 reversion signals over 1200 bars under seed 42.
+- **Historical replay** (`feed_mode: replay`): drives the loop from real `bars`-table rows in chronological order through the same closed-bar path; configurable date range + `replay_speed`; refuses loudly (run the Alpaca backfill first) when the range is empty — never silently zero. Added `Storage::bars_in_range`.
+- **Simulated clock** (`clock_mode: simulated`): bar time advances internally (`util::epoch_to_iso8601`) so finite/synthetic runs actually close bars; real-clock stays default for the continuous loop.
+- **Wired the native signal into the ensemble as `rule_based`** so a genuine technical setup's conviction reaches the RiskGate (previously confidence/edge came only from mock advisory factors, which vetoed every native entry on the 0.02 edge floor). No gate logic or threshold changed; no risk value loosened.
+- **End-to-end verification (Task 5):** synthetic run closed 48,000 bars, fired 31 native entries (momentum 3 / reversion 28), closed 31 trades (30 win / 1 loss; ATR target 30, stop 1) all under the native whitelist, tuner active past its ≥30 gate, and `python -m ml_factor.train_real` trained a real-data challenger (`challenger_recorded`, 47,900 samples, Sharpe 0.98). Residual: entries plateau after ~30 fills as the tuner de-weights `rule_based` (see Known Issues).
+- **Startup transparency:** prints active feed mode, clock mode, and resolved strategy thresholds.
+- **Tests:** C++ `feed_modes` (synthetic crosses thresholds + ≥1 momentum & ≥1 reversion under fixed seed; simulated clock closes the expected bar count; replay reads in order + stops + refuses when empty) → **ctest 6/6**; pytest `test_replay_refusal.py` (binary refuses on empty bars) → **pytest 125 passed**.
+- **Stable:** clean warning-free build, ctest 6/6, pytest 125. **Next:** address the tuner-throttle residual (min-weight floor for the native factor) so sustained offline training keeps generating fills, then the GUI overhaul.
 
 ### 2026-07-05 (Opus 4.8)
 

@@ -116,6 +116,13 @@ public:
     void upsert_bar(const BarRow& b);
     std::vector<BarRow> recent_bars(const std::string& symbol,
                                     const std::string& timeframe, int limit);
+    // All bars for a symbol+timeframe within an inclusive timestamp range,
+    // ordered oldest-first (ascending). Empty start/end means unbounded on that
+    // side. Used by the historical replay feed mode.
+    std::vector<BarRow> bars_in_range(const std::string& symbol,
+                                      const std::string& timeframe,
+                                      const std::string& start_ts,
+                                      const std::string& end_ts);
 
     // Persist the current regime for a symbol (single row per symbol).
     void upsert_regime(const std::string& symbol, const std::string& regime,

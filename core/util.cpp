@@ -21,6 +21,19 @@ std::string now_iso8601() {
     return buf;
 }
 
+std::string epoch_to_iso8601(long epoch_seconds) {
+    std::time_t t = static_cast<std::time_t>(epoch_seconds);
+    std::tm tm{};
+#if defined(_WIN32)
+    gmtime_s(&tm, &t);
+#else
+    gmtime_r(&t, &tm);
+#endif
+    char buf[32];
+    std::strftime(buf, sizeof(buf), "%Y-%m-%dT%H:%M:%SZ", &tm);
+    return buf;
+}
+
 namespace {
 // True if US Eastern observes DST (EDT) on the given UTC-broken-down date.
 // US rule: 2nd Sunday of March 02:00 .. 1st Sunday of November 02:00.

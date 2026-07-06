@@ -4,6 +4,7 @@
 #include <chrono>
 #include <cmath>
 #include <functional>
+#include <stdexcept>
 #include <thread>
 
 #include "core/bridge_client.hpp"
@@ -79,6 +80,24 @@ Engine::Engine(config::Config cfg, EngineOptions opts)
         bar_history_["alpaca|" + sym] = std::move(hist);
     }
 
+    // --- Offline feed / clock resolution (Tasks 2-4) --------------------------
+    // These control ONLY how the offline loop is driven; they never affect live
+    // trading (Alpaca is paper + market-data only, with no live path).
+    feed_mode_ = !opts_.feed_mode.empty() ? opts_.feed_mode
+                                          : cfg_.simulation.feed_mode;
+    const std::string clock = !opts_.clock_mode.empty() ? opts_.clock_mode
+                                                        : cfg_.simulation.clock_mode;
+    simulated_clock_ = (clock == "simulated");
+    bar_step_seconds_ = opts_.native_bar_seconds > 0 ? opts_.native_bar_seconds : 1;
+    // Base the simulated clock at 2026-01-05T00:00:00Z (a Monday) so day buckets
+    // and any market-hours checks land on sensible weekday dates.
+    sim_epoch_ = 1767571200;
+    if (feed_mode_ == "synthetic_regimes" || feed_mode_ == "replay") {
+        // Bar-driven modes build indicator history purely from the fed bars.
+        bar_history_.clear();
+        init_bar_mode(instruments);
+    }
+
     pstate_.equity = equity_;
     pstate_.start_of_day_equity = equity_;
 
@@ -114,7 +133,7 @@ signal_engine::FactorSignal Engine::mock_factor(
 
 std::vector<signal_engine::FactorSignal> Engine::gather_factors(
     const market_data::MarketState& ms, const news::CatalystScore& cat,
-    bool council_allowed) {
+    bool council_allowed, const strategy::StrategySignal* native) {
     std::vector<signal_engine::FactorSignal> out;
     std::vector<std::string> factors = {
         "llm_primary", "llm_secondary", "llm_tertiary",
@@ -131,6 +150,20 @@ std::vector<signal_engine::FactorSignal> Engine::gather_factors(
     // they stay on the in-process mock rather than making the expensive call.
     for (const auto& f : factors) {
         signal_engine::FactorSignal s = mock_factor(f, ms, cat);
+
+        // The native strategy IS the rule-based factor: when a native entry
+        // signal is supplied, drive `rule_based` from that genuine technical
+        // setup instead of the hash mock, so its conviction contributes to the
+        // combined confidence/edge/agreement the RiskGate evaluates. This does
+        // NOT touch the gate or its thresholds; it only reports the real signal.
+        if (f == "rule_based" && native && native->has_signal) {
+            const double str = clamp01(native->strength);
+            const double dir =
+                native->direction == strategy::Direction::Long ? 1.0 : -1.0;
+            s.bias = dir * std::clamp(0.4 + 0.6 * str, 0.0, 1.0);
+            s.confidence = clamp01(0.7 + 0.3 * str);
+            s.edge = 0.05 + 0.10 * str;
+        }
 
         const bool is_llm = f == "llm_primary" || f == "llm_secondary" ||
                             f == "llm_tertiary";
@@ -192,20 +225,26 @@ bool Engine::is_whitelisted(const std::string& symbol) const {
 }
 
 void Engine::update_bars(const market_data::MarketState& ms, long epoch_seconds) {
+    // Tick path (flat_random_walk): aggregate streaming ticks into bars; route a
+    // just-CLOSED bar through the shared closed-bar handler.
     if (!is_whitelisted(ms.symbol)) return;
     const std::string key = ms.venue + "|" + ms.symbol;
     auto closed = bar_agg_.add(key, epoch_seconds, ms.price, ms.volume);
     if (!closed) return;
+    on_closed_bar(ms, *closed, epoch_seconds);
+}
 
+void Engine::on_closed_bar(const market_data::MarketState& ms,
+                           const strategy::Bar& closed, long epoch) {
     const std::string& tf = cfg_.strategy.bar_timeframe;
     // Persist the closed bar (idempotent on venue,symbol,timeframe,timestamp).
-    storage_->upsert_bar({ms.venue, ms.symbol, tf, ms.ts, closed->open,
-                          closed->high, closed->low, closed->close,
-                          closed->volume});
+    storage_->upsert_bar({ms.venue, ms.symbol, tf, ms.ts, closed.open,
+                          closed.high, closed.low, closed.close, closed.volume});
 
     // Append to bounded in-memory history (oldest-first).
+    const std::string key = ms.venue + "|" + ms.symbol;
     auto& hist = bar_history_[key];
-    hist.push_back(*closed);
+    hist.push_back(closed);
     if (hist.size() > kBarHistoryCap)
         hist.erase(hist.begin(),
                    hist.begin() + (hist.size() - kBarHistoryCap));
@@ -215,9 +254,93 @@ void Engine::update_bars(const market_data::MarketState& ms, long epoch_seconds)
     storage_->upsert_regime(ms.symbol, strategy::regime_to_string(rr.regime),
                             rr.adx, rr.rvol, ms.ts);
 
-    // Native trading happens ONLY here (on a closed bar) unless the legacy
-    // bootstrap simulator is explicitly enabled.
-    if (!opts_.bootstrap_sim) handle_bar_close(ms, *closed, epoch_seconds);
+    // Native trading happens ONLY on a closed bar unless the legacy bootstrap
+    // simulator is explicitly enabled. This is the single closed-bar path shared
+    // by the tick feed and the synthetic/replay bar feeds.
+    if (!opts_.bootstrap_sim) handle_bar_close(ms, closed, epoch);
+}
+
+void Engine::init_bar_mode(
+    const std::vector<market_data::Instrument>& instruments) {
+    for (const auto& i : instruments)
+        if (is_whitelisted(i.symbol)) bar_instruments_.push_back(i);
+
+    if (feed_mode_ == "synthetic_regimes") {
+        // One deterministic generator per whitelisted instrument, independently
+        // seeded so the feed is reproducible under opts_.seed.
+        const uint64_t base = opts_.seed ? opts_.seed : 1;
+        for (size_t k = 0; k < bar_instruments_.size(); ++k)
+            synth_gens_.emplace_back(bar_instruments_[k].price,
+                                     base + 1000ull * (k + 1));
+        return;
+    }
+
+    // replay: load stored bars for each whitelisted symbol within the window.
+    const std::string& tf = cfg_.strategy.bar_timeframe;
+    const std::string start = cfg_.simulation.replay_start_date;
+    const std::string end = cfg_.simulation.replay_end_date.empty()
+        ? std::string()
+        : cfg_.simulation.replay_end_date + "T23:59:59Z";
+    for (const auto& bi : bar_instruments_) {
+        auto rows = storage_->bars_in_range(bi.symbol, tf, start, end);
+        for (const auto& r : rows) {
+            BarTick t;
+            t.ms.venue = bi.venue;
+            t.ms.symbol = bi.symbol;
+            t.ms.market = bi.market;
+            t.ms.category = bi.category;
+            t.ms.price = r.close;
+            t.ms.ts = r.timestamp;
+            t.bar = {r.open, r.high, r.low, r.close, r.volume};
+            replay_queue_.push_back(std::move(t));
+        }
+    }
+    std::sort(replay_queue_.begin(), replay_queue_.end(),
+              [](const BarTick& a, const BarTick& b) { return a.ms.ts < b.ms.ts; });
+    // Monotonic epoch for council-cooldown timing (relative spacing only).
+    for (size_t k = 0; k < replay_queue_.size(); ++k)
+        replay_queue_[k].epoch =
+            sim_epoch_ + static_cast<long>(k) * bar_step_seconds_;
+
+    if (replay_queue_.empty()) {
+        std::string wl;
+        for (size_t k = 0; k < bar_instruments_.size(); ++k)
+            wl += (k ? "," : "") + bar_instruments_[k].symbol;
+        throw std::runtime_error(
+            "replay feed: no bars in the 'bars' table for symbols [" + wl +
+            "] timeframe " + tf +
+            (start.empty() && end.empty() ? "" : " in the configured date range") +
+            ". Run the Alpaca historical backfill first (e.g. the paper loop with "
+            "--data-source alpaca, or the market_data backfill helper) so the "
+            "bars table has data before replay.");
+    }
+}
+
+int Engine::step_bar_mode() {
+    if (feed_mode_ == "synthetic_regimes") {
+        // All whitelisted instruments close a bar at the same simulated instant.
+        const std::string ts = util::epoch_to_iso8601(sim_epoch_);
+        for (size_t k = 0; k < bar_instruments_.size(); ++k) {
+            auto ob = synth_gens_[k].next();
+            const auto& bi = bar_instruments_[k];
+            market_data::MarketState ms;
+            ms.venue = bi.venue;
+            ms.symbol = bi.symbol;
+            ms.market = bi.market;
+            ms.category = bi.category;
+            ms.price = ob.close;
+            ms.ts = ts;
+            strategy::Bar bar{ob.open, ob.high, ob.low, ob.close, ob.volume};
+            on_closed_bar(ms, bar, sim_epoch_);
+        }
+        sim_epoch_ += bar_step_seconds_;
+        return static_cast<int>(bar_instruments_.size());
+    }
+    // replay: one stored bar per step, chronological, until the range is spent.
+    if (replay_pos_ >= replay_queue_.size()) return 0;
+    const auto& t = replay_queue_[replay_pos_++];
+    on_closed_bar(t.ms, t.bar, t.epoch);
+    return 1;
 }
 
 void Engine::sync_portfolio_state() {
@@ -247,7 +370,10 @@ void Engine::handle_bar_close(const market_data::MarketState& ms,
     const std::string key = ms.venue + "|" + ms.symbol;
     const auto* venue_cfg = cfg_.find_venue(ms.venue);
     if (!venue_cfg) return;
-    const std::string ts = util::now_iso8601();
+    // Use the bar's own timestamp so simulated/replay trades + events (and the
+    // per-day trade-cap bucket below) advance with bar time, not wall-clock. In
+    // the tick path ms.ts is the live feed time, so behavior there is unchanged.
+    const std::string ts = ms.ts.empty() ? util::now_iso8601() : ms.ts;
 
     // ---------- EXIT path: manage an open position (NO council) ----------
     auto it = open_positions_.find(key);
@@ -414,7 +540,7 @@ void Engine::handle_bar_close(const market_data::MarketState& ms,
     }
 
     auto cat = news_->score_for(ms.symbol);
-    auto signals = gather_factors(ms, cat, council_allowed);
+    auto signals = gather_factors(ms, cat, council_allowed, &sig);
     auto verdict = signal_engine::combine(signals, weights_);
     o.confidence = verdict.confidence;
     o.edge = verdict.edge;
@@ -499,10 +625,19 @@ int Engine::run_iteration() {
     pstate_.exposure_per_market.clear();
     pstate_.exposure_per_category.clear();
     pstate_.open_risk_total = 0.0;
-    const long now_epoch = static_cast<long>(
-        std::chrono::duration_cast<std::chrono::seconds>(
-            std::chrono::system_clock::now().time_since_epoch())
-            .count());
+    // Under the simulated clock, bar time advances internally so finite runs
+    // actually cross bar boundaries (real clock is used for the continuous,
+    // live-adjacent loop). Each tick advances one bar step.
+    long now_epoch;
+    if (simulated_clock_) {
+        now_epoch = sim_epoch_;
+        sim_epoch_ += bar_step_seconds_;
+    } else {
+        now_epoch = static_cast<long>(
+            std::chrono::duration_cast<std::chrono::seconds>(
+                std::chrono::system_clock::now().time_since_epoch())
+                .count());
+    }
     for (const auto& ms : states) {
         // Aggregate whitelisted symbols into bars + regime, and (default path)
         // run the native strategy entry/exit on a closed bar. The legacy generic
@@ -699,9 +834,21 @@ void Engine::snapshot_balances() {
 }
 
 void Engine::run(int iterations) {
-    for (int i = 0; i < iterations; ++i) {
-        run_iteration();
-        maybe_adapt(i);
+    if (feed_mode_ == "replay") {
+        // Replay every stored bar in the window, in order, then stop cleanly.
+        int i = 0;
+        while (step_bar_mode() > 0) maybe_adapt(i++);
+    } else if (feed_mode_ == "synthetic_regimes") {
+        // `iterations` = number of bar steps (each closes one bar per symbol).
+        for (int i = 0; i < iterations; ++i) {
+            step_bar_mode();
+            maybe_adapt(i);
+        }
+    } else {
+        for (int i = 0; i < iterations; ++i) {
+            run_iteration();
+            maybe_adapt(i);
+        }
     }
     const std::string ts = util::now_iso8601();
     storage_->append_event(
@@ -723,6 +870,25 @@ void Engine::run_forever(const volatile std::sig_atomic_t* stop_flag) {
              "Continuous paper loop started (source=" + src +
                  ", interval=" + std::to_string(interval) + "s)",
              "{}"});
+    }
+
+    // Bar-driven feed modes (synthetic_regimes / replay) step bars rather than
+    // polling the tick feed; replay stops cleanly at the end of its data.
+    if (feed_mode_ != "flat_random_walk") {
+        int steps = 0;
+        while (!(stop_flag && *stop_flag)) {
+            if (step_bar_mode() == 0) break;  // replay exhausted
+            maybe_adapt(steps++);
+            if (!simulated_clock_ && cfg_.simulation.replay_speed == "realtime")
+                std::this_thread::sleep_for(std::chrono::seconds(1));
+        }
+        const std::string sts = util::now_iso8601();
+        storage_->append_event(
+            {sts, "continuous_stop", "", "", "info",
+             "Continuous bar-feed loop stopped after " + std::to_string(steps) +
+                 " steps, " + std::to_string(trade_count_) + " trades",
+             util::to_json({}, {{"final_equity", equity_}})});
+        return;
     }
 
     int iteration = 0;

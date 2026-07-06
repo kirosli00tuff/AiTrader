@@ -131,6 +131,7 @@ strategy:
   rsi_oversold: 30.0
   rsi_overbought: 70.0
   vol_lookback: 20
+  vol_multiple: 1.0                       # reversion needs volume > vol_multiple * avg
   # Regime detector (ADX + realized volatility)
   regime_adx_trend: 25.0
   regime_rvol_high: 0.02
@@ -176,6 +177,28 @@ council:
 rl:
   rl_enabled: false                      # OFF by default (ships toggled off)
   rl_min_real_fills: 500                 # training gate: real closed fills required
+
+# -----------------------------------------------------------------------------
+# Offline simulation (how the OFFLINE loop is DRIVEN — never affects live).
+# The offline paper loop is the continuous training environment; these controls
+# let it generate real native fills that feed the real-fill tuner, train_real,
+# and (once enabled + past its gate) RL. NOTE: Alpaca is a PAPER + MARKET-DATA
+# venue only. It has no live brokerage path and must never be wired to one.
+#   feed_mode  : flat_random_walk (default, unchanged) | synthetic_regimes | replay
+#     - synthetic_regimes: deterministic trending/range/volatile legs that cross
+#       the ADX + realized-vol thresholds so momentum AND reversion enter.
+#     - replay: drives the loop from real bars already in the 'bars' table (run
+#       the Alpaca historical backfill first); fails loudly if the range is empty.
+#   clock_mode : real (wall-clock; continuous live-adjacent loop) | simulated
+#     (bar time advances internally so finite/synthetic runs actually close bars).
+# -----------------------------------------------------------------------------
+simulation:
+  feed_mode: flat_random_walk
+  clock_mode: real
+  synthetic_seed: 42
+  replay_start_date: ""                  # inclusive YYYY-MM-DD ("" = earliest stored)
+  replay_end_date: ""                    # inclusive YYYY-MM-DD ("" = latest stored)
+  replay_speed: fast                     # fast (ignore wall-clock) | realtime
 
 # -----------------------------------------------------------------------------
 # Adaptive learning (Layer 2) — bounded, logged, rollback-capable

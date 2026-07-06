@@ -18,6 +18,7 @@
 #include "execution/execution.hpp"
 #include "learning/adaptive.hpp"
 #include "market_data/market_data.hpp"
+#include "market_data/synthetic_feed.hpp"
 #include "news_ingestion/news_ingestion.hpp"
 #include "risk/risk_gate.hpp"
 #include "signal_engine/council_gate.hpp"
@@ -45,6 +46,13 @@ struct EngineOptions {
     // Seconds per native bar bucket (default 5 min). <= 0 means one bar per tick
     // (testability lever so the native entry/exit path can be exercised quickly).
     long native_bar_seconds = 300;
+    // Offline feed/clock overrides (empty => use cfg.simulation.*):
+    //   feed_mode  : flat_random_walk | synthetic_regimes | replay
+    //   clock_mode : real | simulated
+    // These make the offline loop a real training environment; they NEVER touch
+    // live behavior (Alpaca stays paper + market-data only, no live path).
+    std::string feed_mode;
+    std::string clock_mode;
 };
 
 class Engine {
@@ -70,7 +78,8 @@ public:
 private:
     std::vector<signal_engine::FactorSignal> gather_factors(
         const market_data::MarketState& ms, const news::CatalystScore& cat,
-        bool council_allowed = true);
+        bool council_allowed = true,
+        const strategy::StrategySignal* native = nullptr);
     signal_engine::FactorSignal mock_factor(const std::string& name,
                                             const market_data::MarketState& ms,
                                             const news::CatalystScore& cat);
@@ -82,6 +91,19 @@ private:
     // for a whitelisted symbol: persist the bar, update in-memory history, and
     // recompute + persist the symbol's regime. Advisory only — never trades.
     void update_bars(const market_data::MarketState& ms, long epoch_seconds);
+    // Shared closed-bar path: persist the bar, update in-memory history + regime,
+    // and (unless bootstrap-sim) run the native strategy on it. Reached from the
+    // tick aggregator (flat_random_walk) AND directly from the bar-driven feed
+    // modes (synthetic_regimes / replay), so all three exercise the same logic.
+    void on_closed_bar(const market_data::MarketState& ms,
+                       const strategy::Bar& closed, long epoch);
+    // Set up the bar-driven feed modes (synthetic_regimes / replay). Builds the
+    // per-symbol synthetic generators or loads the replay queue from the bars
+    // table; throws with a clear message if replay has no bars for the range.
+    void init_bar_mode(const std::vector<market_data::Instrument>& instruments);
+    // Advance one step of the bar-driven feed. Returns the number of bars
+    // ingested this step (0 => replay exhausted; synthetic never returns 0).
+    int step_bar_mode();
     bool is_whitelisted(const std::string& symbol) const;
     // Native trading on a CLOSED bar for a whitelisted symbol: manage the open
     // position's native exit first, else consider a new strategy entry (council
@@ -134,6 +156,26 @@ private:
     bool continuous_ = false;          // gate equity by market hours when true
     bool alpaca_feed_ = false;         // feed is AlpacaFeed (tracks live status)
     bool last_poll_live_ = false;      // last poll contained real Alpaca data
+
+    // --- Offline feed / clock state (Tasks 2-4) ---------------------------
+    // feed_mode_: flat_random_walk (tick path) | synthetic_regimes | replay.
+    // simulated_clock_: bar time advances internally (sim_epoch_) instead of
+    // against wall-clock, so finite/synthetic runs actually close bars.
+    std::string feed_mode_ = "flat_random_walk";
+    bool simulated_clock_ = false;
+    long sim_epoch_ = 0;               // advancing simulated UTC epoch (seconds)
+    long bar_step_seconds_ = 300;      // sim-clock advance per bar step
+    // synthetic_regimes: one deterministic generator per whitelisted instrument.
+    std::vector<market_data::Instrument> bar_instruments_;
+    std::vector<market_data::SyntheticRegimeGenerator> synth_gens_;
+    // replay: chronologically-ordered stored bars replayed through on_closed_bar.
+    struct BarTick {
+        market_data::MarketState ms;
+        strategy::Bar bar;
+        long epoch = 0;
+    };
+    std::vector<BarTick> replay_queue_;
+    size_t replay_pos_ = 0;
 };
 
 }  // namespace mal::core
