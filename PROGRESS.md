@@ -4,7 +4,7 @@ Status tracker for AiTrader. Read at the start of each session. Update at the en
 
 ## Current State
 
-The C++ safety spine builds clean and runs the offline paper loop (`ctest` 7/7). Polymarket is fully removed (region). Alpaca paper is the primary online loop (`feed_mode: alpaca_paper`, paper + market-data only, no live path). IBKR is wired as the live-only venue via a locally run IB Gateway but stays DISABLED behind the approval gate. The real LLM council is merged (Opus 4.8, GPT-5.5, Gemini 3.1 Pro) with a free Gemini Flash gate, prompt caching, and cost controls (budget, per-symbol cooldown, token cap, neutral skip). The native strategy layer (momentum + reversion + regime detector, closed-bar eval, native ATR exits) is in; the adaptive tuner learns from real closed-trade PnL (≥30-trade gate); the `dnn_advisory` factor has a real-data walk-forward training pipeline with gated promotion; Coinbase replaces Binance; free-first whale feeds (ClankApp + SEC EDGAR) are wired live-OFF by default; security hardening (loopback bridge, credential masking, pre-commit secrets hook, pinned deps) landed. A separate `rl_advisory` PPO module (gym env, real-fill training gate, walk-forward eval, `/score/rl` bridge endpoint) is built but **shipped OFF** — it never touches the ensemble until an operator toggles `rl_enabled` past the `rl_min_real_fills` gate. Two council cost cuts (risk pre-check + equities market-hours skip) short-circuit doomed/after-hours setups before any provider spend. Council/whale live paths stay behind config/env flags and the bridge. Live trading disabled by default. Next up: prove paper-loop stability, then the GUI overhaul (see Next Up).
+The C++ safety spine builds clean and runs the offline paper loop (`ctest` 7/7). Polymarket is fully removed (region). Alpaca paper is the primary online loop (`feed_mode: alpaca_paper`, paper + market-data only, no live path). IBKR is wired as the live-only venue via a locally run IB Gateway but stays DISABLED behind the approval gate. The real LLM council is merged (Opus 4.8, GPT-5.5, Gemini 3.1 Pro) with a free Gemini Flash gate, prompt caching, and cost controls (budget, per-symbol cooldown, token cap, neutral skip). The native strategy layer (momentum + reversion + regime detector, closed-bar eval, native ATR exits) is in; the adaptive tuner learns from real closed-trade PnL (≥30-trade gate); the `dnn_advisory` factor has a real-data walk-forward training pipeline with gated promotion; Coinbase replaces Binance; free-first whale feeds (ClankApp + SEC EDGAR) are wired live-OFF by default; security hardening (loopback bridge, credential masking, pre-commit secrets hook, pinned deps) landed. A separate `rl_advisory` PPO module (gym env, real-fill training gate, walk-forward eval, `/score/rl` bridge endpoint) is built but **shipped OFF** — it never touches the ensemble until an operator toggles `rl_enabled` past the `rl_min_real_fills` gate. Two council cost cuts (risk pre-check + equities market-hours skip) short-circuit doomed/after-hours setups before any provider spend. Council/whale live paths stay behind config/env flags and the bridge. Live trading disabled by default. A React and TypeScript GUI (three pages Settings, Paper, Live) served by a thin read-only FastAPI backend (api_server/) over the same SQLite database is now built and additive to the Dash UI. Next up: extend it with the CONTEXT.md GUI Plan controls, and prove paper-loop stability.
 
 ## Stable and Working
 
@@ -20,6 +20,7 @@ The C++ safety spine builds clean and runs the offline paper loop (`ctest` 7/7).
 
 ## In Progress
 
+- GUI overhaul (React + TypeScript, additive). Three pages built (Settings and APIs, Paper, Live) served by a read-only FastAPI backend (api_server/) over the same SQLite DB, loopback only. Coinbase Pro dark theme, sidebar + status bar, WebSocket live stream. Dash UI retained as fallback. Backend 22 pytest, frontend 3 render tests + typecheck + build all green. Next: wire the control-file kill request into the engine, then the CONTEXT.md GUI Plan controls (per-layer + per-model toggles, champion/challenger + RL enable, weight sliders, regime override, budget dial).
 - None active. The "close open flags + RL advisory (shipped off) + council cost cuts" prompt is complete (2026-07-05): every follow-up flag from the 12-task prompt is cleared, `rl_advisory` (PPO, shipped off) is built, and the two council cost cuts (risk pre-check + market-hours) are in. See "Open Flags / Follow-ups" and RETURN.md.
 
 ## Not Started
@@ -27,7 +28,7 @@ The C++ safety spine builds clean and runs the offline paper loop (`ctest` 7/7).
 - Live-approval workflow end to end (`try_enable_live` still never called by design)
 - Real (disabled-by-default) live adapter for Coinbase (IBKR live adapter is now wired behind the gate, 2026-07-06)
 - Training the RL advisory policy: the `rl_advisory` PPO module is built but shipped OFF and untrained (activates only past the `rl_min_real_fills` gate, default 500 real fills; no synthetic-data path). Supervised `dnn_advisory` is the only Layer-3 signal serving today.
-- Frontend rebuild / GUI overhaul (see Next Up + CONTEXT.md GUI Plan)
+- Remaining GUI Plan controls (per-layer + per-model toggles, champion/challenger + RL enable, weight sliders, regime override, budget dial). The base React GUI (three pages + read-only backend) is now In Progress; these advanced controls are still to build.
 
 ## Next Up
 
@@ -63,6 +64,16 @@ New flags from the feed-work session (2026-07-05, `369b6a6`):
 ## Session Log
 
 Newest entries at top. One entry per session. Format: date, model used, what changed, what is stable, what is next.
+
+### 2026-07-06 (Opus 4.8) — React + TypeScript trading GUI (Settings, Paper, Live) on a read-only FastAPI backend
+
+- **Built a React + TypeScript GUI in web/**, Coinbase Pro dark theme, additive to the Dash UI (which stays as the fallback, untouched). Left sidebar + top status bar (engine state, active view, kill switch, bridge). Three routed pages: Settings and APIs, Paper, Live. Dependency-free SVG equity chart, typed API client, REST for initial load, WebSocket for live updates, loading and error states throughout.
+- **Thin read-only FastAPI backend in api_server/.** Endpoints: /health, /account, /positions, /orders, /trades, /pnl, /signals, /council, /whale, /risk, /venues, /approval, /credentials (GET masked + POST encrypted), /credentials/test, /kill (GET + POST), and the /stream WebSocket on a 2s tick. Binds 127.0.0.1 only. Read-only on the operational tables. The only write paths are credential entry through the existing encrypted keystore and a kill-switch halt request written to a control file (.control/), never an operational table and never the RiskGate.
+- **Kill switch, honestly.** The engine trips its own kill switch and reflects it in venue_state; the GUI shows that state and records a durable operator halt request through the control-file channel. Wiring the engine to consume the request file is a flagged follow-up.
+- **LLM council keys** (OpenAI, Anthropic, Google) added to the credential registry so the Settings page manages them; they resolve through the existing resolve_env path (in-app first, then env), so a saved key flows to the council with no provider change.
+- **Verified live** against the real market_ai_lab.db: /health shows engine running + bridge reachable, /account paper equity resolves, /venues lists alpaca/coinbase/ibkr, /approval reports all four mechanisms with live locked.
+- **Stable:** backend 22 pytest (full Python suite 159 passed), frontend 3 render tests + typecheck clean + production build. No real network in any test. RiskGate, live-trading gate, and the adaptive limit-weakening invariant untouched. Live trading stays OFF.
+- **Next:** consume the kill-request file in the engine, then the CONTEXT.md GUI Plan controls.
 
 ### 2026-07-06 (Opus 4.8) — remove Polymarket, Alpaca paper as primary online loop, IBKR wired live behind the gate
 

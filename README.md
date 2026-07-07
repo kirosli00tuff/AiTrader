@@ -25,6 +25,7 @@ source has a deterministic mock fallback.
 - [Run it 24/7 locally](#run-it-247-locally)
 - [Manual build & run](#manual-build--run)
 - [The dashboard](#the-dashboard)
+- [The React GUI (new, additive)](#the-react-gui-new-additive)
 - [Advisory services](#advisory-services)
 - [Whale / smart-money sources](#whale--smart-money-sources)
 - [Configuration & secrets](#configuration--secrets)
@@ -410,6 +411,55 @@ The weight control panel (on **Advanced**) is the UI's only writer: it appends t
 `weight_changes` and mirrors normalized weights to `ui/weight_overrides.json`.
 Adjusting weights only re-blends advisory factors — it can never weaken the
 deterministic RiskGate.
+
+## The React GUI (new, additive)
+
+`web/` is a React and TypeScript app, dark theme, Coinbase Pro style. It is
+additive. The Plotly Dash board above stays in place as a fallback, unchanged.
+Both read the same SQLite database.
+
+The React app has three pages behind a left sidebar and a top status bar that
+shows engine state, active view, kill-switch status, and bridge reachability:
+
+- **Settings and APIs** — credential entry grouped by category (LLM council,
+  paper venue, live venue, crypto venue, whale data), every field masked, plus
+  the active council models and a per-group offline connection test.
+- **Paper** — the default operating view for the Alpaca paper loop: an equity
+  hero, a stat row (daily PnL, win rate, closed trades, open positions, total
+  P/L, max drawdown), the equity curve, open positions, a fills-and-signals
+  activity feed, per-symbol regime labels, council verdicts, and a kill-switch
+  control with a confirm step.
+- **Live** — the same layout for the IBKR live venue, locked by default. It
+  shows the approval gate and the four safety mechanisms and zeros the trading
+  data. No control on this page can enable live.
+
+A thin FastAPI backend in `api_server/` serves the app. It binds loopback only
+(127.0.0.1) and is read-only on the operational tables. The only write paths are
+credential entry, which goes through the existing encrypted keystore, and a
+durable kill-switch halt request, which writes a control file, never an
+operational table and never the RiskGate. The frontend loads initial data over
+REST and receives live updates over a WebSocket (`/stream`) on a two-second tick.
+
+Run both together:
+
+```bash
+scripts/run_gui.sh
+```
+
+That starts the API backend on <http://127.0.0.1:8000> and the Vite dev server
+on <http://127.0.0.1:5173>. For live data the C++ engine and the `python_bridge`
+should be running. With the paper loop running you see paper trades, positions,
+PnL, signals, and council verdicts as they land.
+
+Install and test:
+
+```bash
+.venv/bin/pip install -r api_server/requirements.txt   # backend deps
+pytest tests/test_api_server.py                        # backend tests
+cd web && npm install                                  # frontend deps
+cd web && npm run typecheck && npm test                # types + render tests
+cd web && npm run build                                # production build
+```
 
 ## Advisory services
 

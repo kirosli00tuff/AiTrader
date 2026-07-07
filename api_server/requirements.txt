@@ -1,0 +1,10 @@
+# Thin read-only API backend for the React GUI. Loopback only.
+# Pinned to versions that ship prebuilt wheels for current Python (3.14+).
+# Pure-Python uvicorn (no [standard] C extensions) so it installs without a
+# compiler. httpx backs the FastAPI TestClient used in the tests.
+fastapi==0.139.0
+uvicorn==0.50.2
+pydantic==2.13.4
+PyYAML==6.0.2
+websockets==14.2
+httpx==0.28.1

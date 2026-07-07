@@ -44,3 +44,9 @@ scratch_captures/
 .vscode/
 .idea/
 .DS_Store
+
+# React GUI (web/) + API control state
+node_modules/
+web/dist/
+web/node_modules/
+.control/

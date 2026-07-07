@@ -88,6 +88,20 @@ def _build_registry() -> dict[str, CredentialSpec]:
                        "sec_api", "SEC EDGAR (free, no key needed)", "source",
                        True, ("SEC_API_KEY",)),
     ]
+    # LLM council provider keys (single credential each). Resolved by
+    # llm_consensus.providers via resolve_env (in-app first, then env), so a key
+    # saved in the GUI flows to the council with no provider code change.
+    specs += [
+        CredentialSpec("openai_key", "API key", "openai",
+                       "OpenAI (GPT-5.5)", "source", True,
+                       ("OPENAI_API_KEY",)),
+        CredentialSpec("anthropic_key", "API key", "anthropic",
+                       "Anthropic (Claude Opus 4.8)", "source", True,
+                       ("ANTHROPIC_API_KEY",)),
+        CredentialSpec("gemini_key", "API key", "gemini",
+                       "Google (Gemini 3.1 Pro + Flash gate)", "source", True,
+                       ("GEMINI_API_KEY",)),
+    ]
     return {s.name: s for s in specs}
 
 
@@ -101,6 +115,9 @@ _REQUIRED_FIELDS: dict[str, tuple[str, ...]] = {
     "clankapp": ("key",),
     "whale_alert": ("key",),
     "sec_api": ("key",),
+    "openai": ("key",),
+    "anthropic": ("key",),
+    "gemini": ("key",),
 }
 
 
