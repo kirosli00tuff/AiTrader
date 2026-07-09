@@ -3,7 +3,11 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <cstdio>
+#include <cstdlib>
+#include <fstream>
 #include <functional>
+#include <iterator>
 #include <stdexcept>
 #include <thread>
 
@@ -39,6 +43,20 @@ Engine::Engine(config::Config cfg, EngineOptions opts)
     storage_->init_schema(opts_.schema_path);
 
     continuous_ = opts_.continuous;
+
+    // Resolve the operator kill-request control file written by the API backend
+    // (api_server/store.py). Contract: env MAL_CONTROL_DIR overrides, else the
+    // configured system.control_dir (default ".control"); the file is
+    // kill_request.json within that dir. Processed requests are archived beside
+    // it so a stale request can never re-trip the kill switch on a later run.
+    {
+        const char* env_dir = std::getenv("MAL_CONTROL_DIR");
+        std::string dir = (env_dir && *env_dir) ? std::string(env_dir)
+                                                 : cfg_.system.control_dir;
+        if (dir.empty()) dir = ".control";
+        kill_request_path_ = dir + "/kill_request.json";
+        kill_request_archive_path_ = dir + "/kill_request.processed.json";
+    }
 
     // Resolve the offline feed mode early so alpaca_paper can force the online
     // Alpaca feed below. feed_mode never affects live: Alpaca is paper + data
@@ -321,6 +339,10 @@ void Engine::init_bar_mode(
 }
 
 int Engine::step_bar_mode() {
+    // Operator halt honored BEFORE stepping bars: the bar-driven feed modes
+    // (synthetic_regimes / replay) do not go through run_iteration, so the check
+    // lives here too. Same latching kill switch, no separate path.
+    consume_operator_kill_request();
     if (feed_mode_ == "synthetic_regimes") {
         // All whitelisted instruments close a bar at the same simulated instant.
         const std::string ts = util::epoch_to_iso8601(sim_epoch_);
@@ -609,8 +631,43 @@ void Engine::handle_bar_close(const market_data::MarketState& ms,
     ++trade_count_;
 }
 
+void Engine::consume_operator_kill_request() {
+    std::ifstream in(kill_request_path_);
+    if (!in) return;  // no pending request on disk
+    std::string body((std::istreambuf_iterator<char>(in)),
+                     std::istreambuf_iterator<char>());
+    in.close();
+    // Only a positive halt request acts; a cleared (requested=false) file is a
+    // no-op left in place. Parsing uses the same tiny JSON helpers as the bridge.
+    if (!bridge::json_get_bool(body, "requested", false)) return;
+
+    const std::string why = bridge::json_get_string(body, "reason", "");
+    const std::string reason =
+        why.empty() ? std::string("operator kill request (GUI)")
+                    : "operator kill request (GUI): " + why;
+
+    const std::string ts = util::now_iso8601();
+    // SAME latching mechanism as the loss-triggered trip — not a separate path.
+    if (kill_switch_.trip(reason)) {
+        for (const auto& [name, _] : accounts_->venues())
+            accounts_->trip_kill_switch(name);
+        storage_->append_event({ts, "kill_switch", "", "", "critical",
+                                "KILL SWITCH TRIPPED: " + reason, "{}"});
+    }
+    // Archive the processed request (atomic rename) so a stale file cannot
+    // re-trip on restart. Fall back to deletion if the rename fails.
+    std::remove(kill_request_archive_path_.c_str());
+    if (std::rename(kill_request_path_.c_str(),
+                    kill_request_archive_path_.c_str()) != 0) {
+        std::remove(kill_request_path_.c_str());
+    }
+}
+
 int Engine::run_iteration() {
     int executed = 0;
+    // Operator halt honored BEFORE any signal this iteration (same latching kill
+    // switch as a loss-triggered halt). See consume_operator_kill_request.
+    consume_operator_kill_request();
     auto states = feed_->poll();
     if (alpaca_feed_) {
         last_poll_live_ =

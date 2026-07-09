@@ -38,3 +38,12 @@ target_link_libraries(test_ibkr_routing PRIVATE mal_execution mal_risk
                       mal_config mal_util)
 add_test(NAME ibkr_routing COMMAND test_ibkr_routing
          WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+# Operator kill-switch wiring: the engine consumes the GUI/API kill-request
+# control file and trips the same latching kill switch; stale/archived files
+# never re-trip; manual resume still required. Offline synthetic feed, temp DB.
+add_executable(test_kill_switch test_kill_switch.cpp)
+target_link_libraries(test_kill_switch PRIVATE mal_core mal_market_data
+                      mal_signal_engine mal_storage mal_risk mal_config mal_util)
+add_test(NAME kill_switch COMMAND test_kill_switch
+         WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})

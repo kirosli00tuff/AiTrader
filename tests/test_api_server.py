@@ -290,6 +290,20 @@ def test_kill_post_records_request_not_op_table(env, client):
     assert client.get("/kill").json()["request"]["reason"] == "operator halt"
 
 
+def test_kill_request_file_shape_matches_engine_contract(env, client):
+    """The control file must carry exactly the fields the C++ engine parses: a
+    boolean `requested`, a `reason` string, and a `ts`. Mocked filesystem only
+    (temp control dir); no real engine and no real halt."""
+    import json as _json
+    client.post("/kill", json={"requested": True, "reason": "halt now"})
+    with open(os.path.join(env["control"], "kill_request.json")) as fh:
+        rec = _json.load(fh)
+    assert set(rec) == {"requested", "reason", "ts"}
+    assert rec["requested"] is True
+    assert rec["reason"] == "halt now"
+    assert isinstance(rec["ts"], str) and rec["ts"]
+
+
 # --- The backend never writes an operational table --------------------------
 
 def test_no_operational_table_write(env, client):

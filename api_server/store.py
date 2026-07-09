@@ -397,8 +397,10 @@ def stream_snapshot(mode: str) -> dict:
 # The engine trips its own kill switch on risk breaches and reflects that in
 # venue_state.kill_switch_tripped (read below). The operator can also record a
 # durable HALT REQUEST here. This writes a control file next to the keystore,
-# never an operational table and never the RiskGate. Wiring the engine to
-# consume this request file is a documented follow-up.
+# never an operational table and never the RiskGate. The C++ engine consumes
+# this file at the top of every loop iteration and trips the same latching kill
+# switch (see core/engine.cpp consume_operator_kill_request), then archives it
+# to kill_request.processed.json so a stale request cannot re-trip on restart.
 
 _DEFAULT_CONTROL = os.path.join(_REPO_ROOT, ".control")
 

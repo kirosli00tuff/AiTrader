@@ -13,6 +13,9 @@ system:
   live_mode_default_enabled: false       # live is OFF by default, everywhere
   kill_switch_enabled: true
   manual_resume_required_after_kill_switch: true
+  control_dir: .control                  # dir for operator control files (the GUI
+                                         # kill-request file the engine consumes);
+                                         # env MAL_CONTROL_DIR overrides at runtime
 
 # -----------------------------------------------------------------------------
 # Engine — continuous (24/7) run-forever loop. Used with `--continuous`.

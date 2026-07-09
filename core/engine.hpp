@@ -75,6 +75,11 @@ public:
 
     bool last_poll_was_live() const { return last_poll_live_; }
 
+    // Read-only kill-switch state (used by tests and status surfaces). The switch
+    // itself is only ever changed through the latching trip / manual-resume path.
+    bool kill_switch_tripped() const { return kill_switch_.tripped(); }
+    bool manual_resume_pending() const { return kill_switch_.manual_resume_pending(); }
+
 private:
     std::vector<signal_engine::FactorSignal> gather_factors(
         const market_data::MarketState& ms, const news::CatalystScore& cat,
@@ -113,6 +118,12 @@ private:
     // Rebuild aggregate portfolio/exposure state from currently open native
     // positions so the RiskGate sees true open risk when judging a new entry.
     void sync_portfolio_state();
+    // Operator halt: consume the GUI/API kill-request control file (if present)
+    // at the top of each loop iteration and trip the SAME latching kill switch
+    // used for a loss-triggered halt, then archive the processed request so a
+    // stale file cannot re-trip on a later run. Reads a control file only; it
+    // never touches the RiskGate.
+    void consume_operator_kill_request();
 
     config::Config cfg_;
     EngineOptions opts_;
@@ -156,6 +167,12 @@ private:
     bool continuous_ = false;          // gate equity by market hours when true
     bool alpaca_feed_ = false;         // feed is AlpacaFeed (tracks live status)
     bool last_poll_live_ = false;      // last poll contained real Alpaca data
+
+    // Operator kill-request control file (written by the API backend). Resolved
+    // once in the constructor; the processed request is archived to the second
+    // path so a stale file never re-trips the kill switch on restart.
+    std::string kill_request_path_;
+    std::string kill_request_archive_path_;
 
     // --- Offline feed / clock state (Tasks 2-4) ---------------------------
     // feed_mode_: flat_random_walk (tick path) | synthetic_regimes | replay.

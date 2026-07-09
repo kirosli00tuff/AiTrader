@@ -23,6 +23,10 @@ struct SystemConfig {
     bool live_mode_default_enabled = false;
     bool kill_switch_enabled = true;
     bool manual_resume_required_after_kill_switch = true;
+    // Directory holding operator control files (e.g. the GUI kill-request file
+    // the engine consumes). Matches api_server/store.py; env MAL_CONTROL_DIR
+    // overrides at runtime.
+    std::string control_dir = ".control";
 };
 
 struct VenueConfig {

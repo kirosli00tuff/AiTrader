@@ -25,5 +25,8 @@ double json_get_number(const std::string& json, const std::string& key,
                        double def = 0.0);
 std::string json_get_string(const std::string& json, const std::string& key,
                             const std::string& def = "");
+// Read a boolean field from a flat JSON object. Accepts true/false and 1/0.
+bool json_get_bool(const std::string& json, const std::string& key,
+                   bool def = false);
 
 }  // namespace mal::bridge

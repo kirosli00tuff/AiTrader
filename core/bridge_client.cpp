@@ -101,4 +101,14 @@ std::string json_get_string(const std::string& json, const std::string& key,
     return json.substr(start, end - start);
 }
 
+bool json_get_bool(const std::string& json, const std::string& key, bool def) {
+    auto p = find_value_start(json, key);
+    if (!p || *p >= json.size()) return def;
+    if (json.compare(*p, 4, "true") == 0) return true;
+    if (json.compare(*p, 5, "false") == 0) return false;
+    if (json[*p] == '1') return true;
+    if (json[*p] == '0') return false;
+    return def;
+}
+
 }  // namespace mal::bridge

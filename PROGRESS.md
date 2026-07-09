@@ -17,10 +17,11 @@ The C++ safety spine builds clean and runs the offline paper loop (`ctest` 7/7).
 - SQLite DAO: 14 tables, WAL mode, append-only audit log
 - Dash UI: paper tab, live tab locked, advanced tab, accounts tab
 - Real LLM council: 3 providers, Claude Haiku base-check gate, offline mock fallback, 29 tests
+- Kill-request wiring: engine consumes the GUI/API halt-request control file each iteration and trips the same latching kill switch (archived to avoid re-trip, manual resume required), ctest-covered
 
 ## In Progress
 
-- GUI overhaul (React + TypeScript, additive). Three pages built (Settings and APIs, Paper, Live) served by a read-only FastAPI backend (api_server/) over the same SQLite DB, loopback only. Coinbase Pro dark theme, sidebar + status bar, WebSocket live stream. Dash UI retained as fallback. Backend 22 pytest, frontend 3 render tests + typecheck + build all green. Next: wire the control-file kill request into the engine, then the CONTEXT.md GUI Plan controls (per-layer + per-model toggles, champion/challenger + RL enable, weight sliders, regime override, budget dial).
+- GUI overhaul (React + TypeScript, additive). Three pages built (Settings and APIs, Paper, Live) served by a read-only FastAPI backend (api_server/) over the same SQLite DB, loopback only. Coinbase Pro dark theme, sidebar + status bar, WebSocket live stream. Dash UI retained as fallback. Backend 22 pytest, frontend 3 render tests + typecheck + build all green. The engine now consumes the GUI kill-request control file and trips the latching kill switch (2026-07-09), so the kill button actually halts the loop. Next: the CONTEXT.md GUI Plan controls (per-layer + per-model toggles, champion/challenger + RL enable, weight sliders, regime override, budget dial).
 - None active. The "close open flags + RL advisory (shipped off) + council cost cuts" prompt is complete (2026-07-05): every follow-up flag from the 12-task prompt is cleared, `rl_advisory` (PPO, shipped off) is built, and the two council cost cuts (risk pre-check + market-hours) are in. See "Open Flags / Follow-ups" and RETURN.md.
 
 ## Not Started
@@ -64,6 +65,17 @@ New flags from the feed-work session (2026-07-05, `369b6a6`):
 ## Session Log
 
 Newest entries at top. One entry per session. Format: date, model used, what changed, what is stable, what is next.
+
+### 2026-07-09 (Opus 4.8) — wire the GUI kill-request control file into the engine kill switch
+
+- **The GUI kill button now actually halts the engine.** New `Engine::consume_operator_kill_request()` (`core/engine.cpp`) reads the API backend's control file (`.control/kill_request.json`, env `MAL_CONTROL_DIR` overrides, matching config `system.control_dir`) at the top of BOTH per-iteration entry points — `run_iteration` (tick / alpaca_paper online loop) and `step_bar_mode` (bar-driven synthetic_regimes / replay) — BEFORE any signal is evaluated.
+- **Same latching mechanism, not a separate path.** When `requested` is true it trips the existing kill switch exactly as a loss breach does: `kill_switch_.trip(reason)` + per-venue `accounts_->trip_kill_switch` + a `kill_switch` critical event. It reads a control file only; it never touches the RiskGate.
+- **No re-trip on restart.** The processed request is archived to `kill_request.processed.json` (atomic rename, delete fallback), so a stale file never re-trips on a later run.
+- **Manual resume unchanged.** The switch stays latching; an operator halt requires the same manual resume as a loss-triggered halt. No new resume path.
+- **Supporting bits:** `SystemConfig::control_dir` (config.hpp/.cpp/default_config.yaml), a `json_get_bool` JSON helper (`core/bridge_client.*`) mirroring the existing tiny readers, and read-only `Engine::kill_switch_tripped()` / `manual_resume_pending()` accessors.
+- **Verified end to end (synthetic_regimes + the real POST /kill endpoint):** baseline 800-step synthetic run opened 52 paper trades; with a pending request the same run tripped on iteration 1 (event order startup -> kill_switch -> summary), opened 0 trades, and archived the request (wall-clock 0.17s). On the tick path, the operator halt persisted `venue_state.kill_switch_tripped=1` for alpaca/coinbase/ibkr via the existing `snapshot_balances`, so the GUI reflects it.
+- **Stable:** C++ ctest 8/8 (new `test_kill_switch`: 14/14 checks). Python pytest 160 passed (added the control-file shape-contract test). RiskGate logic, the live-trading gate, and the adaptive limit-weakening invariant untouched. Live trading stays OFF.
+- **Next:** the CONTEXT.md GUI Plan controls; prove paper-loop stability.
 
 ### 2026-07-08 (Opus 4.8) — replace the Gemini 3 Flash base-check gate with Claude Haiku 4.5
 

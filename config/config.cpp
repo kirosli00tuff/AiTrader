@@ -142,6 +142,8 @@ Config load_config(const std::string& path) {
         get_bool(root, "system.kill_switch_enabled", true);
     c.system.manual_resume_required_after_kill_switch =
         get_bool(root, "system.manual_resume_required_after_kill_switch", true);
+    c.system.control_dir =
+        get_str(root, "system.control_dir", ".control");
 
     // engine (continuous-mode loop)
     c.engine.loop_interval_seconds =
