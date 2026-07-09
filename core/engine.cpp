@@ -487,7 +487,7 @@ void Engine::handle_bar_close(const market_data::MarketState& ms,
     // provisional order whose QUALITY fields are set to pass, so only the hard
     // preconditions (kill switch, daily loss, position/exposure/notional caps)
     // can fire. When a hard limit already blocks the trade the council cannot
-    // change that, so skip the Flash gate + council + execution entirely. This
+    // change that, so skip the base-check gate + council + execution entirely. This
     // REUSES RiskGate read-only; it does not modify or duplicate any gate logic.
     {
         risk::OrderProposal pre = o;
@@ -505,7 +505,7 @@ void Engine::handle_bar_close(const market_data::MarketState& ms,
         }
     }
 
-    // Cut B — market-hours skip: US equities skip the Flash gate + council
+    // Cut B — market-hours skip: US equities skip the base-check gate + council
     // outside regular US trading hours (crypto stays 24/7). Only the expensive
     // council call is suppressed; native factors + execution still run.
     const bool market_hours_skip =

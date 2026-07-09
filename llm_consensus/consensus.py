@@ -3,7 +3,7 @@
 Produces a consensus directional verdict from several LLM providers. Three real
 providers (OpenAI / Anthropic / Google) plug in behind API keys; when a key is
 absent that provider degrades to a clearly-labelled deterministic mock, so the
-offline demo needs no keys. A cheap Gemini-Flash base-check gate can skip the
+offline demo needs no keys. A cheap Claude Haiku base-check gate can skip the
 whole council for low-signal setups (cost control).
 
 Output is ADVISORY ONLY — it enters the C++ factor-combination engine as
@@ -23,7 +23,7 @@ from .config_access import (  # noqa: F401
     council_max_tokens, equities_market_hours_only, gate_enabled,
     llm_model_names, slot_weight, use_real_council,
 )
-from .gate import AlwaysProceedGate, GateDecision, GeminiFlashGate  # noqa: F401
+from .gate import AlwaysProceedGate, GateDecision, HaikuGate  # noqa: F401
 from .providers import (  # noqa: F401
     AnthropicProvider, GeminiProvider, LLMProvider, MockLLMProvider,
     OpenAIProvider,
@@ -89,8 +89,8 @@ def build_gate(cfg_path: str | None = None):
     """The base-check gate, or a no-op AlwaysProceedGate when disabled."""
     if not gate_enabled(cfg_path):
         return AlwaysProceedGate(reason="gate disabled by config", source="disabled")
-    return GeminiFlashGate(model_id=llm_model_names(cfg_path).get(
-        "llm_gate", "gemini-3-flash"))
+    return HaikuGate(model_id=llm_model_names(cfg_path).get(
+        "llm_gate", "claude-haiku-4-5"))
 
 
 def _flat_consensus(gate: GateDecision) -> ConsensusResult:
@@ -110,7 +110,7 @@ def _risk_precheck_skip(state: dict) -> GateDecision | None:
 
     The C++ engine evaluates the cheap RiskGate preconditions READ-ONLY and, when
     a hard limit already blocks the trade, marks the /score/llm payload. The
-    council then never runs (no Flash gate, no providers) — a doomed trade cannot
+    council then never runs (no base-check gate, no providers) — a doomed trade cannot
     be rescued by the council. This honours the engine's gate result; it does not
     re-implement or modify any gate logic. Returns a skip decision or None.
     """
@@ -170,7 +170,7 @@ def consensus(state: dict, providers: list[LLMProvider] | None = None,
     skips the (expensive) providers entirely. The ensemble math itself is
     unchanged from the original mock-only implementation.
 
-    Two council cost cuts run BEFORE the Flash gate + providers (Task 5): a risk
+    Two council cost cuts run BEFORE the base-check gate + providers (Task 5): a risk
     pre-check (skip when the engine's read-only RiskGate already blocks the
     trade) and a market-hours skip (equities outside US RTH). Each returns a flat
     verdict whose gate reason the engine logs as ``risk_precheck`` / ``market_hours``.
@@ -225,7 +225,7 @@ def council_status_line(cfg_path: str | None = None) -> str:
     else:
         council = "MOCK council (deterministic offline stand-ins)"
     if gate_enabled(cfg_path):
-        gate = f"base-check gate ON ({names.get('llm_gate', 'gemini-3-flash')})"
+        gate = f"base-check gate ON ({names.get('llm_gate', 'claude-haiku-4-5')})"
     else:
         gate = "base-check gate OFF"
     return f"LLM council: {council}; {gate}"

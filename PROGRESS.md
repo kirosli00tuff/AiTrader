@@ -4,7 +4,7 @@ Status tracker for AiTrader. Read at the start of each session. Update at the en
 
 ## Current State
 
-The C++ safety spine builds clean and runs the offline paper loop (`ctest` 7/7). Polymarket is fully removed (region). Alpaca paper is the primary online loop (`feed_mode: alpaca_paper`, paper + market-data only, no live path). IBKR is wired as the live-only venue via a locally run IB Gateway but stays DISABLED behind the approval gate. The real LLM council is merged (Opus 4.8, GPT-5.5, Gemini 3.1 Pro) with a free Gemini Flash gate, prompt caching, and cost controls (budget, per-symbol cooldown, token cap, neutral skip). The native strategy layer (momentum + reversion + regime detector, closed-bar eval, native ATR exits) is in; the adaptive tuner learns from real closed-trade PnL (≥30-trade gate); the `dnn_advisory` factor has a real-data walk-forward training pipeline with gated promotion; Coinbase replaces Binance; free-first whale feeds (ClankApp + SEC EDGAR) are wired live-OFF by default; security hardening (loopback bridge, credential masking, pre-commit secrets hook, pinned deps) landed. A separate `rl_advisory` PPO module (gym env, real-fill training gate, walk-forward eval, `/score/rl` bridge endpoint) is built but **shipped OFF** — it never touches the ensemble until an operator toggles `rl_enabled` past the `rl_min_real_fills` gate. Two council cost cuts (risk pre-check + equities market-hours skip) short-circuit doomed/after-hours setups before any provider spend. Council/whale live paths stay behind config/env flags and the bridge. Live trading disabled by default. A React and TypeScript GUI (three pages Settings, Paper, Live) served by a thin read-only FastAPI backend (api_server/) over the same SQLite database is now built and additive to the Dash UI. Next up: extend it with the CONTEXT.md GUI Plan controls, and prove paper-loop stability.
+The C++ safety spine builds clean and runs the offline paper loop (`ctest` 7/7). Polymarket is fully removed (region). Alpaca paper is the primary online loop (`feed_mode: alpaca_paper`, paper + market-data only, no live path). IBKR is wired as the live-only venue via a locally run IB Gateway but stays DISABLED behind the approval gate. The real LLM council is merged (Opus 4.8, GPT-5.5, Gemini 3.1 Pro) with a Claude Haiku 4.5 base-check gate, prompt caching, and cost controls (budget, per-symbol cooldown, token cap, neutral skip). The native strategy layer (momentum + reversion + regime detector, closed-bar eval, native ATR exits) is in; the adaptive tuner learns from real closed-trade PnL (≥30-trade gate); the `dnn_advisory` factor has a real-data walk-forward training pipeline with gated promotion; Coinbase replaces Binance; free-first whale feeds (ClankApp + SEC EDGAR) are wired live-OFF by default; security hardening (loopback bridge, credential masking, pre-commit secrets hook, pinned deps) landed. A separate `rl_advisory` PPO module (gym env, real-fill training gate, walk-forward eval, `/score/rl` bridge endpoint) is built but **shipped OFF** — it never touches the ensemble until an operator toggles `rl_enabled` past the `rl_min_real_fills` gate. Two council cost cuts (risk pre-check + equities market-hours skip) short-circuit doomed/after-hours setups before any provider spend. Council/whale live paths stay behind config/env flags and the bridge. Live trading disabled by default. A React and TypeScript GUI (three pages Settings, Paper, Live) served by a thin read-only FastAPI backend (api_server/) over the same SQLite database is now built and additive to the Dash UI. Next up: extend it with the CONTEXT.md GUI Plan controls, and prove paper-loop stability.
 
 ## Stable and Working
 
@@ -16,7 +16,7 @@ The C++ safety spine builds clean and runs the offline paper loop (`ctest` 7/7).
 - Alpaca paper: real HTTP for market data and paper orders
 - SQLite DAO: 14 tables, WAL mode, append-only audit log
 - Dash UI: paper tab, live tab locked, advanced tab, accounts tab
-- Real LLM council: 3 providers, Flash gate, offline mock fallback, 29 tests
+- Real LLM council: 3 providers, Claude Haiku base-check gate, offline mock fallback, 29 tests
 
 ## In Progress
 
@@ -64,6 +64,19 @@ New flags from the feed-work session (2026-07-05, `369b6a6`):
 ## Session Log
 
 Newest entries at top. One entry per session. Format: date, model used, what changed, what is stable, what is next.
+
+### 2026-07-08 (Opus 4.8) — replace the Gemini 3 Flash base-check gate with Claude Haiku 4.5
+
+- **Base-check gate now runs on Claude Haiku 4.5** (`llm_consensus/gate.py`: `GeminiFlashGate` -> `HaikuGate`). It reuses the council's Anthropic Messages client and the same `ANTHROPIC_API_KEY`, so no new credential is needed. Same screening prompt and same yes/no-plus-reason JSON contract; the gate still skips the council on "no".
+- **Shared Anthropic transport extracted** (`llm_consensus/providers.py`: new `anthropic_request` + `anthropic_text`, mirroring `gemini_request`/`gemini_text`). `AnthropicProvider` was refactored onto them so the council secondary and the gate share one transport (DRY). Gate response capped at 128 tokens.
+- **Config**: `config/default_config.yaml` `llm_gate: gemini-3-flash` -> `claude-haiku-4-5`, commented that the gate uses Haiku through the Anthropic client and reuses `ANTHROPIC_API_KEY`. `gate_enabled` unchanged.
+- **Env**: `.env.example` keeps `GEMINI_API_KEY` (still used by the tertiary council slot `gemini-3.1-pro`); only the gate comment moved to `ANTHROPIC_API_KEY`. No new credential.
+- **Startup line**: `python_bridge/server.py` prints the gate model via `council_status_line`, now showing `claude-haiku-4-5`.
+- **Fail-safe posture preserved**: gate disabled -> AlwaysProceedGate; no key -> permissive mock (proceed); call error / unparseable -> fail-open (proceed).
+- **Tests**: `tests/test_llm_consensus.py` gate tests moved to Haiku mocks (Anthropic envelope, `ANTHROPIC_API_KEY`); `tests/test_council_cost_controls.py` stub gate model string updated. Full Python suite green (159 pytest passed).
+- **Docs**: CONTEXT.md (API Notes + Cost Notes + Key Decisions); CLAUDE.md approved-model-strings rule; AUDIT.md; "Flash gate" -> "base-check gate" comment sweep across consensus.py/config_access.py/core/engine.cpp/config/config.hpp.
+- **NOT touched**: RiskGate logic, the live-trading gate, the adaptive limit-weakening invariant. Live trading stays OFF.
+- **Next**: consume the kill-request file in the engine, then the CONTEXT.md GUI Plan controls; prove paper-loop stability.
 
 ### 2026-07-06 (Opus 4.8) — React + TypeScript trading GUI (Settings, Paper, Live) on a read-only FastAPI backend
 

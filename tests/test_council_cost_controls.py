@@ -164,7 +164,7 @@ class _DeclineGate:
     reason: str = "neutral regime + weak signal"
 
     def should_review(self, state: dict) -> GateDecision:
-        return GateDecision(False, self.reason, "gemini-3-flash", "real")
+        return GateDecision(False, self.reason, "claude-haiku-4-5", "real")
 
 
 class _MustNotRunProvider:
@@ -185,4 +185,4 @@ def test_gate_skip_avoids_council_and_logs_reason():
     # The skip reason is carried out for the engine to log as council_skip.
     assert res.gate["proceed"] is False
     assert res.gate["reason"] == "cooldown active"
-    assert res.gate["model"] == "gemini-3-flash"
+    assert res.gate["model"] == "claude-haiku-4-5"

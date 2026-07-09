@@ -96,10 +96,10 @@ def _build_registry() -> dict[str, CredentialSpec]:
                        "OpenAI (GPT-5.5)", "source", True,
                        ("OPENAI_API_KEY",)),
         CredentialSpec("anthropic_key", "API key", "anthropic",
-                       "Anthropic (Claude Opus 4.8)", "source", True,
+                       "Anthropic (Claude Opus 4.8 + Haiku gate)", "source", True,
                        ("ANTHROPIC_API_KEY",)),
         CredentialSpec("gemini_key", "API key", "gemini",
-                       "Google (Gemini 3.1 Pro + Flash gate)", "source", True,
+                       "Google (Gemini 3.1 Pro)", "source", True,
                        ("GEMINI_API_KEY",)),
     ]
     return {s.name: s for s in specs}

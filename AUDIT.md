@@ -83,9 +83,9 @@ llm_models:
   llm_primary:   gpt-5.5
   llm_secondary: claude-opus-4-8
   llm_tertiary:  gemini-3.1-pro
-  llm_gate:      gemini-3-flash   # free base-check gate
+  llm_gate:      claude-haiku-4-5  # base-check gate (Anthropic client)
 ```
-**Model strings now correct** (the earlier drift is fixed): they match the four approved strings in `CLAUDE.md` exactly, and the free base-check gate `gemini-3-flash` is present.
+**Model strings now correct** (the earlier drift is fixed): they match the four approved strings in `CLAUDE.md` exactly, and the base-check gate `claude-haiku-4-5` is present.
 
 **Council cost controls (real, tested):** beyond the token cap / daily budget / per-symbol cooldown, two cuts now fire **before any provider spend** in `llm_consensus/consensus.py`: (1) a **risk pre-check** — when the engine's read-only RiskGate already blocks the trade, the council is skipped entirely (logged `risk_precheck`); (2) a **market-hours skip** — equities (SPY, QQQ) skip the gate+council outside US regular trading hours while crypto stays 24/7 (logged `market_hours`, config `engine.equities_market_hours_only`, default true). Covered by `tests/test_council_cost_cuts.py`.
 

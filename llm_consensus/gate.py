@@ -1,12 +1,15 @@
-"""Free base-check gate — a cheap pre-council cost-control screen.
+"""Cheap pre-council base-check gate — a Claude Haiku cost-control screen.
 
-Before the three expensive providers run, a single cheap ``gemini-3-flash`` call
-decides whether the setup is even worth a full review. If it says no, the council
-is skipped and a flat/neutral verdict is returned.
+Before the three expensive council providers run, a single cheap
+``claude-haiku-4-5`` call decides whether the setup is even worth a full
+review. If it says no, the council is skipped and a flat/neutral verdict is
+returned. The gate reuses the same Anthropic Messages client (and the same
+``ANTHROPIC_API_KEY``) as the council's secondary provider, so it needs no new
+credential and each call costs a small fraction of a cent.
 
 Fail-safe posture:
   * gate disabled by config        -> always proceed (AlwaysProceedGate).
-  * no GEMINI_API_KEY              -> permissive MOCK gate (always proceed), so
+  * no ANTHROPIC_API_KEY           -> permissive MOCK gate (always proceed), so
                                       offline behaviour is unchanged.
   * gate call errors / unparseable -> proceed (fail-open): a flaky gate must
                                       never silently suppress real analysis.
@@ -17,11 +20,18 @@ import logging
 from dataclasses import dataclass
 
 from . import http_json
-from .providers import _resolve_key, build_user_prompt, gemini_request, gemini_text
+from .providers import (
+    _resolve_key, anthropic_request, anthropic_text, build_user_prompt,
+)
 
 log = logging.getLogger("llm_consensus")
 
-GATE_ENV_VAR = "GEMINI_API_KEY"
+# The gate reuses the council's Anthropic key — no separate credential needed.
+GATE_ENV_VAR = "ANTHROPIC_API_KEY"
+
+# The gate reply is tiny (a yes/no plus a one-line reason), so a small token cap
+# keeps each call cheap without truncating the reason.
+GATE_MAX_TOKENS = 128
 
 # Stable (cacheable) instruction prefix for the gate.
 GATE_SYSTEM_PROMPT = (
@@ -66,10 +76,15 @@ class AlwaysProceedGate:
 
 
 @dataclass
-class GeminiFlashGate:
-    """Cheap Gemini-Flash base-check (env GEMINI_API_KEY, free tier)."""
+class HaikuGate:
+    """Cheap Claude Haiku base-check (env ANTHROPIC_API_KEY, shared with council).
 
-    model_id: str = "gemini-3-flash"
+    Reuses the council's Anthropic Messages transport, so no new credential is
+    needed. Each call is a single small Haiku request (yes/no plus a one-line
+    reason), costing well under a cent.
+    """
+
+    model_id: str = "claude-haiku-4-5"
     timeout: float = http_json.DEFAULT_TIMEOUT
 
     def should_review(self, state: dict) -> GateDecision:
@@ -79,10 +94,11 @@ class GeminiFlashGate:
                 True, f"no {GATE_ENV_VAR}: permissive mock gate (proceed)",
                 self.model_id, "mock")
         try:
-            url, headers, payload = gemini_request(
-                self.model_id, key, GATE_SYSTEM_PROMPT, build_user_prompt(state))
+            url, headers, payload = anthropic_request(
+                self.model_id, key, GATE_SYSTEM_PROMPT, build_user_prompt(state),
+                max_tokens=GATE_MAX_TOKENS)
             resp = http_json.post_json(url, headers, payload, timeout=self.timeout)
-            text = gemini_text(resp)
+            text = anthropic_text(resp)
         except Exception as e:
             log.warning("base-check gate (%s) call failed: %s", self.model_id, e)
             return GateDecision(True, f"gate error, proceeding: {e}",

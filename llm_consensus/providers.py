@@ -229,6 +229,39 @@ def gemini_text(resp: dict) -> str:
     return "".join(str(p.get("text", "")) for p in parts)
 
 
+# --- Anthropic transport (shared by the secondary provider AND the gate) -----
+
+def anthropic_request(model_id: str, key: str, system_prompt: str,
+                      user_prompt: str, max_tokens: int = 400,
+                      cache_system: bool = True) -> tuple[str, dict, dict]:
+    model = model_id or "claude-opus-4-8"
+    url = "https://api.anthropic.com/v1/messages"
+    headers = {
+        "x-api-key": key,
+        "anthropic-version": "2023-06-01",
+        "content-type": "application/json",
+    }
+    system_block = {"type": "text", "text": system_prompt}
+    if cache_system:
+        # Prompt caching: explicit ephemeral cache_control on the fixed system
+        # prefix caches it across calls.
+        system_block["cache_control"] = {"type": "ephemeral"}
+    payload = {
+        "model": model,
+        "max_tokens": max_tokens,  # cost cap (Task 4)
+        "system": [system_block],
+        "messages": [{"role": "user", "content": user_prompt}],
+    }
+    return url, headers, payload
+
+
+def anthropic_text(resp: dict) -> str:
+    for block in resp.get("content") or []:
+        if block.get("type") == "text":
+            return str(block.get("text", ""))
+    return ""
+
+
 # --- Concrete real providers ------------------------------------------------
 
 @dataclass
@@ -271,28 +304,12 @@ class AnthropicProvider(_RealLLMProvider):
     LABEL: ClassVar[str] = "Anthropic"
 
     def _request(self, state: dict, key: str) -> tuple[str, dict, dict]:
-        url = "https://api.anthropic.com/v1/messages"
-        headers = {
-            "x-api-key": key,
-            "anthropic-version": "2023-06-01",
-            "content-type": "application/json",
-        }
-        payload = {
-            "model": self.model_id or "claude-opus-4-8",
-            "max_tokens": self.max_tokens,  # cost cap (Task 4)
-            # Prompt caching: explicit ephemeral cache_control on the fixed
-            # system prefix caches it across calls.
-            "system": [{"type": "text", "text": SYSTEM_PROMPT,
-                        "cache_control": {"type": "ephemeral"}}],
-            "messages": [{"role": "user", "content": build_user_prompt(state)}],
-        }
-        return url, headers, payload
+        return anthropic_request(self.model_id or "claude-opus-4-8", key,
+                                 SYSTEM_PROMPT, build_user_prompt(state),
+                                 max_tokens=self.max_tokens)
 
     def _text_from_response(self, resp: dict) -> str:
-        for block in resp.get("content") or []:
-            if block.get("type") == "text":
-                return str(block.get("text", ""))
-        return ""
+        return anthropic_text(resp)
 
 
 @dataclass

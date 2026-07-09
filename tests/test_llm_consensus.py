@@ -16,7 +16,7 @@ from llm_consensus import (
     use_real_council,
 )
 from llm_consensus import http_json
-from llm_consensus.gate import AlwaysProceedGate, GeminiFlashGate
+from llm_consensus.gate import AlwaysProceedGate, HaikuGate
 
 _LLM_KEYS = ("OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GEMINI_API_KEY")
 
@@ -84,7 +84,7 @@ def _cfg(tmp_path, *, use_real=False, gate=True, name="cfg.yaml") -> str:
             "llm_primary": "gpt-5.5",
             "llm_secondary": "claude-opus-4-8",
             "llm_tertiary": "gemini-3.1-pro",
-            "llm_gate": "gemini-3-flash",
+            "llm_gate": "claude-haiku-4-5",
         },
         "llm": {"use_real_council": use_real, "gate_enabled": gate},
         "model_weights": {
@@ -288,35 +288,35 @@ def test_gate_disabled_via_config_uses_always_proceed(tmp_path):
     assert d.proceed is True and d.source == "disabled"
 
 
-def test_gate_enabled_builds_flash_gate(tmp_path):
+def test_gate_enabled_builds_haiku_gate(tmp_path):
     cfg = _cfg(tmp_path, use_real=False, gate=True)
     g = build_gate(cfg_path=cfg)
-    assert isinstance(g, GeminiFlashGate)
-    assert g.model_id == "gemini-3-flash"
+    assert isinstance(g, HaikuGate)
+    assert g.model_id == "claude-haiku-4-5"
 
 
-def test_flash_gate_without_key_is_permissive_mock():
-    d = GeminiFlashGate().should_review({"symbol": "X"})
+def test_haiku_gate_without_key_is_permissive_mock():
+    d = HaikuGate().should_review({"symbol": "X"})
     assert d.proceed is True and d.source == "mock"
 
 
-def test_flash_gate_says_no_when_model_declines(monkeypatch):
-    monkeypatch.setenv("GEMINI_API_KEY", "test-key")
-    monkeypatch.setattr(http_json, "post_json", lambda *a, **k: _gemini_env(
+def test_haiku_gate_says_no_when_model_declines(monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    monkeypatch.setattr(http_json, "post_json", lambda *a, **k: _anthropic_env(
         '{"proceed": false, "reason": "flat range"}'))
-    d = GeminiFlashGate().should_review({"symbol": "X"})
+    d = HaikuGate().should_review({"symbol": "X"})
     assert d.proceed is False and d.source == "real"
     assert d.reason == "flat range"
 
 
-def test_flash_gate_error_is_fail_open(monkeypatch):
-    monkeypatch.setenv("GEMINI_API_KEY", "test-key")
+def test_haiku_gate_error_is_fail_open(monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
 
     def _raise(*a, **k):
         raise RuntimeError("net")
 
     monkeypatch.setattr(http_json, "post_json", _raise)
-    d = GeminiFlashGate().should_review({"symbol": "X"})
+    d = HaikuGate().should_review({"symbol": "X"})
     assert d.proceed is True and d.source == "error"
 
 
@@ -350,7 +350,7 @@ def test_status_line_reflects_config(tmp_path):
                                                   name="m.yaml"))
     assert "REAL council" in real_line and "gpt-5.5" in real_line
     assert "MOCK council" in mock_line
-    assert "gemini-3-flash" in real_line  # gate on by default
+    assert "claude-haiku-4-5" in real_line  # gate on by default
 
 
 # --- JSON extraction helper --------------------------------------------------

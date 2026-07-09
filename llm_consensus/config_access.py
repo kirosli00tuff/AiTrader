@@ -52,7 +52,7 @@ def use_real_council(cfg_path: str | None = None) -> bool:
 
 
 def gate_enabled(cfg_path: str | None = None) -> bool:
-    """True when the cheap Gemini-Flash base-check runs before the council.
+    """True when the cheap Claude Haiku base-check runs before the council.
 
     Sourced from ``llm.gate_enabled`` (default True — the gate is on by default).
     """
@@ -63,7 +63,7 @@ def equities_market_hours_only(cfg_path: str | None = None) -> bool:
     """True when US equities skip the council outside regular trading hours.
 
     Sourced from ``engine.equities_market_hours_only`` (default True). Council
-    cost cut (Task 5): equity symbols (SPY, QQQ) skip the Flash gate + council
+    cost cut (Task 5): equity symbols (SPY, QQQ) skip the base-check gate + council
     outside US RTH; crypto trades 24/7 and is never skipped for market hours.
     """
     return bool((_cfg(cfg_path).get("engine", {}) or {}).get(

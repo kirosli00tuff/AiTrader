@@ -190,7 +190,7 @@ struct StrategyConfig {
 };
 
 // Council cost controls. The full LLM council runs ONLY on a native strategy
-// entry candidate that passes the Flash gate — never on a timer, tick, or exit.
+// entry candidate that passes the base-check gate — never on a timer, tick, or exit.
 struct CouncilConfig {
     int council_daily_budget = 30;                // max full-council calls per day
     int per_symbol_council_cooldown_minutes = 60;
