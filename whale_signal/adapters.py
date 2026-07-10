@@ -449,12 +449,27 @@ def _num(*candidates):
     return None
 
 
-def default_adapters() -> list:
-    """Free-first default chain.
+# --- Reserved integrations (NOT in the active default chain) ----------------
+# SEC EDGAR is the sole ACTIVE whale source (see default_adapters below). The
+# following stay wired and importable but are OFF the default chain, following
+# one reserved-integration pattern:
+#   - ClankAppAdapter    reserved optional crypto/on-chain feed (free).
+#   - WhaleAlertAdapter  reserved optional crypto/on-chain feed (key-gated).
+#   - Unusual Whales Pro RESERVED real-time PAID upgrade for richer EQUITIES
+#     smart-money data (options flow, dark pool, congressional, insider, and
+#     13F), at roughly 48 dollars per month. No adapter is wired. Only the
+#     UNUSUAL_WHALES_API_KEY env var is reserved (unset), pending an operator
+#     decision.
 
-    ClankApp is the primary crypto whale source. The free EDGAR 13F adapter adds
-    delayed institutional context. Whale Alert stays available as an optional
-    key-gated alternative but is not in the default chain, since its free tier is
-    limited. Add it explicitly if a key is present.
+
+def default_adapters() -> list:
+    """The ACTIVE whale source chain.
+
+    SEC EDGAR 13F is the sole active whale source: free, keyless, and DELAYED
+    institutional context (quarterly, ~45-day lag). The crypto adapters
+    (ClankApp, Whale Alert) and the reserved Unusual Whales Pro paid upgrade are
+    OPTIONAL and NOT in this chain. Add a crypto or paid adapter explicitly only
+    if an operator opts in. Every adapter keeps its deterministic mock fallback,
+    so this runs offline with no keys.
     """
-    return [ClankAppAdapter(), Sec13FAdapter()]
+    return [Sec13FAdapter()]

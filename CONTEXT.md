@@ -47,10 +47,10 @@ A 24/7 paper and live AI auto-trading platform. Four layers: static safety, adap
 
 ## Whale Tracking Decisions
 
-- Crypto: ClankApp, free, 8 chains, already the default adapter. Zero cost.
-- Equities: SEC EDGAR, free, official government data, no key, adapter stubbed. 13F filings lag 45 days, useful for slow-money context. Form 4 insider trades post within two business days, more actionable.
-- Total whale tracking cost: zero.
-- Paid upgrades deferred until the free signal proves useful on paper: Whale Alert at 29.95 per month for crypto, Unusual Whales at 50 per month for equities. Reserved env vars WHALE_ALERT_API_KEY and UNUSUAL_WHALES_API_KEY.
+- SEC EDGAR is the sole active whale feed (2026-07-10). It is free, keyless, and delayed: 13F filings lag about 45 days, useful as slow-money institutional context, not live flow. It is the only adapter in the active default chain (`whale_signal.adapters.default_adapters`), gated by SEC_EDGAR_ENABLED and defaulting to the offline mock.
+- Crypto whale feeds are reserved, not active. ClankApp (free) and Whale Alert (limited free tier) stay wired and importable as optional crypto/on-chain adapters, off the default chain. Turn one on explicitly only if an operator opts into crypto whale data.
+- Unusual Whales Pro is reserved as the real-time paid upgrade (2026-07-10). It would add richer equities smart-money data (options flow, dark pool, congressional, insider, and 13F) for about 48 dollars per month. No adapter is wired. The UNUSUAL_WHALES_API_KEY env var is reserved and unset, following the same reserved-integration pattern used for Whale Alert, pending an operator decision.
+- Total active whale tracking cost stays zero, since SEC EDGAR is free.
 
 ## API Notes and Quirks
 

@@ -14,6 +14,16 @@ Commit message:
 
 ---
 
+## Prompt: Confirm SEC EDGAR as active whale feed, reserve Unusual Whales as documented paid upgrade
+
+Date: 2026-07-10
+Model: Opus 4.8
+Prompt summary: Read CLAUDE.md, PROGRESS.md, CONTEXT.md, RETURN.md and log the prompt before work. Do not touch RiskGate logic, the live-trading gate, or the adaptive limit-weakening invariant. Writing rules spartan, active voice, no em dashes, no semicolons. Goal, confirm SEC EDGAR as the sole active whale feed and reserve Unusual Whales as a documented unimplemented paid upgrade, following the reserved pattern used for Whale Alert. Task 1, verify SEC EDGAR is the only active whale source, no code change if already correct. Task 2, add UNUSUAL_WHALES_API_KEY to env examples if not present (unset, no implementation), add a code comment in whale_signal noting Unusual Whales Pro as the reserved real-time paid upgrade for options flow, dark pool, congressional, insider, and 13F data, roughly 48 dollars per month, pending operator decision. Task 3, update CONTEXT.md Whale Tracking Decisions and PROGRESS.md, complete this RETURN.md entry, commit to main.
+Changes: Investigation found SEC EDGAR was NOT the sole active source. default_adapters() returned [ClankAppAdapter(), Sec13FAdapter()], and two tests asserted ClankApp was the active primary. The operator chose to make SEC EDGAR sole active. Task 1 narrowed whale_signal/adapters.py default_adapters() to [Sec13FAdapter()], so SEC EDGAR (free, keyless, delayed 13F equities context, gated by SEC_EDGAR_ENABLED, default offline mock) is the sole active whale source. ClankApp and Whale Alert stay wired and importable as reserved optional crypto adapters, off the default chain, following the reserved-integration pattern. Task 2 confirmed UNUSUAL_WHALES_API_KEY already existed in .env.example unset, and rewrote its comment to describe Unusual Whales Pro as the reserved real-time paid upgrade for richer equities smart-money data (options flow, dark pool, congressional, insider, and 13F) at roughly 48 dollars per month, no adapter wired, pending an operator decision. Added a matching reserved-upgrade comment block in whale_signal/adapters.py above default_adapters, and updated whale_signal/__init__.py plus the .env.example whale source comments (ClankApp and Whale Alert reserved, SEC EDGAR sole active). Task 3 rewrote CONTEXT.md Whale Tracking Decisions (SEC EDGAR sole active free and delayed, crypto reserved, Unusual Whales Pro reserved paid upgrade, zero active cost), updated PROGRESS.md (Current State plus a dated session entry), updated tests/test_whale_signal.py (default_adapters is sole sec_13f, new test_sec_edgar_is_sole_active_source, and the offline-never-raise test now also exercises the reserved crypto adapters), and completed this entry. Full Python suite green (173 passed). NOT touched: RiskGate logic, live-trading gate, adaptive limit-weakening invariant. Live trading stays OFF.
+Commit message: `Confirm SEC EDGAR as active whale feed, reserve Unusual Whales as documented paid upgrade`
+
+---
+
 ## Prompt: Rebuild the React GUI Alpaca-style with Paper and Live subpages, a Controls surface, and validated backend control endpoints
 
 Date: 2026-07-09

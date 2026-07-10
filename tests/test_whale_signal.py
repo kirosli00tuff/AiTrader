@@ -85,24 +85,28 @@ def test_activity_usefulness_transparent_and_bounded():
 
 
 def test_default_adapters_present():
-    # Free-first. ClankApp is the default crypto whale source. The free EDGAR 13F
-    # adapter adds delayed institutional context. Whale Alert is optional
-    # (key-gated) and not in the default chain. Apify/Polymarket is removed.
+    # SEC EDGAR 13F is the SOLE active whale source. The crypto adapters
+    # (ClankApp, Whale Alert) are reserved optional feeds, off the default
+    # chain. Apify/Polymarket is removed.
     sources = {a.source for a in default_adapters()}
-    assert {"clankapp", "sec_13f"} <= sources
-    assert sources.isdisjoint({"whale_alert", "apify"})
+    assert sources == {"sec_13f"}
+    assert sources.isdisjoint({"clankapp", "whale_alert", "apify"})
 
 
-def test_clankapp_is_default_primary():
+def test_sec_edgar_is_sole_active_source():
     from whale_signal.adapters import ClankAppAdapter, WhaleAlertAdapter
     adapters = default_adapters()
-    assert adapters[0].source == "clankapp"
-    # Whale Alert remains importable as an optional alternative.
+    assert len(adapters) == 1
+    assert adapters[0].source == "sec_13f"
+    # Crypto adapters remain importable as reserved optional feeds.
+    assert ClankAppAdapter().source == "clankapp"
     assert WhaleAlertAdapter().source == "whale_alert"
 
 
 def test_adapters_never_raise_offline():
-    # No keys, no network -> every adapter must return a list, never raise.
-    for adapter in default_adapters():
+    # No keys, no network -> every adapter (active + reserved) returns a list.
+    from whale_signal.adapters import ClankAppAdapter, WhaleAlertAdapter
+    everything = default_adapters() + [ClankAppAdapter(), WhaleAlertAdapter()]
+    for adapter in everything:
         for sym in ("BTC-USD", "AAPL", "PRES-2028-YES"):
             assert isinstance(adapter.fetch(sym), list)

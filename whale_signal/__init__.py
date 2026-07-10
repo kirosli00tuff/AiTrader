@@ -1,9 +1,11 @@
 """Whale / smart-money advisory signal (Layer 4). Advisory only.
 
-Free-first sources: ClankApp (free crypto/on-chain, DEFAULT) and SEC EDGAR 13F
-(free, no key, DELAYED institutional disclosure). Whale Alert remains available
-as an optional key-gated alternative. Every adapter has a deterministic MOCK
-fallback so the app runs offline with no API keys.
+Active source: SEC EDGAR 13F (free, keyless, DELAYED institutional disclosure)
+is the sole adapter in the active default chain. The crypto adapters (ClankApp,
+Whale Alert) stay importable as reserved optional feeds, off the default chain,
+and Unusual Whales Pro is a reserved paid upgrade (env name only, no adapter).
+Every adapter has a deterministic MOCK fallback so the app runs offline with no
+API keys.
 """
 from .adapters import (  # noqa: F401
     ClankAppAdapter,
