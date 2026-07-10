@@ -18,6 +18,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from api_server import store
+from api_server import controls
 
 HOST = "127.0.0.1"        # loopback only, asserted by the test suite
 PORT = int(os.environ.get("MAL_API_PORT", "8000"))
@@ -53,20 +54,24 @@ def get_account(mode: str = Query(store.PAPER)):
 
 
 @app.get("/positions")
-def get_positions(mode: str = Query(store.PAPER)):
-    return {"mode": _mode(mode), "positions": store.positions(_mode(mode))}
+def get_positions(mode: str = Query(store.PAPER),
+                  category: str | None = Query(None)):
+    return {"mode": _mode(mode), "category": store.valid_category(category),
+            "positions": store.positions(_mode(mode), category)}
 
 
 @app.get("/orders")
-def get_orders(mode: str = Query(store.PAPER), limit: int = Query(50, le=500)):
-    return {"mode": _mode(mode),
-            "orders": store.orders(_mode(mode), limit)}
+def get_orders(mode: str = Query(store.PAPER), limit: int = Query(50, le=500),
+               category: str | None = Query(None)):
+    return {"mode": _mode(mode), "category": store.valid_category(category),
+            "orders": store.orders(_mode(mode), limit, category)}
 
 
 @app.get("/trades")
-def get_trades(mode: str = Query(store.PAPER), limit: int = Query(200, le=1000)):
-    return {"mode": _mode(mode),
-            "trades": store.closed_trades(_mode(mode), limit)}
+def get_trades(mode: str = Query(store.PAPER), limit: int = Query(200, le=1000),
+               category: str | None = Query(None)):
+    return {"mode": _mode(mode), "category": store.valid_category(category),
+            "trades": store.closed_trades(_mode(mode), limit, category)}
 
 
 @app.get("/pnl")
@@ -75,8 +80,9 @@ def get_pnl(mode: str = Query(store.PAPER)):
 
 
 @app.get("/signals")
-def get_signals(limit: int = Query(100, le=500)):
-    return store.signals(limit)
+def get_signals(limit: int = Query(100, le=500),
+                category: str | None = Query(None)):
+    return store.signals(limit, category)
 
 
 @app.get("/council")
@@ -191,3 +197,88 @@ def post_kill(body: KillRequest):
     """
     rec = store.write_kill_request(body.requested, body.reason)
     return {"ok": True, "request": rec, "engine": store.kill_state()}
+
+
+# --- Controls: validated operator control surface ---------------------------
+# Every control validates + clamps server-side, records the change to the events
+# log with old/new values, and reuses the Dash weight-override channel for
+# weights. STRUCTURAL RULE (asserted in tests): no control writes a Level-1 risk
+# value, an operational STATE table, or the RiskGate, and none enables live.
+
+@app.get("/controls")
+def get_controls():
+    return controls.control_state()
+
+
+class WeightsWrite(BaseModel):
+    weights: dict[str, float]
+
+
+@app.post("/controls/weights")
+def post_weights(body: WeightsWrite):
+    return controls.set_weights(body.weights)
+
+
+class LayerWrite(BaseModel):
+    layer: str
+    enabled: bool
+
+
+@app.post("/controls/layer")
+def post_layer(body: LayerWrite):
+    return controls.set_layer(body.layer, body.enabled)
+
+
+class ModelWrite(BaseModel):
+    model: str
+    enabled: bool
+
+
+@app.post("/controls/model")
+def post_model(body: ModelWrite):
+    return controls.set_model(body.model, body.enabled)
+
+
+class ToggleWrite(BaseModel):
+    enabled: bool
+
+
+@app.post("/controls/rl")
+def post_rl(body: ToggleWrite):
+    return controls.set_rl(body.enabled)
+
+
+@app.post("/controls/auto_promote")
+def post_auto_promote(body: ToggleWrite):
+    return controls.set_auto_promote(body.enabled)
+
+
+@app.post("/controls/promote")
+def post_promote():
+    return controls.request_promote()
+
+
+@app.post("/controls/rollback")
+def post_rollback():
+    return controls.request_rollback()
+
+
+class RegimeWrite(BaseModel):
+    symbol: str
+    regime: str | None = None
+
+
+@app.post("/controls/regime")
+def post_regime(body: RegimeWrite):
+    return controls.set_regime(body.symbol, body.regime)
+
+
+class BudgetWrite(BaseModel):
+    council_daily_budget: int
+    per_symbol_cooldown_minutes: int
+
+
+@app.post("/controls/budget")
+def post_budget(body: BudgetWrite):
+    return controls.set_budget(body.council_daily_budget,
+                               body.per_symbol_cooldown_minutes)

@@ -42,6 +42,33 @@ def valid_mode(mode: str) -> str:
     return mode if mode in MODES else PAPER
 
 
+# --- Category filtering (Paper/Live Stocks + Crypto subpages) ---------------
+# The subpages filter server-side to a fixed symbol allow-list. Symbols match
+# case-insensitively with "/" and "-" treated as equal, so both BTC/USD and the
+# legacy BTC-USD land in the crypto bucket. Category is never trusted blindly:
+# an unknown value falls back to no filter (all symbols).
+STOCKS = "stocks"
+CRYPTO = "crypto"
+_CATEGORY_SYMBOLS: dict[str, set[str]] = {
+    STOCKS: {"SPY", "QQQ"},
+    CRYPTO: {"BTCUSD", "ETHUSD"},
+}
+
+
+def _norm_symbol(sym: str | None) -> str:
+    return (sym or "").upper().replace("/", "").replace("-", "")
+
+
+def valid_category(cat: str | None) -> str | None:
+    return cat if cat in _CATEGORY_SYMBOLS else None
+
+
+def _in_category(symbol: str | None, category: str | None) -> bool:
+    if not category:
+        return True
+    return _norm_symbol(symbol) in _CATEGORY_SYMBOLS[category]
+
+
 def _now() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
@@ -146,30 +173,43 @@ def account(mode: str) -> dict:
 
 # --- Positions / orders / trades --------------------------------------------
 
-def positions(mode: str) -> list[dict]:
+def positions(mode: str, category: str | None = None) -> list[dict]:
     mode = valid_mode(mode)
+    category = valid_category(category)
     live = _live_venues()
     rows = query(
-        "SELECT venue, symbol, market, side, qty, avg_price, notional, "
+        "SELECT venue, symbol, market, category, side, qty, avg_price, notional, "
         "opened_ts, unrealized_pnl FROM positions ORDER BY venue, symbol")
-    return [r for r in rows if _mode_of(r["venue"], live) == mode]
+    return [r for r in rows
+            if _mode_of(r["venue"], live) == mode
+            and _in_category(r["symbol"], category)]
 
 
-def orders(mode: str, limit: int = 50) -> list[dict]:
+def orders(mode: str, limit: int = 50,
+           category: str | None = None) -> list[dict]:
     mode = valid_mode(mode)
-    return query(
+    category = valid_category(category)
+    fetch = limit if category is None else max(limit, 1000)
+    rows = query(
         "SELECT id, ts, venue, symbol, side, qty, price, notional, mode, "
         "outcome, pnl FROM trades WHERE mode = ? ORDER BY id DESC LIMIT ?",
-        (mode, limit))
+        (mode, fetch))
+    rows = [r for r in rows if _in_category(r["symbol"], category)]
+    return rows[:limit]
 
 
-def closed_trades(mode: str, limit: int = 200) -> list[dict]:
+def closed_trades(mode: str, limit: int = 200,
+                  category: str | None = None) -> list[dict]:
     mode = valid_mode(mode)
-    return query(
+    category = valid_category(category)
+    fetch = limit if category is None else max(limit, 1000)
+    rows = query(
         "SELECT id, ts, venue, symbol, side, qty, price, notional, pnl, "
         "outcome, combined_conf, combined_edge FROM trades "
         "WHERE mode = ? AND outcome IN ('win','loss') "
-        "ORDER BY id DESC LIMIT ?", (mode, limit))
+        "ORDER BY id DESC LIMIT ?", (mode, fetch))
+    rows = [r for r in rows if _in_category(r["symbol"], category)]
+    return rows[:limit]
 
 
 # --- PnL / equity -----------------------------------------------------------
@@ -240,11 +280,15 @@ def regimes() -> list[dict]:
                  "FROM regime_state ORDER BY symbol")
 
 
-def signals(limit: int = 100) -> dict:
+def signals(limit: int = 100, category: str | None = None) -> dict:
+    category = valid_category(category)
+    fetch = limit if category is None else max(limit, 1000)
     rows = query(
         "SELECT ts, venue, symbol, factor, bias, confidence, edge "
-        "FROM signals ORDER BY id DESC LIMIT ?", (limit,))
-    reg = {r["symbol"]: r for r in regimes()}
+        "FROM signals ORDER BY id DESC LIMIT ?", (fetch,))
+    rows = [r for r in rows if _in_category(r["symbol"], category)][:limit]
+    reg = {r["symbol"]: r for r in regimes()
+           if _in_category(r["symbol"], category)}
     for r in rows:
         rr = reg.get(r.get("symbol"))
         r["regime"] = rr["regime"] if rr else None
@@ -434,3 +478,25 @@ def kill_state() -> dict:
     tripped = any(r.get("kill_switch_tripped") for r in vs)
     return {"engine_kill_switch_tripped": tripped,
             "request": read_kill_request()}
+
+
+# --- Audit write (append-only events log) -----------------------------------
+# The ONLY additional write path beyond the credential keystore and the control
+# files: an append to the append-only `events` audit table, used by the Controls
+# endpoints to record each operator change with old/new values. This mirrors
+# ui/db.append_event. It NEVER writes an operational STATE table, a Level-1 risk
+# value, or the RiskGate. The DB path is resolved fresh from env each call.
+
+def append_event(kind: str, message: str, severity: str = "info",
+                 venue: str | None = None, symbol: str | None = None,
+                 payload_json: str | None = None) -> bool:
+    try:
+        with sqlite3.connect(_db_path(), timeout=2.0) as conn:
+            conn.execute(
+                "INSERT INTO events(ts, kind, venue, symbol, severity, message, "
+                "payload_json) VALUES(?,?,?,?,?,?,?)",
+                (_now(), kind, venue, symbol, severity, message, payload_json))
+            conn.commit()
+        return True
+    except Exception:
+        return False

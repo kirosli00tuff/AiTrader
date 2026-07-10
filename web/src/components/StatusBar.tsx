@@ -1,24 +1,45 @@
 import { api } from "../api/client";
 import { useApi } from "../api/useApi";
-import type { Health } from "../api/types";
+import type { Account, Health, Pnl } from "../api/types";
+import { money, pct, signClass } from "../api/format";
 
-// Top bar: engine state, active view, kill-switch status, bridge link. Polls
-// /health so it reflects the engine without a page reload.
+// Top strip on every page: engine state, active mode, portfolio value, daily
+// PnL, kill-switch status (plus the bridge link). Polls /health, /account, and
+// /pnl for the paper account, the primary operating book.
 export default function StatusBar({ activeView }: { activeView: string }) {
-  const { data } = useApi<Health>(() => api.health(), 4000, []);
-  const eng = data?.engine;
+  const health = useApi<Health>(() => api.health(), 4000, []);
+  const acct = useApi<Account>(() => api.account("paper"), 6000, []);
+  const pnlApi = useApi<Pnl>(() => api.pnl("paper"), 6000, []);
+
+  const eng = health.data?.engine;
   const running = eng?.running ?? false;
   const kill = eng?.kill_switch_tripped ?? false;
-  const bridge = data?.bridge?.reachable ?? false;
+  const bridge = health.data?.bridge?.reachable ?? false;
+  const equity = acct.data?.equity ?? pnlApi.data?.equity ?? 0;
+  const daily = pnlApi.data?.daily_pnl?.length
+    ? pnlApi.data.daily_pnl[pnlApi.data.daily_pnl.length - 1].pnl
+    : 0;
+  const dayPct = pnlApi.data?.equity_change_pct ?? 0;
+
   return (
     <div className="statusbar">
       <div className="status-item">
         <span className={`dot ${running ? "g" : "d"}`} />
         Engine <b>{running ? "running" : "offline"}</b>
       </div>
+      <div className="status-sep" />
+      <div className="status-item">Mode <b>{activeView}</b></div>
+      <div className="status-sep" />
       <div className="status-item">
-        View <b>{activeView}</b>
+        Portfolio <b className="mono">{money(equity)}</b>
       </div>
+      <div className="status-item">
+        Today
+        <b className={`mono ${signClass(daily)}`}>
+          {daily >= 0 ? "▲" : "▼"} {money(daily)} ({pct(dayPct)})
+        </b>
+      </div>
+      <div className="status-sep" />
       <div className="status-item">
         <span className={`dot ${kill ? "r" : "g"}`} />
         Kill switch <b>{kill ? "TRIPPED" : "clear"}</b>

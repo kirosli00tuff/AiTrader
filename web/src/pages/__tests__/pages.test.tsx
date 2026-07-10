@@ -1,4 +1,3 @@
-import type { ReactElement } from "react";
 import { render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { describe, expect, it, vi } from "vitest";
@@ -20,89 +19,94 @@ vi.mock("../../api/client", () => {
     equity: 100120, equity_change: 120, equity_change_pct: 0.12,
     max_drawdown_pct: -0.2,
   };
+  const controls = {
+    layers: { adaptive: true, council: true, dnn_advisory: true, whale: true },
+    models: { "gpt-5.5": true, "claude-opus-4-8": true, "gemini-3.1-pro": true },
+    gate_enabled: true, auto_promote: false,
+    budget: { council_daily_budget: 30, per_symbol_cooldown_minutes: 60 },
+    budget_bounds: { budget: [1, 500], cooldown: [0, 1440] },
+    council_used_today: 2,
+    rl: { enabled: false, min_real_fills: 500, real_fills: 31, can_enable: false },
+    regime_pins: {}, regimes: ["trending", "range_bound", "neutral"],
+    weights: { rule_based: 0.18, llm_primary: 0.27, llm_secondary: 0.18, llm_tertiary: 0.12, dnn_advisory: 0.15, whale_signal: 0.10 },
+    default_weights: { rule_based: 0.18, llm_primary: 0.27, llm_secondary: 0.18, llm_tertiary: 0.12, dnn_advisory: 0.15, whale_signal: 0.10 },
+    weight_factors: ["rule_based", "llm_primary", "llm_secondary", "llm_tertiary", "dnn_advisory", "whale_signal"],
+    level1: { max_daily_loss_total_pct: 0.03, max_open_positions_total: 5 },
+    registry: { champion: { model_id: "dnn-synth-v1", role: "champion", ts: "x", metrics: { validation_sharpe: 0.9 }, notes: "synthetic" }, challenger: null, can_rollback: false, can_promote: false, promote_reason: "no challenger recorded" },
+    whitelist: ["BTC/USD", "ETH/USD", "SPY", "QQQ"],
+    pending_promote: null, pending_rollback: null,
+  };
+  const okResult = async () => ({ ok: true });
   return {
-    API_BASE: "http://127.0.0.1:8000",
-    WS_BASE: "ws://127.0.0.1:8000",
+    API_BASE: "http://127.0.0.1:8000", WS_BASE: "ws://127.0.0.1:8000",
     api: {
-      health: async () => ({
-        status: "ok", db_present: true,
-        engine: { db_present: true, last_event_ts: "x", kill_switch_tripped: false, running: true },
-        bridge: { reachable: true, url: "", status: "ok" },
-      }),
-      account: async () => ({
-        mode: "paper", equity: 100120, cash: 90000, realized_pnl: 120,
-        unrealized_pnl: 0, drawdown_pct: -0.2, venues: [],
-      }),
+      health: async () => ({ status: "ok", db_present: true, engine: { db_present: true, last_event_ts: "x", kill_switch_tripped: false, running: true }, bridge: { reachable: true, url: "", status: "ok" } }),
+      account: async () => ({ mode: "paper", equity: 100120, cash: 90000, realized_pnl: 120, unrealized_pnl: 0, drawdown_pct: -0.2, venues: [] }),
       pnl: async () => pnl,
-      positions: async () => ({
-        mode: "paper",
-        positions: [{ venue: "alpaca", symbol: "SPY", side: "buy", qty: 1, avg_price: 540, notional: 540, opened_ts: "x", unrealized_pnl: 1.25 }],
-      }),
-      orders: async () => ({
-        mode: "paper",
-        orders: [{ id: 1, ts: "2026-07-06T01:00:00Z", venue: "alpaca", symbol: "BTC/USD", side: "buy", qty: 0.01, price: 60000, notional: 600, mode: "paper", outcome: "win", pnl: 12.5 }],
-      }),
-      signals: async () => ({
-        signals: [{ ts: "x", venue: "alpaca", symbol: "BTC/USD", factor: "rule_based", bias: 0.4, confidence: 0.7, edge: 0.03, regime: "trending" }],
-        regimes: [{ symbol: "BTC/USD", regime: "trending", adx: 31, rvol: 0.04, updated_ts: "x" }],
-      }),
-      council: async () => ({
-        models: { llm_primary: "gpt-5.5", llm_secondary: "claude-opus-4-8", llm_tertiary: "gemini-3.1-pro", llm_gate: "gemini-3-flash" },
-        latest: [{ ts: "x", model: "gpt-5.5", verdict: "buy", confidence: 0.7, edge: 0.03, weight: 0.27 }],
-        recent: [],
-      }),
+      positions: async () => ({ mode: "paper", positions: [{ venue: "alpaca", symbol: "SPY", side: "buy", qty: 1, avg_price: 540, notional: 540, opened_ts: "x", unrealized_pnl: 1.25 }] }),
+      orders: async () => ({ mode: "paper", orders: [{ id: 1, ts: "2026-07-06T01:00:00Z", venue: "alpaca", symbol: "SPY", side: "buy", qty: 1, price: 540, notional: 540, mode: "paper", outcome: "open", pnl: null }] }),
+      trades: async () => ({ mode: "paper", trades: [{ id: 2, ts: "2026-07-06T01:00:00Z", venue: "alpaca", symbol: "SPY", side: "buy", qty: 1, price: 540, notional: 540, mode: "paper", outcome: "win", pnl: 12.5, combined_conf: 0.7, combined_edge: 0.03 }] }),
+      signals: async () => ({ signals: [{ ts: "x", venue: "alpaca", symbol: "SPY", factor: "rule_based", bias: 0.4, confidence: 0.7, edge: 0.03, regime: "trending" }], regimes: [{ symbol: "SPY", regime: "trending", adx: 31, rvol: 0.04, updated_ts: "x" }] }),
+      council: async () => ({ models: { llm_primary: "gpt-5.5" }, latest: [{ ts: "x", model: "gpt-5.5", verdict: "buy", confidence: 0.7, edge: 0.03, weight: 0.27 }], recent: [] }),
       risk: async () => ({ level1: {}, kill_switch_enabled: true, kill_switch_tripped: false }),
-      venues: async () => ({
-        venues: [{ venue: "alpaca", mode: "paper", live_enabled: false, live_adapter: "none", runtime_mode: "paper", credentials_connected: true, kill_switch_tripped: false, configured: true }],
-      }),
-      approval: async () => ({
-        live_enabled: false, manual_confirmation: false, last_checked_ts: "x",
-        mechanisms: [
-          { name: "Live approval gate passed", key: "approval_gate", passed: false, detail: "d" },
-          { name: "Live credentials connected", key: "credentials_connected", passed: false, detail: "d" },
-          { name: "Kill switch clear", key: "kill_switch", passed: true, detail: "d" },
-          { name: "Live-enabled flag set", key: "live_enabled", passed: false, detail: "d" },
-        ],
-        readiness: null, all_passed: false, live_venue: "ibkr",
-      }),
-      credentials: async () => ({
-        credentials: [
-          { name: "openai_key", label: "API key", group: "openai", group_label: "OpenAI (GPT-5.5)", kind: "source", mode: null, secret: true, configured: false, source: "missing", masked: "" },
-          { name: "alpaca_paper_key", label: "API key", group: "alpaca", group_label: "Alpaca", kind: "venue", mode: "paper", secret: true, configured: false, source: "missing", masked: "" },
-        ],
-      }),
-      saveCredential: async () => ({ ok: true }),
-      testConnection: async () => ({ ok: true, message: "ok", source: "env" }),
+      venues: async () => ({ venues: [{ venue: "alpaca", mode: "paper", live_enabled: false, live_adapter: "none", runtime_mode: "paper", credentials_connected: true, kill_switch_tripped: false, configured: true }] }),
+      approval: async () => ({ live_enabled: false, manual_confirmation: false, last_checked_ts: "x", mechanisms: [ { name: "Live approval gate passed", key: "approval_gate", passed: false, detail: "d" }, { name: "Live credentials connected", key: "credentials_connected", passed: false, detail: "d" }, { name: "Kill switch clear", key: "kill_switch", passed: true, detail: "d" }, { name: "Live-enabled flag set", key: "live_enabled", passed: false, detail: "d" } ], readiness: null, all_passed: false, live_venue: "ibkr" }),
+      credentials: async () => ({ credentials: [ { name: "openai_key", label: "API key", group: "openai", group_label: "OpenAI (GPT-5.5)", kind: "source", mode: null, secret: true, configured: false, source: "missing", masked: "" }, { name: "alpaca_paper_key", label: "API key", group: "alpaca", group_label: "Alpaca", kind: "venue", mode: "paper", secret: true, configured: false, source: "missing", masked: "" } ] }),
+      saveCredential: okResult, testConnection: async () => ({ ok: true, message: "ok", source: "env" }),
       kill: async () => ({ engine_kill_switch_tripped: false, request: { requested: false, reason: null, ts: null } }),
       requestKill: async () => ({ ok: true, request: { requested: true, reason: "x", ts: "x" }, engine: { engine_kill_switch_tripped: false, request: { requested: true, reason: "x", ts: "x" } } }),
+      controls: async () => controls,
+      setWeights: okResult, setLayer: okResult, setModel: okResult, setRl: okResult,
+      setAutoPromote: okResult, promote: okResult, rollback: okResult, setRegime: okResult, setBudget: okResult,
     },
   };
 });
 
-import PaperPage from "../PaperPage";
-import LivePage from "../LivePage";
-import SettingsPage from "../SettingsPage";
+import App from "../../App";
 
-function renderPage(node: ReactElement) {
-  return render(<MemoryRouter>{node}</MemoryRouter>);
+function at(path: string) {
+  return render(<MemoryRouter initialEntries={[path]}><App /></MemoryRouter>);
 }
 
 describe("pages render", () => {
-  it("renders the Paper page with equity", async () => {
-    renderPage(<PaperPage />);
+  it("renders the Paper overview with equity", async () => {
+    at("/paper");
     expect(await screen.findByText("Paper trading")).toBeInTheDocument();
     expect(await screen.findByText("Total equity")).toBeInTheDocument();
   });
 
-  it("renders the Live page locked with four mechanisms", async () => {
-    renderPage(<LivePage />);
+  it("renders the Paper Stocks subpage", async () => {
+    at("/paper/stocks");
+    expect(await screen.findByText(/Stocks \(SPY, QQQ\)/)).toBeInTheDocument();
+    expect(await screen.findByText("Open orders")).toBeInTheDocument();
+  });
+
+  it("renders the Paper Crypto subpage", async () => {
+    at("/paper/crypto");
+    expect(await screen.findByText(/Crypto \(BTC\/USD, ETH\/USD\)/)).toBeInTheDocument();
+  });
+
+  it("renders the Live section locked with four mechanisms", async () => {
+    at("/live");
     expect(await screen.findByText("Live trading")).toBeInTheDocument();
     expect(await screen.findByText(/Live trading is LOCKED/)).toBeInTheDocument();
     expect(await screen.findByText(/four safety mechanisms/)).toBeInTheDocument();
   });
 
+  it("renders the Live Crypto subpage zeroed", async () => {
+    at("/live/crypto");
+    expect(await screen.findByText(/All crypto data is zeroed/)).toBeInTheDocument();
+  });
+
+  it("renders the Controls page with weights and read-only Level 1", async () => {
+    at("/controls");
+    expect(await screen.findByText("Ensemble weights (by layer)")).toBeInTheDocument();
+    expect(await screen.findByText("Level 1 risk limits (read-only)")).toBeInTheDocument();
+    expect(await screen.findByText("ALWAYS ON")).toBeInTheDocument();
+  });
+
   it("renders the Settings page with categories", async () => {
-    renderPage(<SettingsPage />);
+    at("/settings");
     expect(await screen.findByText("Settings & APIs")).toBeInTheDocument();
     expect(await screen.findByText("LLM council")).toBeInTheDocument();
   });

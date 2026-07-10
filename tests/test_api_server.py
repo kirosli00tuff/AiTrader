@@ -88,6 +88,7 @@ def env(tmp_path, monkeypatch):
     _seed(str(db))
     monkeypatch.setenv("MAL_DB_PATH", str(db))
     monkeypatch.setenv("MAL_CONTROL_DIR", str(tmp_path / "control"))
+    monkeypatch.setenv("MAL_WEIGHT_OVERRIDE_PATH", str(tmp_path / "weights.json"))
     kdir = tmp_path / "keystore"
     kdir.mkdir()
     import account_manager.credentials as creds
@@ -100,7 +101,8 @@ def env(tmp_path, monkeypatch):
                                  "url": "http://127.0.0.1:8765",
                                  "status": None})
     return {"db": str(db), "keystore": str(kdir),
-            "control": str(tmp_path / "control")}
+            "control": str(tmp_path / "control"),
+            "weights": str(tmp_path / "weights.json")}
 
 
 @pytest.fixture()
@@ -325,3 +327,150 @@ def test_no_operational_table_write(env, client):
     after = digest()
     assert before == after
     assert os.path.exists(os.path.join(env["keystore"], "credentials.sqlite"))
+
+
+# --- Category filters (Paper/Live Stocks + Crypto subpages) -----------------
+
+def test_positions_category_filter(client):
+    stocks = client.get("/positions?mode=paper&category=stocks").json()
+    assert stocks["category"] == "stocks"
+    assert {p["symbol"] for p in stocks["positions"]} <= {"SPY", "QQQ"}
+    assert any(p["symbol"] == "SPY" for p in stocks["positions"])
+    crypto = client.get("/positions?mode=paper&category=crypto").json()
+    assert all(p["symbol"] in {"BTC/USD", "ETH/USD"}
+               for p in crypto["positions"])
+
+
+def test_orders_category_filter(client):
+    crypto = client.get("/orders?mode=paper&category=crypto").json()["orders"]
+    assert {o["symbol"] for o in crypto} == {"BTC/USD", "ETH/USD"}
+    stocks = client.get("/orders?mode=paper&category=stocks").json()["orders"]
+    assert {o["symbol"] for o in stocks} == {"SPY"}
+
+
+def test_trades_category_filter(client):
+    crypto = client.get("/trades?mode=paper&category=crypto").json()["trades"]
+    assert {t["symbol"] for t in crypto} <= {"BTC/USD", "ETH/USD"}
+    assert len(crypto) == 2
+    stocks = client.get("/trades?mode=paper&category=stocks").json()["trades"]
+    assert all(t["symbol"] in {"SPY", "QQQ"} for t in stocks)  # SPY is open
+
+
+def test_signals_category_filter(client):
+    crypto = client.get("/signals?category=crypto").json()
+    assert all(s["symbol"] in {"BTC/USD", "ETH/USD"} for s in crypto["signals"])
+    assert any(s["symbol"] == "BTC/USD" for s in crypto["signals"])
+    stocks = client.get("/signals?category=stocks").json()
+    assert all(s["symbol"] in {"SPY", "QQQ"} for s in stocks["signals"])
+
+
+# --- Controls: validated write surface --------------------------------------
+
+def _events(db_path, kind):
+    conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
+    conn.row_factory = sqlite3.Row
+    rows = [dict(r) for r in conn.execute(
+        "SELECT * FROM events WHERE kind=? ORDER BY id", (kind,)).fetchall()]
+    conn.close()
+    return rows
+
+
+def test_controls_get_shape(client):
+    j = client.get("/controls").json()
+    for k in ("layers", "models", "gate_enabled", "budget", "rl", "weights",
+              "default_weights", "level1", "registry", "whitelist"):
+        assert k in j
+    assert set(j["layers"]) == {"adaptive", "council", "dnn_advisory", "whale"}
+    assert j["rl"]["min_real_fills"] == 500
+    assert "max_daily_loss_total_pct" in j["level1"]
+
+
+def test_controls_weights_clamped_normalized_and_audited(env, client):
+    r = client.post("/controls/weights", json={"weights": {
+        "rule_based": 5.0, "llm_primary": -1.0, "llm_secondary": 0.5,
+        "llm_tertiary": 0.5, "dnn_advisory": 0.5, "whale_signal": 0.5}}).json()
+    assert r["ok"] is True
+    w = r["weights"]
+    assert all(0.0 <= v <= 1.0 for v in w.values())
+    assert abs(sum(w.values()) - 1.0) < 1e-6
+    assert w["llm_primary"] == 0.0                       # negative -> 0
+    conn = sqlite3.connect(f"file:{env['db']}?mode=ro", uri=True)
+    n = conn.execute("SELECT COUNT(*) FROM weight_changes").fetchone()[0]
+    conn.close()
+    assert n >= 1                                        # audited to weight_changes
+    assert _events(env["db"], "control_change")          # and to the event log
+
+
+def test_controls_layer_toggle_and_safety_rejected(env, client):
+    ok = client.post("/controls/layer",
+                     json={"layer": "adaptive", "enabled": False}).json()
+    assert ok["ok"] is True
+    assert client.get("/controls").json()["layers"]["adaptive"] is False
+    bad = client.post("/controls/layer",
+                      json={"layer": "safety", "enabled": False}).json()
+    assert bad["ok"] is False
+
+
+def test_controls_model_and_gate_toggle(env, client):
+    assert client.post("/controls/model",
+                       json={"model": "gpt-5.5", "enabled": False}).json()["ok"]
+    assert client.get("/controls").json()["models"]["gpt-5.5"] is False
+    assert client.post("/controls/model",
+                       json={"model": "gate", "enabled": False}).json()["ok"]
+    assert client.get("/controls").json()["gate_enabled"] is False
+    assert client.post("/controls/model",
+                       json={"model": "bogus", "enabled": False}).json()["ok"] is False
+
+
+def test_controls_rl_refused_below_gate(env, client):
+    r = client.post("/controls/rl", json={"enabled": True}).json()
+    assert r["ok"] is False
+    assert r["real_fills"] < r["min_real_fills"]
+    assert client.get("/controls").json()["rl"]["enabled"] is False
+    assert client.post("/controls/rl", json={"enabled": False}).json()["ok"] is True
+
+
+def test_controls_regime_persists_and_clears(env, client):
+    assert client.post("/controls/regime",
+                       json={"symbol": "SPY", "regime": "trending"}).json()["ok"]
+    assert client.get("/controls").json()["regime_pins"]["SPY"] == "trending"
+    assert client.post("/controls/regime",
+                       json={"symbol": "SPY", "regime": None}).json()["ok"]
+    assert "SPY" not in client.get("/controls").json()["regime_pins"]
+    assert client.post("/controls/regime",
+                       json={"symbol": "NOPE", "regime": "trending"}).json()["ok"] is False
+
+
+def test_controls_budget_clamped(env, client):
+    r = client.post("/controls/budget",
+                    json={"council_daily_budget": 99999,
+                          "per_symbol_cooldown_minutes": -5}).json()
+    assert r["ok"] is True and r["clamped"] is True
+    assert r["budget"]["council_daily_budget"] == 500
+    assert r["budget"]["per_symbol_cooldown_minutes"] == 0
+
+
+def test_controls_promote_and_rollback_gated(client):
+    assert client.post("/controls/promote").json()["ok"] is False
+    assert client.post("/controls/rollback").json()["ok"] is False
+
+
+def test_controls_never_writes_level1(env, client):
+    cfg = os.path.join(REPO_ROOT, "config", "default_config.yaml")
+
+    def digest() -> str:
+        with open(cfg, "rb") as fh:
+            return hashlib.sha256(fh.read()).hexdigest()
+
+    before = digest()
+    # A Level-1 risk key can never enter the weight channel.
+    r = client.post("/controls/weights",
+                    json={"weights": {"max_daily_loss_total_pct": 0.9}}).json()
+    assert r["ok"] is False
+    client.post("/controls/layer", json={"layer": "whale", "enabled": False})
+    client.post("/controls/budget",
+                json={"council_daily_budget": 10, "per_symbol_cooldown_minutes": 30})
+    client.post("/controls/regime", json={"symbol": "QQQ", "regime": "neutral"})
+    assert digest() == before                     # config (Level-1 source) untouched
+    lvl = client.get("/controls").json()["level1"]
+    assert lvl.get("max_daily_loss_total_pct") == 0.03

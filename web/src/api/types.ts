@@ -1,5 +1,6 @@
 // Response types mirroring the FastAPI backend (api_server).
 export type Mode = "paper" | "live";
+export type Category = "stocks" | "crypto";
 
 export interface Health {
   status: string;
@@ -37,6 +38,7 @@ export interface Position {
   venue: string;
   symbol: string;
   market?: string | null;
+  category?: string | null;
   side: string;
   qty: number;
   avg_price: number;
@@ -175,4 +177,46 @@ export interface Snapshot {
   orders: Order[];
   pnl: Pnl;
   events: EventRow[];
+}
+
+// --- Controls page ---------------------------------------------------------
+export interface RegistryEntry {
+  model_id: string;
+  role: string;
+  ts: string;
+  metrics: Record<string, unknown>;
+  notes: string | null;
+}
+
+export interface ControlsState {
+  layers: Record<string, boolean>;
+  models: Record<string, boolean>;
+  gate_enabled: boolean;
+  auto_promote: boolean;
+  budget: { council_daily_budget: number; per_symbol_cooldown_minutes: number };
+  budget_bounds: { budget: [number, number]; cooldown: [number, number] };
+  council_used_today: number;
+  rl: { enabled: boolean; min_real_fills: number; real_fills: number; can_enable: boolean };
+  regime_pins: Record<string, string>;
+  regimes: string[];
+  weights: Record<string, number>;
+  default_weights: Record<string, number>;
+  weight_factors: string[];
+  level1: Record<string, number | string | boolean>;
+  registry: {
+    champion: RegistryEntry | null;
+    challenger: RegistryEntry | null;
+    can_rollback: boolean;
+    can_promote: boolean;
+    promote_reason: string;
+  };
+  whitelist: string[];
+  pending_promote: unknown;
+  pending_rollback: unknown;
+}
+
+export interface ControlResult {
+  ok: boolean;
+  error?: string;
+  [k: string]: unknown;
 }

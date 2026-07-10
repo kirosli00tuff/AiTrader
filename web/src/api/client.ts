@@ -1,8 +1,9 @@
 // Typed REST client for the AiTrader backend. All calls hit the loopback API.
 // The WebSocket stream lives in useStream.ts.
 import type {
-  Account, Approval, Council, Credential, Health, KillState, Mode, Order,
-  Pnl, Position, SignalsResponse, Trade, Venue,
+  Account, Approval, Category, ControlResult, ControlsState, Council,
+  Credential, Health, KillState, Mode, Order, Pnl, Position, SignalsResponse,
+  Trade, Venue,
 } from "./types";
 
 export const API_BASE = import.meta.env.VITE_API_BASE ?? "http://127.0.0.1:8000";
@@ -26,17 +27,23 @@ async function post<T>(path: string, body: unknown): Promise<T> {
   return (await res.json()) as T;
 }
 
+const cat = (c?: Category) => (c ? `&category=${c}` : "");
+
 export const api = {
   health: () => get<Health>("/health"),
   account: (mode: Mode) => get<Account>(`/account?mode=${mode}`),
-  positions: (mode: Mode) =>
-    get<{ mode: Mode; positions: Position[] }>(`/positions?mode=${mode}`),
-  orders: (mode: Mode, limit = 50) =>
-    get<{ mode: Mode; orders: Order[] }>(`/orders?mode=${mode}&limit=${limit}`),
-  trades: (mode: Mode, limit = 200) =>
-    get<{ mode: Mode; trades: Trade[] }>(`/trades?mode=${mode}&limit=${limit}`),
+  positions: (mode: Mode, category?: Category) =>
+    get<{ mode: Mode; positions: Position[] }>(
+      `/positions?mode=${mode}${cat(category)}`),
+  orders: (mode: Mode, limit = 50, category?: Category) =>
+    get<{ mode: Mode; orders: Order[] }>(
+      `/orders?mode=${mode}&limit=${limit}${cat(category)}`),
+  trades: (mode: Mode, limit = 200, category?: Category) =>
+    get<{ mode: Mode; trades: Trade[] }>(
+      `/trades?mode=${mode}&limit=${limit}${cat(category)}`),
   pnl: (mode: Mode) => get<Pnl>(`/pnl?mode=${mode}`),
-  signals: () => get<SignalsResponse>("/signals"),
+  signals: (category?: Category) =>
+    get<SignalsResponse>(`/signals${category ? `?category=${category}` : ""}`),
   council: () => get<Council>("/council"),
   risk: () => get<{ level1: Record<string, unknown>; kill_switch_enabled: boolean; kill_switch_tripped: boolean }>("/risk"),
   venues: () => get<{ venues: Venue[] }>("/venues"),
@@ -52,4 +59,23 @@ export const api = {
   requestKill: (reason: string) =>
     post<{ ok: boolean; request: KillState["request"]; engine: KillState }>(
       "/kill", { requested: true, reason }),
+
+  // --- Controls -------------------------------------------------------------
+  controls: () => get<ControlsState>("/controls"),
+  setWeights: (weights: Record<string, number>) =>
+    post<ControlResult>("/controls/weights", { weights }),
+  setLayer: (layer: string, enabled: boolean) =>
+    post<ControlResult>("/controls/layer", { layer, enabled }),
+  setModel: (model: string, enabled: boolean) =>
+    post<ControlResult>("/controls/model", { model, enabled }),
+  setRl: (enabled: boolean) => post<ControlResult>("/controls/rl", { enabled }),
+  setAutoPromote: (enabled: boolean) =>
+    post<ControlResult>("/controls/auto_promote", { enabled }),
+  promote: () => post<ControlResult>("/controls/promote", {}),
+  rollback: () => post<ControlResult>("/controls/rollback", {}),
+  setRegime: (symbol: string, regime: string | null) =>
+    post<ControlResult>("/controls/regime", { symbol, regime }),
+  setBudget: (council_daily_budget: number, per_symbol_cooldown_minutes: number) =>
+    post<ControlResult>("/controls/budget",
+      { council_daily_budget, per_symbol_cooldown_minutes }),
 };

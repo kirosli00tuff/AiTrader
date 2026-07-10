@@ -14,8 +14,8 @@ export MAL_API_PORT="$API_PORT"
 
 echo "Starting AiTrader GUI"
 echo "  API backend  : http://127.0.0.1:${API_PORT}   (read-only)"
-echo "  React (Vite) : http://127.0.0.1:5173"
-echo "  Dash fallback: python ui/app.py  (unchanged, still available)"
+echo "  React (Vite) : http://127.0.0.1:5173   (the rebuilt UI, open this)"
+echo "  Dash fallback: python ui/app.py       (unchanged, still available)"
 echo
 
 if [ ! -x "$PY" ]; then

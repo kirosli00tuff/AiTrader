@@ -3,7 +3,8 @@ import { NavLink } from "react-router-dom";
 const LINKS = [
   { to: "/paper", label: "Paper", ico: "▦" },
   { to: "/live", label: "Live", ico: "◆" },
-  { to: "/settings", label: "Settings & APIs", ico: "⚙" },
+  { to: "/controls", label: "Controls", ico: "▤" },
+  { to: "/settings", label: "Settings", ico: "⚙" },
 ];
 
 export default function Sidebar() {
