@@ -14,6 +14,7 @@
 #include <vector>
 
 #include "account_manager/account_manager.hpp"
+#include "core/layer_toggles.hpp"
 #include "config/config.hpp"
 #include "execution/execution.hpp"
 #include "learning/adaptive.hpp"
@@ -124,6 +125,10 @@ private:
     // stale file cannot re-trip on a later run. Reads a control file only; it
     // never touches the RiskGate.
     void consume_operator_kill_request();
+    // Consume the per-layer enable toggles from controls.json each iteration.
+    // A toggle off drops that layer's factor from the ensemble. Safety has no
+    // toggle and is never gated here. Advisory only, never a safety bypass.
+    void consume_layer_toggles();
 
     config::Config cfg_;
     EngineOptions opts_;
@@ -173,6 +178,13 @@ private:
     // path so a stale file never re-trips the kill switch on restart.
     std::string kill_request_path_;
     std::string kill_request_archive_path_;
+
+    // Per-layer enable toggles (controls.json, written by the GUI). Read each
+    // iteration like the kill request. Missing or malformed means all ON.
+    // Advisory only: a toggle off drops a factor from the ensemble, never safety.
+    std::string controls_path_;
+    LayerToggles layer_toggles_;
+    LayerToggles prev_layer_toggles_;
 
     // --- Offline feed / clock state (Tasks 2-4) ---------------------------
     // feed_mode_: flat_random_walk (tick path) | synthetic_regimes | replay.

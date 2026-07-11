@@ -566,6 +566,20 @@ resolved from the keystore or env, which is not a failure. Because the health
 check and the test script use the same resolver, a key saved in the keystore
 counts as configured everywhere, so the live sections run instead of skipping.
 
+### Decision-layer toggles
+
+The Controls page and the Ops section expose four per-layer enable toggles:
+adaptive strategy, LLM council, dnn_advisory, and whale. They write the same
+validated backend endpoint (controls.json). The engine reads controls.json each
+loop iteration, the same pattern as the kill-request file. A layer toggled off
+drops its factor from the ensemble for that iteration, contributing nothing to
+direction, sizing, confidence, or edge. Toggling a layer off removes an advisory
+input. It never disables, weakens, or bypasses the RiskGate, the kill switch, or
+any Level 1 limit. The static-safety layer has no toggle and always runs, shown
+as a fixed always-on indicator. A missing or malformed controls.json means all
+layers on. The run-state banner and the engine startup block show which layers
+are enabled, so a layer off by operator choice is never mistaken for a broken one.
+
 ## Advisory services
 
 - **`llm_consensus`** — `consensus(state)` returns a weighted ensemble verdict

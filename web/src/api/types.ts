@@ -247,7 +247,7 @@ export interface RunState {
   feed_mode: string; clock_mode: string; market_data_source: string;
   use_real_council: boolean; gate_enabled: boolean; council_mode: string;
   bridge: { reachable: boolean; url: string; status: string | null };
-  live_enabled: boolean; ts: string;
+  live_enabled: boolean; layers?: Record<string, boolean>; ts: string;
 }
 export interface DaySummary {
   day: string; trades_today: number; wins_today: number; losses_today: number;

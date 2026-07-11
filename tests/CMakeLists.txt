@@ -55,3 +55,11 @@ add_executable(test_native_conviction_gate test_native_conviction_gate.cpp)
 target_link_libraries(test_native_conviction_gate PRIVATE mal_signal_engine)
 add_test(NAME native_conviction_gate COMMAND test_native_conviction_gate
          WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+# Per-layer toggles (controls.json): read defaults all ON on a missing/malformed
+# file, explicit toggles are respected, a layer off drops its factor, and
+# rule_based (safety-adjacent) is never gated so the RiskGate is unaffected.
+add_executable(test_layer_toggles test_layer_toggles.cpp)
+target_link_libraries(test_layer_toggles PRIVATE mal_core mal_util)
+add_test(NAME layer_toggles COMMAND test_layer_toggles
+         WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})

@@ -22,6 +22,7 @@
 
 #include "config/config.hpp"
 #include "core/engine.hpp"
+#include "core/layer_toggles.hpp"
 
 namespace {
 std::string arg_value(int argc, char** argv, const std::string& flag,
@@ -168,6 +169,12 @@ int main(int argc, char** argv) {
         {
             const auto& st = cfg.strategy;
             const auto& co = cfg.council;
+            const char* cdenv = std::getenv("MAL_CONTROL_DIR");
+            std::string ctl_dir = (cdenv && *cdenv) ? std::string(cdenv)
+                : (cfg.system.control_dir.empty() ? std::string(".control")
+                                                  : cfg.system.control_dir);
+            const auto lt =
+                mal::core::read_layer_toggles(ctl_dir + "/controls.json");
             const auto& rk = cfg.risk;
             std::string wl;
             for (size_t i = 0; i < st.whitelist.size(); ++i)
@@ -222,6 +229,11 @@ int main(int argc, char** argv) {
                         : " (offline feed this run)")
                 << "\n"
                 << "  ibkr:      " << ibkr_status << "\n"
+                << "  layers:    adaptive " << (lt.adaptive ? "on" : "off")
+                << " / council " << (lt.council ? "on" : "off")
+                << " / dnn " << (lt.dnn_advisory ? "on" : "off")
+                << " / whale " << (lt.whale ? "on" : "off")
+                << " (safety ALWAYS ON) [controls.json]\n"
                 << "  thresholds: adx_min " << st.adx_min << " ema " << st.ema_fast
                 << "/" << st.ema_slow << " atr_floor " << st.atr_vol_floor
                 << " bb " << st.bb_period << "/" << st.bb_std << "sd rsi "

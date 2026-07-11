@@ -646,3 +646,25 @@ def test_verify_script_places_no_order_and_never_touches_live():
     assert "health" in src                            # resolver-backed checks
     # no live-trading branch, no order placement helper
     assert "submit_paper_order" not in src and "execute" not in src
+
+
+# --- Layer toggles: Ops writes the same controls.json the engine reads -------
+
+def test_runstate_reflects_layer_toggle(env, client):
+    r0 = client.get("/runstate").json()
+    assert "layers" in r0
+    # An Ops/Controls toggle writes controls.json, which /runstate (and the
+    # engine) read back. Same validated endpoint, no new write path.
+    assert client.post("/controls/layer",
+                       json={"layer": "council", "enabled": False}).json()["ok"] is True
+    r1 = client.get("/runstate").json()
+    assert r1["layers"].get("council") is False
+    # Safety is never toggleable.
+    bad = client.post("/controls/layer",
+                      json={"layer": "safety", "enabled": False}).json()
+    assert bad["ok"] is False
+    # The toggle change audits to the event log (control_change).
+    conn = sqlite3.connect(f"file:{env['db']}?mode=ro", uri=True)
+    n = conn.execute("SELECT COUNT(*) FROM events WHERE kind='control_change'").fetchone()[0]
+    conn.close()
+    assert n >= 1

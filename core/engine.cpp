@@ -56,6 +56,9 @@ Engine::Engine(config::Config cfg, EngineOptions opts)
         if (dir.empty()) dir = ".control";
         kill_request_path_ = dir + "/kill_request.json";
         kill_request_archive_path_ = dir + "/kill_request.processed.json";
+        controls_path_ = dir + "/controls.json";
+        layer_toggles_ = read_layer_toggles(controls_path_);
+        prev_layer_toggles_ = layer_toggles_;
     }
 
     // Resolve the offline feed mode early so alpaca_paper can force the online
@@ -157,14 +160,22 @@ std::vector<signal_engine::FactorSignal> Engine::gather_factors(
     const market_data::MarketState& ms, const news::CatalystScore& cat,
     bool council_allowed, const strategy::StrategySignal* native) {
     std::vector<signal_engine::FactorSignal> out;
-    std::vector<std::string> factors = {
+    std::vector<std::string> all = {
         "llm_primary", "llm_secondary", "llm_tertiary",
         "rule_based",  "dnn_advisory",  "whale_signal"};
     // RL advisory (Task 4) is DEFERRED and ships OFF. Only when rl_enabled does
     // it join the ensemble and get scored via /score/rl; while off it never
     // appears as a factor and the RL service is never called. Advisory only —
     // its ensemble weight defaults to 0.0 so it can never be decisive.
-    if (cfg_.rl.rl_enabled) factors.push_back("rl_advisory");
+    if (cfg_.rl.rl_enabled) all.push_back("rl_advisory");
+    // Per-layer toggles (controls.json): a layer toggled off drops its factor
+    // from the ensemble for this iteration, contributing nothing to direction,
+    // sizing, confidence, or edge. rule_based (native) and rl_advisory are not
+    // gated here. This removes an advisory input, never safety: the RiskGate
+    // still evaluates every order below.
+    std::vector<std::string> factors;
+    for (const auto& f : all)
+        if (factor_enabled(f, layer_toggles_)) factors.push_back(f);
 
     // Rule-based is always computed in C++.
     // LLM/DNN/whale come from the bridge if enabled, else mocks. The three LLM
@@ -343,6 +354,7 @@ int Engine::step_bar_mode() {
     // (synthetic_regimes / replay) do not go through run_iteration, so the check
     // lives here too. Same latching kill switch, no separate path.
     consume_operator_kill_request();
+    consume_layer_toggles();
     if (feed_mode_ == "synthetic_regimes") {
         // All whitelisted instruments close a bar at the same simulated instant.
         const std::string ts = util::epoch_to_iso8601(sim_epoch_);
@@ -668,11 +680,38 @@ void Engine::consume_operator_kill_request() {
     }
 }
 
+void Engine::consume_layer_toggles() {
+    // Read the four toggleable layer states from controls.json each iteration
+    // (same control-file pattern as the kill request). Missing or malformed
+    // means all layers ON, the safe default. A toggle off drops that layer's
+    // factor from the ensemble. It NEVER disables the RiskGate, the kill switch,
+    // or any Level-1 limit. Safety has no toggle.
+    layer_toggles_ = read_layer_toggles(controls_path_);
+    if (layer_toggles_ == prev_layer_toggles_) return;
+    const std::string ts = util::now_iso8601();
+    auto logone = [&](const char* name, bool oldv, bool newv) {
+        if (oldv == newv) return;
+        storage_->append_event(
+            {ts, "layer_toggle", "", "", "info",
+             std::string("Layer ") + name + ": " + (oldv ? "on" : "off") +
+                 " -> " + (newv ? "on" : "off"),
+             util::to_json({{"layer", name}, {"old", oldv ? "on" : "off"},
+                            {"new", newv ? "on" : "off"}}, {})});
+    };
+    logone("adaptive", prev_layer_toggles_.adaptive, layer_toggles_.adaptive);
+    logone("council", prev_layer_toggles_.council, layer_toggles_.council);
+    logone("dnn_advisory", prev_layer_toggles_.dnn_advisory,
+           layer_toggles_.dnn_advisory);
+    logone("whale", prev_layer_toggles_.whale, layer_toggles_.whale);
+    prev_layer_toggles_ = layer_toggles_;
+}
+
 int Engine::run_iteration() {
     int executed = 0;
     // Operator halt honored BEFORE any signal this iteration (same latching kill
     // switch as a loss-triggered halt). See consume_operator_kill_request.
     consume_operator_kill_request();
+    consume_layer_toggles();
     auto states = feed_->poll();
     if (alpaca_feed_) {
         last_poll_live_ =
@@ -848,6 +887,10 @@ int Engine::run_iteration() {
 void Engine::maybe_adapt(int iteration) {
     if (!cfg_.adaptive.adaptive_learning_enabled) return;
     if (!cfg_.adaptive.adaptive_weight_updates_enabled) return;
+    // Adaptive layer toggle (controls.json): skip the weight nudge this
+    // iteration when the operator has toggled the adaptive layer off. Advisory
+    // only, it never affects the RiskGate or any Level-1 limit.
+    if (!layer_toggles_.adaptive) return;
     // Real-fill learning gate (Task 3): the native path must accumulate a
     // minimum number of CLOSED trades before any weight nudge. The bootstrap
     // sim path keeps its legacy trade-count gate. Pure predicate lives in

@@ -30,7 +30,7 @@ The C++ safety spine builds clean and runs the offline paper loop (`ctest` 7/7).
 - Live-approval workflow end to end (`try_enable_live` still never called by design)
 - Real (disabled-by-default) live adapter for Coinbase (IBKR live adapter is now wired behind the gate, 2026-07-06)
 - Training the RL advisory policy: the `rl_advisory` PPO module is built but shipped OFF and untrained (activates only past the `rl_min_real_fills` gate, default 500 real fills; no synthetic-data path). Supervised `dnn_advisory` is the only Layer-3 signal serving today.
-- Engine/trainer consumption of the non-weight controls.json operator overrides (layer/model toggles, regime pins, budget, RL enable, promote/rollback requests). The GUI Plan controls themselves are DONE (2026-07-09, rebuilt Controls page on validated backend endpoints); the engine reads weights (Dash channel) and the kill request today, so wiring the rest is the follow-up, mirroring how the kill-request file was wired.
+- Engine/trainer consumption of the remaining non-weight controls.json operator overrides. The engine now consumes the per-layer enable toggles (adaptive, council, dnn_advisory, whale) from controls.json each iteration (2026-07-11, DONE), alongside weights (Dash channel) and the kill request. Remaining: model toggles, regime pins, budget, RL enable, promote/rollback requests, mirroring how the kill-request and layer-toggle files were wired.
 
 ## Next Up
 
@@ -66,6 +66,15 @@ New flags from the feed-work session (2026-07-05, `369b6a6`):
 ## Session Log
 
 Newest entries at top. One entry per session. Format: date, model used, what changed, what is stable, what is next.
+
+### 2026-07-11 (Opus 4.8) — engine consumes per-layer toggles, surfaced in Ops, safety always on
+
+- **Engine consumes per-layer toggles from controls.json each iteration.** New core/layer_toggles.hpp (read_layer_toggles + factor_enabled). consume_layer_toggles runs at the top of run_iteration and step_bar_mode, the same control-file pattern as the kill request. gather_factors filters the ensemble by factor_enabled, so a layer toggled off (adaptive, council, dnn_advisory, whale) drops its factor and contributes nothing to direction, sizing, confidence, or edge. Adaptive off skips the weight nudge. Missing/malformed controls.json means all layers on. Each change logs to the event log as layer_toggle.
+- **Advisory only, never a safety bypass.** rule_based (native) and rl_advisory are never gated, the RiskGate still evaluates every order with all four toggleable layers off, and the static-safety layer has no toggle. Asserted in ctest.
+- **Surfaced in Ops.** The Ops section shows the same four toggles on the same validated /controls/layer endpoint (no new write path), plus a fixed ALWAYS ON safety indicator. A flip takes effect on the engine's next iteration.
+- **Startup and status reflect toggles.** The run-state banner and the engine startup block show which layers are enabled, so an off-by-choice layer is distinct from a mock or unreachable one. store.runstate returns the layers.
+- **Stable:** C++ ctest 10/10 (new test_layer_toggles), Python pytest 187 passed, frontend typecheck + 9 render tests + production build. RiskGate, live-trading gate, and the adaptive limit-weakening invariant untouched. Live trading stays OFF.
+- **Next:** consume the remaining controls.json overrides (model toggles, regime pins, budget, RL enable, promote/rollback); confirm OpenAI/Gemini model access; prove paper-loop stability.
 
 ### 2026-07-11 (Opus 4.8) — unify credential resolution keystore-first, add live integration verification
 
