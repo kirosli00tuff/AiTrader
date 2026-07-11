@@ -500,3 +500,95 @@ def append_event(kind: str, message: str, severity: str = "info",
         return True
     except Exception:
         return False
+
+
+# --- Operational GUI reads (skip feed, run state, day summary, trade detail) -
+
+_SKIP_KINDS = ("council_skip", "risk_precheck", "market_hours")
+
+
+def skip_feed(limit: int = 50) -> list[dict]:
+    """Recent council skips from the append-only event log. Read-only."""
+    rows = query(
+        "SELECT ts, kind, venue, symbol, message, payload_json FROM events "
+        "WHERE kind IN ('council_skip','risk_precheck','market_hours') "
+        "ORDER BY id DESC LIMIT ?", (limit,))
+    out = []
+    for r in rows:
+        reason = None
+        try:
+            reason = (json.loads(r.get("payload_json") or "{}") or {}).get("reason")
+        except Exception:
+            reason = None
+        out.append({"ts": r["ts"], "kind": r["kind"], "symbol": r.get("symbol"),
+                    "reason": reason or r["kind"], "message": r.get("message")})
+    return out
+
+
+def runstate() -> dict:
+    """Current loop mode and posture, from config plus health. Read-only."""
+    cfg = load_config()
+    sim = cfg.get("simulation", {}) or {}
+    llm = cfg.get("llm", {}) or {}
+    md = cfg.get("market_data", {}) or {}
+    ap = approval()
+    bridge = bridge_health()
+    use_real = bool(llm.get("use_real_council", False))
+    council_mode = "real" if (use_real and bridge.get("reachable")) else "mock"
+    return {"feed_mode": sim.get("feed_mode", "flat_random_walk"),
+            "clock_mode": sim.get("clock_mode", "real"),
+            "market_data_source": md.get("source", "mock"),
+            "use_real_council": use_real,
+            "gate_enabled": bool(llm.get("gate_enabled", True)),
+            "council_mode": council_mode,
+            "bridge": bridge,
+            "live_enabled": bool(ap.get("live_enabled")),
+            "ts": _now()}
+
+
+def day_summary() -> dict:
+    """Trades today, win rate today, and council calls today vs the budget.
+    Estimated spend today is added by the /day_summary route. Read-only."""
+    day = _now()[:10]
+    closed = query("SELECT outcome FROM trades WHERE substr(ts,1,10)=? "
+                   "AND outcome IN ('win','loss')", (day,))
+    wins = sum(1 for r in closed if r.get("outcome") == "win")
+    losses = sum(1 for r in closed if r.get("outcome") == "loss")
+    dec = wins + losses
+    total = query_one("SELECT COUNT(*) AS n FROM trades WHERE substr(ts,1,10)=?", (day,))
+    calls = query_one("SELECT COUNT(*) AS n FROM model_outputs WHERE model IN "
+                      "('llm_primary','llm_secondary','llm_tertiary') "
+                      "AND substr(ts,1,10)=?", (day,))
+    slot_rows = int(calls["n"]) if calls and calls.get("n") is not None else 0
+    cfg = load_config().get("council", {}) or {}
+    return {"day": day,
+            "trades_today": int(total["n"]) if total and total.get("n") is not None else 0,
+            "wins_today": wins, "losses_today": losses,
+            "win_rate_today": round(wins / dec * 100.0, 2) if dec else 0.0,
+            "council_calls_today": slot_rows // 3,  # three slots per decision
+            "council_daily_budget": int(cfg.get("council_daily_budget", 30))}
+
+
+def trade_detail(trade_id: int) -> dict:
+    """Assemble a trade debugging view from trades, signals, model_outputs,
+    regime_state, and events. Read-only."""
+    t = query_one(
+        "SELECT id, ts, venue, symbol, market, category, side, qty, price, "
+        "notional, fee, mode, pnl, outcome, combined_conf, combined_edge, "
+        "decision_id FROM trades WHERE id = ?", (trade_id,))
+    if not t:
+        return {"trade": None}
+    sym, ts = t.get("symbol"), t.get("ts")
+    signals = query(
+        "SELECT ts, factor, bias, confidence, edge FROM signals "
+        "WHERE symbol = ? AND ts <= ? ORDER BY id DESC LIMIT 12", (sym, ts))
+    council = query(
+        "SELECT ts, model, verdict, confidence, edge, weight FROM model_outputs "
+        "WHERE ts <= ? ORDER BY id DESC LIMIT 10", (ts,))
+    reg = query_one("SELECT regime, adx, rvol, updated_ts FROM regime_state "
+                    "WHERE symbol = ?", (sym,))
+    events_rows = query(
+        "SELECT ts, kind, severity, message, payload_json FROM events "
+        "WHERE symbol = ? ORDER BY id DESC LIMIT 20", (sym,))
+    return {"trade": t, "signals": signals, "council": council,
+            "regime": reg, "events": events_rows}

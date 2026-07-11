@@ -5,6 +5,7 @@ const LINKS = [
   { to: "/live", label: "Live", ico: "◆" },
   { to: "/controls", label: "Controls", ico: "▤" },
   { to: "/health", label: "Health", ico: "✚" },
+  { to: "/ops", label: "Ops", ico: "◧" },
   { to: "/settings", label: "Settings", ico: "⚙" },
 ];
 

@@ -20,6 +20,7 @@ from pydantic import BaseModel
 from api_server import store
 from api_server import controls
 from api_server import health
+from api_server import providers_cost
 
 HOST = "127.0.0.1"        # loopback only, asserted by the test suite
 PORT = int(os.environ.get("MAL_API_PORT", "8000"))
@@ -291,3 +292,35 @@ class BudgetWrite(BaseModel):
 def post_budget(body: BudgetWrite):
     return controls.set_budget(body.council_daily_budget,
                                body.per_symbol_cooldown_minutes)
+
+
+# --- Operational reads (skip feed, run state, day summary, trade detail) -----
+# All read-only. None writes an operational or Level-1 value. Bind stays 127.0.0.1.
+
+@app.get("/skips")
+def get_skips(limit: int = Query(50, le=200)):
+    return {"skips": store.skip_feed(limit)}
+
+
+@app.get("/runstate")
+def get_runstate():
+    return store.runstate()
+
+
+@app.get("/day_summary")
+def get_day_summary():
+    d = store.day_summary()
+    d["estimated_spend_today"] = providers_cost.estimated_day_total()
+    return d
+
+
+@app.get("/providers/cost")
+def get_providers_cost():
+    """Per-provider balance where available, provider spend where available, and
+    local estimated day and month spend always. Never returns a key value."""
+    return providers_cost.provider_cost()
+
+
+@app.get("/trade/{trade_id}")
+def get_trade_detail(trade_id: int):
+    return store.trade_detail(trade_id)

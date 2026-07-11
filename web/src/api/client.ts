@@ -3,7 +3,7 @@
 import type {
   Account, Approval, Category, ControlResult, ControlsState, Council,
   Credential, Health, IntegrationsHealth, KillState, Mode, Order, Pnl, Position, SignalsResponse,
-  Trade, Venue,
+  Trade, Venue, DaySummary, ProviderCost, RunState, SkipRow, TradeDetail,
 } from "./types";
 
 export const API_BASE = import.meta.env.VITE_API_BASE ?? "http://127.0.0.1:8000";
@@ -49,6 +49,11 @@ export const api = {
   venues: () => get<{ venues: Venue[] }>("/venues"),
   approval: () => get<Approval>("/approval"),
   integrations: () => get<IntegrationsHealth>("/health/integrations"),
+  skips: (limit = 50) => get<{ skips: SkipRow[] }>(`/skips?limit=${limit}`),
+  runstate: () => get<RunState>("/runstate"),
+  daySummary: () => get<DaySummary>("/day_summary"),
+  providerCost: () => get<ProviderCost>("/providers/cost"),
+  tradeDetail: (id: number) => get<TradeDetail>(`/trade/${id}`),
   credentials: () => get<{ credentials: Credential[] }>("/credentials"),
   saveCredential: (name: string, value: string) =>
     post<{ ok: boolean; name?: string; status?: Credential; error?: string }>(

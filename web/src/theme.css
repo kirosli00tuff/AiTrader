@@ -224,3 +224,20 @@ input[type=range]:disabled { opacity: 0.5; }
 .feed-item:last-child { border-bottom: none; }
 .feed-ts { color: var(--text-dim); font-size: 11px; font-family: var(--mono); flex: 0 0 74px; }
 .feed-kind { flex: 0 0 88px; color: var(--text-muted); font-size: 11px; text-transform: uppercase; }
+
+/* Operational upgrades ----------------------------------------------------- */
+.runstate { display: flex; align-items: center; gap: 20px; flex-wrap: wrap;
+  padding: 7px 24px; background: var(--surface-2); border-bottom: 1px solid var(--border);
+  font-size: 12px; color: var(--text-muted); flex: 0 0 auto; }
+.runstate-item { display: flex; align-items: center; gap: 6px; white-space: nowrap; }
+.runstate-item b { color: var(--text); font-weight: 600; }
+.stale-badge { font-size: 11px; padding: 2px 7px; border-radius: 10px; font-family: var(--mono); }
+.stale-badge.fresh { background: var(--green-dim); color: var(--green); }
+.stale-badge.stale { background: var(--red-dim); color: var(--red); }
+.kill-strip { display: flex; align-items: center; gap: 6px; }
+.trow { cursor: pointer; }
+.trow:hover td { background: var(--surface-2); }
+.modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.55);
+  display: flex; align-items: flex-start; justify-content: center; padding: 6vh 16px; z-index: 50; }
+.modal { background: var(--surface); border: 1px solid var(--border-strong); border-radius: 12px;
+  padding: 18px 20px; width: min(760px, 96vw); max-height: 86vh; overflow-y: auto; }

@@ -239,3 +239,34 @@ export interface IntegrationsHealth {
     ts: string | null;
   };
 }
+
+export interface SkipRow {
+  ts: string; kind: string; symbol: string | null; reason: string; message: string | null;
+}
+export interface RunState {
+  feed_mode: string; clock_mode: string; market_data_source: string;
+  use_real_council: boolean; gate_enabled: boolean; council_mode: string;
+  bridge: { reachable: boolean; url: string; status: string | null };
+  live_enabled: boolean; ts: string;
+}
+export interface DaySummary {
+  day: string; trades_today: number; wins_today: number; losses_today: number;
+  win_rate_today: number; council_calls_today: number; council_daily_budget: number;
+  estimated_spend_today: number;
+}
+export interface ProviderCostRow {
+  provider: string; model: string; balance: number | null; spend: number | null;
+  estimated_day: number; estimated_month: number; calls_today: number;
+  calls_month: number; status: "live" | "estimated" | "unavailable"; source: string;
+}
+export interface ProviderCost {
+  providers: ProviderCostRow[]; currency: string;
+  totals: { estimated_day: number; estimated_month: number }; ts: string;
+}
+export interface TradeDetail {
+  trade: (Trade & { fee?: number; decision_id?: number | null }) | null;
+  signals: { ts: string; factor: string; bias: number; confidence: number; edge: number | null }[];
+  council: ModelOutput[];
+  regime: { regime: string; adx: number | null; rvol: number | null; updated_ts: string } | null;
+  events: { ts: string; kind: string; severity: string; message: string }[];
+}

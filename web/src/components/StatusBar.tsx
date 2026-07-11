@@ -1,6 +1,7 @@
+import { useState } from "react";
 import { api } from "../api/client";
 import { useApi } from "../api/useApi";
-import type { Account, Health, IntegrationsHealth, Pnl } from "../api/types";
+import type { Account, Health, IntegrationsHealth, KillState, Pnl } from "../api/types";
 import { money, pct, signClass } from "../api/format";
 
 // Top strip on every page: engine state, active mode, portfolio value, daily
@@ -13,6 +14,9 @@ export default function StatusBar({ activeView }: { activeView: string }) {
   // Integration health aggregate. Polled slowly (120s): with keys present each
   // poll is a few minimal round trips, with no keys it makes no external call.
   const integ = useApi<IntegrationsHealth>(() => api.integrations(), 120000, []);
+  const killApi = useApi<KillState>(() => api.kill(), 6000, []);
+  const [arming, setArming] = useState(false);
+  const [busy, setBusy] = useState(false);
 
   const eng = health.data?.engine;
   const running = eng?.running ?? false;
@@ -30,6 +34,17 @@ export default function StatusBar({ activeView }: { activeView: string }) {
   // not a failure).
   const apisDot = configured === 0 ? "d" : sum?.all_ok ? "g" : "a";
   const apisLabel = configured === 0 ? "none" : sum?.all_ok ? "ok" : "issues";
+  const tripped = kill || (killApi.data?.engine_kill_switch_tripped ?? false);
+  const confirmKill = async () => {
+    setBusy(true);
+    try {
+      await api.requestKill("operator halt from status strip");
+      killApi.reload();
+    } finally {
+      setBusy(false);
+      setArming(false);
+    }
+  };
 
   return (
     <div className="statusbar">
@@ -50,9 +65,21 @@ export default function StatusBar({ activeView }: { activeView: string }) {
         </b>
       </div>
       <div className="status-sep" />
-      <div className="status-item">
-        <span className={`dot ${kill ? "r" : "g"}`} />
-        Kill switch <b>{kill ? "TRIPPED" : "clear"}</b>
+      <div className="status-item kill-strip">
+        <span className={`dot ${tripped ? "r" : "g"}`} />
+        Kill <b>{tripped ? "TRIPPED" : "armed"}</b>
+        {tripped ? (
+          <span className="dim" style={{ fontSize: 11 }}>manual resume required</span>
+        ) : !arming ? (
+          <button className="btn danger sm" onClick={() => setArming(true)}>halt</button>
+        ) : (
+          <>
+            <button className="btn danger sm" disabled={busy} onClick={confirmKill}>
+              {busy ? "…" : "confirm"}
+            </button>
+            <button className="btn ghost sm" disabled={busy} onClick={() => setArming(false)}>x</button>
+          </>
+        )}
       </div>
       <div className="status-sep" />
       <div className="status-item">

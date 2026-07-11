@@ -522,3 +522,73 @@ def test_health_trade_auth_and_ibkr_never_order():
     assert "_post(" not in ibkr
     assert "/v2/orders" not in ibkr
     assert "create_connection" in ibkr
+
+
+# --- Operational upgrades: skip feed, run state, day summary, provider cost --
+
+def test_skips_reads_event_log(env, client):
+    conn = sqlite3.connect(env["db"])
+    conn.execute("INSERT INTO events(ts,kind,venue,symbol,severity,message,"
+                 "payload_json) VALUES(?,?,?,?,?,?,?)",
+                 ("2026-07-06T03:00:00Z", "council_skip", "alpaca", "SPY",
+                  "info", "Council skipped: skip_budget", '{"reason":"skip_budget"}'))
+    conn.commit(); conn.close()
+    j = client.get("/skips").json()
+    assert any(x["reason"] == "skip_budget" for x in j["skips"])
+
+
+def test_runstate_and_day_summary_shape(client):
+    r = client.get("/runstate").json()
+    assert r["council_mode"] in {"real", "mock"}
+    assert "feed_mode" in r and "bridge" in r
+    d = client.get("/day_summary").json()
+    for k in ("trades_today", "win_rate_today", "council_calls_today",
+              "council_daily_budget", "estimated_spend_today"):
+        assert k in d
+
+
+def test_providers_cost_shape_and_absent_key_unavailable(env, client):
+    j = client.get("/providers/cost").json()
+    assert "providers" in j and "totals" in j and j["currency"] == "USD"
+    names = {p["provider"] for p in j["providers"]}
+    assert {"OpenAI", "Anthropic", "Google"} <= names
+    for p in j["providers"]:
+        for k in ("provider", "model", "balance", "spend", "estimated_day",
+                  "estimated_month", "status", "source"):
+            assert k in p
+        assert p["status"] in {"live", "estimated", "unavailable"}
+        # env fixture clears provider keys -> unavailable
+        assert p["status"] == "unavailable"
+    # no key-shaped value leaks in the response
+    body = client.get("/providers/cost").text
+    assert "sk-" not in body and "APCA-API" not in body
+
+
+def test_providers_cost_estimated_from_recorded_calls(env, client):
+    from datetime import datetime, timezone
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    conn = sqlite3.connect(env["db"])
+    conn.execute("INSERT INTO model_outputs(ts,model,verdict,confidence,edge,"
+                 "weight) VALUES(?,?,?,?,?,?)",
+                 (now, "llm_primary", "buy", 0.7, 0.03, 0.27))
+    conn.commit(); conn.close()
+    j = client.get("/providers/cost").json()
+    openai = next(p for p in j["providers"] if p["provider"] == "OpenAI")
+    assert openai["calls_today"] >= 1
+    assert openai["estimated_day"] > 0.0   # computed from calls * config prices
+
+
+def test_trade_detail_shape(client):
+    j = client.get("/trade/1").json()
+    assert "trade" in j
+    if j["trade"]:
+        for k in ("signals", "council", "regime", "events"):
+            assert k in j
+
+
+def test_ops_endpoints_write_no_op_or_risk_value(env, client):
+    before = hashlib.sha256(open(env["db"], "rb").read()).hexdigest()
+    for path in ("/skips", "/runstate", "/day_summary", "/providers/cost", "/trade/1"):
+        assert client.get(path).status_code == 200
+    after = hashlib.sha256(open(env["db"], "rb").read()).hexdigest()
+    assert before == after

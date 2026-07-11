@@ -50,6 +50,11 @@ vi.mock("../../api/client", () => {
       council: async () => ({ models: { llm_primary: "gpt-5.5" }, latest: [{ ts: "x", model: "gpt-5.5", verdict: "buy", confidence: 0.7, edge: 0.03, weight: 0.27 }], recent: [] }),
       risk: async () => ({ level1: {}, kill_switch_enabled: true, kill_switch_tripped: false }),
       venues: async () => ({ venues: [{ venue: "alpaca", mode: "paper", live_enabled: false, live_adapter: "none", runtime_mode: "paper", credentials_connected: true, kill_switch_tripped: false, configured: true }] }),
+      skips: async () => ({ skips: [] }),
+      runstate: async () => ({ feed_mode: "flat_random_walk", clock_mode: "real", market_data_source: "mock", use_real_council: false, gate_enabled: true, council_mode: "mock", bridge: { reachable: false, url: "", status: null }, live_enabled: false, ts: "x" }),
+      daySummary: async () => ({ day: "2026-07-10", trades_today: 0, wins_today: 0, losses_today: 0, win_rate_today: 0, council_calls_today: 0, council_daily_budget: 30, estimated_spend_today: 0 }),
+      providerCost: async () => ({ providers: [{ provider: "OpenAI", model: "gpt-5.5", balance: null, spend: null, estimated_day: 0, estimated_month: 0, calls_today: 0, calls_month: 0, status: "estimated", source: "local_estimate" }], currency: "USD", totals: { estimated_day: 0, estimated_month: 0 }, ts: "x" }),
+      tradeDetail: async () => ({ trade: null, signals: [], council: [], regime: null, events: [] }),
       integrations: async () => ({
         integrations: [{ name: "openai", provider: "OpenAI GPT-5.5", state: "not_configured", reason: "", latency_ms: null }],
         summary: { all_ok: false, any_failing: false, configured_count: 0, total: 1, ts: "x" },
@@ -113,6 +118,12 @@ describe("pages render", () => {
     at("/health");
     expect(await screen.findByText("Integration health")).toBeInTheDocument();
     expect(await screen.findByText("Integrations")).toBeInTheDocument();
+  });
+
+  it("renders the Ops page", async () => {
+    at("/ops");
+    expect(await screen.findByText("Operations")).toBeInTheDocument();
+    expect(await screen.findByText("Council skip reasons")).toBeInTheDocument();
   });
 
   it("renders the Settings page with categories", async () => {

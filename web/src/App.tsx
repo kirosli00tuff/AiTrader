@@ -7,6 +7,7 @@ import LiveOverview from "./pages/LiveOverview";
 import CategoryView from "./pages/CategoryView";
 import ControlsPage from "./pages/ControlsPage";
 import HealthPage from "./pages/HealthPage";
+import OpsPage from "./pages/OpsPage";
 import SettingsPage from "./pages/SettingsPage";
 
 export default function App() {
@@ -26,6 +27,7 @@ export default function App() {
         </Route>
         <Route path="controls" element={<ControlsPage />} />
         <Route path="health" element={<HealthPage />} />
+        <Route path="ops" element={<OpsPage />} />
         <Route path="settings" element={<SettingsPage />} />
         <Route path="*" element={<Navigate to="/paper" replace />} />
       </Route>

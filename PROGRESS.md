@@ -67,6 +67,19 @@ New flags from the feed-work session (2026-07-05, `369b6a6`):
 
 Newest entries at top. One entry per session. Format: date, model used, what changed, what is stable, what is next.
 
+### 2026-07-10 (Opus 4.8) — operational GUI upgrades and live provider cost panel
+
+- **Always-visible kill switch** in the top strip on every page. One click, one confirm, writes the same kill-request control file the engine consumes. Shows armed or tripped, manual resume unchanged, no second resume path.
+- **Run-state banner** under the strip (RunStateBanner + GET /runstate): loop mode, clock, data source, bridge up/down, real vs mock council.
+- **Council skip-reason feed** (SkipFeed + GET /skips) reading the event log for council_skip, risk_precheck, market_hours, on Paper Overview and the new Ops page.
+- **Staleness badges** (StalenessBadge) on feed-dependent panels (equity/market data, positions, signals, council) with a warning color past a configurable threshold.
+- **Clickable trade rows** open a TradeDetailModal (GET /trade/{id}): order and sizing, regime, factors that fired, council verdict at entry, entry/exit events.
+- **Day summary card** (DaySummary + GET /day_summary): trades today, win rate today, council calls today vs budget, estimated spend today.
+- **Drawdown shading** overlaid on the equity curve.
+- **Provider cost panel** (ProviderCostPanel + GET /providers/cost): balance where exposed, else provider spend, else a local estimate always computed and labeled estimated. No provider exposes a stable prepaid-balance endpoint for a plain key, so the reported signal is the local estimate from recorded council calls times per-model prices in the new config/provider_prices.yaml (Python-only). Concurrent reads with a timeout, absent key reports unavailable, no key value returned or logged.
+- **Stable:** C++ ctest 9/9, Python pytest 182 passed (45 in test_api_server), frontend typecheck + 9 render tests + production build. All new endpoints read-only, bound 127.0.0.1, no Level 1 or operational write. RiskGate, live-trading gate, and the adaptive limit-weakening invariant untouched. Live trading stays OFF.
+- **Next:** wire engine consumption of controls.json; prove paper-loop stability.
+
 ### 2026-07-10 (Opus 4.8) — remove ClankApp, Alpaca-only paper credentials, gate native conviction, full-system test script, live API health check
 
 - **ClankApp removed for a dead host.** api.clankapp.com is DNS-unreachable. Deleted the adapter + mock, the __init__ import, the clankapp_key credential + required-fields entry, the synthetic fixture, the ClankApp parser test, the CLANKAPP_API_KEY env line, the Dash SOURCE_GROUPS entry, the demo + schema.md mentions, and the React Settings whale group. Removed-for-dead-host comments left in place. SEC EDGAR is the sole active whale adapter (default_adapters returns [Sec13FAdapter]); the 0.35 advisory cap is unchanged; Whale Alert and Unusual Whales stay reserved.

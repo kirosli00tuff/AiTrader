@@ -1,6 +1,7 @@
 import { Outlet, useLocation } from "react-router-dom";
 import Sidebar from "./Sidebar";
 import StatusBar from "./StatusBar";
+import RunStateBanner from "./RunStateBanner";
 
 export default function Layout() {
   const { pathname } = useLocation();
@@ -14,6 +15,7 @@ export default function Layout() {
       <Sidebar />
       <div className="main">
         <StatusBar activeView={view} />
+        <RunStateBanner />
         <div className="content">
           <Outlet />
         </div>

@@ -513,6 +513,38 @@ not_configured, not failing. The Health view in the GUI shows each integration
 as a colored row and the top status strip shows an aggregate that is green only
 when every configured integration passes.
 
+### Operational upgrades
+
+The GUI adds operator panels that improve efficiency and catch problems, all
+additive and read-only except the kill switch. No control weakens the RiskGate
+and Level 1 stays read-only.
+
+- An always-visible kill switch in the top strip on every page. One click, one
+  confirm, then it writes the same kill-request control file the engine
+  consumes. It shows armed or tripped. A tripped switch stays latched and needs
+  the existing manual resume, the GUI adds no second resume path.
+- A run-state banner under the strip: loop mode (offline mock, synthetic_regimes,
+  replay, or online alpaca_paper), bridge up or down, and real vs mock council.
+- A council skip-reason feed (budget spent, per-symbol cooldown, neutral regime,
+  risk pre-check, market hours) read from the event log, on the Paper Overview
+  and the Ops page.
+- Staleness badges on feed-dependent panels (market data, positions, signals,
+  council). A stale panel past its threshold turns a warning color.
+- Clickable trade rows open a detail view: order and sizing, regime, the factors
+  that fired, the council verdict at entry, and the entry and exit events.
+- A day summary card: trades today, win rate today, council calls today against
+  the budget, and estimated provider spend today.
+- Drawdown shading on the equity curve.
+- A provider cost panel. It shows balance where a provider exposes it, else
+  provider spend where exposed, else a local estimate that is always computed
+  and clearly labeled estimated. No provider exposes a stable prepaid-balance
+  endpoint for a plain API key today, so the reported signal is the local
+  estimate, computed from the council calls recorded in the database times the
+  per-model token prices in config/provider_prices.yaml. Backend endpoint
+  GET /providers/cost runs the reads concurrently with a timeout, reports a
+  per-provider status of live, estimated, or unavailable, and never returns or
+  logs a key value.
+
 ## Advisory services
 
 - **`llm_consensus`** — `consensus(state)` returns a weighted ensemble verdict

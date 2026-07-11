@@ -2,7 +2,9 @@ import type { Order, Signal, Trade } from "../api/types";
 import { clockTs, money, num } from "../api/format";
 import { Empty } from "./ui";
 
-export function OrdersTable({ orders }: { orders: Order[] }) {
+export function OrdersTable({ orders, onSelect }: {
+  orders: Order[]; onSelect?: (id: number) => void;
+}) {
   if (!orders.length) return <Empty>No open orders.</Empty>;
   return (
     <div className="tbl-scroll">
@@ -10,13 +12,13 @@ export function OrdersTable({ orders }: { orders: Order[] }) {
         <thead>
           <tr>
             <th>Time</th><th>Symbol</th><th>Side</th><th className="num">Qty</th>
-            <th className="num">Price</th><th className="num">Notional</th>
-            <th>Outcome</th>
+            <th className="num">Price</th><th className="num">Notional</th><th>Outcome</th>
           </tr>
         </thead>
         <tbody>
           {orders.map((o) => (
-            <tr key={o.id}>
+            <tr key={o.id} className={onSelect ? "trow" : ""}
+              onClick={onSelect ? () => onSelect(o.id) : undefined}>
               <td className="dim">{clockTs(o.ts)}</td>
               <td className="mono">{o.symbol}</td>
               <td className={o.side === "buy" ? "side-buy" : "side-sell"}>{o.side}</td>
@@ -32,7 +34,9 @@ export function OrdersTable({ orders }: { orders: Order[] }) {
   );
 }
 
-export function ClosedTradesTable({ trades }: { trades: Trade[] }) {
+export function ClosedTradesTable({ trades, onSelect }: {
+  trades: Trade[]; onSelect?: (id: number) => void;
+}) {
   if (!trades.length) return <Empty>No closed trades.</Empty>;
   return (
     <div className="tbl-scroll">
@@ -45,7 +49,8 @@ export function ClosedTradesTable({ trades }: { trades: Trade[] }) {
         </thead>
         <tbody>
           {trades.map((t) => (
-            <tr key={t.id}>
+            <tr key={t.id} className={onSelect ? "trow" : ""}
+              onClick={onSelect ? () => onSelect(t.id) : undefined}>
               <td className="dim">{clockTs(t.ts)}</td>
               <td className="mono">{t.symbol}</td>
               <td className={t.side === "buy" ? "side-buy" : "side-sell"}>{t.side}</td>
