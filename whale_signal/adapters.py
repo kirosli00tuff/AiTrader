@@ -67,7 +67,7 @@ def _user_agent() -> str:
     committed to YAML). When unset we send an explicit self-describing note
     instead of a fake address so the header is honest.
     """
-    contact = os.environ.get("SEC_EDGAR_CONTACT_EMAIL", "").strip()
+    contact = (_resolve("SEC_EDGAR_CONTACT_EMAIL") or "").strip()
     who = f"contact {contact}" if contact else "contact: set SEC_EDGAR_CONTACT_EMAIL"
     return f"MarketAiLab/1.0 (paper-training research; {who})"
 

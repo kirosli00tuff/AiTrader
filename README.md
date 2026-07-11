@@ -545,6 +545,27 @@ and Level 1 stays read-only.
   per-provider status of live, estimated, or unavailable, and never returns or
   logs a key value.
 
+### Live integration verification
+
+`scripts/verify_live_integrations.sh` resolves every provider key through the
+unified keystore-first resolver (encrypted keystore, then env) and runs one real
+minimal round trip per integration. It prints a labeled result table and appends
+it to RETURN.md under a verification log section. It never places a resting
+order (the Alpaca order-auth check is an authenticated GET on the account),
+never touches live trading, and never prints a key value. One minimal call per
+provider keeps spend near zero.
+
+```bash
+bash scripts/verify_live_integrations.sh
+```
+
+A healthy result shows working for every configured integration with a small
+latency. failing rows carry a short reason (bad key, rate limit, quota, bad
+request, network) so the operator can fix it. not_configured means no key
+resolved from the keystore or env, which is not a failure. Because the health
+check and the test script use the same resolver, a key saved in the keystore
+counts as configured everywhere, so the live sections run instead of skipping.
+
 ## Advisory services
 
 - **`llm_consensus`** — `consensus(state)` returns a weighted ensemble verdict

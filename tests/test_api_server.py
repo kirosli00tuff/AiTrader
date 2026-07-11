@@ -592,3 +592,57 @@ def test_ops_endpoints_write_no_op_or_risk_value(env, client):
         assert client.get(path).status_code == 200
     after = hashlib.sha256(open(env["db"], "rb").read()).hexdigest()
     assert before == after
+
+
+# --- Unified keystore-first credential resolution (live-key paths) ----------
+
+def test_health_resolver_keystore_counts_configured(env, client, monkeypatch):
+    # A key in the keystore ONLY (no env) must count as configured. Stub the
+    # HTTP so no real network call happens.
+    import account_manager.credentials as creds
+    for name in ("openai_key", "anthropic_key", "gemini_key",
+                 "alpaca_paper_key", "alpaca_paper_secret"):
+        creds.set_credential(name, "unit-test-fake-value")
+    from api_server import health
+    monkeypatch.setattr(health, "_post", lambda *a, **k: 200)
+    monkeypatch.setattr(health, "_get", lambda *a, **k: 200)
+    j = client.get("/health/integrations").json()
+    states = {i["name"]: i["state"] for i in j["integrations"]}
+    for n in ("openai", "anthropic_opus", "anthropic_haiku_gate", "gemini",
+              "alpaca_data", "alpaca_trading_auth"):
+        assert states[n] == "working", (n, states[n])
+    assert "unit-test-fake-value" not in client.get("/health/integrations").text
+
+
+def test_health_resolver_absent_key_not_configured(env, client):
+    j = client.get("/health/integrations").json()
+    states = {i["name"]: i["state"] for i in j["integrations"]}
+    for n in ("openai", "anthropic_opus", "anthropic_haiku_gate", "gemini",
+              "alpaca_data", "alpaca_trading_auth"):
+        assert states[n] == "not_configured"   # no key anywhere -> no call
+
+
+def test_resolver_is_single_source_for_provider_keys():
+    import inspect
+    from api_server import health
+    import llm_consensus.providers as P
+    import llm_consensus.gate as G
+    import whale_signal.adapters as W
+    import market_data.alpaca_source as A
+    assert "resolve_env" in inspect.getsource(health._key)
+    assert "get_credential" in inspect.getsource(health._alpaca_creds)
+    assert "resolve_env" in inspect.getsource(P._resolve_key)
+    assert "_resolve_key" in inspect.getsource(G)
+    # SEC contact + Alpaca data keys go through the resolver, not raw env
+    assert "_resolve(" in inspect.getsource(W._user_agent)
+    assert "os.environ" not in inspect.getsource(A._data_keys)
+
+
+def test_verify_script_places_no_order_and_never_touches_live():
+    path = os.path.join(REPO_ROOT, "scripts", "verify_live_integrations.sh")
+    src = open(path).read()
+    assert "/v2/orders" not in src                    # never a resting order
+    assert "_check_alpaca_trading" in src             # auth-only account check
+    assert "health" in src                            # resolver-backed checks
+    # no live-trading branch, no order placement helper
+    assert "submit_paper_order" not in src and "execute" not in src

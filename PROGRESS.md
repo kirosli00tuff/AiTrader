@@ -54,7 +54,7 @@ Still open (not defects — known limits):
 - Advisory factor scores run through real Python services only with `--bridge`; the default path uses deterministic C++ mocks.
 - Whale live-fetch parsers are verified against one recorded SEC 13F payload only; the other feeds' assumed shapes are still unverified against live responses (and live is off by default behind `WHALE_LIVE_ENABLED` / `SEC_EDGAR_ENABLED`).
 - Live-approval workflow not wired end to end (`try_enable_live` never called). Safe, but incomplete.
-- Real LLM providers untested against live keys; `rl_advisory` untrained (real-fill gate unmet); `dnn_advisory` still shipping the synthetic champion until enough real labelled samples exist.
+- Real LLM providers VERIFIED live 2026-07-11 via scripts/verify_live_integrations.sh: Anthropic Opus + Haiku gate + Alpaca paper (data + order-auth) working; OpenAI (HTTP 400) and Gemini (HTTP 404) returned request/model errors, not auth errors, so keys resolve but the operator should confirm model access or request shape before the paper week. `rl_advisory` untrained (real-fill gate unmet); `dnn_advisory` still shipping the synthetic champion until enough real labelled samples exist.
 
 New flags from the feed-work session (2026-07-05, `369b6a6`):
 
@@ -66,6 +66,15 @@ New flags from the feed-work session (2026-07-05, `369b6a6`):
 ## Session Log
 
 Newest entries at top. One entry per session. Format: date, model used, what changed, what is stable, what is next.
+
+### 2026-07-11 (Opus 4.8) — unify credential resolution keystore-first, add live integration verification
+
+- **All live-key paths resolve through the one keystore-first resolver.** account_manager.credentials.resolve_env / get_credential (keystore, then env, masked, never logged). Confirmed for the LLM providers, the Haiku gate, the Alpaca clients, and GET /health/integrations; routed the two stragglers through it (whale_signal/adapters SEC_EDGAR_CONTACT_EMAIL, market_data/alpaca_source._data_keys). A keystore key now counts as configured exactly as the engine sees it.
+- **Health check + test script use the resolver.** scripts/test_full_system.sh sec_council_live checks presence via resolve_env, sec_alpaca_paper resolves via get_credential inside python (key never touches the shell), so both run when the keystore holds keys and SKIP only when a key is absent everywhere.
+- **scripts/verify_live_integrations.sh** runs one real minimal round trip per integration (reusing the resolver-backed health checks), prints a labeled table with latency, and appends it to RETURN.md. Never a resting order (Alpaca order-auth is a GET), never live, never a key value.
+- **Verified live (2026-07-11):** Anthropic Opus 4.8 working, Anthropic Haiku 4.5 gate working, Alpaca paper market data working, Alpaca paper order-auth working. OpenAI GPT-5.5 failing HTTP 400 and Gemini 3.1 Pro failing HTTP 404, request/model errors not auth, so the keys resolve but the operator should confirm model access or request shape. Approved model strings unchanged per CLAUDE.md.
+- **Stable:** Python pytest 186 passed (49 in test_api_server, +4 resolver tests). Frontend unchanged (Health view already reflects keystore-resolved state). RiskGate, live-trading gate, and the adaptive limit-weakening invariant untouched. Live trading stays OFF.
+- **Next:** engine consumption of the remaining controls.json operator overrides (layer/model toggles, regime pins, budget, RL enable); confirm the OpenAI and Gemini model access; prove paper-loop stability.
 
 ### 2026-07-10 (Opus 4.8) — operational GUI upgrades and live provider cost panel
 

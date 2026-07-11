@@ -14,6 +14,26 @@ Commit message:
 
 ---
 
+## Prompt: Unify credential resolution keystore-first across all live-key paths, add live integration verification
+
+Date: 2026-07-11
+Model: Opus 4.8
+Prompt summary: Autonomous run, operator away. Do not touch RiskGate logic, the live-trading gate, or the adaptive limit-weakening invariant. Live trading stays off. Task 1, route every live-key consumer through the single keystore-first resolver (keystore then env, masked, never logged): LLM council providers, the Haiku gate, the Alpaca market-data and paper-order clients, the SEC EDGAR contact email, and GET /health/integrations, so a keystore key counts as configured. Task 2, make the health check and the test script live sections resolve through the resolver so they run when the keystore holds keys, keep SKIPPED only when a key is absent from both keystore and env. Task 3, add scripts/verify_live_integrations.sh running one real minimal round trip per integration with a labeled table, never a resting order, never live, never a key value. Task 4, run it and record the table. Task 5, tests. Task 6, document and commit and push.
+Changes: Task 1 confirmed the single resolver, account_manager.credentials.resolve_env (by env name) and get_credential (by credential name), keystore first then env, masked, never logged, and routed the two stragglers through it: whale_signal/adapters._user_agent now resolves SEC_EDGAR_CONTACT_EMAIL through the shared _resolve (resolve_env) instead of os.environ, and market_data.alpaca_source._data_keys now resolves the data key and secret through _resolve (keystore first, then ALPACA_DATA_* env, then ALPACA_* env) instead of a direct os.environ read. The LLM council providers (_resolve_key), the Haiku gate (_resolve_key), the Alpaca paper clients (_resolve / get_credential), and GET /health/integrations (_key via resolve_env, _alpaca_creds via get_credential) already resolved keystore-first, confirmed. A key in the keystore now counts as configured exactly as the engine sees it. Task 2 updated the two test-script live sections: sec_council_live checks presence via resolve_env, and sec_alpaca_paper resolves keys via get_credential inside a python check that never exposes the key to the shell, so both run when the keystore holds keys and SKIP only when a key is absent from both keystore and env. Task 3 added scripts/verify_live_integrations.sh, which reuses the resolver-backed health checks to run one real minimal round trip per integration (OpenAI, Anthropic Opus, Anthropic Haiku gate, Gemini, Alpaca paper market data, Alpaca paper order-auth via GET /v2/account), prints a labeled table with latency, and appends it to RETURN.md under a verification log section. It never places a resting order, never touches live, and never prints a key value. Task 4 ran it (table below, also appended to RETURN.md). Task 5 added tests: a keystore-only key reports configured to the health check (HTTP stubbed, no network), a genuinely absent key reports not_configured, the resolver is the single source (source inspection of health._key/_alpaca_creds, providers._resolve_key, gate, adapters._user_agent, alpaca_source._data_keys), and the verification script places no resting order and never touches live. No path logs or returns a key value and the bind stays loopback. Full Python suite 186 passed. Frontend unchanged (the Health view already reflects keystore-resolved state). Task 6 documented the script in the README, updated PROGRESS.md (session entry + Open Flags) and CONTEXT.md, and completed this entry. NOT touched: RiskGate logic, the live-trading gate, the adaptive limit-weakening invariant. Live trading stays OFF. Safe decision noted: OpenAI and Gemini returned request/model errors (HTTP 400 and 404), not auth errors, and CLAUDE.md fixes the approved model strings, so I recorded the failures for the operator rather than changing the model ids.
+Verification result table:
+
+| Integration | Result | Detail | Latency |
+| --- | --- | --- | --- |
+| OpenAI GPT-5.5 | failing | HTTP 400 Bad Request (request/model, not auth) | 445.5 ms |
+| Anthropic Opus 4.8 | working | - | 1080.7 ms |
+| Anthropic Haiku 4.5 (gate path) | working | - | 483.7 ms |
+| Gemini 3.1 Pro | failing | HTTP 404 Not Found (request/model, not auth) | 230.1 ms |
+| Alpaca paper market data | working | one quote ok | 253.1 ms |
+| Alpaca paper order-auth (validation-only) | working | paper account auth ok | 235.6 ms |
+Commit message: `Unify credential resolution keystore-first across all live-key paths, add live integration verification, live trading untouched`
+
+---
+
 ## Prompt: Operational GUI upgrades and live provider cost panel
 
 Date: 2026-07-10
@@ -354,3 +374,16 @@ $ git diff --cached --stat
  tests/test_llm_consensus.py    | 315 ++++++++++++++++++++++++++++++++++++++++-
  12 files changed, 1182 insertions(+), 171 deletions(-)
 ```
+
+## Live Integration Verification Log
+
+### Run 2026-07-11T18:38:38Z
+
+| Integration | Result | Detail | Latency |
+| --- | --- | --- | --- |
+| OpenAI GPT-5.5 | failing | HTTPError: HTTP Error 400: Bad Request | 445.5 ms |
+| Anthropic Opus 4.8 | working | - | 1080.7 ms |
+| Anthropic Haiku 4.5 (gate path) | working | - | 483.7 ms |
+| Gemini 3.1 Pro | failing | HTTPError: HTTP Error 404: Not Found | 230.1 ms |
+| Alpaca paper market data | working | one quote ok | 253.1 ms |
+| Alpaca paper order-auth (validation-only) | working | paper account auth ok | 235.6 ms |

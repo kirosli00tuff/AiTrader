@@ -101,7 +101,8 @@ sec_live_exclusion() {
   return 0
 }
 sec_council_live() {
-  if [ -z "${ANTHROPIC_API_KEY:-}" ] || [ -z "${OPENAI_API_KEY:-}" ] || [ -z "${GEMINI_API_KEY:-}" ]; then return 2; fi
+  # Present when the unified resolver finds each key in the keystore OR env.
+  "$PY" -c 'import sys; from account_manager.credentials import resolve_env; sys.exit(0 if all(resolve_env(v) for v in ("ANTHROPIC_API_KEY","OPENAI_API_KEY","GEMINI_API_KEY")) else 1)' || return 2
   "$PY" - > "$TMP/cl.log" 2>&1 <<'PYCL'
 from llm_consensus import providers as P
 state = {"symbol": "SPY", "venue": "alpaca", "price": 500.0, "ret_5": 0.004,
@@ -121,15 +122,31 @@ assert all(c.source in ("real", "mock", "error") for c in council)
 PYCL
 }
 sec_alpaca_paper() {
-  local k="${APCA_API_KEY_ID:-${ALPACA_API_KEY:-}}"
-  local s="${APCA_API_SECRET_KEY:-${ALPACA_API_SECRET:-}}"
-  if [ -z "$k" ] || [ -z "$s" ]; then return 2; fi
-  local base="${ALPACA_DATA_BASE:-https://data.alpaca.markets}"
-  local pbase="${ALPACA_PAPER_BASE:-https://paper-api.alpaca.markets}"
-  local q a
-  q="$(curl -s -o /dev/null -w '%{http_code}' -H "APCA-API-KEY-ID: $k" -H "APCA-API-SECRET-KEY: $s" "$base/v2/stocks/SPY/quotes/latest")"
-  a="$(curl -s -o /dev/null -w '%{http_code}' -H "APCA-API-KEY-ID: $k" -H "APCA-API-SECRET-KEY: $s" "$pbase/v2/account")"
-  [ "$q" = "200" ] && [ "$a" = "200" ]
+  # Keys resolved keystore-first via the unified resolver. The HTTP runs inside
+  # python so the key never touches the shell. Auth-only, never a resting order.
+  "$PY" - > "$TMP/ap.log" 2>&1 <<'PYAP'
+import os, sys, urllib.request, urllib.error
+from account_manager.credentials import get_credential
+k = get_credential("alpaca_paper_key"); s = get_credential("alpaca_paper_secret")
+if not (k and s):
+    sys.exit(2)
+h = {"APCA-API-KEY-ID": k, "APCA-API-SECRET-KEY": s}
+dbase = os.environ.get("ALPACA_DATA_BASE", "https://data.alpaca.markets")
+pbase = os.environ.get("ALPACA_PAPER_BASE", "https://paper-api.alpaca.markets")
+def code(url):
+    req = urllib.request.Request(url, headers=h, method="GET")
+    try:
+        with urllib.request.urlopen(req, timeout=6) as r:
+            return r.status
+    except urllib.error.HTTPError as e:
+        return e.code
+    except Exception:
+        return 0
+q = code(f"{dbase}/v2/stocks/SPY/quotes/latest")
+a = code(f"{pbase}/v2/account")
+print("quote", q, "account", a)
+sys.exit(0 if (q == 200 and a == 200) else 1)
+PYAP
 }
 
 log "Market AI Lab full-system test"

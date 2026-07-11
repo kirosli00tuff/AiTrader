@@ -58,11 +58,11 @@ def _resolve(name: str, env_names: tuple[str, ...]) -> str | None:
 
 
 def _data_keys() -> tuple[str | None, str | None]:
-    """Data-API key/secret: dedicated ALPACA_DATA_* else paper creds."""
-    key = (os.environ.get("ALPACA_DATA_API_KEY")
-           or _resolve("alpaca_paper_key", ("ALPACA_API_KEY",)))
-    secret = (os.environ.get("ALPACA_DATA_API_SECRET")
-              or _resolve("alpaca_paper_secret", ("ALPACA_API_SECRET",)))
+    """Data-API key/secret via the unified resolver: keystore first, then the
+    dedicated ALPACA_DATA_* env, then the generic ALPACA_* env."""
+    key = _resolve("alpaca_paper_key", ("ALPACA_DATA_API_KEY", "ALPACA_API_KEY"))
+    secret = _resolve("alpaca_paper_secret",
+                      ("ALPACA_DATA_API_SECRET", "ALPACA_API_SECRET"))
     return key, secret
 
 
