@@ -36,7 +36,7 @@ _STORE_PATH = os.path.join(KEYSTORE_DIR, "credentials.sqlite")
 class CredentialSpec:
     name: str               # stable storage key
     label: str              # field label in the UI
-    group: str              # venue/source id (e.g. "alpaca", "clankapp")
+    group: str              # venue/source id (e.g. "alpaca", "whale_alert")
     group_label: str        # human group name
     kind: str               # "venue" | "source"
     secret: bool            # mask in UI + never echo
@@ -59,30 +59,42 @@ def _venue_keypair(group: str, glabel: str, mode: str,
 
 def _build_registry() -> dict[str, CredentialSpec]:
     specs: list[CredentialSpec] = []
-    # Venues with separate paper/live key+secret.
-    for mode in ("paper", "live"):
-        specs += _venue_keypair("alpaca", "Alpaca", mode,
-                                ("ALPACA_API_KEY", "ALPACA_API_SECRET"))
-        specs += _venue_keypair("coinbase", "Coinbase", mode,
-                                ("COINBASE_API_KEY", "COINBASE_API_SECRET"))
-        m = mode.upper()
-        specs += [
-            CredentialSpec(f"ibkr_{mode}_host", "Host", "ibkr", "IBKR", "venue",
-                           False, (f"IBKR_{m}_HOST", "IBKR_HOST"), mode),
-            CredentialSpec(f"ibkr_{mode}_port", "Port", "ibkr", "IBKR", "venue",
-                           False, (f"IBKR_{m}_PORT", "IBKR_PORT"), mode),
-            CredentialSpec(f"ibkr_{mode}_account", "Account", "ibkr", "IBKR",
-                           "venue", False,
-                           (f"IBKR_{m}_ACCOUNT", "IBKR_ACCOUNT"), mode),
-        ]
-    # Data sources (single credential each). Free-first: ClankApp (crypto) and
-    # SEC EDGAR (institutional) are the defaults and need no paid key.
+    # Alpaca is the ONLY paper venue with paper credentials. Its paper keys use
+    # the official Alpaca names APCA_API_KEY_ID / APCA_API_SECRET_KEY, with the
+    # older ALPACA_* names kept as fallbacks. Alpaca also has reserved live keys.
     specs += [
-        CredentialSpec("clankapp_key", "API key (optional, free signup)",
-                       "clankapp", "ClankApp (free, default)", "source", True,
-                       ("CLANKAPP_API_KEY",)),
+        CredentialSpec("alpaca_paper_key", "API key", "alpaca", "Alpaca",
+                       "venue", True,
+                       ("APCA_API_KEY_ID", "ALPACA_PAPER_API_KEY",
+                        "ALPACA_API_KEY"), "paper"),
+        CredentialSpec("alpaca_paper_secret", "API secret", "alpaca", "Alpaca",
+                       "venue", True,
+                       ("APCA_API_SECRET_KEY", "ALPACA_PAPER_API_SECRET",
+                        "ALPACA_API_SECRET"), "paper"),
+    ]
+    specs += _venue_keypair("alpaca", "Alpaca", "live",
+                            ("ALPACA_API_KEY", "ALPACA_API_SECRET"))
+    # Coinbase is sim-only market access and holds NO paper credentials. Its
+    # live keys stay reserved.
+    specs += _venue_keypair("coinbase", "Coinbase", "live",
+                            ("COINBASE_API_KEY", "COINBASE_API_SECRET"))
+    # IBKR is live-only through IB Gateway and holds NO paper credentials. The
+    # gateway connection settings (host, port, enabled) live in config.ibkr, not
+    # here. These reserved live fields identify the live account.
+    specs += [
+        CredentialSpec("ibkr_live_host", "Host", "ibkr", "IBKR", "venue",
+                       False, ("IBKR_LIVE_HOST", "IBKR_HOST"), "live"),
+        CredentialSpec("ibkr_live_port", "Port", "ibkr", "IBKR", "venue",
+                       False, ("IBKR_LIVE_PORT", "IBKR_PORT"), "live"),
+        CredentialSpec("ibkr_live_account", "Account", "ibkr", "IBKR", "venue",
+                       False, ("IBKR_LIVE_ACCOUNT", "IBKR_ACCOUNT"), "live"),
+    ]
+    # Data sources (single credential each). SEC EDGAR is the sole active whale
+    # feed (free, no key). Whale Alert stays reserved (optional paid crypto).
+    # ClankApp was removed 2026-07-10 (dead host).
+    specs += [
         CredentialSpec("whale_alert_key", "API key", "whale_alert",
-                       "Whale Alert (optional, limited free tier)", "source",
+                       "Whale Alert (reserved, optional)", "source",
                        True, ("WHALE_ALERT_API_KEY",)),
         CredentialSpec("sec_api_key", "API key (optional override only)",
                        "sec_api", "SEC EDGAR (free, no key needed)", "source",
@@ -112,7 +124,6 @@ _REQUIRED_FIELDS: dict[str, tuple[str, ...]] = {
     "alpaca": ("key", "secret"),
     "coinbase": ("key", "secret"),
     "ibkr": ("host", "port", "account"),
-    "clankapp": ("key",),
     "whale_alert": ("key",),
     "sec_api": ("key",),
     "openai": ("key",),

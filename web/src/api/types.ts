@@ -220,3 +220,22 @@ export interface ControlResult {
   error?: string;
   [k: string]: unknown;
 }
+
+export type IntegrationState = "working" | "failing" | "not_configured";
+export interface IntegrationCheck {
+  name: string;
+  provider: string;
+  state: IntegrationState;
+  reason: string;
+  latency_ms: number | null;
+}
+export interface IntegrationsHealth {
+  integrations: IntegrationCheck[];
+  summary: {
+    all_ok: boolean;
+    any_failing: boolean;
+    configured_count: number;
+    total: number;
+    ts: string | null;
+  };
+}

@@ -76,37 +76,41 @@ def test_noisy_actors_filtered():
 
 def test_activity_usefulness_transparent_and_bounded():
     # Larger, clearly-directional flows score higher than small/ambiguous ones.
-    big = activity_usefulness(_act("clankapp", "whale", "outflow", 50_000_000.0))
-    small = activity_usefulness(_act("clankapp", "minnow", "outflow", 5_000.0))
-    ambiguous = activity_usefulness(_act("clankapp", "x", "unknown", 50_000_000.0))
+    big = activity_usefulness(_act("whale_alert", "whale", "outflow", 50_000_000.0))
+    small = activity_usefulness(_act("whale_alert", "minnow", "outflow", 5_000.0))
+    ambiguous = activity_usefulness(_act("whale_alert", "x", "unknown", 50_000_000.0))
     assert 0.0 <= small <= big <= 1.0
     assert ambiguous < big  # unclear direction is down-weighted
     assert 0.0 <= ambiguous <= 1.0
 
 
 def test_default_adapters_present():
-    # SEC EDGAR 13F is the SOLE active whale source. The crypto adapters
-    # (ClankApp, Whale Alert) are reserved optional feeds, off the default
-    # chain. Apify/Polymarket is removed.
+    # SEC EDGAR 13F is the SOLE active whale source. Whale Alert is a reserved
+    # optional crypto feed, off the default chain. ClankApp was removed
+    # 2026-07-10 (dead host). Apify/Polymarket is removed.
     sources = {a.source for a in default_adapters()}
     assert sources == {"sec_13f"}
     assert sources.isdisjoint({"clankapp", "whale_alert", "apify"})
 
 
 def test_sec_edgar_is_sole_active_source():
-    from whale_signal.adapters import ClankAppAdapter, WhaleAlertAdapter
+    from whale_signal.adapters import WhaleAlertAdapter
     adapters = default_adapters()
     assert len(adapters) == 1
     assert adapters[0].source == "sec_13f"
-    # Crypto adapters remain importable as reserved optional feeds.
-    assert ClankAppAdapter().source == "clankapp"
+    # Whale Alert remains importable as a reserved optional feed.
     assert WhaleAlertAdapter().source == "whale_alert"
+
+
+def test_clankapp_fully_removed():
+    import whale_signal.adapters as a
+    assert not hasattr(a, "ClankAppAdapter")
 
 
 def test_adapters_never_raise_offline():
     # No keys, no network -> every adapter (active + reserved) returns a list.
-    from whale_signal.adapters import ClankAppAdapter, WhaleAlertAdapter
-    everything = default_adapters() + [ClankAppAdapter(), WhaleAlertAdapter()]
+    from whale_signal.adapters import WhaleAlertAdapter
+    everything = default_adapters() + [WhaleAlertAdapter()]
     for adapter in everything:
         for sym in ("BTC-USD", "AAPL", "PRES-2028-YES"):
             assert isinstance(adapter.fetch(sym), list)

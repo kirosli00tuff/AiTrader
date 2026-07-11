@@ -153,6 +153,9 @@ Config load_config(const std::string& path) {
     c.engine.equities_market_hours_only =
         get_bool(root, "engine.equities_market_hours_only",
                  c.engine.equities_market_hours_only);
+    c.engine.native_conviction_feeds_gate =
+        get_bool(root, "engine.native_conviction_feeds_gate",
+                 c.engine.native_conviction_feeds_gate);
 
     // market data source
     c.market_data.source =

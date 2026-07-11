@@ -29,6 +29,13 @@ engine:
                                         # skip the base-check gate + council outside
                                         # regular US trading hours; crypto stays
                                         # 24/7. Skips logged as `market_hours`.
+  native_conviction_feeds_gate: true    # true keeps current behavior: the native
+                                        # rule_based conviction feeds the gate
+                                        # confidence and edge. false makes gate
+                                        # confidence and edge come from advisory
+                                        # factors alone, native still drives
+                                        # direction and sizing. Composition only,
+                                        # never changes a Level-1 risk limit.
 
 # -----------------------------------------------------------------------------
 # Market data — where price snapshots come from.

@@ -4,6 +4,7 @@ const LINKS = [
   { to: "/paper", label: "Paper", ico: "▦" },
   { to: "/live", label: "Live", ico: "◆" },
   { to: "/controls", label: "Controls", ico: "▤" },
+  { to: "/health", label: "Health", ico: "✚" },
   { to: "/settings", label: "Settings", ico: "⚙" },
 ];
 

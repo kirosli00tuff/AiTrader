@@ -47,3 +47,11 @@ target_link_libraries(test_kill_switch PRIVATE mal_core mal_market_data
                       mal_signal_engine mal_storage mal_risk mal_config mal_util)
 add_test(NAME kill_switch COMMAND test_kill_switch
          WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+# native_conviction_feeds_gate composition (Task 3): flag ON feeds the native
+# rule_based conviction into the gate confidence/edge, OFF takes them from the
+# advisory factors alone. Direction and agreement stay unchanged. No RiskGate.
+add_executable(test_native_conviction_gate test_native_conviction_gate.cpp)
+target_link_libraries(test_native_conviction_gate PRIVATE mal_signal_engine)
+add_test(NAME native_conviction_gate COMMAND test_native_conviction_gate
+         WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})

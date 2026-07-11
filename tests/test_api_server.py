@@ -54,7 +54,7 @@ INSERT INTO model_outputs(ts, model, verdict, confidence, edge, weight) VALUES
 
 INSERT INTO whale_activity(ts, source, delayed, entity, symbol, direction,
     value_usd) VALUES
-  ('2026-07-06T01:00:00Z','clankapp',0,'wallet-x','BTC/USD','inflow',1200000);
+  ('2026-07-06T01:00:00Z','sec_13f',1,'Institution-x','SPY','long',1200000);
 
 INSERT INTO whale_signal_history(ts, symbol, whale_bias, whale_confidence,
     whale_flow_direction, whale_regime_label, trade_outcome) VALUES
@@ -89,6 +89,14 @@ def env(tmp_path, monkeypatch):
     monkeypatch.setenv("MAL_DB_PATH", str(db))
     monkeypatch.setenv("MAL_CONTROL_DIR", str(tmp_path / "control"))
     monkeypatch.setenv("MAL_WEIGHT_OVERRIDE_PATH", str(tmp_path / "weights.json"))
+    # Clear real API keys/flags so the integration health checks stay offline
+    # (not_configured) in tests: no real network or socket call is made.
+    for _v in ("OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GEMINI_API_KEY",
+               "APCA_API_KEY_ID", "APCA_API_SECRET_KEY", "ALPACA_API_KEY",
+               "ALPACA_API_SECRET", "ALPACA_PAPER_API_KEY",
+               "ALPACA_PAPER_API_SECRET", "WHALE_ALERT_API_KEY",
+               "UNUSUAL_WHALES_API_KEY", "SEC_EDGAR_ENABLED"):
+        monkeypatch.delenv(_v, raising=False)
     kdir = tmp_path / "keystore"
     kdir.mkdir()
     import account_manager.credentials as creds
@@ -190,7 +198,7 @@ def test_council_shape(client):
 def test_whale_shape(client):
     j = client.get("/whale").json()
     assert "activity" in j and "history" in j
-    assert j["activity"][0]["source"] == "clankapp"
+    assert j["activity"][0]["source"] == "sec_13f"
 
 
 def test_risk_shape(client):
@@ -474,3 +482,43 @@ def test_controls_never_writes_level1(env, client):
     assert digest() == before                     # config (Level-1 source) untouched
     lvl = client.get("/controls").json()["level1"]
     assert lvl.get("max_daily_loss_total_pct") == 0.03
+
+
+# --- Live API health check (Task 5): read-only, offline-safe in tests --------
+
+def test_health_integrations_offline_all_not_configured(env, client):
+    j = client.get("/health/integrations").json()
+    assert "integrations" in j and "summary" in j
+    names = {r["name"] for r in j["integrations"]}
+    assert {"openai", "anthropic_opus", "anthropic_haiku_gate", "gemini",
+            "alpaca_data", "alpaca_trading_auth", "sec_edgar", "ibkr_gateway",
+            "whale_alert", "unusual_whales"} <= names
+    for r in j["integrations"]:
+        assert r["state"] in {"working", "failing", "not_configured"}
+    # Keys cleared, SEC/IBKR disabled -> every check not_configured, so NO real
+    # network or socket call happens in the test.
+    assert all(r["state"] == "not_configured" for r in j["integrations"])
+    assert j["summary"]["configured_count"] == 0
+
+
+def test_health_integrations_writes_no_op_or_risk_value(env, client):
+    before = hashlib.sha256(open(env["db"], "rb").read()).hexdigest()
+    client.get("/health/integrations")
+    after = hashlib.sha256(open(env["db"], "rb").read()).hexdigest()
+    assert before == after
+
+
+def test_health_trade_auth_and_ibkr_never_order():
+    import inspect
+    from api_server import health
+    # Trade-auth is a GET /v2/account only. It must never POST or hit an orders
+    # endpoint (no resting order, no money moved).
+    trade = inspect.getsource(health._check_alpaca_trading)
+    assert "_post(" not in trade
+    assert "orders" not in trade.lower()
+    assert "/v2/account" in trade
+    # IBKR check is socket reachability only. No HTTP POST, no orders endpoint.
+    ibkr = inspect.getsource(health._check_ibkr)
+    assert "_post(" not in ibkr
+    assert "/v2/orders" not in ibkr
+    assert "create_connection" in ibkr

@@ -77,4 +77,16 @@ CombinedVerdict combine(const std::vector<FactorSignal>& signals,
                         const WeightState& weights,
                         double min_factor_conf = 0.05);
 
+// Compose the confidence/edge the RiskGate sees, honoring
+// native_conviction_feeds_gate. When true (default) this returns the full
+// ensemble verdict (native rule_based conviction feeds the gate). When false,
+// bias/verdict/agreement stay from the full ensemble but confidence/edge come
+// from the advisory factors alone (rule_based excluded), so a genuine technical
+// setup drives direction and sizing without also inflating the gate
+// confidence/edge. This never touches the RiskGate or its thresholds.
+CombinedVerdict compose_gate_verdict(const std::vector<FactorSignal>& signals,
+                                     const WeightState& weights,
+                                     bool native_conviction_feeds_gate,
+                                     double min_factor_conf = 0.05);
+
 }  // namespace mal::signal_engine

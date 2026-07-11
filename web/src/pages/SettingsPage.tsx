@@ -13,10 +13,10 @@ const CATEGORIES: Category[] = [
     note: "Alpaca handles all paper trading and paper market data. It has no live path." },
   { title: "Live venue", groups: ["ibkr"], testMode: "live",
     note: "IBKR live connection settings. Live stays disabled behind the approval gate." },
-  { title: "Crypto venue", groups: ["coinbase"], testMode: "paper",
-    note: "Coinbase, simulated and paper only." },
-  { title: "Whale data", groups: ["clankapp", "sec_api", "whale_alert"],
-    note: "Free-first: ClankApp and SEC EDGAR need no paid key." },
+  { title: "Crypto venue", groups: ["coinbase"], testMode: "live",
+    note: "Coinbase, sim-only market access. Live keys reserved, no paper credentials." },
+  { title: "Whale data", groups: ["sec_api", "whale_alert"],
+    note: "SEC EDGAR is the sole active whale feed, free and delayed. Whale Alert reserved." },
 ];
 
 function CredField({ c, onSaved }: { c: Credential; onSaved: () => void }) {

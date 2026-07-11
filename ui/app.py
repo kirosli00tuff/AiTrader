@@ -686,9 +686,8 @@ def _advanced_page() -> html.Div:
 
 VENUE_GROUPS = [("alpaca", "Alpaca"), ("coinbase", "Coinbase"),
                 ("ibkr", "IBKR")]
-SOURCE_GROUPS = [("clankapp", "ClankApp (free, default)"),
-                 ("sec_api", "SEC EDGAR (free, no key needed)"),
-                 ("whale_alert", "Whale Alert (optional, limited free tier)")]
+SOURCE_GROUPS = [("sec_api", "SEC EDGAR (free, sole active whale feed)"),
+                 ("whale_alert", "Whale Alert (reserved, optional)")]
 
 
 def _cred_input(spec) -> html.Div:

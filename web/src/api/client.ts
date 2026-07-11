@@ -2,7 +2,7 @@
 // The WebSocket stream lives in useStream.ts.
 import type {
   Account, Approval, Category, ControlResult, ControlsState, Council,
-  Credential, Health, KillState, Mode, Order, Pnl, Position, SignalsResponse,
+  Credential, Health, IntegrationsHealth, KillState, Mode, Order, Pnl, Position, SignalsResponse,
   Trade, Venue,
 } from "./types";
 
@@ -48,6 +48,7 @@ export const api = {
   risk: () => get<{ level1: Record<string, unknown>; kill_switch_enabled: boolean; kill_switch_tripped: boolean }>("/risk"),
   venues: () => get<{ venues: Venue[] }>("/venues"),
   approval: () => get<Approval>("/approval"),
+  integrations: () => get<IntegrationsHealth>("/health/integrations"),
   credentials: () => get<{ credentials: Credential[] }>("/credentials"),
   saveCredential: (name: string, value: string) =>
     post<{ ok: boolean; name?: string; status?: Credential; error?: string }>(

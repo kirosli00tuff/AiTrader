@@ -1,6 +1,6 @@
 import { api } from "../api/client";
 import { useApi } from "../api/useApi";
-import type { Account, Health, Pnl } from "../api/types";
+import type { Account, Health, IntegrationsHealth, Pnl } from "../api/types";
 import { money, pct, signClass } from "../api/format";
 
 // Top strip on every page: engine state, active mode, portfolio value, daily
@@ -10,6 +10,9 @@ export default function StatusBar({ activeView }: { activeView: string }) {
   const health = useApi<Health>(() => api.health(), 4000, []);
   const acct = useApi<Account>(() => api.account("paper"), 6000, []);
   const pnlApi = useApi<Pnl>(() => api.pnl("paper"), 6000, []);
+  // Integration health aggregate. Polled slowly (120s): with keys present each
+  // poll is a few minimal round trips, with no keys it makes no external call.
+  const integ = useApi<IntegrationsHealth>(() => api.integrations(), 120000, []);
 
   const eng = health.data?.engine;
   const running = eng?.running ?? false;
@@ -20,6 +23,13 @@ export default function StatusBar({ activeView }: { activeView: string }) {
     ? pnlApi.data.daily_pnl[pnlApi.data.daily_pnl.length - 1].pnl
     : 0;
   const dayPct = pnlApi.data?.equity_change_pct ?? 0;
+  const sum = integ.data?.summary;
+  const configured = sum?.configured_count ?? 0;
+  // green only when every configured integration passes, amber when any
+  // configured one fails, grey when none configured (missing optional key is
+  // not a failure).
+  const apisDot = configured === 0 ? "d" : sum?.all_ok ? "g" : "a";
+  const apisLabel = configured === 0 ? "none" : sum?.all_ok ? "ok" : "issues";
 
   return (
     <div className="statusbar">
@@ -43,6 +53,11 @@ export default function StatusBar({ activeView }: { activeView: string }) {
       <div className="status-item">
         <span className={`dot ${kill ? "r" : "g"}`} />
         Kill switch <b>{kill ? "TRIPPED" : "clear"}</b>
+      </div>
+      <div className="status-sep" />
+      <div className="status-item">
+        <span className={`dot ${apisDot}`} />
+        APIs <b>{apisLabel}</b>
       </div>
       <div className="statusbar-spacer" />
       <div className="status-item">

@@ -50,6 +50,10 @@ vi.mock("../../api/client", () => {
       council: async () => ({ models: { llm_primary: "gpt-5.5" }, latest: [{ ts: "x", model: "gpt-5.5", verdict: "buy", confidence: 0.7, edge: 0.03, weight: 0.27 }], recent: [] }),
       risk: async () => ({ level1: {}, kill_switch_enabled: true, kill_switch_tripped: false }),
       venues: async () => ({ venues: [{ venue: "alpaca", mode: "paper", live_enabled: false, live_adapter: "none", runtime_mode: "paper", credentials_connected: true, kill_switch_tripped: false, configured: true }] }),
+      integrations: async () => ({
+        integrations: [{ name: "openai", provider: "OpenAI GPT-5.5", state: "not_configured", reason: "", latency_ms: null }],
+        summary: { all_ok: false, any_failing: false, configured_count: 0, total: 1, ts: "x" },
+      }),
       approval: async () => ({ live_enabled: false, manual_confirmation: false, last_checked_ts: "x", mechanisms: [ { name: "Live approval gate passed", key: "approval_gate", passed: false, detail: "d" }, { name: "Live credentials connected", key: "credentials_connected", passed: false, detail: "d" }, { name: "Kill switch clear", key: "kill_switch", passed: true, detail: "d" }, { name: "Live-enabled flag set", key: "live_enabled", passed: false, detail: "d" } ], readiness: null, all_passed: false, live_venue: "ibkr" }),
       credentials: async () => ({ credentials: [ { name: "openai_key", label: "API key", group: "openai", group_label: "OpenAI (GPT-5.5)", kind: "source", mode: null, secret: true, configured: false, source: "missing", masked: "" }, { name: "alpaca_paper_key", label: "API key", group: "alpaca", group_label: "Alpaca", kind: "venue", mode: "paper", secret: true, configured: false, source: "missing", masked: "" } ] }),
       saveCredential: okResult, testConnection: async () => ({ ok: true, message: "ok", source: "env" }),
@@ -103,6 +107,12 @@ describe("pages render", () => {
     expect(await screen.findByText("Ensemble weights (by layer)")).toBeInTheDocument();
     expect(await screen.findByText("Level 1 risk limits (read-only)")).toBeInTheDocument();
     expect(await screen.findByText("ALWAYS ON")).toBeInTheDocument();
+  });
+
+  it("renders the Health page with integrations", async () => {
+    at("/health");
+    expect(await screen.findByText("Integration health")).toBeInTheDocument();
+    expect(await screen.findByText("Integrations")).toBeInTheDocument();
   });
 
   it("renders the Settings page with categories", async () => {

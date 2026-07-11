@@ -53,6 +53,12 @@ struct EngineConfig {
     // Distinct from respect_market_hours (which gates whether equity TICKS run at
     // all in continuous mode); this only suppresses the expensive council call.
     bool equities_market_hours_only = true;
+    // native_conviction_feeds_gate: when true (default) the native rule_based
+    // conviction feeds the combined confidence/edge the RiskGate reads (current
+    // behavior). When false, the gate confidence/edge come from the advisory
+    // factors alone, while the native setup still drives direction and sizing.
+    // Composition-only, never changes a Level-1 RiskGate limit.
+    bool native_conviction_feeds_gate = true;
 };
 
 // RL advisory (Layer 3, deferred). SHIPS OFF: while rl_enabled is false the

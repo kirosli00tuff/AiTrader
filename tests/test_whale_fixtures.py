@@ -1,20 +1,17 @@
 """Parser tests for the whale live adapters against recorded fixtures.
 
-Provenance is now MIXED (see each file's `_provenance`):
-  - tests/fixtures/sec_edgar_13f_sample.json is a REAL capture recorded
-    2026-07-05 from SEC EDGAR full-text search (efts.sec.gov, q=Apple,
-    forms=13F-HR), trimmed to the first 5 hits with the full real _source shape.
-  - tests/fixtures/clankapp_sample.json stays SYNTHETIC: api.clankapp.com was
-    unreachable from this environment on 2026-07-05 (DNS failure), so the
-    documented-shape synthetic fixture is retained (Task 2 fallback).
-Both exercise the pure `_parse` methods so parsing is verified with NO network
-call. Swap the ClankApp fixture for a real capture once the host is reachable.
+tests/fixtures/sec_edgar_13f_sample.json is a REAL capture recorded 2026-07-05
+from SEC EDGAR full-text search (efts.sec.gov, q=Apple, forms=13F-HR), trimmed
+to the first 5 hits with the full real _source shape. It exercises the pure
+`_parse` method so parsing is verified with NO network call.
+
+ClankApp was removed on 2026-07-10 (host api.clankapp.com dead, DNS-unreachable),
+so its fixture and parser test are gone. SEC EDGAR is the sole active whale feed.
 """
 import json
 import os
 
-from whale_signal.adapters import (ClankAppAdapter, Sec13FAdapter, _flag,
-                                    _user_agent)
+from whale_signal.adapters import Sec13FAdapter, _flag, _user_agent
 
 _FIX = os.path.join(os.path.dirname(__file__), "fixtures")
 
@@ -22,19 +19,6 @@ _FIX = os.path.join(os.path.dirname(__file__), "fixtures")
 def _load(name):
     with open(os.path.join(_FIX, name), encoding="utf-8") as f:
         return json.load(f)
-
-
-def test_clankapp_parse_exchange_flows():
-    payload = _load("clankapp_sample.json")
-    rows = ClankAppAdapter()._parse(payload, "BTC-USD")
-    # Sub-min ($900) txn dropped; deposit->exchange = inflow, withdrawal = outflow.
-    assert len(rows) == 2
-    dirs = {r.direction for r in rows}
-    assert dirs == {"inflow", "outflow"}
-    assert all(r.source == "clankapp" and not r.delayed for r in rows)
-    assert all(r.value_usd >= 500_000 for r in rows)
-    entities = {r.entity for r in rows}
-    assert "binance" in entities and "coinbase" in entities
 
 
 def test_sec_edgar_parse_is_delayed_and_clean():
@@ -46,13 +30,11 @@ def test_sec_edgar_parse_is_delayed_and_clean():
     assert all(r.delayed for r in rows)
     assert all("(CIK" not in r.entity for r in rows)
     assert all(r.direction == "long" and r.value_usd == 0.0 for r in rows)
-    # First real hit in the recorded payload.
     assert rows[0].entity == "THURSTON, SPRINGER, MILLER, HERD & TITAK, INC."
     assert rows[0].ts.startswith("2024-05-14")
 
 
 def test_empty_payload_yields_no_rows():
-    assert ClankAppAdapter()._parse({}, "BTC-USD") == []
     assert Sec13FAdapter()._parse({"hits": {"hits": []}}, "AAPL") == []
 
 
@@ -62,8 +44,6 @@ def test_live_disabled_by_default():
         os.environ.pop(var, None)
     assert _flag("WHALE_LIVE_ENABLED") is False
     assert _flag("SEC_EDGAR_ENABLED") is False
-    crypto = ClankAppAdapter().fetch("BTC-USD")   # mock (offline)
-    assert crypto and all(not a.delayed for a in crypto)
     equities = Sec13FAdapter().fetch("AAPL")       # mock (offline)
     assert equities and all(a.delayed for a in equities)
 

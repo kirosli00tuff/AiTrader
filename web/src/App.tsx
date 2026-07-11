@@ -6,6 +6,7 @@ import LiveSection from "./pages/LivePage";
 import LiveOverview from "./pages/LiveOverview";
 import CategoryView from "./pages/CategoryView";
 import ControlsPage from "./pages/ControlsPage";
+import HealthPage from "./pages/HealthPage";
 import SettingsPage from "./pages/SettingsPage";
 
 export default function App() {
@@ -24,6 +25,7 @@ export default function App() {
           <Route path="crypto" element={<CategoryView mode="live" category="crypto" />} />
         </Route>
         <Route path="controls" element={<ControlsPage />} />
+        <Route path="health" element={<HealthPage />} />
         <Route path="settings" element={<SettingsPage />} />
         <Route path="*" element={<Navigate to="/paper" replace />} />
       </Route>

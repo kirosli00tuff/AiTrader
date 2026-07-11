@@ -479,6 +479,40 @@ cd web && npm run typecheck && npm test                # types + render tests (7
 cd web && npm run build                                # production build
 ```
 
+### Full-system test and live API health
+
+`scripts/test_full_system.sh` runs the whole suite in one pass and prints a
+PASS, FAIL, or SKIPPED line per section plus a summary table. It continues past
+failures and exits nonzero if any section fails. Sections cover the build
+(zero warnings), C++ ctest, Python pytest, config validation, the RiskGate and
+kill switch, strategy and regime, real-fill feedback, the council offline,
+council cost controls, dnn advisory, RL gating, the whale layer, the API
+backend, the frontend, and live exclusion. Two sections are optional and print
+SKIPPED unless keys are present in the process environment: the live council
+call (needs ANTHROPIC, OPENAI, and GEMINI keys, capped at one gate plus one
+council pass) and Alpaca paper (needs Alpaca paper keys, one quote plus an
+auth-only account check, never a resting order). Live trading is never touched.
+The script cleans up its temp DBs and configs and leaves the repo unchanged.
+Expected runtime is roughly one to two minutes offline, a little more when the
+optional live sections run.
+
+```bash
+bash scripts/test_full_system.sh
+```
+
+The **live API health check** verifies each integration with a real round trip,
+not just a key-present check. `GET /health/integrations` runs one minimal call
+per integration (OpenAI, Anthropic Opus, the Anthropic Haiku gate, Gemini,
+Alpaca market data, Alpaca paper trading auth, SEC EDGAR, IBKR gateway
+reachability) concurrently with per-check timeouts and returns working,
+failing, or not_configured with a short reason and round-trip latency in
+milliseconds. It never places a resting order (the Alpaca trade check
+authenticates only), never touches live trading, never writes an operational or
+Level 1 value, and never logs or returns a key value. An absent key reports
+not_configured, not failing. The Health view in the GUI shows each integration
+as a colored row and the top status strip shows an aggregate that is green only
+when every configured integration passes.
+
 ## Advisory services
 
 - **`llm_consensus`** — `consensus(state)` returns a weighted ensemble verdict

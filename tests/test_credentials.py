@@ -16,7 +16,9 @@ import pytest
 def creds(tmp_path, monkeypatch):
     monkeypatch.setenv("MAL_KEYSTORE_DIR", str(tmp_path / "keystore"))
     # Clear any env that could leak into resolution.
-    for var in ("CLANKAPP_API_KEY", "WHALE_ALERT_API_KEY", "SEC_API_KEY",
+    for var in ("WHALE_ALERT_API_KEY", "SEC_API_KEY",
+                "APCA_API_KEY_ID", "APCA_API_SECRET_KEY",
+                "ALPACA_PAPER_API_KEY", "ALPACA_PAPER_API_SECRET",
                 "ALPACA_API_KEY", "ALPACA_API_SECRET", "ALPACA_LIVE_API_KEY",
                 "ALPACA_LIVE_API_SECRET", "COINBASE_API_KEY", "COINBASE_API_SECRET",
                 "IBKR_HOST", "IBKR_PORT", "IBKR_ACCOUNT"):
@@ -27,7 +29,7 @@ def creds(tmp_path, monkeypatch):
 
 
 def test_keyfile_generated_on_first_use(creds, tmp_path):
-    creds.set_credential("clankapp_key", "secret-token-123")
+    creds.set_credential("whale_alert_key", "secret-token-123")
     keyfile = os.path.join(str(tmp_path / "keystore"), "secret.key")
     assert os.path.exists(keyfile)
     # restrictive perms (owner-only)
@@ -36,8 +38,8 @@ def test_keyfile_generated_on_first_use(creds, tmp_path):
 
 
 def test_encryption_roundtrip_and_at_rest(creds, tmp_path):
-    creds.set_credential("clankapp_key", "plaintext-value")
-    assert creds.get_credential("clankapp_key") == "plaintext-value"
+    creds.set_credential("whale_alert_key", "plaintext-value")
+    assert creds.get_credential("whale_alert_key") == "plaintext-value"
     # The on-disk store must NOT contain the plaintext.
     store = os.path.join(str(tmp_path / "keystore"), "credentials.sqlite")
     with open(store, "rb") as fh:
@@ -46,12 +48,12 @@ def test_encryption_roundtrip_and_at_rest(creds, tmp_path):
 
 
 def test_in_app_overrides_env(creds, monkeypatch):
-    monkeypatch.setenv("CLANKAPP_API_KEY", "from-env")
-    assert creds.get_credential("clankapp_key") == "from-env"
-    assert creds.get_credential_source("clankapp_key") == "env"
-    creds.set_credential("clankapp_key", "from-app")
-    assert creds.get_credential("clankapp_key") == "from-app"
-    assert creds.get_credential_source("clankapp_key") == "in-app"
+    monkeypatch.setenv("WHALE_ALERT_API_KEY", "from-env")
+    assert creds.get_credential("whale_alert_key") == "from-env"
+    assert creds.get_credential_source("whale_alert_key") == "env"
+    creds.set_credential("whale_alert_key", "from-app")
+    assert creds.get_credential("whale_alert_key") == "from-app"
+    assert creds.get_credential_source("whale_alert_key") == "in-app"
 
 
 def test_env_fallback_when_not_saved(creds, monkeypatch):
@@ -83,24 +85,24 @@ def test_resolve_env_uses_precedence(creds, monkeypatch):
 
 
 def test_clearing_credential_restores_env(creds, monkeypatch):
-    monkeypatch.setenv("CLANKAPP_API_KEY", "env-val")
-    creds.set_credential("clankapp_key", "app-val")
-    assert creds.get_credential("clankapp_key") == "app-val"
-    creds.set_credential("clankapp_key", "")  # blank clears in-app
-    assert creds.get_credential("clankapp_key") == "env-val"
+    monkeypatch.setenv("WHALE_ALERT_API_KEY", "env-val")
+    creds.set_credential("whale_alert_key", "app-val")
+    assert creds.get_credential("whale_alert_key") == "app-val"
+    creds.set_credential("whale_alert_key", "")  # blank clears in-app
+    assert creds.get_credential("whale_alert_key") == "env-val"
 
 
 def test_list_status_masks_secrets(creds):
-    creds.set_credential("clankapp_key", "supersecret")
+    creds.set_credential("whale_alert_key", "supersecret")
     status = {s["name"]: s for s in creds.list_status()}
-    s = status["clankapp_key"]
+    s = status["whale_alert_key"]
     assert s["configured"] is True
     assert s["source"] == "in-app"
     assert "supersecret" not in s["masked"]
     # non-secret values are shown
-    creds.set_credential("ibkr_paper_host", "127.0.0.1")
+    creds.set_credential("ibkr_live_host", "127.0.0.1")
     status = {s["name"]: s for s in creds.list_status()}
-    assert status["ibkr_paper_host"]["masked"] == "127.0.0.1"
+    assert status["ibkr_live_host"]["masked"] == "127.0.0.1"
 
 
 def test_validate_connection_offline(creds):

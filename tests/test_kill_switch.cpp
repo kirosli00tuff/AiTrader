@@ -48,7 +48,7 @@ int main() {
     const std::string ctrl = "/tmp/mal_test_kill_ctrl";
     // Point the engine at a private control dir (the same env var the API uses).
     ::setenv("MAL_CONTROL_DIR", ctrl.c_str(), 1);
-    std::system(("mkdir -p " + ctrl).c_str());
+    if (std::system(("mkdir -p " + ctrl).c_str()) != 0) return 1;
     std::remove((ctrl + "/kill_request.json").c_str());
     std::remove((ctrl + "/kill_request.processed.json").c_str());
 

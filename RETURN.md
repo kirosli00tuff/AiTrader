@@ -14,6 +14,38 @@ Commit message:
 
 ---
 
+## Prompt: Remove ClankApp, Alpaca-only paper credentials, gate native conviction, full-system test script, live API health check
+
+Date: 2026-07-10
+Model: Opus 4.8
+Prompt summary: Autonomous run, operator away. Do not touch RiskGate logic, the live-trading gate, or the adaptive limit-weakening invariant. Live trading stays off and is excluded from testing. Task 1, remove ClankApp fully (adapter, config, env, docs, tests, demo, fixture, flags), whale layer runs on SEC EDGAR alone with the 0.35 cap, keep Whale Alert and Unusual Whales reserved, add a removed-for-dead-host comment. Task 2, Alpaca is the only paper venue with paper keys APCA_API_KEY_ID and APCA_API_SECRET_KEY, remove IBKR and Coinbase paper env vars from env, config, credentials, Settings page, docs, keep IBKR gateway host/port/enabled, keep reserved live and data vars. Task 3, add config flag native_conviction_feeds_gate default true, when false the native setup feeds direction and sizing only and the gate confidence and edge come from advisory factors alone, document the tradeoff, test both states, no RiskGate change. Task 4, scripts/test_full_system.sh running build, ctest, pytest, config validation, RiskGate and kill switch, strategy and regime, real-fill feedback, council offline, council live optional, council cost controls, dnn advisory, RL gating, whale, Alpaca paper optional, API backend, frontend, live exclusion, with PASS or FAIL per section, continue past failures, nonzero exit on any failure, summary table, self-cleanup. Task 5, GET /health/integrations doing one real minimal round trip per integration concurrently with timeouts, per-integration working or failing or not configured plus latency, never a resting order or live trade or key value, plus a frontend Health view and a top-strip aggregate indicator. Task 6, document and commit and push to main.
+Changes: Task 1 removed ClankApp fully for a dead host (api.clankapp.com is DNS-unreachable). Deleted the ClankAppAdapter class and its mock from whale_signal/adapters.py, dropped the import from whale_signal/__init__.py, removed the clankapp_key credential spec and its required-fields entry from account_manager/credentials.py, deleted tests/fixtures/clankapp_sample.json and the ClankApp parser test, removed the CLANKAPP_API_KEY env line, the Dash SOURCE_GROUPS entry, the ops/demo.py mention, the config/schema.md line, and the React Settings whale group. Left removed-for-dead-host comments in adapters.py, __init__.py, .env.example, and credentials.py. SEC EDGAR is the sole active adapter (default_adapters returns [Sec13FAdapter]); the whale factor scores a single source cleanly and the 0.35 advisory cap (sizing.whale_position_scale_cap) is unchanged. Whale Alert and Unusual Whales stay reserved. A repo grep confirms no functional ClankApp reference survives, only the removal notes. Task 2 made Alpaca the only paper venue with credentials. Its paper keys are APCA_API_KEY_ID and APCA_API_SECRET_KEY (older ALPACA_* kept as fallbacks). Removed the IBKR paper and Coinbase paper credential specs from the registry, the Settings page groups, and the env example. Kept IBKR gateway host/port/enabled in config.ibkr and the reserved live and data env vars. Task 3 added the engine.native_conviction_feeds_gate config flag (default true, preserves current behavior). New signal_engine::compose_gate_verdict composes the gate confidence and edge: true feeds the native rule_based conviction, false takes confidence and edge from the advisory factors alone while direction and sizing still use the full ensemble. The engine native-entry path calls it. Documented at the composition point and in CONTEXT.md. New ctest test_native_conviction_gate covers both flag states. RiskGate logic untouched. Task 4 added scripts/test_full_system.sh with 17 sections, PASS/FAIL/SKIPPED per section, continue past failures, nonzero exit on any failure, a summary table, and self-cleanup. Task 5 added GET /health/integrations (api_server/health.py) doing one real minimal round trip per integration concurrently with per-check timeouts, reporting working/failing/not_configured plus latency, never a resting order (the Alpaca trade check is an auth-only GET /v2/account), never live, never a Level-1 or operational write, never a key value. Reserved paid feeds and a disabled SEC or IBKR report not_configured without calling. Added a frontend Health view (sidebar + route) and a top-strip aggregate (green only when every configured integration passes, amber on any configured failure, grey when none). Tests assert the trade and IBKR checks place no order, no health endpoint writes an op or risk value, and the bind stays loopback. Task 6 documented the script and health check in the README, updated CONTEXT.md and PROGRESS.md (the rule_based double-count flag is now marked GATED), and completed this entry. NOT touched: RiskGate logic, the live-trading gate, the adaptive limit-weakening invariant. Live trading stays OFF and was excluded from testing (the live-exclusion section asserts it). Verification: C++ ctest 9/9, Python pytest 176 passed, frontend typecheck + 8 render tests + production build, and scripts/test_full_system.sh all sections PASS with the two live sections SKIPPED (keys resolve from the keystore, not the process env).
+Section results table:
+
+| Section | Result |
+| --- | --- |
+| Build (zero warnings) | PASS |
+| C++ unit tests (ctest) | PASS |
+| Python unit tests (pytest) | PASS |
+| Config validation | PASS |
+| RiskGate and kill switch | PASS |
+| Strategy and regime | PASS |
+| Real-fill feedback | PASS |
+| Council offline | PASS |
+| Council live keys | SKIPPED (no ANTHROPIC/OPENAI/GEMINI env key) |
+| Council cost controls | PASS |
+| DNN advisory | PASS |
+| RL gating | PASS |
+| Whale layer (SEC EDGAR) | PASS |
+| Alpaca paper | SKIPPED (no Alpaca paper env keys) |
+| API backend | PASS |
+| Frontend (types/test/build) | PASS |
+| Live exclusion | PASS |
+
+Commit message: `Remove ClankApp, remove non-Alpaca paper credentials, gate native conviction into the gate behind a flag, add full-system test script and live API health check, live trading excluded`
+
+---
+
 ## Prompt: Confirm SEC EDGAR as active whale feed, reserve Unusual Whales as documented paid upgrade
 
 Date: 2026-07-10

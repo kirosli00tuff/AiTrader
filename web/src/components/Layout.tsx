@@ -4,13 +4,11 @@ import StatusBar from "./StatusBar";
 
 export default function Layout() {
   const { pathname } = useLocation();
-  const view = pathname.startsWith("/live")
-    ? "Live"
-    : pathname.startsWith("/controls")
-      ? "Controls"
-      : pathname.startsWith("/settings")
-        ? "Settings"
-        : "Paper";
+  const view = pathname.startsWith("/live") ? "Live"
+    : pathname.startsWith("/controls") ? "Controls"
+    : pathname.startsWith("/health") ? "Health"
+    : pathname.startsWith("/settings") ? "Settings"
+    : "Paper";
   return (
     <div className="app">
       <Sidebar />

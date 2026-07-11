@@ -106,4 +106,25 @@ CombinedVerdict combine(const std::vector<FactorSignal>& signals,
     return cv;
 }
 
+CombinedVerdict compose_gate_verdict(const std::vector<FactorSignal>& signals,
+                                     const WeightState& weights,
+                                     bool native_conviction_feeds_gate,
+                                     double min_factor_conf) {
+    CombinedVerdict full = combine(signals, weights, min_factor_conf);
+    if (native_conviction_feeds_gate) return full;
+    // Flag OFF: the native setup still drives direction (bias) and sizing, but
+    // the gate confidence and edge come from the ADVISORY factors alone. We
+    // recompute confidence/edge over the ensemble minus `rule_based` and swap
+    // only those two fields. Bias, verdict, and agreement are unchanged. This
+    // never touches the RiskGate or its thresholds.
+    std::vector<FactorSignal> advisory;
+    advisory.reserve(signals.size());
+    for (const auto& s : signals)
+        if (s.factor != "rule_based") advisory.push_back(s);
+    CombinedVerdict adv = combine(advisory, weights, min_factor_conf);
+    full.confidence = adv.confidence;
+    full.edge = adv.edge;
+    return full;
+}
+
 }  // namespace mal::signal_engine

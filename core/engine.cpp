@@ -567,7 +567,12 @@ void Engine::handle_bar_close(const market_data::MarketState& ms,
 
     auto cat = news_->score_for(ms.symbol);
     auto signals = gather_factors(ms, cat, council_allowed, &sig);
-    auto verdict = signal_engine::combine(signals, weights_);
+    // native_conviction_feeds_gate gates the mild double-count. Default true
+    // keeps the native rule_based conviction feeding the gate confidence/edge.
+    // When false, the gate confidence/edge come from advisory factors alone and
+    // the native setup still drives direction and sizing. RiskGate untouched.
+    auto verdict = signal_engine::compose_gate_verdict(
+        signals, weights_, cfg_.engine.native_conviction_feeds_gate);
     o.confidence = verdict.confidence;
     o.edge = verdict.edge;
     o.model_agreement_count = verdict.agreement_count;

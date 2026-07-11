@@ -22,7 +22,7 @@ The Python services and Dash UI read the same YAML for display/control defaults.
 | `live_approval` | `LiveApprovalConfig` | all conditions that must hold before live can be enabled. |
 | `dashboard` | `DashboardConfig` | refresh seconds + default panels. |
 | `model_weights` | `ModelWeights` | ensemble weights (auto-normalized in the engine). |
-| `data_sources` | (read by Python) | Whale Alert / SEC 13F endpoints + key env vars. ClankApp is the default free source. |
+| `data_sources` | (read by Python) | Whale Alert / SEC 13F endpoints + key env vars. SEC EDGAR is the sole active free source. ClankApp was removed for a dead host. |
 
 ## New blocks: `engine` and `market_data`
 

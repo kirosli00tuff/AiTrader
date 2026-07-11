@@ -1,9 +1,11 @@
 """Whale data-source adapters with offline MOCK fallbacks.
 
-Each adapter targets exactly one allowed source:
-  - ClankAppAdapter    -> ClankApp free crypto/on-chain whale API (DEFAULT)
-  - WhaleAlertAdapter  -> Whale Alert API (crypto on-chain large transfers, key-gated)
-  - Sec13FAdapter      -> SEC EDGAR 13F (free, DELAYED institutional holdings)
+SEC EDGAR is the sole ACTIVE source. Adapters:
+  - Sec13FAdapter      -> SEC EDGAR 13F (free, DELAYED institutional holdings), ACTIVE
+  - WhaleAlertAdapter  -> Whale Alert API (crypto on-chain, key-gated), RESERVED
+ClankApp was removed on 2026-07-10: its host api.clankapp.com is confirmed
+DNS-unreachable and dead. Whale Alert and Unusual Whales Pro stay reserved as
+documented paid options (see default_adapters).
 
 Live fetches use `requests` with short timeouts and a descriptive User-Agent.
 Any network error, HTTP 429 (rate limit), missing dependency, or parse failure
@@ -44,7 +46,7 @@ def _requests():
 
 # Live network fetches are OFF by default (Task 7): the whole app runs offline on
 # deterministic mocks unless an operator explicitly opts in. Crypto/on-chain
-# whale feeds (ClankApp, Whale Alert) are gated by WHALE_LIVE_ENABLED.
+# whale feeds (Whale Alert, reserved) are gated by WHALE_LIVE_ENABLED.
 # SEC EDGAR is gated separately by SEC_EDGAR_ENABLED. Both default false.
 WHALE_LIVE_ENABLED_ENV = "WHALE_LIVE_ENABLED"
 SEC_EDGAR_ENABLED_ENV = "SEC_EDGAR_ENABLED"
@@ -72,7 +74,7 @@ def _user_agent() -> str:
 
 @dataclass
 class WhaleActivity:
-    source: str          # clankapp | whale_alert | sec_13f
+    source: str          # whale_alert | sec_13f
     entity: str          # actor / wallet / exchange / institution
     symbol: str
     direction: str       # inflow | outflow | long | short
@@ -106,134 +108,17 @@ def _is_crypto(symbol: str) -> bool:
     return any(tok in s for tok in ("USD", "BTC", "ETH", "USDT", "USDC", "-"))
 
 
-class ClankAppAdapter:
-    """ClankApp free crypto/on-chain whale API adapter (DEFAULT source).
-
-    ClankApp is fully free (email-signup key, ~10 calls/min, ~21 chains). An API
-    key is OPTIONAL — without one the adapter returns deterministic mock data.
-    Endpoint + response shape are parsed defensively; any parse failure falls
-    back to mock.
-    """
-
-    source = "clankapp"
-    BASE_URL = "https://api.clankapp.com/v2/explorer/tx"
-
-    def __init__(self, api_key_env: str = "CLANKAPP_API_KEY",
-                 min_value_usd: float = 500_000):
-        self.key = _resolve(api_key_env)
-        self.min_value_usd = min_value_usd
-
-    def is_live(self) -> bool:
-        return bool(self.key)
-
-    def fetch(self, symbol: str) -> list[WhaleActivity]:
-        # ClankApp covers crypto/on-chain only.
-        if not _is_crypto(symbol):
-            return []
-        # Live is OFF unless the operator opts in (WHALE_LIVE_ENABLED). Default
-        # path is deterministic mock — no network, no keys.
-        if not _flag(WHALE_LIVE_ENABLED_ENV):
-            return self._mock(symbol)
-        try:
-            return self._fetch_live(symbol)
-        except Exception:
-            # Network down / parse failure / missing dep -> never crash.
-            return self._mock(symbol)
-
-    def _fetch_live(self, symbol: str) -> list[WhaleActivity]:
-        requests = _requests()
-        # Token portion before the quote currency (e.g. BTC-USD -> btc).
-        token = symbol.upper().replace("-", "").replace("USDT", "").replace(
-            "USDC", "").replace("USD", "").lower() or symbol.lower()
-        params = {"symbol": token, "size": 25}
-        headers = {"User-Agent": _user_agent(), "Accept": "application/json"}
-        if self.key:
-            headers["x-api-key"] = self.key
-        resp = requests.get(self.BASE_URL, params=params, headers=headers,
-                            timeout=_TIMEOUT)
-        if resp.status_code == 429:  # rate-limited this cycle -> mock
-            return self._mock(symbol)
-        resp.raise_for_status()
-        parsed = self._parse(resp.json(), symbol)
-        return parsed if parsed else self._mock(symbol)
-
-    def _parse(self, payload, symbol: str) -> list[WhaleActivity]:
-        """Parse a ClankApp JSON payload into WhaleActivity rows (pure).
-
-        Extracted so fixtures can exercise parsing without a live call.
-        Response shape is defensively probed: list under common keys.
-        """
-        rows = payload
-        if isinstance(payload, dict):
-            for key in ("transactions", "data", "result", "txs", "items"):
-                if isinstance(payload.get(key), list):
-                    rows = payload[key]
-                    break
-        if not isinstance(rows, list):
-            return []
-        out: list[WhaleActivity] = []
-        for row in rows:
-            if not isinstance(row, dict):
-                continue
-            value = _num(row.get("amount_usd"), row.get("value_usd"),
-                        row.get("usd"), row.get("amount"))
-            if value is None or value < self.min_value_usd:
-                continue
-            frm = row.get("from") if isinstance(row.get("from"), dict) else {}
-            to = row.get("to") if isinstance(row.get("to"), dict) else {}
-            to_type = str(to.get("owner_type", "")).lower()
-            frm_type = str(frm.get("owner_type", "")).lower()
-            # Deposit to an exchange = inflow (distribution); withdrawal = outflow.
-            if to_type == "exchange":
-                direction = "inflow"
-                entity = to.get("owner") or to.get("address") or "exchange"
-            elif frm_type == "exchange":
-                direction = "outflow"
-                entity = frm.get("owner") or frm.get("address") or "exchange"
-            else:
-                direction = "inflow" if _det(str(row.get("hash", value)), 2) else "outflow"
-                entity = (to.get("owner") or frm.get("owner")
-                          or to.get("address") or frm.get("address") or "wallet")
-            ts = row.get("timestamp") or row.get("ts")
-            out.append(WhaleActivity(
-                source=self.source,
-                entity=str(entity),
-                symbol=symbol,
-                direction=direction,
-                value_usd=float(value),
-                delayed=False,
-                ts=_ts_from_epoch(ts) if ts is not None else _now(),
-            ))
-        return out
-
-    def _mock(self, symbol: str) -> list[WhaleActivity]:
-        if not _is_crypto(symbol):
-            return []
-        out = []
-        n = 1 + _det("clank_n" + symbol, 3)
-        for i in range(n):
-            seed = f"clank{symbol}{i}"
-            direction = "inflow" if _det(seed, 2) else "outflow"
-            value = float(self.min_value_usd + _det("v" + seed, 8_000_000))
-            entity = ("binance" if _det("ex" + seed, 2)
-                      else f"wallet_{_det('w' + seed, 9999):04d}")
-            out.append(WhaleActivity(
-                source=self.source,
-                entity=entity,
-                symbol=symbol,
-                direction=direction,
-                value_usd=value,
-                delayed=False,
-                ts=_now(),
-            ))
-        return out
+# ClankApp adapter REMOVED 2026-07-10: host api.clankapp.com is confirmed
+# DNS-unreachable and dead. SEC EDGAR is the sole active whale source.
+# Whale Alert and Unusual Whales Pro remain reserved (see default_adapters).
 
 
 class WhaleAlertAdapter:
     """Whale Alert API adapter (large on-chain crypto transfers).
 
-    OPTIONAL key-gated alternative to ClankApp. Its free tier is limited; the
-    app works fine with NO Whale Alert key (ClankApp + mock cover the default).
+    RESERVED key-gated crypto feed, not in the active chain. Its free tier is
+    limited; the app works fine with NO Whale Alert key (SEC EDGAR is the sole
+    active source and the mock covers offline).
     """
 
     source = "whale_alert"
@@ -453,7 +338,7 @@ def _num(*candidates):
 # SEC EDGAR is the sole ACTIVE whale source (see default_adapters below). The
 # following stay wired and importable but are OFF the default chain, following
 # one reserved-integration pattern:
-#   - ClankAppAdapter    reserved optional crypto/on-chain feed (free).
+#   - ClankApp REMOVED 2026-07-10 (host api.clankapp.com dead, DNS-unreachable).
 #   - WhaleAlertAdapter  reserved optional crypto/on-chain feed (key-gated).
 #   - Unusual Whales Pro RESERVED real-time PAID upgrade for richer EQUITIES
 #     smart-money data (options flow, dark pool, congressional, insider, and
@@ -466,8 +351,8 @@ def default_adapters() -> list:
     """The ACTIVE whale source chain.
 
     SEC EDGAR 13F is the sole active whale source: free, keyless, and DELAYED
-    institutional context (quarterly, ~45-day lag). The crypto adapters
-    (ClankApp, Whale Alert) and the reserved Unusual Whales Pro paid upgrade are
+    institutional context (quarterly, ~45-day lag). The reserved crypto adapter
+    (Whale Alert) and the reserved Unusual Whales Pro paid upgrade are
     OPTIONAL and NOT in this chain. Add a crypto or paid adapter explicitly only
     if an operator opts in. Every adapter keeps its deterministic mock fallback,
     so this runs offline with no keys.

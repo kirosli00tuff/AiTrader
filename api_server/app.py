@@ -19,6 +19,7 @@ from pydantic import BaseModel
 
 from api_server import store
 from api_server import controls
+from api_server import health
 
 HOST = "127.0.0.1"        # loopback only, asserted by the test suite
 PORT = int(os.environ.get("MAL_API_PORT", "8000"))
@@ -46,6 +47,14 @@ def _mode(mode: str) -> str:
 @app.get("/health")
 def get_health():
     return store.health()
+
+
+@app.get("/health/integrations")
+def get_health_integrations():
+    """Per-integration live round-trip health. Read-only except the Alpaca
+    trade-auth check, which authenticates only and never places an order. No
+    key value is returned. See api_server/health.py for the safety contract."""
+    return health.integrations()
 
 
 @app.get("/account")
