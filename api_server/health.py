@@ -69,7 +69,9 @@ def _check_openai():
                    {"Authorization": f"Bearer {key}"},
                    {"model": "gpt-5.5",
                     "messages": [{"role": "user", "content": "ping"}],
-                    "max_tokens": 1})
+                    # GPT-5 family: max_completion_tokens (not max_tokens), and
+                    # no custom temperature. A tiny cap leaves room past reasoning.
+                    "max_completion_tokens": 16})
     return (WORKING, "") if status == 200 else (FAILING, f"HTTP {status}")
 
 
@@ -89,7 +91,7 @@ def _check_gemini():
     if not key:
         return NOT_CONFIGURED, "GEMINI_API_KEY not set"
     url = ("https://generativelanguage.googleapis.com/v1beta/models/"
-           "gemini-3.1-pro:generateContent")
+           "gemini-3.1-pro-preview:generateContent")
     status = _post(url, {"x-goog-api-key": key},
                    {"contents": [{"role": "user", "parts": [{"text": "ping"}]}],
                     "generationConfig": {"maxOutputTokens": 1}})

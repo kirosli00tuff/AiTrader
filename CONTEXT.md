@@ -10,7 +10,7 @@ A 24/7 paper and live AI auto-trading platform. Four layers: static safety, adap
 
 - Alpaca chosen as first real venue. Safest and easiest paper API.
 - Coinbase replaces Binance for direct crypto market access. Binance does not operate in Canada. Alpaca crypto remains the paper execution venue.
-- LLM council uses three models for reasoning diversity: gpt-5.5, claude-opus-4-8, gemini-3.1-pro.
+- LLM council uses three models for reasoning diversity: gpt-5.5, claude-opus-4-8, gemini-3.1-pro-preview.
 - Base-check gate uses Claude Haiku 4.5 (2026-07-08), replacing Gemini 3 Flash. It reuses the council's ANTHROPIC_API_KEY through the same Anthropic Messages client, so no new credential is needed. It screens signals before the paid council, cutting cost. Each gate call is well under a cent; this trades a 1,500-request-per-day free tier for near-zero paid usage, and concentrates spend on one dependency (Anthropic) instead of two.
 - Council runs only on native strategy signals, never on a timer or per tick. Cost control.
 - Native strategy layer blends momentum and mean reversion with a regime detector. Research shows the blend delivers smoother risk-adjusted returns across regimes than either alone.
@@ -60,6 +60,10 @@ A 24/7 paper and live AI auto-trading platform. Four layers: static safety, adap
 
 ## API Notes and Quirks
 
+- Council model reachability verified 2026-07-12 (scripts/list_provider_models.sh, keystore-first keys). Reachable ids in use: OpenAI `gpt-5.5` (in the account's model list), Anthropic `claude-opus-4-8` (in the list) and `claude-haiku-4-5` (server-resolved alias of `claude-haiku-4-5-20251001`), Google `gemini-3.1-pro-preview`. Substitution: the previously configured `gemini-3.1-pro` does NOT exist for the key (HTTP 404, "not found for API version v1beta"); the reachable Gemini 3.1 Pro id is `gemini-3.1-pro-preview`, so the tertiary slot uses that. OpenAI needed no model change, only a request-shape fix.
+- OpenAI GPT-5 family request shape: the earlier HTTP 400 was not auth and not the model. Two shape rules: (1) the token cap field is `max_completion_tokens`, not the deprecated `max_tokens` ("Unsupported parameter: 'max_tokens' is not supported with this model"); (2) only the default temperature is allowed ("'temperature' does not support 0.2 with this model. Only the default (1) value is supported"), so the provider omits temperature. The provider keeps `response_format: json_object`, and the system prompt contains the word "JSON" as that mode requires.
+- Thinking models need output headroom. Gemini 3.1 Pro is thinking-only (`thinkingBudget: 0` is rejected). At the old 400-token response cap it spent 384 tokens on reasoning and returned 2 characters (finishReason MAX_TOKENS), which parsed as an error. council_max_tokens was raised to 2048 (a ceiling, not spend: a real verdict used ~324 tokens total) so the council actually gets a parseable verdict. This is a cost cap, not a risk limit; the C++ side reads it only for a startup display line.
+- A non-fatal startup model check (llm_consensus/model_check.py) runs at bridge startup when the real council is active. It lists each provider's models and warns if a configured council model is not reachable, so a wrong model string is a visible startup warning instead of a silent mid-trade 404. A word suffix like `-preview` is not treated as a date alias, so `gemini-3.1-pro` would NOT falsely match `gemini-3.1-pro-preview`; a date suffix like `claude-haiku-4-5-20251001` does count as the `claude-haiku-4-5` alias.
 - SEC EDGAR requires a User-Agent header with app name and contact email. No header means blocked requests. Fair-use limit around 10 requests per second.
 - ClankApp response shape needs verification against live data before trusting parsers.
 - Alpaca paths verified for paper orders and market data. No live brokerage path.

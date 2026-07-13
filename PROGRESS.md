@@ -54,7 +54,7 @@ Still open (not defects — known limits):
 - Advisory factor scores run through real Python services only with `--bridge`; the default path uses deterministic C++ mocks.
 - Whale live-fetch parsers are verified against one recorded SEC 13F payload only; the other feeds' assumed shapes are still unverified against live responses (and live is off by default behind `WHALE_LIVE_ENABLED` / `SEC_EDGAR_ENABLED`).
 - Live-approval workflow not wired end to end (`try_enable_live` never called). Safe, but incomplete.
-- Real LLM providers VERIFIED live 2026-07-11 via scripts/verify_live_integrations.sh: Anthropic Opus + Haiku gate + Alpaca paper (data + order-auth) working; OpenAI (HTTP 400) and Gemini (HTTP 404) returned request/model errors, not auth errors, so keys resolve but the operator should confirm model access or request shape before the paper week. `rl_advisory` untrained (real-fill gate unmet); `dnn_advisory` still shipping the synthetic champion until enough real labelled samples exist.
+- Real LLM providers VERIFIED live 2026-07-12 (RESOLVED): all four LLM paths plus Alpaca paper (data + order-auth) return working via scripts/verify_live_integrations.sh. The earlier OpenAI HTTP 400 and Gemini HTTP 404 (2026-07-11) were NOT auth failures. OpenAI: `gpt-5.5` is reachable, the request shape was wrong (needs `max_completion_tokens` not `max_tokens`, and only the default temperature) — fixed in the provider and health check. Gemini: `gemini-3.1-pro` does not exist for the key; the reachable id is `gemini-3.1-pro-preview` — updated in config, CLAUDE.md, and everywhere the string appeared. Gemini 3.1 Pro is thinking-only and truncated at the old 400-token cap, so `council_max_tokens` was raised to 2048 (a ceiling, not spend) so the council gets a parseable verdict. A non-fatal startup check now warns if a configured model is unreachable. `rl_advisory` untrained (real-fill gate unmet); `dnn_advisory` still shipping the synthetic champion until enough real labelled samples exist.
 
 New flags from the feed-work session (2026-07-05, `369b6a6`):
 
@@ -66,6 +66,17 @@ New flags from the feed-work session (2026-07-05, `369b6a6`):
 ## Session Log
 
 Newest entries at top. One entry per session. Format: date, model used, what changed, what is stable, what is next.
+
+### 2026-07-12 (Opus 4.8) — fix OpenAI and Gemini to models the keys can reach, add startup model validation
+
+- **Diagnosed against live APIs, not assumptions.** New scripts/list_provider_models.sh resolves keys keystore-first and lists each provider's reachable models (redacting any key). The earlier OpenAI 400 and Gemini 404 were never auth failures. OpenAI `gpt-5.5` IS reachable; the request shape was wrong. Gemini `gemini-3.1-pro` does NOT exist for the key; `gemini-3.1-pro-preview` does.
+- **OpenAI request-shape fix.** GPT-5 family needs `max_completion_tokens` (not the deprecated `max_tokens`, which it rejects) and only the default temperature. Fixed in llm_consensus/providers.py (OpenAIProvider) and the health check. Model string unchanged.
+- **Gemini model-string fix.** llm_tertiary is now `gemini-3.1-pro-preview` in config, and the string was corrected everywhere it appeared (provider defaults, consensus defaults, provider_prices, health check, controls model-toggle keys now derive from config so they cannot drift, frontend label, docs, CLAUDE.md approved list).
+- **Thinking-model headroom.** Gemini 3.1 Pro is thinking-only and spent the whole 400-token cap on reasoning (finishReason MAX_TOKENS, 2 chars out). council_max_tokens raised to 2048 (a ceiling, not spend: a real verdict used ~324 tokens) so the council gets a parseable verdict. Cost cap only, not a risk limit.
+- **Non-fatal startup model check.** New llm_consensus/model_check.py lists each provider's models at bridge startup (real council only) and warns if a configured model is unreachable, turning a silent mid-trade 404 into a visible warning. It never raises, so a provider outage never blocks startup. A `-preview` word suffix is not treated as a date alias, so `gemini-3.1-pro` would not falsely pass; a date suffix like `-20251001` counts as the `claude-haiku-4-5` alias.
+- **Re-verified:** all four LLM paths (OpenAI, Anthropic Opus, Haiku gate, Gemini) plus Alpaca paper data and order-auth return working (scripts/verify_live_integrations.sh, table in RETURN.md). End-to-end the real council now returns real verdicts from OpenAI, Anthropic, and Gemini.
+- **Stable:** C++ ctest 10/10, Python pytest 198 passed (11 new model_check tests; suite made hermetic against the host keystore so offline tests never issue real calls), frontend typecheck + 9 render tests + production build. RiskGate, live-trading gate, and the adaptive limit-weakening invariant untouched. Live trading stays OFF.
+- **Next:** consume the remaining controls.json overrides (model toggles, regime pins, budget, RL enable, promote/rollback); prove paper-loop stability.
 
 ### 2026-07-11 (Opus 4.8) — engine consumes per-layer toggles, surfaced in Ops, safety always on
 

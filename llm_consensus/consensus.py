@@ -57,7 +57,7 @@ def real_providers(cfg_path: str | None = None) -> list[LLMProvider]:
     Slot -> provider mapping matches the ``llm_models`` config block:
       llm_primary   = OpenAI    (gpt-5.5)
       llm_secondary = Anthropic (claude-opus-4-8)
-      llm_tertiary  = Google    (gemini-3.1-pro)
+      llm_tertiary  = Google    (gemini-3.1-pro-preview)
     Each still degrades to a labelled mock when its key is absent.
     """
     names = llm_model_names(cfg_path)
@@ -73,7 +73,7 @@ def real_providers(cfg_path: str | None = None) -> list[LLMProvider]:
                           skew=_SLOT_SKEW["llm_secondary"], max_tokens=max_tok),
         GeminiProvider(name="llm_tertiary",
                        weight=slot_weight("llm_tertiary", cfg_path),
-                       model_id=names.get("llm_tertiary", "gemini-3.1-pro"),
+                       model_id=names.get("llm_tertiary", "gemini-3.1-pro-preview"),
                        skew=_SLOT_SKEW["llm_tertiary"], max_tokens=max_tok),
     ]
 
@@ -221,7 +221,7 @@ def council_status_line(cfg_path: str | None = None) -> str:
     if real:
         council = (f"REAL council [{names.get('llm_primary', 'gpt-5.5')}, "
                    f"{names.get('llm_secondary', 'claude-opus-4-8')}, "
-                   f"{names.get('llm_tertiary', 'gemini-3.1-pro')}]")
+                   f"{names.get('llm_tertiary', 'gemini-3.1-pro-preview')}]")
     else:
         council = "MOCK council (deterministic offline stand-ins)"
     if gate_enabled(cfg_path):

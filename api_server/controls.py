@@ -31,7 +31,24 @@ _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # Validated domains -----------------------------------------------------------
 ADAPTIVE, COUNCIL, DNN, WHALE = "adaptive", "council", "dnn_advisory", "whale"
 LAYERS = (ADAPTIVE, COUNCIL, DNN, WHALE)   # safety has NO toggle (always on)
-COUNCIL_MODELS = ("gpt-5.5", "claude-opus-4-8", "gemini-3.1-pro")
+def _council_models() -> tuple[str, ...]:
+    """The three council model ids straight from config (llm_primary/secondary/
+    tertiary), so the per-model toggle keys never drift from the configured
+    models. Falls back to the approved defaults if config is unavailable."""
+    try:
+        from llm_consensus.config_access import llm_model_names
+        names = llm_model_names()
+        ids = tuple(names[s] for s in
+                    ("llm_primary", "llm_secondary", "llm_tertiary")
+                    if names.get(s))
+        if len(ids) == 3:
+            return ids
+    except Exception:
+        pass
+    return ("gpt-5.5", "claude-opus-4-8", "gemini-3.1-pro-preview")
+
+
+COUNCIL_MODELS = _council_models()
 GATE_KEY = "gate"                          # the Claude Haiku base-check gate
 REGIMES = ("trending", "range_bound", "neutral")
 

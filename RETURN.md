@@ -14,6 +14,36 @@ Commit message:
 
 ---
 
+## Prompt: Fix OpenAI and Gemini model strings to models the keys can reach, add startup model validation
+
+Date: 2026-07-12
+Model: Opus 4.8
+Prompt summary: Autonomous, operator away. Do not touch RiskGate logic, the live-trading gate, or the adaptive limit-weakening invariant. Live trading stays off. verify_live_integrations.sh showed Anthropic Opus, the Haiku gate, and Alpaca paper working, OpenAI HTTP 400 and Gemini HTTP 404. Keys resolve from the keystore, so these are model-access or request-shape errors, not auth. Task 1, add scripts/list_provider_models.sh that resolves keys keystore-first and lists which models each key can reach, highlight the gpt-5 and gemini-3 families, and record the lists. Task 2, capture the exact HTTP 400 and 404 response bodies from minimal calls and record them. Task 3, set the council model strings to models the keys can actually reach, keep Opus and the Haiku gate, prefer the newest GPT-5 and a Gemini 3 Pro, correct any request-shape issue, update config and the CLAUDE.md approved list so they never drift. Task 4, add a non-fatal startup check that warns when a configured model is not in the provider live list. Task 5, re-run verify_live_integrations.sh and record the new table. Task 6, tests with mocked provider responses. Task 7, document and commit and push.
+Changes: Task 1 added scripts/list_provider_models.sh, which resolves keys keystore-first and lists each provider's reachable models (OpenAI GET /v1/models, Gemini GET v1beta/models with a v1 fallback filtered to generateContent-capable, Anthropic GET /v1/models), highlighting the gpt-5 and gemini-3 families, and redacts any key value from all output. Run this session: OpenAI returned 123 models including gpt-5.5; Gemini returned gemini-3.1-pro-preview (NOT a bare gemini-3.1-pro); Anthropic listed claude-opus-4-8 and claude-haiku-4-5-20251001. Model lists recorded in this entry below. Task 2 captured the exact error bodies. OpenAI HTTP 400: "Unsupported parameter: 'max_tokens' is not supported with this model. Use 'max_completion_tokens' instead." and, once that was fixed, "Unsupported value: 'temperature' does not support 0.2 with this model. Only the default (1) value is supported." So OpenAI was a request-shape problem, not a model or auth problem. Gemini HTTP 404: "models/gemini-3.1-pro is not found for API version v1beta, or is not supported for generateContent." So Gemini was a wrong model id. Task 3 set the config to reachable reality. OpenAI keeps gpt-5.5 (verified reachable); the fix was the request shape: llm_consensus/providers.py OpenAIProvider now sends max_completion_tokens (not max_tokens) and omits temperature (GPT-5 family allows only the default). Gemini llm_tertiary is now gemini-3.1-pro-preview, corrected in config/default_config.yaml, the provider and consensus fallback defaults, config/provider_prices.yaml, api_server/health.py, the frontend MODEL_LABEL, .env.example, AUDIT.md, and CLAUDE.md's approved-model list (which also now records the OpenAI request shape). api_server/controls.py COUNCIL_MODELS now derives from the config llm_models block so the per-model toggle keys can never drift from the configured models again. A discovered issue was also fixed: Gemini 3.1 Pro is thinking-only and, at the old council_max_tokens of 400, spent the whole budget on reasoning (finishReason MAX_TOKENS, 2 characters of output) so the council verdict was unparseable; council_max_tokens was raised to 2048 (a ceiling, not spend, since a real verdict used ~324 tokens total) in config/default_config.yaml, config/config.hpp, and config_access, after which the real council returns real verdicts from all three providers. council_max_tokens is a cost cap only, not a risk limit (C++ uses it for a startup display line and a >=1 validation). Task 4 added llm_consensus/model_check.py, a non-fatal startup check that lists each provider's models and warns when a configured council model is not reachable with the current key, wired into python_bridge/server.py serve() when the real council is active. It never raises (a provider outage or absent key warns/skips and startup continues) and never logs a key. A configured id counts as reachable if it is an exact list member or a date-suffixed alias (claude-haiku-4-5 matches claude-haiku-4-5-20251001), but a word suffix like -preview is NOT an alias, so gemini-3.1-pro would still be flagged unreachable. Task 5 re-ran scripts/verify_live_integrations.sh: all four LLM paths (OpenAI, Anthropic Opus, Haiku gate, Gemini) plus Alpaca paper market data and order-auth now return working (table below). Task 6 added tests/test_model_check.py (11 tests, all provider responses mocked, no network): each provider list shape parses, an unreachable configured model warns without raising, an absent key or unavailable list is unchecked (no false alarm), the -preview word suffix is not a date alias, and no key value leaks into any record or warning. Existing tests updated for the new values (council_max_tokens 2048, OpenAI payload uses max_completion_tokens with no temperature, gemini-3.1-pro-preview), and tests/conftest.py now points the credential keystore at an empty temp dir so the suite stays hermetic and offline against a populated host keystore. Task 7 documented in CLAUDE.md, CONTEXT.md (API Notes: exact reachable strings, the request-shape fix, the token-cap reason, the startup check), PROGRESS.md (dated session entry + resolved Open Flags entry), AUDIT.md, and completed this entry. Verification: C++ ctest 10/10, Python pytest 198 passed, frontend typecheck + 9 render tests + production build, live re-verification all working. NOT touched: RiskGate logic, the live-trading gate, the adaptive limit-weakening invariant. Live trading stays OFF.
+
+Model lists recorded (2026-07-12, scripts/list_provider_models.sh):
+- OpenAI gpt-5 family reachable: gpt-5, gpt-5-codex, gpt-5-mini, gpt-5-nano, gpt-5-pro, gpt-5.1, gpt-5.1-codex, gpt-5.2, gpt-5.2-pro, gpt-5.3-codex, gpt-5.4, gpt-5.4-pro, gpt-5.5, gpt-5.5-pro, gpt-5.6-luna, gpt-5.6-sol, gpt-5.6-terra (and dated pins). gpt-5.5 is reachable; kept.
+- Gemini 3 family with generateContent: gemini-3-flash-preview, gemini-3-pro-preview, gemini-3.1-flash-lite, gemini-3.1-flash-lite-preview, gemini-3.1-pro-preview, gemini-3.1-pro-preview-customtools, gemini-3.5-flash. No bare gemini-3.1-pro. Chose gemini-3.1-pro-preview (the pinned Gemini 3.1 Pro).
+- Anthropic: claude-fable-5, claude-haiku-4-5-20251001, claude-opus-4-5-20251101, claude-opus-4-6, claude-opus-4-7, claude-opus-4-8, claude-sonnet-4-5-20250929, claude-sonnet-4-6, claude-sonnet-5. claude-opus-4-8 exact; claude-haiku-4-5 resolves to the dated Haiku. Both kept.
+
+Exact error bodies (2026-07-12):
+- OpenAI (gpt-5.5, old shape): HTTP 400 `{"error":{"message":"Unsupported parameter: 'max_tokens' is not supported with this model. Use 'max_completion_tokens' instead.","type":"invalid_request_error","param":"max_tokens","code":"unsupported_parameter"}}`; then HTTP 400 `{"error":{"message":"Unsupported value: 'temperature' does not support 0.2 with this model. Only the default (1) value is supported.","type":"invalid_request_error","param":"temperature","code":"unsupported_value"}}`.
+- Gemini (gemini-3.1-pro): HTTP 404 `{"error":{"code":404,"message":"models/gemini-3.1-pro is not found for API version v1beta, or is not supported for generateContent. Call ModelService.ListModels to see the list of available models and their supported methods.","status":"NOT_FOUND"}}`.
+
+Final verification table (2026-07-12):
+
+| Integration | Result | Detail | Latency |
+| --- | --- | --- | --- |
+| OpenAI GPT-5.5 | working | - | 1084.4 ms |
+| Anthropic Opus 4.8 | working | - | 1393.7 ms |
+| Anthropic Haiku 4.5 (gate path) | working | - | 1694.8 ms |
+| Gemini 3.1 Pro | working | - | 1230.0 ms |
+| Alpaca paper market data | working | one quote ok | 325.1 ms |
+| Alpaca paper order-auth (validation-only) | working | paper account auth ok | 241.7 ms |
+Commit message: `Fix OpenAI and Gemini model strings to models the keys can reach, add startup model validation`
+
+---
+
 ## Prompt: Wire engine consumption of per-layer toggles, surface layer toggles in Ops, safety always on
 
 Date: 2026-07-11
@@ -397,3 +427,14 @@ $ git diff --cached --stat
 | Gemini 3.1 Pro | failing | HTTPError: HTTP Error 404: Not Found | 230.1 ms |
 | Alpaca paper market data | working | one quote ok | 253.1 ms |
 | Alpaca paper order-auth (validation-only) | working | paper account auth ok | 235.6 ms |
+
+### Run 2026-07-13T02:54:01Z
+
+| Integration | Result | Detail | Latency |
+| --- | --- | --- | --- |
+| OpenAI GPT-5.5 | working | - | 1084.4 ms |
+| Anthropic Opus 4.8 | working | - | 1393.7 ms |
+| Anthropic Haiku 4.5 (gate path) | working | - | 1694.8 ms |
+| Gemini 3.1 Pro | working | - | 1230.0 ms |
+| Alpaca paper market data | working | one quote ok | 325.1 ms |
+| Alpaca paper order-auth (validation-only) | working | paper account auth ok | 241.7 ms |

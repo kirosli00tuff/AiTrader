@@ -21,7 +21,7 @@ const LAYER_LABEL: Record<string, string> = {
 };
 const MODEL_LABEL: Record<string, string> = {
   "gpt-5.5": "OpenAI GPT-5.5", "claude-opus-4-8": "Anthropic Claude Opus 4.8",
-  "gemini-3.1-pro": "Google Gemini 3.1 Pro",
+  "gemini-3.1-pro-preview": "Google Gemini 3.1 Pro",
 };
 
 function metric(m: Record<string, unknown>, k: string): string {

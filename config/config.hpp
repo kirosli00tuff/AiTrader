@@ -204,7 +204,7 @@ struct StrategyConfig {
 struct CouncilConfig {
     int council_daily_budget = 30;                // max full-council calls per day
     int per_symbol_council_cooldown_minutes = 60;
-    int council_max_tokens = 400;                 // per-provider response cap
+    int council_max_tokens = 2048;                // per-provider response cap (room for thinking models)
     // Council-side thresholds. SEPARATE from the gate's risk.min_confidence_default
     // / required_model_agreement_count so they never weaken the Layer-1 gate.
     double council_min_confidence = 0.6;

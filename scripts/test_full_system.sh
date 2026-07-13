@@ -113,7 +113,7 @@ gate = P.AnthropicProvider(name="gate", model_id="claude-haiku-4-5",
 council = [
     P.OpenAIProvider(name="llm_primary", model_id="gpt-5.5", max_tokens=48).score(state),
     P.AnthropicProvider(name="llm_secondary", model_id="claude-opus-4-8", max_tokens=48).score(state),
-    P.GeminiProvider(name="llm_tertiary", model_id="gemini-3.1-pro", max_tokens=48).score(state),
+    P.GeminiProvider(name="llm_tertiary", model_id="gemini-3.1-pro-preview", max_tokens=48).score(state),
 ]
 print("gate source:", gate.source)
 print("council sources:", [c.source for c in council])

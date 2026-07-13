@@ -203,7 +203,7 @@ class _RealLLMProvider:
 def gemini_request(model_id: str, key: str, system_prompt: str,
                    user_prompt: str, max_tokens: int = 400
                    ) -> tuple[str, dict, dict]:
-    model = model_id or "gemini-3.1-pro"
+    model = model_id or "gemini-3.1-pro-preview"
     url = ("https://generativelanguage.googleapis.com/v1beta/models/"
            f"{model}:generateContent")
     headers = {"x-goog-api-key": key, "Content-Type": "application/json"}
@@ -284,8 +284,11 @@ class OpenAIProvider(_RealLLMProvider):
                 {"role": "user", "content": build_user_prompt(state)},
             ],
             "response_format": {"type": "json_object"},  # force JSON output
-            "temperature": 0.2,
-            "max_tokens": self.max_tokens,  # cost cap (Task 4)
+            # GPT-5 family request shape: the token cap must be
+            # max_completion_tokens (these models reject the deprecated
+            # max_tokens), and only the default temperature is allowed, so we
+            # omit temperature rather than send an unsupported value.
+            "max_completion_tokens": self.max_tokens,  # cost cap (Task 4)
         }
         return url, headers, payload
 
@@ -320,7 +323,7 @@ class GeminiProvider(_RealLLMProvider):
     LABEL: ClassVar[str] = "Gemini"
 
     def _request(self, state: dict, key: str) -> tuple[str, dict, dict]:
-        return gemini_request(self.model_id or "gemini-3.1-pro", key,
+        return gemini_request(self.model_id or "gemini-3.1-pro-preview", key,
                               SYSTEM_PROMPT, build_user_prompt(state),
                               max_tokens=self.max_tokens)
 

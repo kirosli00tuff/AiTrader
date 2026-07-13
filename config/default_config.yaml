@@ -170,7 +170,12 @@ strategy:
 council:
   council_daily_budget: 30
   per_symbol_council_cooldown_minutes: 60
-  council_max_tokens: 400
+  council_max_tokens: 2048   # per-provider response cap. Must leave room for a
+                             # short verdict AFTER a thinking model's reasoning.
+                             # 400 truncated Gemini 3.1 Pro before it could answer
+                             # (finishReason=MAX_TOKENS, 384 reasoning tokens, 2
+                             # chars of output). This is a ceiling, not spend: a
+                             # real verdict used ~324 tokens total.
   council_min_confidence: 0.6
   council_min_agreement: 2
   neutral_skip_strength_threshold: 0.5
@@ -306,10 +311,10 @@ model_weights:
 # These are the only approved model strings (see CLAUDE.md); do not invent others.
 # -----------------------------------------------------------------------------
 llm_models:
-  llm_primary: gpt-5.5              # OpenAI    (env OPENAI_API_KEY)
-  llm_secondary: claude-opus-4-8   # Anthropic (env ANTHROPIC_API_KEY)
-  llm_tertiary: gemini-3.1-pro     # Google    (env GEMINI_API_KEY)
-  llm_gate: claude-haiku-4-5       # base-check gate via the Anthropic client (env ANTHROPIC_API_KEY)
+  llm_primary: gpt-5.5                 # OpenAI    (env OPENAI_API_KEY)
+  llm_secondary: claude-opus-4-8       # Anthropic (env ANTHROPIC_API_KEY)
+  llm_tertiary: gemini-3.1-pro-preview # Google    (env GEMINI_API_KEY) — reachable id for Gemini 3.1 Pro
+  llm_gate: claude-haiku-4-5           # base-check gate via the Anthropic client (env ANTHROPIC_API_KEY)
 
 # -----------------------------------------------------------------------------
 # LLM council (Layer 2 advisory) — real multi-provider consensus.

@@ -46,7 +46,7 @@ def _write_cfg(tmp_path, body: str, name: str = "cfg.yaml") -> str:
 
 def test_cost_control_defaults_when_no_council_block(tmp_path):
     cfg = _write_cfg(tmp_path, "llm:\n  use_real_council: false\n", "none.yaml")
-    assert council_max_tokens(cfg) == 400
+    assert council_max_tokens(cfg) == 2048
     assert council_daily_budget(cfg) == 30
     assert per_symbol_council_cooldown_minutes(cfg) == 60
     assert council_min_confidence(cfg) == pytest.approx(0.6)
@@ -56,7 +56,7 @@ def test_cost_control_defaults_when_no_council_block(tmp_path):
 
 def test_missing_config_file_falls_back_to_defaults(tmp_path):
     missing = str(tmp_path / "does_not_exist.yaml")
-    assert council_max_tokens(missing) == 400
+    assert council_max_tokens(missing) == 2048
     assert council_daily_budget(missing) == 30
 
 
@@ -86,7 +86,7 @@ def test_bad_values_fall_back_to_defaults(tmp_path):
         "  council_max_tokens: not-a-number\n"
         "  council_daily_budget: []\n"
     ), "bad.yaml")
-    assert council_max_tokens(cfg) == 400
+    assert council_max_tokens(cfg) == 2048
     assert council_daily_budget(cfg) == 30
 
 
@@ -134,7 +134,11 @@ def test_openai_payload_carries_token_cap(monkeypatch):
         {"message": {"content": _GOOD}}]})
     p = OpenAIProvider(name="s", weight=0.2, model_id="gpt-5.5", max_tokens=128)
     p.score({"symbol": "BTC-USD", "ret_5": 0.03})
-    assert seen["payload"]["max_tokens"] == 128
+    # GPT-5 family request shape: max_completion_tokens (not max_tokens) and no
+    # custom temperature (only the default is allowed).
+    assert seen["payload"]["max_completion_tokens"] == 128
+    assert "max_tokens" not in seen["payload"]
+    assert "temperature" not in seen["payload"]
 
 
 def test_anthropic_payload_carries_token_cap(monkeypatch):
@@ -151,7 +155,7 @@ def test_gemini_payload_carries_token_cap(monkeypatch):
     monkeypatch.setenv("GEMINI_API_KEY", "test-key")
     seen = _capture_payload(monkeypatch, {"candidates": [
         {"content": {"parts": [{"text": _GOOD}]}}]})
-    p = GeminiProvider(name="s", weight=0.2, model_id="gemini-3.1-pro",
+    p = GeminiProvider(name="s", weight=0.2, model_id="gemini-3.1-pro-preview",
                        max_tokens=64)
     p.score({"symbol": "BTC-USD", "ret_5": 0.03})
     assert seen["payload"]["generationConfig"]["maxOutputTokens"] == 64

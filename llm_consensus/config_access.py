@@ -95,7 +95,7 @@ def slot_weight(slot: str, cfg_path: str | None = None) -> float:
 _COUNCIL_DEFAULTS: dict[str, float] = {
     "council_daily_budget": 30,
     "per_symbol_council_cooldown_minutes": 60,
-    "council_max_tokens": 400,
+    "council_max_tokens": 2048,
     "council_min_confidence": 0.6,
     "council_min_agreement": 2,
     "neutral_skip_strength_threshold": 0.5,

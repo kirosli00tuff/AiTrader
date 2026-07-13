@@ -147,6 +147,18 @@ def serve(host: str = "127.0.0.1", port: int = 8765) -> None:
     safe_print(f"python_bridge serving on http://{host}:{port} ({mode})")
     # Unambiguous, single source of truth for which council + gate are running.
     safe_print(f"  {council_status_line()}")
+    # Non-fatal startup check: warn if a configured council model is not
+    # reachable with the current key. Only when the real council is active (the
+    # mock council makes no provider call, so a bad model string cannot 404
+    # mid-trade). Never blocks serve() on a provider outage.
+    if use_real_council():
+        try:
+            from llm_consensus.model_check import warn_unreachable_models
+            if not warn_unreachable_models(printer=safe_print):
+                safe_print("  model check: all configured council models "
+                           "reachable (or unchecked)")
+        except Exception as e:  # pragma: no cover - must never block startup
+            safe_print(f"  model check skipped: {e}")
     safe_print(
         f"  RL advisory: {'ON' if rl_enabled() else 'OFF (ships off)'} "
         f"(real-fills gate {rl_min_real_fills()}, advisory cap 0.5)")

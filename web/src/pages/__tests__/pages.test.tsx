@@ -21,7 +21,7 @@ vi.mock("../../api/client", () => {
   };
   const controls = {
     layers: { adaptive: true, council: true, dnn_advisory: true, whale: true },
-    models: { "gpt-5.5": true, "claude-opus-4-8": true, "gemini-3.1-pro": true },
+    models: { "gpt-5.5": true, "claude-opus-4-8": true, "gemini-3.1-pro-preview": true },
     gate_enabled: true, auto_promote: false,
     budget: { council_daily_budget: 30, per_symbol_cooldown_minutes: 60 },
     budget_bounds: { budget: [1, 500], cooldown: [0, 1440] },

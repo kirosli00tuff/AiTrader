@@ -82,7 +82,7 @@ In the **default engine run (no `--bridge`), the factor *scores* — `llm_*`, `d
 llm_models:
   llm_primary:   gpt-5.5
   llm_secondary: claude-opus-4-8
-  llm_tertiary:  gemini-3.1-pro
+  llm_tertiary:  gemini-3.1-pro-preview  # reachable id for Gemini 3.1 Pro
   llm_gate:      claude-haiku-4-5  # base-check gate (Anthropic client)
 ```
 **Model strings now correct** (the earlier drift is fixed): they match the four approved strings in `CLAUDE.md` exactly, and the base-check gate `claude-haiku-4-5` is present.

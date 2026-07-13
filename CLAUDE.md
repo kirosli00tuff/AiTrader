@@ -29,7 +29,7 @@ See `AUDIT.md` for the current honest state of each layer (what is real vs. scaf
 - The `dnn_advisory` (advisory DNN) and `rl_advisory` factors and whale signals are advisory, never sole execution controllers
 - RL ships toggled off, trains only on real fills, and activates only past the `rl_min_real_fills` gate
 - Never hardcode API keys; use env vars or a key-gated config
-- LLM council model strings: `claude-opus-4-8` (Anthropic), `gpt-5.5` (OpenAI), `gemini-3.1-pro` (Google). Base-check gate: `claude-haiku-4-5` (via the Anthropic client, shares ANTHROPIC_API_KEY). These are the only approved model strings; do not invent others.
+- LLM council model strings: `claude-opus-4-8` (Anthropic), `gpt-5.5` (OpenAI), `gemini-3.1-pro-preview` (Google, the reachable id for Gemini 3.1 Pro). Base-check gate: `claude-haiku-4-5` (via the Anthropic client, shares ANTHROPIC_API_KEY). These are the only approved model strings; do not invent others. Verified reachable 2026-07-12 via `scripts/list_provider_models.sh`. OpenAI GPT-5 family request shape: use `max_completion_tokens` (not `max_tokens`) and omit `temperature` (only the default is allowed).
 - Paper trading is the continuous default training environment
 - Safety and manual user control override all intelligence layers
 

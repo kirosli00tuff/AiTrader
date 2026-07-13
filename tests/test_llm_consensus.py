@@ -83,7 +83,7 @@ def _cfg(tmp_path, *, use_real=False, gate=True, name="cfg.yaml") -> str:
         "llm_models": {
             "llm_primary": "gpt-5.5",
             "llm_secondary": "claude-opus-4-8",
-            "llm_tertiary": "gemini-3.1-pro",
+            "llm_tertiary": "gemini-3.1-pro-preview",
             "llm_gate": "claude-haiku-4-5",
         },
         "llm": {"use_real_council": use_real, "gate_enabled": gate},
@@ -174,7 +174,7 @@ def test_ensemble_math_unchanged():
 @pytest.mark.parametrize("provider_cls,env,mid", [
     (OpenAIProvider, "OPENAI_API_KEY", "gpt-5.5"),
     (AnthropicProvider, "ANTHROPIC_API_KEY", "claude-opus-4-8"),
-    (GeminiProvider, "GEMINI_API_KEY", "gemini-3.1-pro"),
+    (GeminiProvider, "GEMINI_API_KEY", "gemini-3.1-pro-preview"),
 ])
 def test_missing_key_returns_labeled_mock(provider_cls, env, mid):
     p = provider_cls(name="slot", weight=0.2, model_id=mid)
@@ -252,7 +252,7 @@ def test_provider_exception_never_crashes_council(monkeypatch):
     # A raising provider must be swallowed into a flat verdict, not propagate.
     res = consensus({"symbol": "BTC-USD", "ret_5": 0.03},
                     providers=[GeminiProvider(name="slot", weight=1.0,
-                                              model_id="gemini-3.1-pro")],
+                                              model_id="gemini-3.1-pro-preview")],
                     gate=_ALWAYS)
     assert res.per_model[0].source == "error"
     assert res.bias == 0.0
@@ -340,7 +340,7 @@ def test_real_providers_mapping_and_models():
     provs = {type(p).__name__: p for p in real_providers()}
     assert provs["OpenAIProvider"].model_id == "gpt-5.5"
     assert provs["AnthropicProvider"].model_id == "claude-opus-4-8"
-    assert provs["GeminiProvider"].model_id == "gemini-3.1-pro"
+    assert provs["GeminiProvider"].model_id == "gemini-3.1-pro-preview"
 
 
 def test_status_line_reflects_config(tmp_path):
