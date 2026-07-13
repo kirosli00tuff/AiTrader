@@ -419,6 +419,29 @@ def test_controls_layer_toggle_and_safety_rejected(env, client):
     assert bad["ok"] is False
 
 
+def test_controls_source_toggle_and_safety_rejected(env, client):
+    # Source axis (mock/real), distinct from the enable toggle.
+    ok = client.post("/controls/source",
+                     json={"layer": "council", "source": "mock"}).json()
+    assert ok["ok"] is True and ok["source"] == "mock"
+    j = client.get("/controls").json()
+    assert j["layer_sources"]["council"] == "mock"       # written + read back
+    assert set(j["source_layers"]) == {"council", "dnn_advisory", "whale"}
+    # Safety has no source axis (always real).
+    assert client.post("/controls/source",
+                       json={"layer": "safety", "source": "mock"}).json()["ok"] is False
+    # Adaptive has no mock-vs-real service, so no source axis.
+    assert client.post("/controls/source",
+                       json={"layer": "adaptive", "source": "mock"}).json()["ok"] is False
+    # An invalid source value is refused.
+    assert client.post("/controls/source",
+                       json={"layer": "whale", "source": "banana"}).json()["ok"] is False
+    # The change is audited to the event log.
+    assert _events(env["db"], "control_change")
+    # /runstate mirrors the same source view for the banner.
+    assert client.get("/runstate").json()["layer_sources"]["council"] == "mock"
+
+
 def test_controls_model_and_gate_toggle(env, client):
     assert client.post("/controls/model",
                        json={"model": "gpt-5.5", "enabled": False}).json()["ok"]

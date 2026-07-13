@@ -43,7 +43,75 @@ from account_manager.log_safety import safe_print  # noqa: E402
 _LOOPBACK_HOSTS = frozenset({"127.0.0.1", "::1", "localhost"})
 
 
+def _bridge_status() -> dict:
+    """Report which real advisory services are actually available.
+
+    Feeds the engine's strict-mode startup check (a layer set on-real refuses to
+    start if its real service is not available) and the startup proof block.
+    Cheap by design: no paid provider call and no live SEC fetch. Never raises
+    and never returns a key value.
+    """
+    out: dict = {"status": "ok"}
+    # Council: real only when use_real_council is true AND all three provider
+    # keys resolve (else the providers silently degrade to labelled mocks).
+    try:
+        from account_manager.credentials import resolve_env
+        from llm_consensus.config_access import llm_model_names
+        names = llm_model_names()
+
+        def _has(env: str) -> bool:
+            try:
+                return bool(resolve_env(env))
+            except Exception:
+                return False
+
+        keys_ok = (_has("OPENAI_API_KEY") and _has("ANTHROPIC_API_KEY")
+                   and _has("GEMINI_API_KEY"))
+        real_council = bool(use_real_council())
+        out["council_real"] = real_council and keys_ok
+        out["council_models"] = ",".join(
+            names.get(s, "") for s in
+            ("llm_primary", "llm_secondary", "llm_tertiary"))
+        out["council_gate"] = names.get("llm_gate", "")
+        if not real_council:
+            out["council_detail"] = "llm.use_real_council is false (config)"
+        elif not keys_ok:
+            out["council_detail"] = "a provider key does not resolve (keystore/env)"
+        else:
+            out["council_detail"] = "real council, all provider keys resolve"
+    except Exception as e:  # noqa: BLE001
+        out["council_real"] = False
+        out["council_detail"] = f"council status error: {type(e).__name__}"
+    # dnn_advisory: the bridge always runs real inference on the champion model.
+    try:
+        from ml_factor.factor import load_champion
+        mid = str(load_champion().model_id)
+        out["dnn_real"] = True
+        out["dnn_champion"] = mid
+        out["dnn_detail"] = ("champion " + mid + (" (synthetic Stage-A)"
+                             if mid.startswith("dnn-0") else " (promoted real-data)"))
+    except Exception as e:  # noqa: BLE001
+        out["dnn_real"] = False
+        out["dnn_detail"] = f"dnn unavailable: {type(e).__name__}"
+    # whale: a real fetch happens only when the active SEC EDGAR feed is enabled.
+    try:
+        from whale_signal.adapters import (SEC_EDGAR_ENABLED_ENV,
+                                           WHALE_LIVE_ENABLED_ENV, _flag)
+        sec = _flag(SEC_EDGAR_ENABLED_ENV)
+        out["sec_edgar"] = sec
+        out["whale_live"] = _flag(WHALE_LIVE_ENABLED_ENV)
+        out["whale_real"] = sec
+        out["whale_detail"] = ("SEC EDGAR enabled (active whale feed)" if sec
+                               else "SEC_EDGAR_ENABLED off, whale would be offline mock")
+    except Exception as e:  # noqa: BLE001
+        out["whale_real"] = False
+        out["whale_detail"] = f"whale status error: {type(e).__name__}"
+    return out
+
+
 def _handle(path: str, payload: dict) -> dict:
+    if path == "/status":
+        return _bridge_status()
     if path == "/score/llm":
         return consensus(payload).to_dict()
     if path == "/score/dnn":
@@ -97,6 +165,10 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path == "/health":
             self._send(200, {"status": "ok"})
+        elif self.path == "/status":
+            # Which real advisory services are available (for the start script's
+            # health check and the strict-mode readiness view). No paid call.
+            self._send(200, _bridge_status())
         elif self.path == "/health/ibkr":
             # Raw socket probe of the local IB Gateway. Reports reachability only.
             # It never places an order and never enables live.

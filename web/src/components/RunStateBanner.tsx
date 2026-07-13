@@ -10,8 +10,18 @@ export default function RunStateBanner() {
   const bridge = data.bridge?.reachable ?? false;
   const council = data.council_mode;
   const layers = data.layers ?? {};
-  const offLayers = Object.entries(layers).filter(([, v]) => !v).map(([k]) => k);
-  const layersLabel = offLayers.length ? `${offLayers.join(", ")} OFF` : "all on";
+  const sources = data.layer_sources ?? {};
+  // Three-state per level: off / on-mock / on-real. Layers without a source
+  // axis (adaptive) show on/off only.
+  const state = (k: string): string => {
+    if (layers[k] === false) return "off";
+    return k in sources ? `on-${sources[k]}` : "on";
+  };
+  const order = ["council", "dnn_advisory", "whale", "adaptive"];
+  const present = order.filter((k) => k in layers);
+  const layersLabel = present.length
+    ? present.map((k) => `${k.replace("_advisory", "")}:${state(k)}`).join("  ")
+    : "all on";
   return (
     <div className="runstate">
       <span className="runstate-item">Loop <b className="mono">{data.feed_mode}</b></span>

@@ -239,6 +239,18 @@ def post_layer(body: LayerWrite):
     return controls.set_layer(body.layer, body.enabled)
 
 
+class SourceWrite(BaseModel):
+    layer: str
+    source: str
+
+
+@app.post("/controls/source")
+def post_source(body: SourceWrite):
+    # Source axis (mock/real), distinct from the enable toggle. Validated
+    # server-side; refuses the safety layer. Same control-file write path.
+    return controls.set_source(body.layer, body.source)
+
+
 class ModelWrite(BaseModel):
     model: str
     enabled: bool

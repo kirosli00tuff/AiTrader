@@ -21,6 +21,8 @@ vi.mock("../../api/client", () => {
   };
   const controls = {
     layers: { adaptive: true, council: true, dnn_advisory: true, whale: true },
+    layer_sources: { council: "real", dnn_advisory: "real", whale: "real" },
+    source_layers: ["council", "dnn_advisory", "whale"],
     models: { "gpt-5.5": true, "claude-opus-4-8": true, "gemini-3.1-pro-preview": true },
     gate_enabled: true, auto_promote: false,
     budget: { council_daily_budget: 30, per_symbol_cooldown_minutes: 60 },
@@ -111,7 +113,7 @@ describe("pages render", () => {
     at("/controls");
     expect(await screen.findByText("Ensemble weights (by layer)")).toBeInTheDocument();
     expect(await screen.findByText("Level 1 risk limits (read-only)")).toBeInTheDocument();
-    expect(await screen.findByText("ALWAYS ON")).toBeInTheDocument();
+    expect(await screen.findByText(/ALWAYS ON/)).toBeInTheDocument();
   });
 
   it("renders the Health page with integrations", async () => {
@@ -125,7 +127,7 @@ describe("pages render", () => {
     expect(await screen.findByText("Operations")).toBeInTheDocument();
     expect(await screen.findByText("Council skip reasons")).toBeInTheDocument();
     expect(await screen.findByText("Decision layers")).toBeInTheDocument();
-    expect(await screen.findByText("ALWAYS ON")).toBeInTheDocument();
+    expect(await screen.findByText(/ALWAYS ON/)).toBeInTheDocument();
   });
 
   it("renders the Settings page with categories", async () => {

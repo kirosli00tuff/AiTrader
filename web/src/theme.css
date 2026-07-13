@@ -187,6 +187,16 @@ input[type=range]:disabled { opacity: 0.5; }
   border-bottom: 1px solid var(--border); }
 .ctrl-row:last-child { border-bottom: none; }
 .ctrl-name { flex: 1; font-size: 13.5px; }
+/* Enable Toggle + mock/real SourceToggle sit together on the right of a row. */
+.ctrl-actions { display: flex; align-items: center; gap: 10px; flex: 0 0 auto; }
+.srcseg { display: inline-flex; border: 1px solid var(--border-strong);
+  border-radius: 7px; overflow: hidden; }
+.srcseg-btn { font-size: 11px; padding: 3px 9px; background: var(--surface-3);
+  color: var(--text-muted); border: none; cursor: pointer; text-transform: uppercase;
+  letter-spacing: 0.3px; }
+.srcseg-btn.active { background: var(--accent-dim); color: var(--accent); font-weight: 700; }
+.srcseg.disabled { opacity: 0.45; }
+.srcseg.disabled .srcseg-btn { cursor: not-allowed; }
 .ctrl-sub { font-size: 11.5px; color: var(--text-dim); }
 .slider-row { display: grid; grid-template-columns: 130px 1fr 58px; align-items: center;
   gap: 12px; padding: 8px 2px; }

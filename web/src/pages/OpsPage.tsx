@@ -2,7 +2,7 @@ import { useState } from "react";
 import { api } from "../api/client";
 import { useApi } from "../api/useApi";
 import type { ControlsState } from "../api/types";
-import { Toggle } from "../components/controls";
+import { Toggle, SourceToggle } from "../components/controls";
 import SkipFeed from "../components/SkipFeed";
 import DaySummary from "../components/DaySummary";
 import ProviderCostPanel from "../components/ProviderCostPanel";
@@ -27,22 +27,44 @@ function LayerTogglesPanel() {
                 : (r.error ?? "refused"));
     c.reload();
   }
+  async function chooseSource(layer: string, source: "mock" | "real") {
+    const r = await api.setSource(layer, source);
+    setMsg(r.ok ? `${layer} source ${source}. Takes effect next iteration.`
+                : (r.error ?? "refused"));
+    c.reload();
+  }
+  const sourceLayers = d?.source_layers ?? [];
   return (
     <Panel title="Decision layers">
       <div className="ctrl-row">
         <div className="ctrl-name">Static safety (Layer 1)
-          <div className="ctrl-sub">Always on. Final authority. Safety cannot be disabled.</div>
+          <div className="ctrl-sub">Always on, always real. Final authority. Safety cannot be disabled or mocked.</div>
         </div>
-        <span className="tag on">ALWAYS ON</span>
+        <span className="tag on">ALWAYS ON · REAL</span>
       </div>
-      {Object.keys(LAYER_LABEL).map((layer) => (
-        <div className="ctrl-row" key={layer}>
-          <div className="ctrl-name">{LAYER_LABEL[layer]}
-            <div className="ctrl-sub">Toggling off removes an advisory input. It never affects safety.</div>
+      {Object.keys(LAYER_LABEL).map((layer) => {
+        const on = d?.layers?.[layer] ?? true;
+        const hasSource = sourceLayers.includes(layer);
+        const src = d?.layer_sources?.[layer] ?? "real";
+        return (
+          <div className="ctrl-row" key={layer}>
+            <div className="ctrl-name">{LAYER_LABEL[layer]}
+              <div className="ctrl-sub">
+                {hasSource
+                  ? `State: ${!on ? "off" : `on-${src}`}. Source toggles mock vs the live service; off removes the advisory input. Never affects safety.`
+                  : "Toggling off removes an advisory input. It never affects safety."}
+              </div>
+            </div>
+            <div className="ctrl-actions">
+              {hasSource && (
+                <SourceToggle source={src} disabled={!on}
+                  onSelect={(nx) => chooseSource(layer, nx)} />
+              )}
+              <Toggle on={on} onToggle={(nx) => toggle(layer, nx)} />
+            </div>
           </div>
-          <Toggle on={d?.layers?.[layer] ?? true} onToggle={(nx) => toggle(layer, nx)} />
-        </div>
-      ))}
+        );
+      })}
       {msg && <div className="callout" style={{ marginTop: 10 }}>{msg}</div>}
     </Panel>
   );

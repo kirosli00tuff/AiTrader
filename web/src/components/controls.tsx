@@ -14,6 +14,27 @@ export function Toggle({ on, disabled, onToggle }: {
   );
 }
 
+// Mock-versus-real source segmented control. The SOURCE axis is distinct from
+// the enable Toggle: it only matters when the layer is on. Disabled (greyed)
+// when the layer is off, since source is meaningless then.
+export function SourceToggle({ source, disabled, onSelect }: {
+  source: string; disabled?: boolean; onSelect: (next: "mock" | "real") => void;
+}) {
+  return (
+    <div className={`srcseg${disabled ? " disabled" : ""}`} role="group"
+      aria-label="source">
+      {(["mock", "real"] as const).map((s) => (
+        <button type="button" key={s}
+          className={`srcseg-btn${source === s ? " active" : ""}`}
+          aria-pressed={source === s} disabled={disabled}
+          onClick={() => !disabled && source !== s && onSelect(s)}>
+          {s}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 export function Slider({ value, min = 0, max = 1, step = 0.01, disabled, onChange }: {
   value: number; min?: number; max?: number; step?: number;
   disabled?: boolean; onChange: (v: number) => void;

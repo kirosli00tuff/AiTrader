@@ -1,0 +1,250 @@
+{
+  "hits": {
+    "total": {
+      "value": 3502,
+      "relation": "eq"
+    },
+    "hits": [
+      {
+        "_index": "edgar_file",
+        "_id": "0001225208-14-007432:doc4.xml",
+        "_score": 8.344485,
+        "_source": {
+          "ciks": [
+            "0001387361",
+            "0001242677"
+          ],
+          "period_ending": "2014-03-01",
+          "file_num": [
+            "000-53175"
+          ],
+          "display_names": [
+            "Apple REIT Eight, Inc.  (CIK 0001387361)",
+            "WATERS MICHAEL S  (CIK 0001242677)"
+          ],
+          "xsl": "xslF345X03",
+          "schema_version": "X0306",
+          "sequence": 1,
+          "root_forms": [
+            "4"
+          ],
+          "file_date": "2014-03-04",
+          "biz_states": [
+            "VA"
+          ],
+          "sics": [
+            "6798"
+          ],
+          "form": "4",
+          "adsh": "0001225208-14-007432",
+          "film_num": [
+            "14667004"
+          ],
+          "biz_locations": [
+            "Richmond, VA",
+            ""
+          ],
+          "file_type": "4",
+          "file_description": null,
+          "inc_states": [
+            "VA",
+            ""
+          ],
+          "items": []
+        }
+      },
+      {
+        "_index": "edgar_file",
+        "_id": "0001225208-14-007433:doc4.xml",
+        "_score": 8.337094,
+        "_source": {
+          "ciks": [
+            "0001329011",
+            "0001242676"
+          ],
+          "period_ending": "2014-03-01",
+          "file_num": [
+            "000-52585"
+          ],
+          "display_names": [
+            "Apple REIT Seven, Inc.  (CIK 0001329011)",
+            "MATSON BRUCE H  (CIK 0001242676)"
+          ],
+          "xsl": "xslF345X03",
+          "schema_version": "X0306",
+          "sequence": 1,
+          "root_forms": [
+            "4"
+          ],
+          "file_date": "2014-03-04",
+          "biz_states": [
+            "VA"
+          ],
+          "sics": [
+            "6798"
+          ],
+          "form": "4",
+          "adsh": "0001225208-14-007433",
+          "film_num": [
+            "14667005"
+          ],
+          "biz_locations": [
+            "Richmond, VA",
+            ""
+          ],
+          "file_type": "4",
+          "file_description": null,
+          "inc_states": [
+            "VA",
+            ""
+          ],
+          "items": []
+        }
+      },
+      {
+        "_index": "edgar_file",
+        "_id": "0001225208-14-007468:doc4.xml",
+        "_score": 8.334705,
+        "_source": {
+          "ciks": [
+            "0001329011",
+            "0001242988"
+          ],
+          "period_ending": "2014-03-01",
+          "file_num": [
+            "000-52585"
+          ],
+          "display_names": [
+            "Apple REIT Seven, Inc.  (CIK 0001329011)",
+            "COLTON KENT W  (CIK 0001242988)"
+          ],
+          "xsl": "xslF345X03",
+          "schema_version": "X0306",
+          "sequence": 1,
+          "root_forms": [
+            "4"
+          ],
+          "file_date": "2014-03-04",
+          "biz_states": [
+            "VA"
+          ],
+          "sics": [
+            "6798"
+          ],
+          "form": "4",
+          "adsh": "0001225208-14-007468",
+          "film_num": [
+            "14667178"
+          ],
+          "biz_locations": [
+            "Richmond, VA",
+            ""
+          ],
+          "file_type": "4",
+          "file_description": null,
+          "inc_states": [
+            "VA",
+            ""
+          ],
+          "items": []
+        }
+      },
+      {
+        "_index": "edgar_file",
+        "_id": "0001225208-14-007467:doc4.xml",
+        "_score": 8.327135,
+        "_source": {
+          "ciks": [
+            "0001329011",
+            "0001242985"
+          ],
+          "period_ending": "2014-03-01",
+          "file_num": [
+            "000-52585"
+          ],
+          "display_names": [
+            "Apple REIT Seven, Inc.  (CIK 0001329011)",
+            "Bunting Glenn W Jr  (CIK 0001242985)"
+          ],
+          "xsl": "xslF345X03",
+          "schema_version": "X0306",
+          "sequence": 1,
+          "root_forms": [
+            "4"
+          ],
+          "file_date": "2014-03-04",
+          "biz_states": [
+            "VA"
+          ],
+          "sics": [
+            "6798"
+          ],
+          "form": "4",
+          "adsh": "0001225208-14-007467",
+          "film_num": [
+            "14667177"
+          ],
+          "biz_locations": [
+            "Richmond, VA",
+            ""
+          ],
+          "file_type": "4",
+          "file_description": null,
+          "inc_states": [
+            "VA",
+            ""
+          ],
+          "items": []
+        }
+      },
+      {
+        "_index": "edgar_file",
+        "_id": "0001225208-14-007431:doc4.xml",
+        "_score": 8.322139,
+        "_source": {
+          "ciks": [
+            "0001387361",
+            "0001242678"
+          ],
+          "period_ending": "2014-03-01",
+          "file_num": [
+            "000-53175"
+          ],
+          "display_names": [
+            "Apple REIT Eight, Inc.  (CIK 0001387361)",
+            "WILY ROBERT M  (CIK 0001242678)"
+          ],
+          "xsl": "xslF345X03",
+          "schema_version": "X0306",
+          "sequence": 1,
+          "root_forms": [
+            "4"
+          ],
+          "file_date": "2014-03-04",
+          "biz_states": [
+            "VA"
+          ],
+          "sics": [
+            "6798"
+          ],
+          "form": "4",
+          "adsh": "0001225208-14-007431",
+          "film_num": [
+            "14667000"
+          ],
+          "biz_locations": [
+            "Richmond, VA",
+            ""
+          ],
+          "file_type": "4",
+          "file_description": null,
+          "inc_states": [
+            "VA",
+            ""
+          ],
+          "items": []
+        }
+      }
+    ]
+  }
+}

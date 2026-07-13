@@ -253,6 +253,16 @@ adaptive:
 # -----------------------------------------------------------------------------
 whale:
   whale_tracking_enabled: true
+  # Full-activation defaults (2026-07-13). SEC EDGAR is the free, keyless, active
+  # whale feed; whale_live_enabled is the master live switch. These declare the
+  # intended live state and are exported to the bridge environment by
+  # scripts/start_paper_trading.sh (SEC_EDGAR_ENABLED / WHALE_LIVE_ENABLED). The
+  # whale library itself still treats live fetch as an env opt-in that defaults
+  # OFF, so any process that is not the deliberate start command stays offline
+  # and safe. The per-layer source toggle can override whale to on-mock at
+  # runtime without stopping the run.
+  sec_edgar_enabled: true
+  whale_live_enabled: true
   whale_signal_weight: 0.10
   whale_min_activity_score: 0.60
   whale_min_historical_usefulness: 0.55
@@ -333,7 +343,12 @@ llm_models:
 #     offline behaviour is unchanged.
 # -----------------------------------------------------------------------------
 llm:
-  use_real_council: false
+  # Full four-level activation default (2026-07-13). TRUE assumes the operator
+  # runs the Python bridge and holds keystore keys; without --bridge the loop
+  # stays in-process mock, and any provider without a resolvable key degrades to
+  # a labelled mock. The per-layer source toggle (controls.json) can override the
+  # council to on-mock at runtime without stopping the run.
+  use_real_council: true
   gate_enabled: true
 
 # -----------------------------------------------------------------------------

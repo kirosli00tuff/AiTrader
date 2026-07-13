@@ -3,7 +3,7 @@ import { api } from "../api/client";
 import { useApi } from "../api/useApi";
 import type { ControlResult, ControlsState, RegistryEntry } from "../api/types";
 import { DataState, Panel } from "../components/ui";
-import { ConfirmButton, Slider, Toggle } from "../components/controls";
+import { ConfirmButton, Slider, Toggle, SourceToggle } from "../components/controls";
 
 const FACTOR_LABEL: Record<string, string> = {
   rule_based: "Native rule-based", llm_primary: "GPT-5.5", llm_secondary: "Claude Opus 4.8",
@@ -122,17 +122,32 @@ export default function ControlsPage() {
               <div className="ctrl-row">
                 <div className="ctrl-name">
                   Static safety (Layer 1)
-                  <div className="ctrl-sub">Always on. Final authority. It has no off switch.</div>
+                  <div className="ctrl-sub">Always on, always real. Final authority. No off switch, no mock.</div>
                 </div>
-                <span className="tag on">ALWAYS ON</span>
+                <span className="tag on">ALWAYS ON · REAL</span>
               </div>
-              {Object.keys(LAYER_LABEL).map((layer) => (
-                <div className="ctrl-row" key={layer}>
-                  <div className="ctrl-name">{LAYER_LABEL[layer]}</div>
-                  <Toggle on={d.layers[layer] ?? true}
-                    onToggle={(nx) => act(() => api.setLayer(layer, nx))} />
-                </div>
-              ))}
+              {Object.keys(LAYER_LABEL).map((layer) => {
+                const on = d.layers[layer] ?? true;
+                const hasSource = (d.source_layers ?? []).includes(layer);
+                const src = d.layer_sources?.[layer] ?? "real";
+                return (
+                  <div className="ctrl-row" key={layer}>
+                    <div className="ctrl-name">{LAYER_LABEL[layer]}
+                      {hasSource && (
+                        <div className="ctrl-sub">State: {!on ? "off" : `on-${src}`}</div>
+                      )}
+                    </div>
+                    <div className="ctrl-actions">
+                      {hasSource && (
+                        <SourceToggle source={src} disabled={!on}
+                          onSelect={(nx) => act(() => api.setSource(layer, nx))} />
+                      )}
+                      <Toggle on={on}
+                        onToggle={(nx) => act(() => api.setLayer(layer, nx))} />
+                    </div>
+                  </div>
+                );
+              })}
             </Panel>
 
             {/* --- Council model toggles --- */}

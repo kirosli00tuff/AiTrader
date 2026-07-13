@@ -1,7 +1,4 @@
 {
-  "_provenance": "REAL \u2014 recorded live 2026-07-05 from SEC EDGAR full-text search https://efts.sec.gov/LATEST/search-index?q=Apple&forms=13F-HR (read-only GET, descriptive User-Agent with contact email supplied via SEC_EDGAR_CONTACT_EMAIL, not committed). Trimmed to the first 5 hits; full real _source structure preserved.",
-  "took": 530,
-  "timed_out": false,
   "hits": {
     "total": {
       "value": 10000,
@@ -11,7 +8,7 @@
       {
         "_index": "edgar_file",
         "_id": "0000319933-24-000002:03.31.24thurston.xml",
-        "_score": 8.267542,
+        "_score": 8.261629,
         "_source": {
           "ciks": [
             "0000319933"
@@ -52,7 +49,7 @@
       {
         "_index": "edgar_file",
         "_id": "0001580642-21-000721:infotable.xml",
-        "_score": 8.224382,
+        "_score": 8.222922,
         "_source": {
           "ciks": [
             "0001661762"
@@ -93,7 +90,7 @@
       {
         "_index": "edgar_file",
         "_id": "0001398344-21-018572:fp0067493_13fhr-table.xml",
-        "_score": 8.219446,
+        "_score": 8.216899,
         "_source": {
           "ciks": [
             "0001875202"
@@ -132,7 +129,7 @@
       {
         "_index": "edgar_file",
         "_id": "0001606587-22-000582:form13InfoTable.xml",
-        "_score": 8.199747,
+        "_score": 8.198198,
         "_source": {
           "ciks": [
             "0001911400"
@@ -173,7 +170,7 @@
       {
         "_index": "edgar_file",
         "_id": "0001597694-14-000011:septemberfinalrev.xml",
-        "_score": 8.195166,
+        "_score": 8.195639,
         "_source": {
           "ciks": [
             "0001597694"

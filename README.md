@@ -140,6 +140,51 @@ ops/run_demo.sh --no-dash
 ITER=40 ops/run_demo.sh           # custom iteration count
 ```
 
+## Full real-time paper trading — all four levels (one command)
+
+`scripts/start_paper_trading.sh` starts everything for real-time Alpaca **paper**
+trading with all four decision levels active, in order, with a health check
+between steps and clean teardown on exit:
+
+1. the Python bridge (real LLM council + `dnn_advisory` + whale via SEC EDGAR),
+2. the C++ engine (`feed_mode alpaca_paper`, `clock real`) on the full whitelist
+   (BTC/USD, ETH/USD, SPY, QQQ) — crypto 24/7, equities respect market hours,
+3. the GUI backend + frontend (open <http://127.0.0.1:5173>).
+
+```bash
+scripts/start_paper_trading.sh                 # full stack + GUI
+MAL_HEADLESS=1 MAL_RUN_SECONDS=900 scripts/start_paper_trading.sh   # headless, bounded
+```
+
+Live trading stays **OFF** (Alpaca is paper + market-data only). Full activation
+assumes you run the bridge and hold keystore keys; without `--bridge` the loop
+stays in-process mock, and any provider without a resolvable key degrades to a
+labelled mock.
+
+### Per-level toggles: off / on-mock / on-real
+
+Each advisory level has **two independent axes**, surfaced on the Controls page
+and the Ops section (validated backend endpoints, safety cannot be altered):
+
+- **Enable** (off / on): off drops that layer's factor from the ensemble.
+- **Source** (mock / real, only when on): `on-mock` uses the deterministic
+  stand-in even while the bridge is up, `on-real` calls the live service. So each
+  layer reads as **off**, **on-mock**, or **on-real** — you can drop any single
+  layer to mock mid-run to isolate it, without stopping the loop.
+
+The **static safety layer (Level 1) has neither axis: always on, always real.**
+On the real paper path the engine is **strict**: a layer set `on-real` whose real
+service is unreachable makes the engine **refuse to start**, printing exactly
+what is missing, rather than silently substituting a mock (a layer you set
+`on-mock` starts normally — that is a deliberate choice). The startup block prints
+the exact state of every level, and the GUI run-state banner mirrors it.
+
+Two states are **on by design and not part of full activation**:
+
+- **RL advisory** ships **OFF**, gated behind `rl_min_real_fills` (default 500
+  real fills); it is never force-enabled.
+- **Live trading** is **OFF**, behind the in-app approval gate.
+
 ## Run it 24/7 locally
 
 The finite demo above runs a fixed number of ticks and exits. To keep the engine

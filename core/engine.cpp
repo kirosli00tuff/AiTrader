@@ -200,8 +200,13 @@ std::vector<signal_engine::FactorSignal> Engine::gather_factors(
 
         const bool is_llm = f == "llm_primary" || f == "llm_secondary" ||
                             f == "llm_tertiary";
+        // Source axis (controls.json): only call the real service (bridge) when
+        // the layer is set on-real. On-mock keeps the deterministic C++ mock for
+        // this factor even though the bridge is up, so the operator can isolate
+        // one layer without stopping the run. rule_based is always native C++.
+        const bool source_real = factor_source_real(f, layer_toggles_);
         const bool may_call = opts_.use_bridge && f != "rule_based" &&
-                              (council_allowed || !is_llm);
+                              (council_allowed || !is_llm) && source_real;
         if (may_call) {
             std::string endpoint = "/score/llm";
             if (f == "dnn_advisory") endpoint = "/score/dnn";
@@ -703,6 +708,21 @@ void Engine::consume_layer_toggles() {
     logone("dnn_advisory", prev_layer_toggles_.dnn_advisory,
            layer_toggles_.dnn_advisory);
     logone("whale", prev_layer_toggles_.whale, layer_toggles_.whale);
+    // Source-axis changes are logged separately as layer_source (mock/real).
+    auto logsrc = [&](const char* name, bool oldr, bool newr) {
+        if (oldr == newr) return;
+        storage_->append_event(
+            {ts, "layer_source", "", "", "info",
+             std::string("Layer ") + name + " source: " +
+                 (oldr ? "real" : "mock") + " -> " + (newr ? "real" : "mock"),
+             util::to_json({{"layer", name}, {"old", oldr ? "real" : "mock"},
+                            {"new", newr ? "real" : "mock"}}, {})});
+    };
+    logsrc("council", prev_layer_toggles_.council_real,
+           layer_toggles_.council_real);
+    logsrc("dnn_advisory", prev_layer_toggles_.dnn_advisory_real,
+           layer_toggles_.dnn_advisory_real);
+    logsrc("whale", prev_layer_toggles_.whale_real, layer_toggles_.whale_real);
     prev_layer_toggles_ = layer_toggles_;
 }
 
@@ -946,7 +966,75 @@ void Engine::snapshot_balances() {
     }
 }
 
+void Engine::verify_real_layers_reachable() {
+    // Only the real paper path is strict. Offline feed modes keep their mock
+    // behavior for tests, so they are a no-op here.
+    if (feed_mode_ != "alpaca_paper") return;
+
+    // A layer is checked only when it is BOTH enabled AND set on-real. on-mock is
+    // an explicit operator choice and starts silently. Adaptive has no source.
+    const bool need_council =
+        layer_toggles_.council && layer_toggles_.council_real;
+    const bool need_dnn =
+        layer_toggles_.dnn_advisory && layer_toggles_.dnn_advisory_real;
+    const bool need_whale = layer_toggles_.whale && layer_toggles_.whale_real;
+    if (!(need_council || need_dnn || need_whale)) return;
+
+    std::vector<std::string> missing;
+    if (!opts_.use_bridge) {
+        // The real advisory services run only via the Python bridge.
+        if (need_council)
+            missing.push_back("LLM council is on-real but the engine has no "
+                              "--bridge (the real council runs only via the "
+                              "Python bridge)");
+        if (need_dnn)
+            missing.push_back("dnn_advisory is on-real but the engine has no "
+                              "--bridge");
+        if (need_whale)
+            missing.push_back("whale is on-real but the engine has no --bridge");
+    } else {
+        const std::string addr =
+            opts_.bridge_host + ":" + std::to_string(opts_.bridge_port);
+        auto resp = bridge::http_post_json(opts_.bridge_host, opts_.bridge_port,
+                                           "/status", "{}", 3000);
+        if (!resp) {
+            if (need_council)
+                missing.push_back("LLM council on-real but the Python bridge is "
+                                  "unreachable at " + addr);
+            if (need_dnn)
+                missing.push_back("dnn_advisory on-real but the Python bridge is "
+                                  "unreachable at " + addr);
+            if (need_whale)
+                missing.push_back("whale on-real but the Python bridge is "
+                                  "unreachable at " + addr);
+        } else {
+            if (need_council && !bridge::json_get_bool(*resp, "council_real", false))
+                missing.push_back("LLM council on-real but not available: " +
+                    bridge::json_get_string(*resp, "council_detail",
+                                            "real council unavailable"));
+            if (need_dnn && !bridge::json_get_bool(*resp, "dnn_real", false))
+                missing.push_back("dnn_advisory on-real but not available: " +
+                    bridge::json_get_string(*resp, "dnn_detail",
+                                            "real dnn unavailable"));
+            if (need_whale && !bridge::json_get_bool(*resp, "whale_real", false))
+                missing.push_back("whale on-real but not available: " +
+                    bridge::json_get_string(*resp, "whale_detail",
+                                            "real whale feed unavailable"));
+        }
+    }
+    if (missing.empty()) return;
+
+    std::string msg =
+        "STRICT MODE (feed_mode=alpaca_paper): refusing to start. A layer set "
+        "on-real has no reachable real service. Fix the service, or set that "
+        "layer to on-mock in controls.json to run it as a deliberate mock:\n";
+    for (const auto& m : missing) msg += "  - " + m + "\n";
+    // Refuse to start on the real path rather than silently substituting a mock.
+    throw std::runtime_error(msg);
+}
+
 void Engine::run(int iterations) {
+    verify_real_layers_reachable();  // strict mode: no silent mock on real path
     if (feed_mode_ == "replay") {
         // Replay every stored bar in the window, in order, then stop cleanly.
         int i = 0;
@@ -971,6 +1059,7 @@ void Engine::run(int iterations) {
 }
 
 void Engine::run_forever(const volatile std::sig_atomic_t* stop_flag) {
+    verify_real_layers_reachable();  // strict mode: no silent mock on real path
     int interval = opts_.interval_seconds > 0 ? opts_.interval_seconds
                                               : cfg_.engine.loop_interval_seconds;
     if (interval < 1) interval = 1;
@@ -986,8 +1075,12 @@ void Engine::run_forever(const volatile std::sig_atomic_t* stop_flag) {
     }
 
     // Bar-driven feed modes (synthetic_regimes / replay) step bars rather than
-    // polling the tick feed; replay stops cleanly at the end of its data.
-    if (feed_mode_ != "flat_random_walk") {
+    // polling the tick feed; replay stops cleanly at the end of its data. The
+    // tick-polling modes (flat_random_walk AND alpaca_paper, the primary online
+    // loop) fall through to run_iteration below, which polls the feed and
+    // aggregates ticks into closed bars. Routing alpaca_paper here would call
+    // step_bar_mode (synthetic/replay only) and exit immediately.
+    if (feed_mode_ == "synthetic_regimes" || feed_mode_ == "replay") {
         int steps = 0;
         while (!(stop_flag && *stop_flag)) {
             if (step_bar_mode() == 0) break;  // replay exhausted

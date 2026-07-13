@@ -31,6 +31,11 @@ _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # Validated domains -----------------------------------------------------------
 ADAPTIVE, COUNCIL, DNN, WHALE = "adaptive", "council", "dnn_advisory", "whale"
 LAYERS = (ADAPTIVE, COUNCIL, DNN, WHALE)   # safety has NO toggle (always on)
+# Layers that carry a mock-versus-real SOURCE axis (bridge-backed services). The
+# adaptive layer has no mock-vs-real service, so it has the enable axis only.
+# Safety has neither axis: always on, always real.
+SOURCE_LAYERS = (COUNCIL, DNN, WHALE)
+SOURCES = ("mock", "real")
 def _council_models() -> tuple[str, ...]:
     """The three council model ids straight from config (llm_primary/secondary/
     tertiary), so the per-model toggle keys never drift from the configured
@@ -104,6 +109,8 @@ def _defaults() -> dict:
     adaptive = cfg.get("adaptive", {}) or {}
     return {
         "layers": {layer: True for layer in LAYERS},
+        # Source axis, default real (full-activation default on the paper path).
+        "layer_sources": {layer: "real" for layer in SOURCE_LAYERS},
         "models": {m: True for m in COUNCIL_MODELS},
         "gate_enabled": bool(llm.get("gate_enabled", True)),
         "auto_promote": bool(adaptive.get("dnn_auto_promote_if_better", False)),
@@ -141,6 +148,11 @@ def read_controls() -> dict:
         for layer in LAYERS:
             if layer in saved["layers"]:
                 state["layers"][layer] = bool(saved["layers"][layer])
+    if isinstance(saved.get("layer_sources"), dict):
+        for layer in SOURCE_LAYERS:
+            v = saved["layer_sources"].get(layer)
+            if v in SOURCES:
+                state["layer_sources"][layer] = v
     if isinstance(saved.get("models"), dict):
         for m in COUNCIL_MODELS:
             if m in saved["models"]:
@@ -166,6 +178,13 @@ def read_controls() -> dict:
 def _write_controls(state: dict) -> None:
     os.makedirs(_control_dir(), exist_ok=True)
     out = {**state, "ts": _now()}
+    # Emit flat per-layer source keys the C++ engine reads (council_source,
+    # dnn_advisory_source, whale_source) derived from the nested layer_sources
+    # map the GUI uses. The flat keys are distinct from the enable keys, so the
+    # engine's flat JSON reader can never confuse a source with an enable toggle.
+    srcs = state.get("layer_sources", {}) or {}
+    for layer in SOURCE_LAYERS:
+        out[f"{layer}_source"] = "mock" if srcs.get(layer) == "mock" else "real"
     with open(_controls_path(), "w") as fh:
         json.dump(out, fh, indent=2)
 
@@ -287,6 +306,8 @@ def control_state() -> dict:
     fills, gate = real_fills(), rl_gate()
     return {
         "layers": st["layers"],
+        "layer_sources": st["layer_sources"],
+        "source_layers": list(SOURCE_LAYERS),
         "models": st["models"],
         "gate_enabled": st["gate_enabled"],
         "auto_promote": st["auto_promote"],
@@ -350,6 +371,30 @@ def set_layer(layer: str, enabled: bool) -> dict:
     _write_controls(st)
     _audit(f"layer.{layer}", old, bool(enabled))
     return {"ok": True, "layer": layer, "enabled": bool(enabled)}
+
+
+def set_source(layer: str, source: str) -> dict:
+    """Set a layer's SOURCE axis (mock/real), distinct from the enable toggle.
+
+    Refuses the safety layer (no axis, always real) and the adaptive layer (no
+    mock-vs-real service). The change takes effect on the engine's next
+    iteration and is audited to the event log as layer_source.
+    """
+    if layer == "safety":
+        return {"ok": False,
+                "error": "safety layer is always real and has no source toggle"}
+    if layer not in SOURCE_LAYERS:
+        return {"ok": False,
+                "error": f"layer has no mock/real source axis: {layer}"}
+    source = str(source).strip().lower()
+    if source not in SOURCES:
+        return {"ok": False, "error": f"source must be one of {SOURCES}"}
+    st = read_controls()
+    old = st["layer_sources"][layer]
+    st["layer_sources"][layer] = source
+    _write_controls(st)
+    _audit(f"source.{layer}", old, source)
+    return {"ok": True, "layer": layer, "source": source}
 
 
 def set_model(model: str, enabled: bool) -> dict:

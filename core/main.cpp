@@ -175,6 +175,36 @@ int main(int argc, char** argv) {
                                                   : cfg.system.control_dir);
             const auto lt =
                 mal::core::read_layer_toggles(ctl_dir + "/controls.json");
+            // Query the bridge for the true real-vs-mock availability of each
+            // advisory service, so the proof block shows the actual state, not
+            // just the configured intent. Non-fatal: if the bridge is down the
+            // strict-mode check (verify_real_layers_reachable) reports it.
+            std::string st_models, st_gate, st_cdetail, st_ddetail, st_wdetail;
+            bool st_bridge_up = false, st_council_real = false,
+                 st_dnn_real = false, st_whale_real = false, st_sec = false;
+            if (opts.use_bridge) {
+                auto s = mal::bridge::http_post_json(
+                    opts.bridge_host, opts.bridge_port, "/status", "{}", 3000);
+                if (s) {
+                    st_bridge_up = true;
+                    st_models = mal::bridge::json_get_string(*s, "council_models", "");
+                    st_gate = mal::bridge::json_get_string(*s, "council_gate", "");
+                    st_cdetail = mal::bridge::json_get_string(*s, "council_detail", "");
+                    st_ddetail = mal::bridge::json_get_string(*s, "dnn_detail", "");
+                    st_wdetail = mal::bridge::json_get_string(*s, "whale_detail", "");
+                    st_council_real = mal::bridge::json_get_bool(*s, "council_real", false);
+                    st_dnn_real = mal::bridge::json_get_bool(*s, "dnn_real", false);
+                    st_whale_real = mal::bridge::json_get_bool(*s, "whale_real", false);
+                    st_sec = mal::bridge::json_get_bool(*s, "sec_edgar", false);
+                }
+            }
+            auto svc_state = [&](bool enabled, bool real, bool avail) -> std::string {
+                if (!enabled) return "off";
+                if (!real) return "on-mock (by choice)";
+                if (!opts.use_bridge) return "on-real but NO --bridge (mock)";
+                if (!st_bridge_up) return "on-real but bridge DOWN";
+                return avail ? "on-real (available)" : "on-real but UNAVAILABLE";
+            };
             const auto& rk = cfg.risk;
             std::string wl;
             for (size_t i = 0; i < st.whitelist.size(); ++i)
@@ -229,11 +259,29 @@ int main(int argc, char** argv) {
                         : " (offline feed this run)")
                 << "\n"
                 << "  ibkr:      " << ibkr_status << "\n"
-                << "  layers:    adaptive " << (lt.adaptive ? "on" : "off")
-                << " / council " << (lt.council ? "on" : "off")
-                << " / dnn " << (lt.dnn_advisory ? "on" : "off")
-                << " / whale " << (lt.whale ? "on" : "off")
-                << " (safety ALWAYS ON) [controls.json]\n"
+                << "  levels:    L1 safety on-real (ALWAYS) / L2 council "
+                << mal::core::layer_state(lt.council, lt.council_real)
+                << " / L3 dnn "
+                << mal::core::layer_state(lt.dnn_advisory, lt.dnn_advisory_real)
+                << " / L4 whale "
+                << mal::core::layer_state(lt.whale, lt.whale_real)
+                << " / adaptive " << (lt.adaptive ? "on" : "off")
+                << "  [controls.json]\n"
+                << "  L2 council: "
+                << svc_state(lt.council, lt.council_real, st_council_real)
+                << " [" << (st_models.empty()
+                        ? "gpt-5.5,claude-opus-4-8,gemini-3.1-pro-preview"
+                        : st_models)
+                << "] gate " << (st_gate.empty() ? "claude-haiku-4-5" : st_gate)
+                << (st_cdetail.empty() ? "" : " — " + st_cdetail) << "\n"
+                << "  L3 dnn:    "
+                << svc_state(lt.dnn_advisory, lt.dnn_advisory_real, st_dnn_real)
+                << (st_ddetail.empty() ? "" : " — " + st_ddetail) << "\n"
+                << "  L4 whale:  "
+                << svc_state(lt.whale, lt.whale_real, st_whale_real)
+                << ", SEC EDGAR "
+                << (st_sec ? "ON (active free feed)" : "off (env opt-in)")
+                << (st_wdetail.empty() ? "" : " — " + st_wdetail) << "\n"
                 << "  thresholds: adx_min " << st.adx_min << " ema " << st.ema_fast
                 << "/" << st.ema_slow << " atr_floor " << st.atr_vol_floor
                 << " bb " << st.bb_period << "/" << st.bb_std << "sd rsi "
@@ -273,13 +321,20 @@ int main(int argc, char** argv) {
 
         mal::core::Engine engine(std::move(cfg), opts);
 
-        if (rl_on) {
+        // RL fill count vs the gate, always shown (RL ships off; it activates
+        // only past the real-fills gate, and promotion stays manual).
+        {
             long long fills = engine.storage().count_closed_trades();
             std::cout << "  rl fills:  " << fills << " / " << rl_gate
                       << (fills >= rl_gate ? " (gate met — challenger training "
                                              "allowed; promotion still manual)"
                                            : " (below gate — trainer refuses)")
-                      << "\n";
+                      << (rl_on ? " [rl_enabled ON]" : " [rl_enabled OFF, ships off]")
+                      << "\n"
+                      << "  kill sw:   ARMED"
+                      << (engine.kill_switch_tripped() ? " (TRIPPED)" : "")
+                      << " (latching, manual resume required)\n"
+                      << "  ----------------------------------------------------\n";
         }
 
         if (continuous) {

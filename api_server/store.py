@@ -536,9 +536,12 @@ def runstate() -> dict:
     use_real = bool(llm.get("use_real_council", False))
     try:
         from api_server import controls
-        _layers = controls.read_controls().get("layers", {})
+        _ctl = controls.read_controls()
+        _layers = _ctl.get("layers", {})
+        _layer_sources = _ctl.get("layer_sources", {})
     except Exception:
         _layers = {}
+        _layer_sources = {}
     council_mode = "real" if (use_real and bridge.get("reachable")) else "mock"
     return {"feed_mode": sim.get("feed_mode", "flat_random_walk"),
             "clock_mode": sim.get("clock_mode", "real"),
@@ -549,6 +552,7 @@ def runstate() -> dict:
             "bridge": bridge,
             "live_enabled": bool(ap.get("live_enabled")),
             "layers": _layers,
+            "layer_sources": _layer_sources,
             "ts": _now()}
 
 

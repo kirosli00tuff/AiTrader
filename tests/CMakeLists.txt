@@ -63,3 +63,12 @@ add_executable(test_layer_toggles test_layer_toggles.cpp)
 target_link_libraries(test_layer_toggles PRIVATE mal_core mal_util)
 add_test(NAME layer_toggles COMMAND test_layer_toggles
          WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+# Strict mode (Task 3): on feed_mode alpaca_paper a layer set on-real with no
+# reachable real service makes the engine refuse to start; on-mock is an
+# explicit choice and starts; offline feed modes are a no-op. No network.
+add_executable(test_strict_mode test_strict_mode.cpp)
+target_link_libraries(test_strict_mode PRIVATE mal_core mal_market_data
+                      mal_signal_engine mal_storage mal_risk mal_config mal_util)
+add_test(NAME strict_mode COMMAND test_strict_mode
+         WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})

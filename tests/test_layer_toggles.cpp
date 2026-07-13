@@ -45,5 +45,41 @@ int main() {
                    "rule_based never gated by a layer toggle (safety-adjacent)");
     maltest::check(factor_enabled("rl_advisory", alloff),
                    "rl_advisory never gated by a layer toggle (separately gated)");
+
+    // --- Source axis (mock/real), Task 1 -----------------------------------
+    // Missing file => every layer on-real (full-activation default).
+    maltest::check(miss.council_real && miss.dnn_advisory_real && miss.whale_real,
+                   "missing controls.json defaults every source to real");
+
+    const std::string src = "/tmp/mal_src_controls.json";
+    { std::ofstream o(src);
+      o << R"({"layers": {"adaptive": true, "council": true, )"
+           R"("dnn_advisory": true, "whale": true}, )"
+           R"("council_source": "mock", "whale_source": "real"})"; }
+    LayerToggles s = read_layer_toggles(src);
+    maltest::check(!s.council_real, "council_source mock => council_real false");
+    maltest::check(s.whale_real, "whale_source real => whale_real true");
+    maltest::check(s.dnn_advisory_real,
+                   "missing dnn_advisory_source defaults to real");
+    std::remove(src.c_str());
+
+    // factor_source_real maps each advisory factor to its layer source; the
+    // native + rl factors have no mock/real axis and report real.
+    maltest::check(!factor_source_real("llm_primary", s),
+                   "llm factor source follows council_real (mock)");
+    maltest::check(factor_source_real("whale_signal", s),
+                   "whale factor source follows whale_real (real)");
+    maltest::check(factor_source_real("rule_based", s),
+                   "rule_based has no source axis, reports real");
+    maltest::check(factor_source_real("rl_advisory", s),
+                   "rl_advisory has no source axis, reports real");
+
+    // Three-state label: off / on-mock / on-real.
+    maltest::check(std::string(layer_state(false, true)) == "off",
+                   "disabled layer state is off");
+    maltest::check(std::string(layer_state(true, false)) == "on-mock",
+                   "enabled+mock state is on-mock");
+    maltest::check(std::string(layer_state(true, true)) == "on-real",
+                   "enabled+real state is on-real");
     return maltest::report("layer_toggles");
 }

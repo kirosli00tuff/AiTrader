@@ -85,20 +85,22 @@ def test_activity_usefulness_transparent_and_bounded():
 
 
 def test_default_adapters_present():
-    # SEC EDGAR 13F is the SOLE active whale source. Whale Alert is a reserved
+    # SEC EDGAR is the SOLE active whale source, now via TWO forms: quarterly
+    # 13F (institutional) and Form 4 (insider). Whale Alert is a reserved
     # optional crypto feed, off the default chain. ClankApp was removed
     # 2026-07-10 (dead host). Apify/Polymarket is removed.
     sources = {a.source for a in default_adapters()}
-    assert sources == {"sec_13f"}
+    assert sources == {"sec_13f", "sec_form4"}
     assert sources.isdisjoint({"clankapp", "whale_alert", "apify"})
 
 
 def test_sec_edgar_is_sole_active_source():
     from whale_signal.adapters import WhaleAlertAdapter
     adapters = default_adapters()
-    assert len(adapters) == 1
-    assert adapters[0].source == "sec_13f"
-    # Whale Alert remains importable as a reserved optional feed.
+    # Every active adapter is a SEC EDGAR form (free, keyless, delayed context).
+    assert adapters and all(a.source.startswith("sec_") for a in adapters)
+    assert {a.source for a in adapters} == {"sec_13f", "sec_form4"}
+    # Whale Alert remains importable as a reserved optional feed (off the chain).
     assert WhaleAlertAdapter().source == "whale_alert"
 
 

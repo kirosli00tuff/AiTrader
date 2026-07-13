@@ -81,6 +81,14 @@ public:
     bool kill_switch_tripped() const { return kill_switch_.tripped(); }
     bool manual_resume_pending() const { return kill_switch_.manual_resume_pending(); }
 
+    // Strict mode (Task 3): on the real paper path (feed_mode alpaca_paper), a
+    // layer set on-real must have a reachable real service or this throws with
+    // exactly what is missing, so the engine refuses to start rather than
+    // silently substituting a mock. A layer set on-mock is an explicit choice
+    // and does not throw. Offline feed modes are a no-op (they keep mock). Called
+    // at the top of run() and run_forever(); public so it is directly testable.
+    void verify_real_layers_reachable();
+
 private:
     std::vector<signal_engine::FactorSignal> gather_factors(
         const market_data::MarketState& ms, const news::CatalystScore& cat,

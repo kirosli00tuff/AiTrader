@@ -74,13 +74,16 @@ def _user_agent() -> str:
 
 @dataclass
 class WhaleActivity:
-    source: str          # whale_alert | sec_13f
-    entity: str          # actor / wallet / exchange / institution
+    source: str          # whale_alert | sec_13f | sec_form4
+    entity: str          # actor / wallet / exchange / institution / insider
     symbol: str
     direction: str       # inflow | outflow | long | short
     value_usd: float
-    delayed: bool        # True => DELAYED disclosure (e.g. 13F)
+    delayed: bool        # True => DELAYED disclosure (e.g. 13F, Form 4)
     ts: str
+    # Human-readable delay magnitude so the specific lag surfaces, not just the
+    # delayed bool: ~45 days for quarterly 13F, ~2 business days for Form 4.
+    delay_label: str = ""
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -297,6 +300,7 @@ class Sec13FAdapter:
                 value_usd=0.0,      # full-text search exposes no position value
                 delayed=True,       # DELAYED quarterly disclosure
                 ts=ts,
+                delay_label=SEC_13F_DELAY_LABEL,
             ))
         return out
 
@@ -318,8 +322,104 @@ class Sec13FAdapter:
                 value_usd=float(10_000_000 + _det("v" + seed, 90_000_000)),
                 delayed=True,  # DELAYED disclosure
                 ts=_now(),
+                delay_label=SEC_13F_DELAY_LABEL,
             ))
         return out
+
+
+# Delay-magnitude labels (surfaced on every SEC row so the lag is explicit).
+SEC_13F_DELAY_LABEL = "~45 day lag (quarterly 13F)"
+SEC_FORM4_DELAY_LABEL = "~2 business day lag (Form 4 insider)"
+
+
+class SecForm4Adapter:
+    """SEC EDGAR Form 4 (insider transactions) adapter.
+
+    Officers, directors, and 10% owners must file Form 4 within two business
+    days of a transaction, so it is much fresher than a quarterly 13F but still
+    DELAYED, near-real-time context, not a live feed. Uses the same free,
+    keyless EDGAR full-text search (efts.sec.gov) with a descriptive User-Agent.
+    Every row is delayed=True with the ~2-business-day label. Equities only.
+    """
+
+    source = "sec_form4"
+    EDGAR_FTS_URL = "https://efts.sec.gov/LATEST/search-index"
+
+    def is_live(self) -> bool:
+        return True  # EDGAR is keyless and always available
+
+    def fetch(self, symbol: str) -> list[WhaleActivity]:
+        if any(c in symbol.upper() for c in ("USD", "BTC", "ETH", "-")):
+            return []                              # equities only
+        if not _flag(SEC_EDGAR_ENABLED_ENV):
+            return self._mock(symbol)
+        try:
+            return self._fetch_live(symbol)
+        except Exception:
+            return self._mock(symbol)
+
+    def _fetch_live(self, symbol: str) -> list[WhaleActivity]:
+        requests = _requests()
+        headers = {"User-Agent": _user_agent(), "Accept": "application/json"}
+        params = {"q": symbol, "forms": "4"}
+        resp = requests.get(self.EDGAR_FTS_URL, params=params, headers=headers,
+                            timeout=_TIMEOUT)
+        if resp.status_code == 429:
+            return self._mock(symbol)
+        resp.raise_for_status()
+        parsed = self._parse(resp.json(), symbol)
+        return parsed if parsed else self._mock(symbol)
+
+    def _parse(self, payload, symbol: str) -> list[WhaleActivity]:
+        """Parse an EDGAR full-text-search Form 4 payload into rows (pure).
+
+        Extracted so fixtures exercise parsing without a live call. Direction is
+        long (the insider filing side; FTS does not expose acquire/dispose
+        reliably), value 0 (not in FTS), and every row is delayed=True with the
+        ~2-business-day Form 4 label.
+        """
+        hits = (((payload or {}).get("hits") or {}).get("hits")
+                if isinstance(payload, dict) else None)
+        if not isinstance(hits, list) or not hits:
+            return []
+        out: list[WhaleActivity] = []
+        for hit in hits[:8]:
+            if not isinstance(hit, dict):
+                continue
+            src = hit.get("_source") if isinstance(hit.get("_source"), dict) else {}
+            names = src.get("display_names")
+            entity = (names[0] if isinstance(names, list) and names
+                      else src.get("entity") or "Insider")
+            entity = str(entity).split("(CIK")[0].strip() or "Insider"
+            file_date = src.get("file_date") or src.get("filed")
+            ts = (f"{file_date}T00:00:00Z" if file_date else _now())
+            out.append(WhaleActivity(
+                source=self.source,
+                entity=entity,
+                symbol=symbol,
+                direction="long",   # insider filing side (FTS has no dispose flag)
+                value_usd=0.0,       # not exposed by full-text search
+                delayed=True,        # DELAYED ~2 business days
+                ts=ts,
+                delay_label=SEC_FORM4_DELAY_LABEL,
+            ))
+        return out
+
+    def _mock(self, symbol: str) -> list[WhaleActivity]:
+        if any(c in symbol.upper() for c in ("USD", "BTC", "ETH", "-")):
+            return []
+        insiders = ["CEO", "CFO", "Director", "10% Owner"]
+        seed = f"form4{symbol}"
+        return [WhaleActivity(
+            source=self.source,
+            entity=insiders[_det("ins" + seed, len(insiders))],
+            symbol=symbol,
+            direction="long" if _det(seed, 2) else "short",
+            value_usd=0.0,
+            delayed=True,
+            ts=_now(),
+            delay_label=SEC_FORM4_DELAY_LABEL,
+        )]
 
 
 def _num(*candidates):
@@ -356,5 +456,9 @@ def default_adapters() -> list:
     OPTIONAL and NOT in this chain. Add a crypto or paid adapter explicitly only
     if an operator opts in. Every adapter keeps its deterministic mock fallback,
     so this runs offline with no keys.
+
+    Two SEC EDGAR forms are active: quarterly 13F (institutional holdings, ~45
+    day lag) and Form 4 (insider transactions, ~2 business day lag). Both are
+    free, keyless, and DELAYED context, gated by SEC_EDGAR_ENABLED.
     """
-    return [Sec13FAdapter()]
+    return [Sec13FAdapter(), SecForm4Adapter()]
