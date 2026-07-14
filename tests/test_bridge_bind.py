@@ -83,3 +83,54 @@ def test_safe_print_masks(capsys):
     captured = capsys.readouterr().out
     assert "sk-abcdefghijklmnop1234" not in captured
     assert "REDACTED" in captured
+
+
+# --- Client-disconnect handling (bridge-call timeout fix) ------------------- #
+# A slow real council round trip used to outlast the engine's short timeout; the
+# engine hung up mid-response and the bridge raised BrokenPipeError, then tried
+# to write a 500 over the already-broken socket (a double traceback). The write
+# path now catches the disconnect, logs one line, and never writes twice.
+
+class _BrokenWFile:
+    """A wfile whose write always fails, as if the client already hung up."""
+    def __init__(self):
+        self.writes = 0
+
+    def write(self, b):
+        self.writes += 1
+        raise BrokenPipeError("client hung up")
+
+
+def _make_handler(server, wfile, path="/score/llm"):
+    """A Handler instance without the socket plumbing: HTTP header writes are
+    stubbed, only the body write (via wfile) exercises the disconnect path."""
+    h = server.Handler.__new__(server.Handler)
+    h.wfile = wfile
+    h.path = path
+    h._responses = []
+    h.send_response = lambda code, *a: h._responses.append(code)
+    h.send_header = lambda *a, **k: None
+    h.end_headers = lambda: None
+    return h
+
+
+def test_send_swallows_client_disconnect():
+    server = pytest.importorskip("python_bridge.server")
+    h = _make_handler(server, _BrokenWFile())
+    # _send must NOT raise on a broken socket, and must report the failure.
+    ok = h._send(200, {"ok": True})
+    assert ok is False
+
+
+def test_do_post_no_second_write_after_disconnect(monkeypatch):
+    import io
+    server = pytest.importorskip("python_bridge.server")
+    # Handler result is a plain dict, so no real council/network call is made.
+    monkeypatch.setattr(server, "_handle", lambda path, payload: {"ok": True})
+    h = _make_handler(server, _BrokenWFile(), path="/score/llm")
+    h.headers = {"Content-Length": "2"}
+    h.rfile = io.BytesIO(b"{}")
+    # do_POST must not raise, and must attempt exactly ONE response (the 200),
+    # never a second 500 write over the broken socket.
+    h.do_POST()
+    assert h._responses == [200]

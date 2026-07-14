@@ -362,3 +362,76 @@ def test_extract_json_object_handles_prose_and_garbage():
         "direction": "short", "confidence": 0.5}
     assert http_json.extract_json_object("no json here") is None
     assert http_json.extract_json_object("") is None
+
+
+# --- Timeout / slow-provider resilience (bridge-call timeout fix) -------------
+
+def test_council_timeouts_read_from_config(tmp_path):
+    """Task 2: the provider and gate timeouts are config values, not literals,
+    and flow into the real providers and the gate."""
+    from llm_consensus import config_access
+    # The packaged defaults are the fix's values (30s provider, 15s gate).
+    assert config_access.provider_timeout_seconds() == 30.0
+    assert config_access.gate_timeout_seconds() == 15.0
+    # A config override flows through to the built providers and gate.
+    cfg = tmp_path / "cfg.yaml"
+    cfg.write_text(yaml.dump({"council": {"provider_timeout_seconds": 42,
+                                          "gate_timeout_seconds": 7},
+                              "llm": {"use_real_council": True, "gate_enabled": True}}))
+    p = str(cfg)
+    assert config_access.provider_timeout_seconds(p) == 42.0
+    assert config_access.gate_timeout_seconds(p) == 7.0
+    assert all(getattr(x, "timeout", None) == 42.0 for x in real_providers(p))
+    assert getattr(build_gate(p), "timeout", None) == 7.0
+
+
+def test_slow_provider_times_out_council_proceeds_on_rest(monkeypatch):
+    """Task 4: one provider that times out fails ALONE (flat/error verdict); the
+    other two answer and the council still produces a verdict. The at-least-one-
+    provider rule holds. No real network: the HTTP layer is mocked."""
+    for k in _LLM_KEYS:
+        monkeypatch.setenv(k, "test-key")
+
+    def _post(url, headers, payload, timeout=None):
+        if "generativelanguage" in url:          # Gemini -> simulate a timeout
+            raise http_json.LLMHTTPError("request failed: read timed out")
+        if "openai" in url:
+            return _openai_env(_GOOD_JSON)
+        return _anthropic_env(_GOOD_JSON)
+
+    monkeypatch.setattr(http_json, "post_json", _post)
+    res = consensus({"symbol": "BTC/USD", "ret_5": 0.03},
+                    providers=real_providers(), gate=_ALWAYS)
+    # Slot order is primary(OpenAI), secondary(Anthropic), tertiary(Gemini).
+    assert res.per_model[0].source == "real"     # answered
+    assert res.per_model[1].source == "real"     # answered
+    assert res.per_model[2].source == "error"    # timed out, failed alone
+    # At least one provider answered, so the council still produced a verdict.
+    assert any(v.source == "real" for v in res.per_model)
+    assert res.confidence > 0.0
+
+
+def test_council_is_concurrent_not_serialized(monkeypatch):
+    """Task 4: providers are scored concurrently, so a slow provider only delays
+    the council by its own time, not the sum of all three. Two providers each
+    'sleep' 0.3s; a serial council would take >=0.6s, a concurrent one ~0.3s."""
+    import time
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    monkeypatch.setenv("GEMINI_API_KEY", "test-key")
+
+    def _post(url, headers, payload, timeout=None):
+        time.sleep(0.3)
+        if "openai" in url:
+            return _openai_env(_GOOD_JSON)
+        if "anthropic" in url:
+            return _anthropic_env(_GOOD_JSON)
+        return _gemini_env(_GOOD_JSON)
+
+    monkeypatch.setattr(http_json, "post_json", _post)
+    t0 = time.perf_counter()
+    res = consensus({"symbol": "BTC/USD", "ret_5": 0.03},
+                    providers=real_providers(), gate=_ALWAYS)
+    elapsed = time.perf_counter() - t0
+    assert len(res.per_model) == 3
+    assert elapsed < 0.75          # concurrent (~0.3s), not serial (~0.9s)

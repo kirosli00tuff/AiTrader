@@ -21,7 +21,8 @@ from __future__ import annotations
 # keep working after the split into focused modules.
 from .config_access import (  # noqa: F401
     council_max_tokens, equities_market_hours_only, gate_enabled,
-    llm_model_names, slot_weight, use_real_council,
+    gate_timeout_seconds, llm_model_names, provider_timeout_seconds,
+    slot_weight, use_real_council,
 )
 from .gate import AlwaysProceedGate, GateDecision, HaikuGate  # noqa: F401
 from .providers import (  # noqa: F401
@@ -62,19 +63,25 @@ def real_providers(cfg_path: str | None = None) -> list[LLMProvider]:
     """
     names = llm_model_names(cfg_path)
     max_tok = council_max_tokens(cfg_path)
+    # Per-provider call timeout from config: a slow or hung provider fails alone
+    # after this, the council proceeds on the rest (Task 4).
+    ptimeout = provider_timeout_seconds(cfg_path)
     return [
         OpenAIProvider(name="llm_primary",
                        weight=slot_weight("llm_primary", cfg_path),
                        model_id=names.get("llm_primary", "gpt-5.5"),
-                       skew=_SLOT_SKEW["llm_primary"], max_tokens=max_tok),
+                       skew=_SLOT_SKEW["llm_primary"], max_tokens=max_tok,
+                       timeout=ptimeout),
         AnthropicProvider(name="llm_secondary",
                           weight=slot_weight("llm_secondary", cfg_path),
                           model_id=names.get("llm_secondary", "claude-opus-4-8"),
-                          skew=_SLOT_SKEW["llm_secondary"], max_tokens=max_tok),
+                          skew=_SLOT_SKEW["llm_secondary"], max_tokens=max_tok,
+                          timeout=ptimeout),
         GeminiProvider(name="llm_tertiary",
                        weight=slot_weight("llm_tertiary", cfg_path),
                        model_id=names.get("llm_tertiary", "gemini-3.1-pro-preview"),
-                       skew=_SLOT_SKEW["llm_tertiary"], max_tokens=max_tok),
+                       skew=_SLOT_SKEW["llm_tertiary"], max_tokens=max_tok,
+                       timeout=ptimeout),
     ]
 
 
@@ -90,7 +97,8 @@ def build_gate(cfg_path: str | None = None):
     if not gate_enabled(cfg_path):
         return AlwaysProceedGate(reason="gate disabled by config", source="disabled")
     return HaikuGate(model_id=llm_model_names(cfg_path).get(
-        "llm_gate", "claude-haiku-4-5"))
+        "llm_gate", "claude-haiku-4-5"),
+        timeout=gate_timeout_seconds(cfg_path))
 
 
 def _flat_consensus(gate: GateDecision) -> ConsensusResult:
@@ -162,6 +170,20 @@ def _us_equity_market_open_now(now=None) -> bool:
     return 13 * 60 + 30 <= minutes < 20 * 60
 
 
+def _score_all(prov: list[LLMProvider], state: dict) -> list[ModelVerdict]:
+    """Score every provider concurrently, preserving order. A slow provider only
+    delays the council by its own timeout, never the sum. score() never raises
+    (each provider degrades to a flat verdict), so this cannot fail the council."""
+    if len(prov) <= 1:
+        return [p.score(state) for p in prov]
+    try:
+        from concurrent.futures import ThreadPoolExecutor
+        with ThreadPoolExecutor(max_workers=len(prov)) as ex:
+            return list(ex.map(lambda p: p.score(state), prov))
+    except Exception:  # pragma: no cover - thread pool unavailable
+        return [p.score(state) for p in prov]
+
+
 def consensus(state: dict, providers: list[LLMProvider] | None = None,
               gate=None, cfg_path: str | None = None) -> ConsensusResult:
     """Weighted ensemble of provider verdicts into one consensus.
@@ -188,7 +210,12 @@ def consensus(state: dict, providers: list[LLMProvider] | None = None,
         return _flat_consensus(decision)
 
     prov = providers if providers is not None else build_council(cfg_path)
-    verdicts = [p.score(state) for p in prov]
+    # Score the providers CONCURRENTLY so a single slow or hung provider only
+    # delays the council by its OWN timeout, not the sum of all three (Task 4).
+    # Each provider's score() already catches its own errors and returns a flat
+    # verdict, so this never raises and order is preserved. Falls back to a plain
+    # sequential map if a thread pool cannot be created.
+    verdicts = _score_all(prov, state)
     wsum = sum(p.weight for p in prov) or 1.0
 
     bias = sum(v.bias * p.weight for v, p in zip(verdicts, prov)) / wsum

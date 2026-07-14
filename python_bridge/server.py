@@ -20,9 +20,12 @@ consume them directly. Runs fully offline (all services have mock fallbacks).
 from __future__ import annotations
 
 import json
+import logging
 import os
 import sys
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+log = logging.getLogger("python_bridge")
 
 # Make repo-root packages importable when run as a script.
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -154,13 +157,23 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, *args):  # silence default logging
         pass
 
-    def _send(self, code: int, obj: dict) -> None:
-        body = json.dumps(obj).encode()
-        self.send_response(code)
-        self.send_header("Content-Type", "application/json")
-        self.send_header("Content-Length", str(len(body)))
-        self.end_headers()
-        self.wfile.write(body)
+    def _send(self, code: int, obj: dict) -> bool:
+        """Write a JSON response. Returns False (and logs one line) if the client
+        already hung up, so the caller never writes a second time (the 500) over
+        an already-broken socket. This stops the double traceback that a slow
+        council round trip used to cause when the engine timed out mid-response."""
+        try:
+            body = json.dumps(obj).encode()
+            self.send_response(code)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return True
+        except (BrokenPipeError, ConnectionResetError) as e:
+            log.warning("bridge client disconnected before response on %s: %s",
+                        self.path, e)
+            return False
 
     def do_GET(self):
         if self.path == "/health":
@@ -180,16 +193,27 @@ class Handler(BaseHTTPRequestHandler):
             self._send(404, {"error": "not found"})
 
     def do_POST(self):
-        length = int(self.headers.get("Content-Length", 0))
-        raw = self.rfile.read(length) if length else b"{}"
+        # Read the request body first. If the client already hung up, log one
+        # line and return, never touch the socket again.
+        try:
+            length = int(self.headers.get("Content-Length", 0))
+            raw = self.rfile.read(length) if length else b"{}"
+        except (BrokenPipeError, ConnectionResetError) as e:
+            log.warning("bridge client disconnected before request body on %s: %s",
+                        self.path, e)
+            return
+        # Compute the result, then send ONCE. A handler error sends a 500; a
+        # broken socket during any send is swallowed by _send (no second write).
         try:
             payload = json.loads(raw or b"{}")
             result = _handle(self.path, payload)
-            self._send(200, result)
         except KeyError:
             self._send(404, {"error": f"unknown endpoint {self.path}"})
+            return
         except Exception as e:  # noqa: BLE001
             self._send(500, {"error": str(e)})
+            return
+        self._send(200, result)
 
 
 def resolve_bind_host(host: str, allow_remote: bool | None = None) -> str:

@@ -256,6 +256,10 @@ Config load_config(const std::string& path) {
     co.council_min_confidence = get_double(root, "council.council_min_confidence", co.council_min_confidence);
     co.council_min_agreement = get_int(root, "council.council_min_agreement", co.council_min_agreement);
     co.neutral_skip_strength_threshold = get_double(root, "council.neutral_skip_strength_threshold", co.neutral_skip_strength_threshold);
+    co.engine_council_call_timeout_ms = get_int(root, "council.engine_council_call_timeout_ms", co.engine_council_call_timeout_ms);
+    co.engine_bridge_call_timeout_ms = get_int(root, "council.engine_bridge_call_timeout_ms", co.engine_bridge_call_timeout_ms);
+    co.provider_timeout_seconds = get_int(root, "council.provider_timeout_seconds", co.provider_timeout_seconds);
+    co.gate_timeout_seconds = get_int(root, "council.gate_timeout_seconds", co.gate_timeout_seconds);
 
     // rl advisory (deferred; ships OFF, trains only past the real-fill gate)
     auto& rl = c.rl;
@@ -475,6 +479,20 @@ std::vector<std::string> validate_config(const Config& cfg) {
         problems.push_back("council.council_daily_budget must be >= 0");
     if (co.council_max_tokens < 1)
         problems.push_back("council.council_max_tokens must be >= 1");
+    if (co.engine_council_call_timeout_ms < 1)
+        problems.push_back("council.engine_council_call_timeout_ms must be >= 1");
+    if (co.engine_bridge_call_timeout_ms < 1)
+        problems.push_back("council.engine_bridge_call_timeout_ms must be >= 1");
+    if (co.provider_timeout_seconds < 1)
+        problems.push_back("council.provider_timeout_seconds must be >= 1");
+    if (co.gate_timeout_seconds < 1)
+        problems.push_back("council.gate_timeout_seconds must be >= 1");
+    // The engine must wait longer for a full council than a single provider, or
+    // it can hang up mid-round-trip (the no-trade stall).
+    if (co.engine_council_call_timeout_ms < co.provider_timeout_seconds * 1000)
+        problems.push_back("council.engine_council_call_timeout_ms must exceed "
+                           "provider_timeout_seconds (the engine must outwait a "
+                           "full council round trip)");
     if (co.council_min_agreement < 0)
         problems.push_back("council.council_min_agreement must be >= 0");
     if (co.per_symbol_council_cooldown_minutes < 0)

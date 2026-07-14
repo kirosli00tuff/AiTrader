@@ -223,6 +223,19 @@ struct CouncilConfig {
     int council_min_agreement = 2;
     // Skip the council when regime is neutral AND signal strength is below this.
     double neutral_skip_strength_threshold = 0.5;
+    // Engine-to-bridge call timeouts (milliseconds). A full real council round
+    // trip (gate + three providers, one doing extended thinking at
+    // council_max_tokens) takes many seconds, so the /score/llm wait must be well
+    // above it, or the engine hangs up mid-response and the council returns no
+    // verdict (the no-trade stall). Fast local scores (dnn/whale/rl/status) use
+    // the shorter timeout. Both are config values, never literals at the call site.
+    int engine_council_call_timeout_ms = 60000;   // wait for /score/llm (real council)
+    int engine_bridge_call_timeout_ms = 8000;     // wait for a fast bridge call
+    // Bridge-to-provider timeouts (seconds), read by the Python bridge (mirrored
+    // in llm_consensus/config_access.py). A single slow or hung provider fails
+    // that one provider gracefully after this, the council proceeds on the rest.
+    int provider_timeout_seconds = 30;            // per real provider call
+    int gate_timeout_seconds = 15;                // Haiku base-check gate call
 };
 
 // Ensemble weights. Editable in UI, auto-normalized, lockable.

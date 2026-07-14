@@ -99,6 +99,11 @@ _COUNCIL_DEFAULTS: dict[str, float] = {
     "council_min_confidence": 0.6,
     "council_min_agreement": 2,
     "neutral_skip_strength_threshold": 0.5,
+    # Bridge-to-provider call timeouts (seconds). Mirror the C++ council block.
+    # A single slow or hung provider fails alone after provider_timeout_seconds,
+    # the council proceeds on the rest. The gate has its own shorter budget.
+    "provider_timeout_seconds": 30,
+    "gate_timeout_seconds": 15,
 }
 
 
@@ -142,3 +147,15 @@ def council_min_agreement(cfg_path: str | None = None) -> int:
 def neutral_skip_strength_threshold(cfg_path: str | None = None) -> float:
     """Skip the council when regime is neutral and strength is below this."""
     return float(_council_num("neutral_skip_strength_threshold", cfg_path))
+
+
+def provider_timeout_seconds(cfg_path: str | None = None) -> float:
+    """Per real-provider call timeout (default 30s). A slow or hung provider
+    fails alone after this; the council proceeds on the providers that answered."""
+    return float(_council_num("provider_timeout_seconds", cfg_path))
+
+
+def gate_timeout_seconds(cfg_path: str | None = None) -> float:
+    """Haiku base-check gate call timeout (default 15s). On timeout the gate
+    proceeds (fail-open to the council) rather than dropping the candidate."""
+    return float(_council_num("gate_timeout_seconds", cfg_path))

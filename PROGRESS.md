@@ -68,6 +68,15 @@ New flags from the feed-work session (2026-07-05, `369b6a6`):
 
 Newest entries at top. One entry per session. Format: date, model used, what changed, what is stable, what is next.
 
+### 2026-07-14 (Opus 4.8) — raise bridge-call timeouts above real council latency, degrade on a slow provider, handle client disconnect, fix the no-trade stall
+
+- **Root cause confirmed by measurement.** A full REAL council round trip is ~16.1s sequential (gate 1.3s + GPT-5.5 4.6s + Opus 2.9s + Gemini 3.1 Pro 7.3s, the slow one doing extended thinking at council_max_tokens 2048). The engine's bridge-call timeout was the default 1500 ms, so the engine hung up mid-response, the bridge raised BrokenPipeError, the council returned no verdict, the RiskGate never got agreement, and nothing traded.
+- **Timeouts raised and made config values (no literals).** New `council` config: `engine_council_call_timeout_ms` 60000 (engine wait for /score/llm), `engine_bridge_call_timeout_ms` 8000 (fast dnn/whale/rl/status), `provider_timeout_seconds` 30 (bridge per-provider), `gate_timeout_seconds` 15 (Haiku gate). Validation rejects an engine council timeout below a provider timeout. The engine reads the two engine-side values (core/engine.cpp gather_factors + verify, core/main.cpp status probe); the Python bridge reads the two provider-side values (llm_consensus/config_access.py, consensus.py).
+- **Council degrades on a slow provider and runs concurrently.** Providers are now scored concurrently (llm_consensus/consensus.py _score_all), so a slow provider only delays the council by its own time, not the sum. A provider that times out fails ALONE (flat/error verdict, logged), the other two plus the gate still produce a verdict, and the per-model source shows which failed. Verified through the bridge: the full council now returns in ~8.9s (concurrent), verdict strong_buy, agreement 3, all three sources real, no broken pipe.
+- **Client disconnect handled in the bridge.** python_bridge/server.py _send and do_POST catch BrokenPipeError / ConnectionResetError, log one line, and never write a second time (the 500) over a broken socket, so a timeout can never cause the double traceback again.
+- **Stable:** C++ ctest 16/16 (config timeout parse + validation), Python pytest 232 passed (5 new: config timeouts, slow-provider proceeds-on-rest, concurrent-not-serialized, _send disconnect, do_POST no-second-write). Live re-run confirmed council calls complete in ~8.9s with real per-model sources and zero broken pipes. RiskGate, the live-trading gate, and the adaptive limit-weakening invariant untouched. RL gated (0/500), live OFF.
+- **Next:** run the warm real loop and watch native crossovers reach a RiskGate decision now that the council no longer stalls.
+
 ### 2026-07-14 (Opus 4.8) — self-clean stale processes and ports on start, PID tracking for clean teardown, block duplicate starts
 
 - **Port-collision class of start failure resolved.** A prior run that crashed while holding a port no longer blocks the next start. Both the start script and the GUI supervisor self-clean pre-flight through one shared implementation (api_server/stack.py).

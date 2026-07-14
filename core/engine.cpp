@@ -238,8 +238,17 @@ std::vector<signal_engine::FactorSignal> Engine::gather_factors(
                  {"volatility", ms.volatility},
                  {"imbalance", ms.order_book_imbalance},
                  {"catalyst", cat.score}});
+            // The /score/llm call fans out to the full real council (gate + three
+            // providers), so it needs the long timeout, or the engine hangs up
+            // mid-round-trip and the council returns no verdict (the no-trade
+            // stall). Fast local scores use the short timeout. Both from config.
+            const int timeout_ms =
+                (endpoint == "/score/llm")
+                    ? cfg_.council.engine_council_call_timeout_ms
+                    : cfg_.council.engine_bridge_call_timeout_ms;
             auto resp = bridge::http_post_json(opts_.bridge_host,
-                                               opts_.bridge_port, endpoint, body);
+                                               opts_.bridge_port, endpoint, body,
+                                               timeout_ms);
             if (resp) {
                 s.bias = std::clamp(bridge::json_get_number(*resp, "bias", s.bias),
                                     -1.0, 1.0);
@@ -1267,7 +1276,8 @@ void Engine::verify_real_layers_reachable() {
         const std::string addr =
             opts_.bridge_host + ":" + std::to_string(opts_.bridge_port);
         auto resp = bridge::http_post_json(opts_.bridge_host, opts_.bridge_port,
-                                           "/status", "{}", 3000);
+                                           "/status", "{}",
+                                           cfg_.council.engine_bridge_call_timeout_ms);
         if (!resp) {
             if (need_council)
                 missing.push_back("LLM council on-real but the Python bridge is "

@@ -184,7 +184,8 @@ int main(int argc, char** argv) {
                  st_dnn_real = false, st_whale_real = false, st_sec = false;
             if (opts.use_bridge) {
                 auto s = mal::bridge::http_post_json(
-                    opts.bridge_host, opts.bridge_port, "/status", "{}", 3000);
+                    opts.bridge_host, opts.bridge_port, "/status", "{}",
+                    cfg.council.engine_bridge_call_timeout_ms);
                 if (s) {
                     st_bridge_up = true;
                     st_models = mal::bridge::json_get_string(*s, "council_models", "");

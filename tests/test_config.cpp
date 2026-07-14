@@ -80,5 +80,33 @@ int main() {
               "mode round-trip live");
     }
 
+    // 7. Bridge-call timeouts parse and default sanely (the no-trade-stall fix).
+    {
+        auto cfg = config::load_config("config/default_config.yaml");
+        // The engine must outwait a full real council round trip (~16s measured),
+        // so the council-call timeout is well above a single provider timeout.
+        check(cfg.council.engine_council_call_timeout_ms >= 60000,
+              "engine council-call timeout parsed (>= 60s)");
+        check(cfg.council.engine_bridge_call_timeout_ms >= 1000,
+              "engine fast-call timeout parsed");
+        check(cfg.council.provider_timeout_seconds >= 1,
+              "provider timeout parsed");
+        check(cfg.council.gate_timeout_seconds >= 1, "gate timeout parsed");
+    }
+
+    // 8. Validation rejects an engine council timeout below a provider timeout
+    //    (would let the engine hang up mid-round-trip -> the no-trade stall).
+    {
+        config::Config c;
+        c.council.provider_timeout_seconds = 30;
+        c.council.engine_council_call_timeout_ms = 5000;  // < 30s
+        auto problems = validate_config(c);
+        bool found = false;
+        for (const auto& p : problems)
+            if (p.find("engine_council_call_timeout_ms") != std::string::npos)
+                found = true;
+        check(found, "engine council timeout below provider timeout rejected");
+    }
+
     return report("config");
 }
