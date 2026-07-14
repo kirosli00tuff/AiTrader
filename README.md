@@ -172,6 +172,12 @@ labelled mock.
 
 ### Start and stop from the GUI (supervisor)
 
+**The GUI backend must be running first.** The supervisor lives inside the
+read-only backend, so `scripts/run_gui.sh` (backend + Vite frontend) must be up
+before the Start button works. The Start button does not launch the backend it
+runs inside, it drives the supervisor in that backend. `run_gui.sh` prints a
+"GUI backend is ready" line once you can start the stack.
+
 You can start and stop the same warmed stack from the GUI, without the terminal.
 The **Ops** page carries a **Start paper trading** / **Stop** control, mirrored
 in the top status strip. A small backend **supervisor** owns the bridge and
@@ -182,8 +188,12 @@ shared callable (`api_server/stack.py`), so the two never drift:
   bridge with the real council, then the engine (`feed_mode alpaca_paper`,
   `clock real`, full whitelist), health checked between steps. It reports the
   live lifecycle: `not_running` → `starting` → `warming` (with per-symbol warm
-  progress) → `running`. Strict no-silent-mock still applies: if a layer set
-  on-real is unreachable, Start **fails loudly** in the GUI with what is missing.
+  progress) → `running`. Start spawns the bridge with the **same whale env flags
+  the script exports** and **waits for the bridge to pass a health probe** before
+  the engine starts, so the engine never races ahead of the bridge. Strict
+  no-silent-mock still applies: if a layer set on-real is unreachable, Start
+  **fails loudly** in the GUI with what is missing (surfaced in the Ops panel and
+  the status strip), it does not go dark.
 - **Stop** is a **graceful shutdown** of the bridge and engine the supervisor
   started. It is not the kill switch.
 - **Single instance:** the supervisor refuses a start when an engine already

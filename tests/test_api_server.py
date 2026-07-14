@@ -854,6 +854,8 @@ def sup(env, monkeypatch, tmp_path):
     # Pre-flight is mocked so tests never probe or kill a real port. pid-file
     # helpers stay real (they write under the temp MAL_RUN_DIR).
     monkeypatch.setattr(stack, "preflight_ports", lambda names=None, exclude_pids=(): [])
+    # The bridge readiness probe hits no real network in tests: default all-ready.
+    monkeypatch.setattr(stack, "bridge_missing_real_layers", lambda: [])
     stack.clear_pids()
     yield supervisor.SUPERVISOR
     supervisor.SUPERVISOR._reset_for_test()
@@ -1092,3 +1094,83 @@ def test_preflight_and_pid_helpers_never_touch_kill_request():
     for fn in (stack.preflight_ports, stack.free_port, stack.self_heal,
                stack.stop_tracked_pids, stack.record_pid):
         assert "kill_request" not in inspect.getsource(fn).lower()
+
+
+# --- Supervisor survives past warming: env parity + readiness gating ---------
+# The GUI start died right after warming because the supervisor spawned the
+# bridge WITHOUT the whale env flags the script exports, so the bridge reported
+# whale_real=false, the engine's strict on-real check refused, the engine exited,
+# and the supervisor tore everything down. These lock the fix.
+
+def test_bridge_env_carries_whale_flags(env):
+    """The bridge env the supervisor spawns with includes the whale flags the
+    script exports, so a GUI start matches the script (whale_real can be true)."""
+    from api_server import stack
+    be = stack.bridge_env()
+    assert "SEC_EDGAR_ENABLED" in be and "WHALE_LIVE_ENABLED" in be
+    assert be["SEC_EDGAR_ENABLED"] in ("true", "false")
+    assert be.get("BRIDGE_PORT")
+
+
+def test_supervisor_spawns_bridge_with_whale_env(sup, client, monkeypatch):
+    from api_server import stack
+    seen = {}
+
+    def _rec_spawn(cmd, env=None, log_path=None):
+        if any("python_bridge" in str(c) for c in cmd):
+            seen["bridge_env"] = env or {}
+        return FakeProc(pid=(222 if any("mal_engine" in str(c) for c in cmd) else 111),
+                        alive=True)
+
+    monkeypatch.setattr(stack, "spawn", _rec_spawn)
+    client.post("/engine/start")
+    sup.join(4)
+    assert client.get("/engine/state").json()["state"] == "running"
+    # The bridge was spawned WITH the whale flags (the shutdown-after-warming fix).
+    assert "SEC_EDGAR_ENABLED" in seen.get("bridge_env", {})
+
+
+def test_supervisor_readiness_gate_blocks_engine_when_bridge_unhealthy(sup, monkeypatch):
+    from api_server import stack, supervisor
+    calls = {"spawn": 0}
+    real_spawn = _mk_spawn(engine_alive=True)
+
+    def _count_spawn(cmd, env=None, log_path=None):
+        calls["spawn"] += 1
+        return real_spawn(cmd, env, log_path)
+
+    monkeypatch.setattr(stack, "spawn", _count_spawn)
+    monkeypatch.setattr(stack, "http_ok", lambda *a, **k: False)  # bridge never healthy
+    supervisor.SUPERVISOR.start(background=False)
+    st = supervisor.SUPERVISOR.state()
+    assert st["state"] == "not_running"
+    assert st["error"] and "health check" in st["error"]
+    # The engine was NEVER spawned: only the bridge spawn happened before the gate.
+    assert calls["spawn"] == 1
+
+
+def test_supervisor_teardown_reports_reason_to_state_and_event_log(sup, env, monkeypatch):
+    from api_server import stack, supervisor
+    # The bridge is healthy but a required on-real layer is not ready.
+    monkeypatch.setattr(stack, "bridge_missing_real_layers",
+                        lambda: ["whale: SEC_EDGAR_ENABLED off, whale would be offline mock"])
+    supervisor.SUPERVISOR.start(background=False)
+    st = supervisor.SUPERVISOR.state()
+    assert st["state"] == "not_running"
+    assert st["error"] and "on-real layer" in st["error"] and "whale" in st["error"]
+    # The reason is also recorded to the append-only event log for the GUI feed.
+    conn = sqlite3.connect(env["db"])
+    n = conn.execute("SELECT COUNT(*) FROM events WHERE kind='engine_supervisor' "
+                     "AND message LIKE 'GUI start failed%'").fetchone()[0]
+    conn.close()
+    assert n >= 1
+
+
+def test_supervisor_teardown_never_touches_kill_request(sup, env, monkeypatch):
+    """A supervisor teardown must never write the kill-request file: the safety
+    halt stays independent of a failed start."""
+    from api_server import stack, supervisor
+    monkeypatch.setattr(stack, "bridge_missing_real_layers", lambda: ["council: not real"])
+    supervisor.SUPERVISOR.start(background=False)
+    assert supervisor.SUPERVISOR.state()["state"] == "not_running"
+    assert not os.path.exists(os.path.join(env["control"], "kill_request.json"))

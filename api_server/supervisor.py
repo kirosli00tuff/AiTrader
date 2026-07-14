@@ -162,15 +162,31 @@ class Supervisor:
             # crashed prior run. Never the api port (this backend runs on it) or
             # the vite port. free_port protects our own pid regardless.
             stack.preflight_ports(names=["bridge"], exclude_pids={os.getpid()})
-            # Bridge (real council + dnn + whale). Health check between steps.
+            # Bridge (real council + dnn + whale). Spawn it with the SAME env the
+            # script uses (the whale flags via stack.bridge_env), or the bridge
+            # reports whale_real=false and the engine's strict on-real check
+            # refuses, which was the shutdown-after-warming bug.
             self._bridge = stack.spawn(
                 stack.bridge_cmd(),
-                env={"BRIDGE_PORT": str(stack.bridge_port())},
+                env=stack.bridge_env(),
                 log_path=os.path.join(logdir, "bridge.log"))
             stack.record_pid("bridge", self._bridge.pid)
-            if not stack.http_ok(stack.bridge_health_url(), tries=40, delay=0.5):
+            # Readiness gate: wait for the bridge to pass a REAL health probe
+            # before the engine starts, so the engine's on-real check never races
+            # ahead of the bridge being reachable. A slow health check is not a
+            # failure, only exhausting the retry window is.
+            if not stack.http_ok(stack.bridge_health_url(), tries=60, delay=1.0):
                 raise RuntimeError(
-                    f"bridge did not become healthy on port {stack.bridge_port()}")
+                    f"bridge did not pass its health check on port "
+                    f"{stack.bridge_port()} within the readiness window")
+            # The bridge answered. Confirm the on-real layers it will be asked for
+            # are actually served real, so a genuinely unreachable layer fails
+            # HERE with a specific reason instead of the engine exiting cryptically.
+            missing = stack.bridge_missing_real_layers()
+            if missing:
+                raise RuntimeError(
+                    "bridge is up but a required on-real layer is not ready: "
+                    + "; ".join(missing))
             # 4. Engine, strict mode. It exits if an on-real layer is unreachable.
             self._engine = stack.spawn(
                 stack.engine_cmd(db),
@@ -190,7 +206,11 @@ class Supervisor:
                 self._started_ts = store._now()
                 self._set_state(RUNNING)
         except Exception as e:
+            # A real unrecoverable error: tear down cleanly and report exactly
+            # why, in the engine state (self._error, surfaced to the GUI) and the
+            # event log, so the GUI shows the cause instead of going dark.
             self._error = str(e)
+            self._report_teardown(str(e))
             stack.terminate(self._engine)
             self._engine = None
             stack.terminate(self._bridge)
@@ -200,6 +220,16 @@ class Supervisor:
             stack.clear_lock()
             with self._lock:
                 self._set_state(NOT_RUNNING)
+
+    def _report_teardown(self, reason: str) -> None:
+        """Record the start failure to the append-only event log so the GUI event
+        feed shows the cause. Never raises, never logs a key value."""
+        try:
+            store.append_event("engine_supervisor",
+                               "GUI start failed: " + reason[:400],
+                               severity="warning")
+        except Exception:
+            pass
 
     # --- stop (graceful shutdown, NOT the kill switch) -----------------------
 

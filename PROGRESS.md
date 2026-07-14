@@ -68,6 +68,17 @@ New flags from the feed-work session (2026-07-05, `369b6a6`):
 
 Newest entries at top. One entry per session. Format: date, model used, what changed, what is stable, what is next.
 
+### 2026-07-14 (Opus 4.8) — fix GUI supervisor start so the stack survives past warming, gate engine start on bridge readiness, surface start failures
+
+- **Shutdown cause found (reproduced).** From a cold GUI, Start reached warming then the whole stack shut off. Root cause: the supervisor spawned the bridge WITHOUT the whale env flags the script exports (SEC_EDGAR_ENABLED / WHALE_LIVE_ENABLED, which default OFF in the whale library). So the bridge reported whale_real=false, the engine's strict on-real whale check refused, the engine exited, and the supervisor tore down the bridge too. Confirmed by reproduction: bridge /status whale_real=False without the flags, True with them.
+- **Env parity fix.** The supervisor now spawns the bridge with stack.bridge_env() (port + the whale flags from config), the SAME helper the start script now uses via the new stack bridge-env-export CLI, so the two cannot drift.
+- **Readiness gating.** The supervisor waits for the bridge /health to pass (60s window, a slow health check is not a failure) before starting the engine, then confirms via stack.bridge_missing_real_layers that the required on-real layers are actually served real, failing HERE with a specific reason instead of letting the engine exit cryptically. A teardown fires only on a real unrecoverable error, never on a normal warming transition.
+- **Failure surfaced in the GUI.** A failed start sets engine state.error (shown in the Ops panel and the top status strip as start failed) and writes an engine_supervisor event to the log, so the GUI shows the cause instead of going dark.
+- **Cold-GUI clarity.** run_gui.sh documents that the backend hosts the supervisor and must run first, prints a GUI backend is ready line, and the Start button drives the supervisor (it never launches the backend it runs inside).
+- **Verified live from a cold GUI.** Started the backend, triggered the supervisor start: starting to warming to running in ~18s, still running after 25s (no shutoff), bridge council_real=dnn_real=whale_real=sec_edgar=True, graceful stop returned not_running, engine log Shutdown complete. Kill independence held (tests: the kill path writes the control file with no supervisor involvement, and teardown never touches the kill-request file).
+- **Stable:** Python pytest 237 passed (5 new supervisor tests), frontend typecheck + 11 render tests + build. C++ untouched this session. RiskGate, the live-trading gate, and the adaptive limit-weakening invariant untouched. RL gated (0/500), live OFF.
+- **Next:** fix council verdict parsing so real provider responses (gemini-3.1-pro-preview, claude-opus-4-8) become verdicts reliably.
+
 ### 2026-07-14 (Opus 4.8) — raise bridge-call timeouts above real council latency, degrade on a slow provider, handle client disconnect, fix the no-trade stall
 
 - **Root cause confirmed by measurement.** A full REAL council round trip is ~16.1s sequential (gate 1.3s + GPT-5.5 4.6s + Opus 2.9s + Gemini 3.1 Pro 7.3s, the slow one doing extended thinking at council_max_tokens 2048). The engine's bridge-call timeout was the default 1500 ms, so the engine hung up mid-response, the bridge raised BrokenPipeError, the council returned no verdict, the RiskGate never got agreement, and nothing traded.

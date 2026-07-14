@@ -155,6 +155,29 @@ describe("pages render", () => {
     expect(await screen.findByText("Kill")).toBeInTheDocument();
   });
 
+  it("surfaces a failed GUI start reason on the Ops page", async () => {
+    const mod = await import("../../api/client");
+    const orig = mod.api.engineState;
+    // A start that failed and returned to not_running, carrying the reason.
+    (mod.api as unknown as { engineState: () => Promise<unknown> }).engineState =
+      async () => ({
+        ok: false, error: "bridge failed health check: on-real layer whale not ready",
+        state: "not_running", owned: false, warm: [], all_warm: false,
+        engine_pid: null, bridge_pid: null, bridge_port: 8765, api_port: 8000,
+        interval_seconds: 30, feed_mode: "alpaca_paper", clock_mode: "real",
+        started_ts: null,
+        lock: { present: false, alive: false, stale: false, engine_pid: null, bridge_pid: null, source: null },
+        history: [], whitelist: ["BTC/USD"],
+      });
+    try {
+      at("/ops");
+      const callout = await screen.findByText(/^Start failed:/);
+      expect(callout).toHaveTextContent("bridge failed health check");
+    } finally {
+      (mod.api as unknown as { engineState: unknown }).engineState = orig;
+    }
+  });
+
   it("renders the Settings page with categories", async () => {
     at("/settings");
     expect(await screen.findByText("Settings & APIs")).toBeInTheDocument();

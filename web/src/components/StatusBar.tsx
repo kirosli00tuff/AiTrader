@@ -48,6 +48,7 @@ export default function StatusBar({ activeView }: { activeView: string }) {
   // Supervisor lifecycle, mirrored compactly. Distinct from the kill strip: this
   // is the ordinary Start/Stop, the kill switch below is the safety halt.
   const lifecycle = engApi.data?.state ?? (running ? "running" : "not_running");
+  const engErr = engApi.data?.error ?? null;
   const engCanStart = lifecycle === "not_running";
   const engCanStop = lifecycle === "running" || lifecycle === "warming" || lifecycle === "starting";
   const startEngine = async () => {
@@ -77,6 +78,10 @@ export default function StatusBar({ activeView }: { activeView: string }) {
       <div className="status-item">
         <span className={`dot ${ENG_DOT[lifecycle] ?? "d"}`} />
         Engine <b>{lifecycle.replace("_", " ")}</b>
+        {engErr && lifecycle === "not_running" && (
+          <span className="mono" style={{ color: "var(--loss, #e05252)", fontSize: 11 }}
+            title={engErr}>start failed</span>
+        )}
         {engCanStart ? (
           !engArm ? (
             <button className="btn sm" onClick={() => setEngArm(true)}>start</button>

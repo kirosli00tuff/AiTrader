@@ -76,15 +76,9 @@ wait_http() {  # url, label, tries
 # config so the bridge fetches real SEC EDGAR data. The whale library treats
 # these as env opt-ins (default OFF), so this deliberate start command is what
 # turns them on. use_real_council is read from config by the bridge directly.
-eval "$("$PY" - <<'PYCFG'
-import yaml
-c = yaml.safe_load(open("config/default_config.yaml")) or {}
-w = c.get("whale", {}) or {}
-def b(v): return "true" if v else "false"
-print(f'export SEC_EDGAR_ENABLED={b(w.get("sec_edgar_enabled"))}')
-print(f'export WHALE_LIVE_ENABLED={b(w.get("whale_live_enabled"))}')
-PYCFG
-)"
+# Whale live flags from config, via the SAME shared helper the GUI supervisor
+# uses (api_server.stack.whale_env), so the script and the GUI cannot drift.
+eval "$("$PY" -m api_server.stack bridge-env-export)"
 echo "Full four-level real-time paper trading"
 echo "======================================="
 echo "  SEC_EDGAR_ENABLED=$SEC_EDGAR_ENABLED  WHALE_LIVE_ENABLED=$WHALE_LIVE_ENABLED"

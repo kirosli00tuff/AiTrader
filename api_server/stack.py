@@ -119,6 +119,62 @@ def bridge_cmd() -> list[str]:
     return [python_bin(), "-m", "python_bridge.server"]
 
 
+def whale_env() -> dict:
+    """The whale live flags the bridge needs, read from config. The whale library
+    treats SEC_EDGAR_ENABLED / WHALE_LIVE_ENABLED as env opt-ins (default OFF), so
+    a deliberate start must export them or the bridge reports whale_real=false and
+    the engine's strict on-real check refuses. The script and the GUI supervisor
+    BOTH build the bridge env here so they cannot drift."""
+    try:
+        cfg = store.load_config().get("whale", {}) or {}
+    except Exception:
+        cfg = {}
+
+    def _b(v) -> str:
+        return "true" if v else "false"
+
+    return {"SEC_EDGAR_ENABLED": _b(cfg.get("sec_edgar_enabled")),
+            "WHALE_LIVE_ENABLED": _b(cfg.get("whale_live_enabled"))}
+
+
+def bridge_env() -> dict:
+    """Full environment the bridge is spawned with: the port plus the whale
+    live flags. Reused by the supervisor so a GUI start matches the script."""
+    return {"BRIDGE_PORT": str(bridge_port()), **whale_env()}
+
+
+def bridge_missing_real_layers() -> list[str]:
+    """After the bridge is healthy, report which ON-REAL layers (per controls.json)
+    the bridge does NOT yet serve as real, so the supervisor can fail with a clear
+    reason BEFORE the engine starts and exits cryptically. Best-effort: returns []
+    when /status cannot be read, so the engine stays the authority."""
+    try:
+        with urllib.request.urlopen(
+                f"http://127.0.0.1:{bridge_port()}/status", timeout=5) as r:
+            st = json.loads(r.read().decode())
+    except Exception:
+        return []
+    try:
+        from api_server import controls
+        ctl = controls.read_controls()
+        layers = ctl.get("layers", {}) or {}
+        srcs = ctl.get("layer_sources", {}) or {}
+    except Exception:
+        layers, srcs = {}, {}
+
+    def _on_real(layer: str) -> bool:
+        return bool(layers.get(layer, True)) and srcs.get(layer, "real") == "real"
+
+    missing = []
+    if _on_real("council") and not st.get("council_real"):
+        missing.append("LLM council: " + str(st.get("council_detail", "not real")))
+    if _on_real("dnn_advisory") and not st.get("dnn_real"):
+        missing.append("dnn_advisory: " + str(st.get("dnn_detail", "not real")))
+    if _on_real("whale") and not st.get("whale_real"):
+        missing.append("whale: " + str(st.get("whale_detail", "not real")))
+    return missing
+
+
 def engine_cmd(db: str | None = None) -> list[str]:
     return [engine_bin(), "--continuous",
             "--interval-seconds", str(interval_seconds()),
@@ -493,6 +549,12 @@ def _cli(argv: list[str]) -> int:
     if cmd == "clear-lock":
         clear_lock()
         print("lock cleared")
+        return 0
+    if cmd == "bridge-env-export":
+        # Shell-eval-able export lines for the whale flags the bridge needs, so
+        # the start script reuses the SAME whale_env logic as the supervisor.
+        for k, v in whale_env().items():
+            print(f"export {k}={v}")
         return 0
     if cmd == "preflight":
         names = argv[1:] or None
