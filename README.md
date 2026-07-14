@@ -202,6 +202,28 @@ shared callable (`api_server/stack.py`), so the two never drift:
 > through the supervisor. The always-visible kill switch is never replaced by the
 > Stop button.
 
+### Self-cleaning start (no port collisions)
+
+Both the script and the GUI supervisor self-clean before they start, so a prior
+run that crashed and left a process holding a port never blocks the next start:
+
+- **Pre-flight port cleanup** frees the exact ports this stack owns (bridge, GUI
+  backend, Vite) if a stale process holds them, graceful signal then force kill,
+  one line per port. Only those ports, never a blanket kill. The supervisor
+  frees only the bridge port (never the port it is served on, and it never kills
+  its own process).
+- **PID tracking + clean teardown.** The script records every started pid
+  (bridge, engine, backend, frontend) in `.run/pids`. A trap stops them cleanly
+  on exit and Ctrl-C, then removes the file. A crashed prior run self-heals on
+  the next start: stale pids are stopped and the file is cleared.
+- **Single instance.** A healthy full stack already running (pid file + a live
+  health check) refuses a second start rather than fighting for ports. A stale
+  pid file with dead pids is not a running instance, it is cleared.
+
+The shared logic lives in `api_server/stack.py`, so the script and the supervisor
+run one implementation. Pre-flight cleanup never touches the kill-request control
+file, so the kill switch stays independent of all of this.
+
 ### Per-level toggles: off / on-mock / on-real
 
 Each advisory level has **two independent axes**, surfaced on the Controls page

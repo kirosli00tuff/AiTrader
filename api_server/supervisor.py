@@ -158,11 +158,16 @@ class Supervisor:
                 self._set_state(WARMING)
             stack.seed_feed_clock()
             self._warm = stack.warm_report(db)["symbols"]
-            # 3. Bridge (real council + dnn + whale). Health check between steps.
+            # 3. Pre-flight: free ONLY the bridge port of a stale holder from a
+            # crashed prior run. Never the api port (this backend runs on it) or
+            # the vite port. free_port protects our own pid regardless.
+            stack.preflight_ports(names=["bridge"], exclude_pids={os.getpid()})
+            # Bridge (real council + dnn + whale). Health check between steps.
             self._bridge = stack.spawn(
                 stack.bridge_cmd(),
                 env={"BRIDGE_PORT": str(stack.bridge_port())},
                 log_path=os.path.join(logdir, "bridge.log"))
+            stack.record_pid("bridge", self._bridge.pid)
             if not stack.http_ok(stack.bridge_health_url(), tries=40, delay=0.5):
                 raise RuntimeError(
                     f"bridge did not become healthy on port {stack.bridge_port()}")
@@ -170,6 +175,7 @@ class Supervisor:
             self._engine = stack.spawn(
                 stack.engine_cmd(db),
                 log_path=os.path.join(logdir, "engine.log"))
+            stack.record_pid("engine", self._engine.pid)
             stack.sleep(ENGINE_SETTLE_SECONDS)
             if self._engine.poll() is not None:
                 tail = _log_tail(os.path.join(logdir, "engine.log"))
@@ -189,6 +195,8 @@ class Supervisor:
             self._engine = None
             stack.terminate(self._bridge)
             self._bridge = None
+            stack.remove_pid("engine")
+            stack.remove_pid("bridge")
             stack.clear_lock()
             with self._lock:
                 self._set_state(NOT_RUNNING)
@@ -214,6 +222,8 @@ class Supervisor:
             stack.terminate(br)
         elif lk.get("bridge_pid"):
             stack.terminate_pid(lk["bridge_pid"])
+        stack.remove_pid("engine")
+        stack.remove_pid("bridge")
         stack.clear_lock()
         with self._lock:
             self._engine = None

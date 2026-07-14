@@ -51,8 +51,10 @@ cleanup() {
     [ -n "$pid" ] && kill "$pid" 2>/dev/null || true
   done
   wait 2>/dev/null || true
-  # Clear the single-instance lock so the next start (script or GUI) is clean.
+  # Clear the single-instance lock and the pid file so the next start (script or
+  # GUI) is clean. The kill-request control file is never touched here.
   "$PY" -m api_server.stack clear-lock >/dev/null 2>&1 || true
+  "$PY" -m api_server.stack clear-pids >/dev/null 2>&1 || true
   echo "All stopped."
 }
 trap cleanup EXIT INT TERM
@@ -89,6 +91,22 @@ echo "  SEC_EDGAR_ENABLED=$SEC_EDGAR_ENABLED  WHALE_LIVE_ENABLED=$WHALE_LIVE_ENA
 echo "  DB=$DB"
 echo ""
 
+# --- Pre-flight: refuse a duplicate, self-heal a crashed prior run ----------
+# A healthy full stack already running (engine + live health check) is not
+# something to fight for ports with. Refuse. Otherwise clear any stale processes
+# and stack ports a crashed prior run left behind, then start fresh. Only the
+# ports this stack owns are touched, never a blanket kill. This never touches the
+# kill-request control file, so the safety halt is unaffected.
+export MAL_VITE_PORT="${MAL_VITE_PORT:-5173}"
+if "$PY" -m api_server.stack stack-running >/dev/null 2>&1; then
+  die "a healthy stack is already running (engine + health check). Refusing to start a second copy. Stop it first (GUI Stop, or Ctrl-C the running start)."
+fi
+echo "[pre-flight] self-healing any crashed prior run ..."
+"$PY" -m api_server.stack self-heal 2>&1 | sed 's/^/       /' || true
+echo "[pre-flight] freeing stack ports (bridge ${BRIDGE_PORT}, api ${API_PORT}, vite ${MAL_VITE_PORT}) if held by stale processes ..."
+"$PY" -m api_server.stack preflight 2>&1 | sed 's/^/       /' || true
+echo ""
+
 # --- 0. Warm-start: backfill real bars + verify every symbol warm -----------
 # Fills the shared bars table with real Alpaca history so the engine seeds warm
 # indicators on construction (>= 300 5-min bars per symbol via the 30-day 5-min
@@ -114,6 +132,7 @@ echo ""
 echo "[1/4] starting Python bridge on 127.0.0.1:${BRIDGE_PORT} ..."
 BRIDGE_PORT="$BRIDGE_PORT" "$PY" -m python_bridge.server &
 BRIDGE_PID=$!
+"$PY" -m api_server.stack record-pid bridge "$BRIDGE_PID" >/dev/null 2>&1 || true
 wait_http "http://127.0.0.1:${BRIDGE_PORT}/health" "bridge" 40 \
   || die "bridge did not become healthy on port ${BRIDGE_PORT}"
 echo "      bridge healthy. Real-service availability:"
@@ -134,11 +153,13 @@ echo "      engine running (pid $ENGINE_PID). Crypto 24/7; equities respect mark
 # Record the single-instance lock the SAME way the GUI supervisor does, so a GUI
 # start refuses to launch a second engine over this one. Cleared on exit.
 "$PY" -c "from api_server import stack; stack.write_lock($ENGINE_PID, $BRIDGE_PID, source='script')" 2>/dev/null || true
+"$PY" -m api_server.stack record-pid engine "$ENGINE_PID" >/dev/null 2>&1 || true
 
 # --- 3. GUI backend ----------------------------------------------------------
 echo "[3/4] starting GUI backend on 127.0.0.1:${API_PORT} ..."
 "$PY" -m api_server.run &
 API_PID=$!
+"$PY" -m api_server.stack record-pid api "$API_PID" >/dev/null 2>&1 || true
 wait_http "http://127.0.0.1:${API_PORT}/health" "api" 40 \
   || die "GUI backend did not become healthy on port ${API_PORT}"
 echo "      GUI backend healthy."
@@ -167,5 +188,6 @@ else
   echo ""
   ( cd web && npm run dev ) &
   VITE_PID=$!
+  "$PY" -m api_server.stack record-pid vite "$VITE_PID" >/dev/null 2>&1 || true
   wait "$VITE_PID"
 fi

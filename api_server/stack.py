@@ -327,6 +327,155 @@ def seed_feed_clock() -> None:
         pass
 
 
+# --- pre-flight port cleanup (self-clean a prior run holding a port) --------
+# Only the exact ports this stack owns, never a blanket kill. port_holders is the
+# mockable seam. free_port always protects our own pid, so the supervisor can
+# never kill the backend process it runs in.
+
+def stack_ports() -> dict:
+    return {"bridge": bridge_port(), "api": api_port(), "vite": vite_port()}
+
+
+def port_holders(port: int) -> list[int]:
+    """PIDs listening on a local TCP port. Best-effort via lsof then ss. Returns
+    [] when it cannot tell, it never guesses a pid."""
+    pids: set[int] = set()
+    try:
+        out = subprocess.run(["lsof", "-ti", f"tcp:{port}", "-sTCP:LISTEN"],
+                             capture_output=True, text=True, timeout=5)
+        for line in out.stdout.split():
+            if line.strip().isdigit():
+                pids.add(int(line.strip()))
+        if pids:
+            return sorted(pids)
+    except Exception:
+        pass
+    try:
+        import re
+        out = subprocess.run(["ss", "-tlnp", f"sport = :{port}"],
+                             capture_output=True, text=True, timeout=5)
+        for m in re.finditer(r"pid=(\d+)", out.stdout):
+            pids.add(int(m.group(1)))
+    except Exception:
+        pass
+    return sorted(pids)
+
+
+def free_port(port: int, label: str, exclude_pids=()) -> dict:
+    """Terminate any process holding `port`, gracefully then force. Only this
+    port, never a blanket kill. Always protects our own pid and exclude_pids."""
+    protect = set(exclude_pids) | {os.getpid()}
+    holders = [p for p in port_holders(port) if p not in protect]
+    if not holders:
+        return {"port": port, "label": label, "action": "free", "pids": []}
+    cleared = [pid for pid in holders if terminate_pid(pid)]
+    return {"port": port, "label": label, "action": "cleared", "pids": cleared}
+
+
+def preflight_ports(names=None, exclude_pids=()) -> list[dict]:
+    """Free the named stack ports (default all) of stale holders. The supervisor
+    passes names=["bridge"] so it never touches the port it is served on."""
+    ports = stack_ports()
+    if names is None:
+        names = list(ports.keys())
+    return [free_port(ports[n], n, exclude_pids) for n in names if n in ports]
+
+
+# --- pid tracking + clean teardown (self-heal a crashed prior run) ----------
+
+def pids_path() -> str:
+    return os.path.join(run_dir(), "pids")
+
+
+def read_pids() -> dict:
+    try:
+        with open(pids_path()) as fh:
+            return json.load(fh)
+    except Exception:
+        return {}
+
+
+def _write_pids(d: dict) -> None:
+    os.makedirs(run_dir(), exist_ok=True)
+    with open(pids_path(), "w") as fh:
+        json.dump(d, fh, indent=2)
+
+
+def record_pid(name: str, pid) -> None:
+    d = read_pids()
+    try:
+        d[name] = int(pid)
+    except (TypeError, ValueError):
+        return
+    d["ts"] = store._now()
+    _write_pids(d)
+
+
+def remove_pid(name: str) -> None:
+    d = read_pids()
+    if name in d:
+        d.pop(name, None)
+        _write_pids(d)
+
+
+def clear_pids() -> None:
+    try:
+        os.remove(pids_path())
+    except FileNotFoundError:
+        pass
+    except Exception:
+        pass
+
+
+def tracked_pids() -> dict:
+    return {k: v for k, v in read_pids().items()
+            if k != "ts" and isinstance(v, int)}
+
+
+def stop_tracked_pids() -> list[dict]:
+    """Stop every recorded pid gracefully then force, then clear the file. Used
+    by teardown and by self-heal of a crashed prior run."""
+    out = []
+    for name, pid in tracked_pids().items():
+        if pid_alive(pid):
+            out.append({"name": name, "pid": pid, "stopped": terminate_pid(pid)})
+        else:
+            out.append({"name": name, "pid": pid, "stopped": True,
+                        "already_dead": True})
+    clear_pids()
+    return out
+
+
+def stack_running() -> dict:
+    """A healthy stack: the engine pid (from the lock, else the pid file) is alive
+    AND a health check passes on the bridge or the backend. The single-instance
+    guard refuses a duplicate start when this is true, instead of fighting for
+    ports. It reads the kill-request file NOWHERE."""
+    lk = lock_status()
+    epid = lk["engine_pid"] if lk["alive"] else tracked_pids().get("engine")
+    engine_alive = bool(epid) and pid_alive(epid)
+    healthy = bool(engine_alive) and (
+        http_ok(bridge_health_url(), tries=1, delay=0)
+        or http_ok(api_health_url(), tries=1, delay=0))
+    return {"running": bool(engine_alive and healthy), "engine_pid": epid,
+            "engine_alive": bool(engine_alive), "healthy": bool(healthy)}
+
+
+def self_heal() -> dict:
+    """Clean a crashed prior run: stop any still-alive tracked pids, clear the
+    pid file, and clear a stale engine lock. Refuses to run when a healthy stack
+    is up (that is a duplicate, not a crash). Never touches the kill-request
+    file."""
+    if stack_running()["running"]:
+        return {"skipped": "a healthy stack is already running"}
+    lk = lock_status()
+    stopped = stop_tracked_pids()
+    cleared_lock = bool(lk["present"] and lk["stale"])
+    if cleared_lock:
+        clear_lock()
+    return {"stopped": stopped, "cleared_stale_lock": cleared_lock}
+
+
 # --- CLI for the bash script (shared logic, not duplicated) -----------------
 
 def _cli(argv: list[str]) -> int:
@@ -344,6 +493,46 @@ def _cli(argv: list[str]) -> int:
     if cmd == "clear-lock":
         clear_lock()
         print("lock cleared")
+        return 0
+    if cmd == "preflight":
+        names = argv[1:] or None
+        for r in preflight_ports(names):
+            if r["action"] == "free":
+                print(f"port {r['port']} ({r['label']}): free already")
+            else:
+                print(f"port {r['port']} ({r['label']}): cleared stale pid(s) {r['pids']}")
+        return 0
+    if cmd == "self-heal":
+        res = self_heal()
+        if res.get("skipped"):
+            print(f"self-heal skipped: {res['skipped']}")
+            return 0
+        for s in res["stopped"]:
+            extra = " (already dead)" if s.get("already_dead") else ""
+            print(f"stopped {s['name']} pid {s['pid']}{extra}")
+        if res["cleared_stale_lock"]:
+            print("cleared stale engine lock")
+        if not res["stopped"] and not res["cleared_stale_lock"]:
+            print("nothing to clean")
+        return 0
+    if cmd == "stack-running":
+        st = stack_running()
+        print(json.dumps(st))
+        return 0 if st["running"] else 1
+    if cmd == "record-pid":
+        if len(argv) >= 3:
+            record_pid(argv[1], argv[2])
+            print(f"recorded {argv[1]}={argv[2]}")
+            return 0
+        print("usage: record-pid <name> <pid>")
+        return 2
+    if cmd == "clear-pids":
+        clear_pids()
+        print("pids cleared")
+        return 0
+    if cmd == "stop-tracked":
+        for s in stop_tracked_pids():
+            print(f"stopped {s['name']} pid {s['pid']}")
         return 0
     print(f"unknown stack command: {cmd}", flush=True)
     return 2

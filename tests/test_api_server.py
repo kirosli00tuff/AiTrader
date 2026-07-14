@@ -851,8 +851,13 @@ def sup(env, monkeypatch, tmp_path):
     monkeypatch.setattr(stack, "warm_report", lambda db=None: dict(_WARM_ALL))
     monkeypatch.setattr(stack, "pid_alive", lambda pid: True)
     monkeypatch.setattr(stack, "spawn", _mk_spawn(engine_alive=True))
+    # Pre-flight is mocked so tests never probe or kill a real port. pid-file
+    # helpers stay real (they write under the temp MAL_RUN_DIR).
+    monkeypatch.setattr(stack, "preflight_ports", lambda names=None, exclude_pids=(): [])
+    stack.clear_pids()
     yield supervisor.SUPERVISOR
     supervisor.SUPERVISOR._reset_for_test()
+    stack.clear_pids()
 
 
 def test_engine_state_shape_and_no_key(sup, client):
@@ -968,3 +973,122 @@ def test_engine_endpoints_bind_loopback():
     """The lifecycle endpoints ride the same loopback-bound app, no new bind."""
     from api_server.app import HOST
     assert HOST == "127.0.0.1"
+
+
+# --- Pre-flight port cleanup, PID tracking, single-instance self-heal --------
+# All process/port control is mocked. No real lsof, no real kill, no network.
+
+def test_preflight_clears_stale_holder_and_leaves_others(monkeypatch, tmp_path):
+    monkeypatch.setenv("MAL_RUN_DIR", str(tmp_path / "run"))
+    from api_server import stack
+    killed = []
+    monkeypatch.setattr(stack, "terminate_pid",
+                        lambda pid, timeout=8.0: (killed.append(pid) or True))
+    bp = stack.bridge_port()
+    # Only the bridge port is held by a stale pid; other stack ports are free.
+    monkeypatch.setattr(stack, "port_holders",
+                        lambda port: [55555] if port == bp else [])
+    rep = stack.preflight_ports()
+    br = next(r for r in rep if r["label"] == "bridge")
+    assert br["action"] == "cleared" and 55555 in br["pids"]
+    assert all(r["action"] == "free" for r in rep if r["label"] != "bridge")
+    assert killed == [55555]   # only the stale bridge holder, no blanket kill
+
+
+def test_preflight_never_targets_own_pid(monkeypatch):
+    import os as _os
+    from api_server import stack
+    killed = []
+    monkeypatch.setattr(stack, "terminate_pid",
+                        lambda pid, timeout=8.0: (killed.append(pid) or True))
+    # Even if our own process appears to hold a stack port, it is protected.
+    monkeypatch.setattr(stack, "port_holders", lambda port: [_os.getpid()])
+    stack.preflight_ports()
+    assert killed == []
+
+
+def test_pid_file_record_read_and_stop(monkeypatch, tmp_path):
+    monkeypatch.setenv("MAL_RUN_DIR", str(tmp_path / "run"))
+    from api_server import stack
+    stack.clear_pids()
+    stack.record_pid("bridge", 111)
+    stack.record_pid("engine", 222)
+    assert stack.tracked_pids() == {"bridge": 111, "engine": 222}
+    stopped = []
+    monkeypatch.setattr(stack, "pid_alive", lambda pid: True)
+    monkeypatch.setattr(stack, "terminate_pid",
+                        lambda pid, timeout=8.0: (stopped.append(pid) or True))
+    res = stack.stop_tracked_pids()
+    assert {r["pid"] for r in res} == {111, 222}
+    assert set(stopped) == {111, 222}
+    assert stack.read_pids() == {}   # file cleared after teardown
+
+
+def test_self_heal_clears_stale_run(monkeypatch, tmp_path):
+    monkeypatch.setenv("MAL_RUN_DIR", str(tmp_path / "run"))
+    monkeypatch.setenv("MAL_CONTROL_DIR", str(tmp_path / "control"))
+    from api_server import stack
+    # A crashed prior run: dead recorded pids + a stale engine lock.
+    monkeypatch.setattr(stack, "pid_alive", lambda pid: False)
+    monkeypatch.setattr(stack, "http_ok", lambda *a, **k: False)
+    stack.record_pid("engine", 999999)
+    stack.write_lock(999999, source="script")
+    assert stack.lock_status()["stale"] is True
+    res = stack.self_heal()
+    assert res.get("skipped") is None
+    assert stack.read_pids() == {}
+    assert stack.lock_status()["present"] is False
+
+
+def test_self_heal_refuses_when_healthy_stack_up(monkeypatch, tmp_path):
+    monkeypatch.setenv("MAL_RUN_DIR", str(tmp_path / "run"))
+    monkeypatch.setenv("MAL_CONTROL_DIR", str(tmp_path / "control"))
+    from api_server import stack
+    # A live, healthy engine: self-heal must NOT kill it (it is a duplicate, not
+    # a crash), and stop_tracked must not be reached.
+    monkeypatch.setattr(stack, "pid_alive", lambda pid: True)
+    monkeypatch.setattr(stack, "http_ok", lambda *a, **k: True)
+    stack.write_lock(4242, 4243, source="script")
+    res = stack.self_heal()
+    assert res.get("skipped")
+
+
+def test_stack_running_guard(monkeypatch, tmp_path):
+    monkeypatch.setenv("MAL_RUN_DIR", str(tmp_path / "run"))
+    monkeypatch.setenv("MAL_CONTROL_DIR", str(tmp_path / "control"))
+    from api_server import stack
+    monkeypatch.setattr(stack, "pid_alive", lambda pid: True)
+    stack.write_lock(4242, 4243, source="script")
+    # Healthy: engine alive AND a health check passes -> refuse a duplicate.
+    monkeypatch.setattr(stack, "http_ok", lambda *a, **k: True)
+    assert stack.stack_running()["running"] is True
+    # Engine alive but unhealthy (no health) -> not a running instance to block.
+    monkeypatch.setattr(stack, "http_ok", lambda *a, **k: False)
+    assert stack.stack_running()["running"] is False
+
+
+def test_supervisor_preflights_bridge_only_and_tracks_pids(sup, client, monkeypatch):
+    from api_server import stack
+    calls = []
+    monkeypatch.setattr(stack, "preflight_ports",
+                        lambda names=None, exclude_pids=(): (calls.append(names) or []))
+    client.post("/engine/start")
+    sup.join(4)
+    assert client.get("/engine/state").json()["state"] == "running"
+    # Pre-flight cleaned ONLY the bridge port, never the api port it runs on.
+    assert calls and all(n == ["bridge"] for n in calls)
+    # It tracked the bridge + engine pids in the shared pid file.
+    assert {"bridge", "engine"} <= set(stack.tracked_pids())
+    # Stop removes the tracked pids.
+    client.post("/engine/stop")
+    assert "engine" not in stack.tracked_pids()
+
+
+def test_preflight_and_pid_helpers_never_touch_kill_request():
+    """Pre-flight, pid tracking, and self-heal must never read or write the
+    kill-request file, so cleanup can never disturb the safety halt."""
+    import inspect
+    from api_server import stack
+    for fn in (stack.preflight_ports, stack.free_port, stack.self_heal,
+               stack.stop_tracked_pids, stack.record_pid):
+        assert "kill_request" not in inspect.getsource(fn).lower()

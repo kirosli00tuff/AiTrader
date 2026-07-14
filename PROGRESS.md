@@ -68,6 +68,16 @@ New flags from the feed-work session (2026-07-05, `369b6a6`):
 
 Newest entries at top. One entry per session. Format: date, model used, what changed, what is stable, what is next.
 
+### 2026-07-14 (Opus 4.8) — self-clean stale processes and ports on start, PID tracking for clean teardown, block duplicate starts
+
+- **Port-collision class of start failure resolved.** A prior run that crashed while holding a port no longer blocks the next start. Both the start script and the GUI supervisor self-clean pre-flight through one shared implementation (api_server/stack.py).
+- **Pre-flight port cleanup.** Frees the exact ports this stack owns (bridge, GUI backend, Vite) of stale holders, graceful signal then force kill, one line per port. Only those ports, never a blanket kill. The supervisor frees ONLY the bridge port (never the api port it is served on), and free_port always protects our own pid so the supervisor can never kill the backend it runs in.
+- **PID tracking + clean teardown.** The script records every started pid (bridge, engine, backend, frontend) in .run/pids, and a trap stops them and removes the file on exit and Ctrl-C. A crashed prior run self-heals on the next start: stale pids stopped, file cleared, a stale engine lock cleared.
+- **Single-instance guard.** A healthy full stack already running (engine pid alive + a live health check, stack.stack_running) refuses a second start rather than fighting for ports. A stale pid file with dead pids is not a running instance, it is cleared and the start proceeds.
+- **Kill switch stays independent.** Pre-flight, pid tracking, and self-heal never read or write the kill-request control file (asserted in tests), so cleanup never disturbs the safety halt, which still halts the engine with the supervisor down.
+- **Stable:** Python pytest 227 passed (8 new pre-flight/pid/self-heal/guard tests, all process and port control mocked, no real network). Frontend unchanged this session (typecheck + 10 render + build green from the supervisor session). RiskGate, the live-trading gate, and the adaptive limit-weakening invariant untouched. RL gated (0/500), live OFF.
+- **Next:** raise the engine-to-bridge and bridge-to-provider timeouts above real council latency and degrade gracefully on a slow provider, to fix the broken-pipe no-trade stall.
+
 ### 2026-07-14 (Opus 4.8) — GUI start/stop for paper trading through an independent supervisor, kill switch stays independent
 
 - **Start and stop paper trading from the GUI.** New backend supervisor (api_server/supervisor.py) owns the bridge + engine lifecycle and exposes GET /engine/state, POST /engine/start, POST /engine/stop on the existing loopback backend. Start runs the same warmed sequence as scripts/start_paper_trading.sh (backfill, warm-verify, bridge, engine feed_mode alpaca_paper clock real, health checked between steps) through one shared callable, api_server/stack.py, so the script and the GUI never drift. The script was refactored to reuse stack (warm-report CLI, seed_feed_clock, the lock). State: not_running, starting, warming (per-symbol warm progress), running, stopping. Strict no-silent-mock: an unreachable on-real layer makes Start fail loudly with what is missing.
