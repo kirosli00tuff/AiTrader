@@ -435,3 +435,93 @@ def test_council_is_concurrent_not_serialized(monkeypatch):
     elapsed = time.perf_counter() - t0
     assert len(res.per_model) == 3
     assert elapsed < 0.75          # concurrent (~0.3s), not serial (~0.9s)
+
+
+# --- Robust verdict parsing of real provider response shapes ------------------
+# Recorded from real calls: Gemini 3.1 Pro preview emits a valid object with a
+# stray extra "}" OR drops its closing "}" (finishReason STOP, not truncation);
+# OpenAI/Anthropic occasionally wrap or fence the JSON. The parser recovers all.
+
+# The exact body Gemini returned that the old parser rejected (stray extra brace).
+_GEMINI_DOUBLE_BRACE = (
+    '{\n  "direction": "long",\n  "confidence": 0.65,\n  "edge": 0.015,\n'
+    '  "rationale": "Momentum and catalyst favor a long."\n}\n}')
+# Gemini dropping the closing brace entirely (a complete but unterminated object).
+_GEMINI_NO_CLOSE = (
+    '{\n  "direction": "long",\n  "confidence": 0.55,\n  "edge": 0.005,\n'
+    '  "rationale": "Mild upside, neutral order book."')
+_FENCED = ('```json\n{"direction": "short", "confidence": 0.5, "edge": 0.02, '
+           '"rationale": "fenced"}\n```')
+_PROSE = ('Here is my read after weighing the setup: '
+          '{"direction": "long", "confidence": 0.7, "edge": 0.03, "rationale": "prose"}')
+_REASONING_THEN_ANSWER = (
+    'Thinking: the book looks like {a: 1} but the read is '
+    '{"direction": "short", "confidence": 0.4, "edge": 0.01, "rationale": "after reasoning"}')
+# Genuinely broken: truncated mid-number, nothing recoverable.
+_BROKEN = '{"direction": "long", "confidence": 0.'
+
+
+def test_extract_recovers_real_noisy_shapes():
+    assert http_json.extract_json_object(_GEMINI_DOUBLE_BRACE)["confidence"] == 0.65
+    assert http_json.extract_json_object(_GEMINI_NO_CLOSE)["confidence"] == 0.55
+    assert http_json.extract_json_object(_FENCED)["direction"] == "short"
+    assert http_json.extract_json_object(_PROSE)["direction"] == "long"
+    # An incidental object in the reasoning is skipped for the verdict-shaped one.
+    assert http_json.extract_json_object(_REASONING_THEN_ANSWER)["rationale"] == "after reasoning"
+    # A genuinely broken body yields None (the caller then flat-fallbacks).
+    assert http_json.extract_json_object(_BROKEN) is None
+
+
+def test_provider_parses_gemini_double_brace(monkeypatch):
+    monkeypatch.setenv("GEMINI_API_KEY", "test-key")
+    monkeypatch.setattr(http_json, "post_json",
+                        lambda *a, **k: _gemini_env(_GEMINI_DOUBLE_BRACE))
+    v = GeminiProvider(name="llm_tertiary", weight=0.12,
+                       model_id="gemini-3.1-pro-preview").score({"symbol": "BTC/USD"})
+    assert v.source == "real" and v.bias > 0
+
+
+def test_provider_parses_gemini_missing_close(monkeypatch):
+    monkeypatch.setenv("GEMINI_API_KEY", "test-key")
+    monkeypatch.setattr(http_json, "post_json",
+                        lambda *a, **k: _gemini_env(_GEMINI_NO_CLOSE))
+    v = GeminiProvider(name="llm_tertiary", weight=0.12,
+                       model_id="gemini-3.1-pro-preview").score({"symbol": "BTC/USD"})
+    assert v.source == "real" and v.bias > 0
+
+
+def test_provider_broken_body_is_flat_not_raise(monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    monkeypatch.setattr(http_json, "post_json",
+                        lambda *a, **k: _anthropic_env(_BROKEN))
+    v = AnthropicProvider(name="llm_secondary", weight=0.18,
+                          model_id="claude-opus-4-8").score({"symbol": "BTC/USD"})
+    assert v.source == "error" and v.bias == 0.0
+
+
+def test_council_holds_with_one_broken_two_noisy(monkeypatch):
+    for k in _LLM_KEYS:
+        monkeypatch.setenv(k, "test-key")
+
+    def _post(url, headers, payload, timeout=None):
+        if "openai" in url:
+            return _openai_env(_FENCED)                 # noisy but valid
+        if "anthropic" in url:
+            return _anthropic_env(_BROKEN)              # genuinely broken
+        return _gemini_env(_GEMINI_NO_CLOSE)            # noisy but valid
+
+    monkeypatch.setattr(http_json, "post_json", _post)
+    res = consensus({"symbol": "BTC/USD", "ret_5": 0.03},
+                    providers=real_providers(), gate=_ALWAYS)
+    sources = [v.source for v in res.per_model]
+    assert sources.count("real") == 2 and sources.count("error") == 1
+    # At least one provider parsed, so the council still produced a verdict.
+    assert any(v.source == "real" for v in res.per_model)
+
+
+def test_anthropic_request_has_no_unsupported_prefill():
+    """claude-opus-4-8 rejects an assistant-message prefill (HTTP 400), so the
+    request must end with a user message."""
+    from llm_consensus.providers import anthropic_request
+    _, _, payload = anthropic_request("claude-opus-4-8", "k", "sys", "user")
+    assert payload["messages"][-1]["role"] == "user"

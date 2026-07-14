@@ -65,6 +65,21 @@ def build_user_prompt(state: dict) -> str:
             "\nReturn your directional read as the required JSON object.")
 
 
+def _debug_raw(name: str, model_id: str, text: str) -> None:
+    """Log the raw provider text on a parse failure, ONLY when MAL_COUNCIL_DEBUG
+    is set (off by default). Truncated and passed through the credential masker so
+    no key value is ever logged. Diagnostic aid, off in normal running."""
+    if not os.environ.get("MAL_COUNCIL_DEBUG"):
+        return
+    snippet = (text or "")[:800]
+    try:
+        from account_manager.log_safety import mask_secrets
+        snippet = mask_secrets(snippet)
+    except Exception:
+        pass
+    log.warning("council raw (unparseable) %s (%s): %r", name, model_id, snippet)
+
+
 def _resolve_key(env_var: str) -> str | None:
     """Resolve an API key following the credentials.py precedence (in-app then
     env), degrading to a plain env lookup if the credential store is unavailable.
@@ -186,6 +201,7 @@ class _RealLLMProvider:
         if obj is None:
             log.warning("council provider %s (%s) returned unparseable output",
                         self.name, self.model_id)
+            _debug_raw(self.name, self.model_id, text)
             return flat_verdict(self.name, f"flat: {self.LABEL} unparseable JSON",
                                 source="error", model_id=self.model_id)
         try:
@@ -246,6 +262,11 @@ def anthropic_request(model_id: str, key: str, system_prompt: str,
         # Prompt caching: explicit ephemeral cache_control on the fixed system
         # prefix caches it across calls.
         system_block["cache_control"] = {"type": "ephemeral"}
+    # NOTE: claude-opus-4-8 does NOT support an assistant-message prefill ("The
+    # conversation must end with a user message", HTTP 400), so the "{" prefill
+    # trick is unavailable here. Anthropic's structured output relies on the
+    # strict JSON instruction in the system prompt, and the robust parser
+    # (http_json.extract_json_object) recovers the verdict from any noise.
     payload = {
         "model": model,
         "max_tokens": max_tokens,  # cost cap (Task 4)
