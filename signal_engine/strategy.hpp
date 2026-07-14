@@ -91,6 +91,9 @@ bool indicators_warm(int bar_count, const config::StrategyConfig& cfg);
 // --- Regime detection ----------------------------------------------------
 enum class Regime { Trending, RangeBound, Neutral };
 std::string regime_to_string(Regime r);
+// Parse a regime label ("trending" | "range_bound" | "neutral") back to a
+// Regime. Used by the operator regime-pin override. Unknown => Neutral.
+Regime regime_from_string(const std::string& s);
 
 struct RegimeResult {
     Regime regime = Regime::Neutral;

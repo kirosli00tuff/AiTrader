@@ -92,6 +92,17 @@ def meets_promotion_criteria(champion_metrics: dict, challenger_metrics: dict,
     return True, "meets all promotion criteria (still requires explicit promotion)"
 
 
+def promote(conn: sqlite3.Connection, challenger_id: str,
+            metrics: dict | None = None, reason: str = "manual promote") -> str:
+    """Manually promote a challenger to champion: retire the current champion and
+    install the challenger. The caller enforces the gate (meets_promotion_criteria)
+    before this runs, so a runtime promote cannot bypass the criteria. Advisory
+    layer, the 0.5 sizing cap is unchanged regardless of which model serves."""
+    conn.execute("UPDATE model_registry SET role='retired' WHERE role='champion'")
+    register(conn, challenger_id, "champion", metrics or {}, reason)
+    return challenger_id
+
+
 def rollback(conn: sqlite3.Connection, reason: str) -> str | None:
     """Roll back to the most recent retired model (previous champion)."""
     row = conn.execute(

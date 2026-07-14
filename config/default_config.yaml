@@ -242,6 +242,11 @@ adaptive:
   adaptive_learning_enabled: true
   adaptive_weight_updates_enabled: true
   manual_weight_override_priority: true        # manual weights win over adaptive
+  # Floor on the rule_based (native) signal weight. Two effects: the tuner never
+  # nudges the raw weight below it, and the gate verdict guarantees rule_based at
+  # least this NORMALIZED share so advisory factors at the cap cannot dilute the
+  # native conviction and stall entries. Advisory bound, no risk limit.
+  rule_based_weight_floor: 0.35
   adaptive_threshold_update_frequency_trades: 25
   dnn_retrain_frequency_trades: 50
   dnn_challenger_evaluation_window_trades: 100

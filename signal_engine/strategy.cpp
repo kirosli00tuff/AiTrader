@@ -45,6 +45,12 @@ std::string regime_to_string(Regime r) {
     return "neutral";
 }
 
+Regime regime_from_string(const std::string& s) {
+    if (s == "trending") return Regime::Trending;
+    if (s == "range_bound") return Regime::RangeBound;
+    return Regime::Neutral;
+}
+
 std::string direction_to_string(Direction d) {
     switch (d) {
         case Direction::Long: return "long";

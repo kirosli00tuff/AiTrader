@@ -86,6 +86,15 @@ std::map<std::string, double> AdaptiveTuner::propose_weight_update(
         if (it != factor_performance.end()) perf = it->second;
         double w = entry.weight * (1.0 + learning_rate * perf);
         w = std::clamp(w, 0.0, max_single_weight);
+        // Floor the native rule_based weight so the tuner cannot starve native
+        // entry generation over a long run. The floor is a lower bound on an
+        // advisory weight, still under the max_single_weight cap, and it never
+        // touches a risk limit. The tuner may still lower rule_based toward the
+        // floor and raise it up to the cap.
+        if (factor == "rule_based") {
+            double floor = std::min(cfg_.rule_based_weight_floor, max_single_weight);
+            w = std::max(w, floor);
+        }
         proposed[factor] = w;
     }
     return proposed;

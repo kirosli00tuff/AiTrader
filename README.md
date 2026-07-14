@@ -205,6 +205,27 @@ switch is audited (`feed_mode` / `clock_mode` events); a blocked one logs
 `feed_mode_blocked`. A missing or invalid control value keeps the launch
 feed/clock, so it never forces an offline run onto the live feed.
 
+### Other live controls and the tuner floor
+
+The remaining Controls-page controls are now consumed by the engine too:
+
+- **Council model toggles** drop a provider (GPT-5.5, Claude Opus 4.8, or Gemini
+  3.1 Pro) from the council for that iteration. At least one must stay on, or the
+  council falls back to a clearly logged skip.
+- **Regime pins** override the detector for a symbol (test-only), affecting the
+  surfaced regime and the council neutral-skip.
+- **Council budget** (daily budget and per-symbol cooldown) adjusts at runtime
+  within validated bounds.
+- **Promote / rollback** of the `dnn_advisory` champion execute through the
+  registry, gated by the promotion criteria (a runtime promote cannot bypass
+  them) and audited.
+
+A **tuner floor** (`adaptive.rule_based_weight_floor`, default 0.35) keeps the
+native signal's weight — and its share of the gate verdict — from being starved
+by the adaptive tuner, so a long paper run keeps generating native entries
+(fills) instead of stalling after ~30. It is an advisory bound and never weakens
+a risk limit.
+
 Two states are **on by design and not part of full activation**:
 
 - **RL advisory** ships **OFF**, gated behind `rl_min_real_fills` (default 500

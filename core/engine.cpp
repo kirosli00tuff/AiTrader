@@ -5,6 +5,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <ctime>
 #include <fstream>
 #include <functional>
 #include <iterator>
@@ -59,6 +60,9 @@ Engine::Engine(config::Config cfg, EngineOptions opts)
         controls_path_ = dir + "/controls.json";
         layer_toggles_ = read_layer_toggles(controls_path_);
         prev_layer_toggles_ = layer_toggles_;
+        operator_controls_ =
+            read_operator_controls(controls_path_, cfg_.strategy.whitelist);
+        prev_operator_controls_ = operator_controls_;
     }
 
     // Resolve the offline feed mode early so alpaca_paper can force the online
@@ -181,8 +185,16 @@ std::vector<signal_engine::FactorSignal> Engine::gather_factors(
     // gated here. This removes an advisory input, never safety: the RiskGate
     // still evaluates every order below.
     std::vector<std::string> factors;
-    for (const auto& f : all)
-        if (factor_enabled(f, layer_toggles_)) factors.push_back(f);
+    for (const auto& f : all) {
+        if (!factor_enabled(f, layer_toggles_)) continue;
+        // Council model toggles (controls.json): drop a disabled provider slot for
+        // this iteration. The ensemble math handles a reduced provider set via the
+        // normalized weights. rule_based and the other factors are untouched.
+        if (f == "llm_primary" && !operator_controls_.llm_primary) continue;
+        if (f == "llm_secondary" && !operator_controls_.llm_secondary) continue;
+        if (f == "llm_tertiary" && !operator_controls_.llm_tertiary) continue;
+        factors.push_back(f);
+    }
 
     // Rule-based is always computed in C++.
     // LLM/DNN/whale come from the bridge if enabled, else mocks. The three LLM
@@ -294,8 +306,11 @@ void Engine::on_closed_bar(const market_data::MarketState& ms,
         hist.erase(hist.begin(),
                    hist.begin() + (hist.size() - kBarHistoryCap));
 
-    // Recompute + persist the symbol's regime (advisory; surfaced in the UI).
+    // Recompute + persist the symbol's regime (advisory; surfaced in the UI). An
+    // operator regime pin (controls.json, test-only) overrides the detector for
+    // that symbol so the UI and the council neutral-skip both see the pin.
     auto rr = strategy::detect_regime(hist, cfg_.strategy);
+    rr.regime = pinned_or(ms.symbol, rr.regime);
     storage_->upsert_regime(ms.symbol, strategy::regime_to_string(rr.regime),
                             rr.adx, rr.rvol, ms.ts);
 
@@ -353,10 +368,16 @@ void Engine::init_bar_mode(
     }
     std::sort(replay_queue_.begin(), replay_queue_.end(),
               [](const BarTick& a, const BarTick& b) { return a.ms.ts < b.ms.ts; });
-    // Monotonic epoch for council-cooldown timing (relative spacing only).
-    for (size_t k = 0; k < replay_queue_.size(); ++k)
+    // Council-cooldown spacing keys off the TRUE historical bar time (matching
+    // the per-day trade cap, which already uses the bar ts), so cooldowns reflect
+    // real historical spacing rather than a synthetic sequential epoch. Fall back
+    // to a monotonic epoch only if a stored ts is malformed.
+    for (size_t k = 0; k < replay_queue_.size(); ++k) {
+        long hist = util::iso8601_to_epoch(replay_queue_[k].ms.ts);
         replay_queue_[k].epoch =
-            sim_epoch_ + static_cast<long>(k) * bar_step_seconds_;
+            hist > 0 ? hist
+                     : sim_epoch_ + static_cast<long>(k) * bar_step_seconds_;
+    }
 
     if (replay_queue_.empty()) {
         std::string wl;
@@ -378,6 +399,7 @@ int Engine::step_bar_mode() {
     // lives here too. Same latching kill switch, no separate path.
     consume_operator_kill_request();
     consume_layer_toggles();
+    consume_operator_controls();
     if (feed_mode_ == "synthetic_regimes") {
         // All whitelisted instruments close a bar at the same simulated instant.
         const std::string ts = util::epoch_to_iso8601(sim_epoch_);
@@ -524,6 +546,10 @@ void Engine::handle_bar_close(const market_data::MarketState& ms,
 
     const bool is_crypto = ms.category == "crypto";
     auto decision = strategy::evaluate(bar_history_[key], cfg_.strategy, is_crypto);
+    // Operator regime pin (test-only) overrides the detected regime used for the
+    // council neutral-skip and the surfaced label. The strategy signal selection
+    // already ran on the detected regime inside evaluate().
+    decision.regime.regime = pinned_or(ms.symbol, decision.regime.regime);
     const auto& sig = decision.signal;
     if (!sig.has_signal) return;
 
@@ -570,12 +596,26 @@ void Engine::handle_bar_close(const market_data::MarketState& ms,
     // Cut B — market-hours skip: US equities skip the base-check gate + council
     // outside regular US trading hours (crypto stays 24/7). Only the expensive
     // council call is suppressed; native factors + execution still run.
+    // Market-hours skip keys off the SIMULATED timestamp under clock_mode
+    // simulated, and real wall-clock under clock_mode real, so an offline
+    // simulated run gates equities by simulated bar time, not the wall clock.
+    const std::time_t mh_time = simulated_clock_
+                                    ? static_cast<std::time_t>(now_epoch)
+                                    : std::time(nullptr);
     const bool market_hours_skip =
         cfg_.engine.equities_market_hours_only && ms.category == "equity" &&
-        !util::us_equity_market_open();
+        !util::us_equity_market_open(mh_time);
 
-    // Council cost-control gate: decide whether the full council may run.
+    // Council cost-control gate: decide whether the full council may run. The
+    // runtime budget override (controls.json) adjusts the daily budget and the
+    // per-symbol cooldown within their validated bounds; a -1 keeps the config.
     reset_if_new_day(council_state_, utc_day);
+    config::CouncilConfig rc = cfg_.council;
+    if (operator_controls_.council_daily_budget >= 0)
+        rc.council_daily_budget = operator_controls_.council_daily_budget;
+    if (operator_controls_.per_symbol_cooldown_minutes >= 0)
+        rc.per_symbol_council_cooldown_minutes =
+            operator_controls_.per_symbol_cooldown_minutes;
     bool council_allowed;
     if (market_hours_skip) {
         council_allowed = false;
@@ -584,9 +624,18 @@ void Engine::handle_bar_close(const market_data::MarketState& ms,
              "Council skipped: equities outside US regular trading hours",
              util::to_json({{"reason", "market_hours"}, {"symbol", ms.symbol}},
                            {})});
+    } else if (!any_council_provider(operator_controls_)) {
+        // Model toggles disabled every provider: the council cannot run, so fall
+        // back to a clearly logged skip. Native factors + execution still run.
+        council_allowed = false;
+        storage_->append_event(
+            {ts, "council_skip", ms.venue, ms.symbol, "info",
+             "Council skipped: all providers disabled (model toggles)",
+             util::to_json({{"reason", "no_providers"}, {"symbol", ms.symbol}},
+                           {})});
     } else {
         auto cdec = signal_engine::decide_council(
-            cfg_.council, council_state_, decision.regime.regime, sig.strength,
+            rc, council_state_, decision.regime.regime, sig.strength,
             ms.symbol, now_epoch);
         council_allowed = cdec == signal_engine::CouncilDecision::Proceed;
         if (!council_allowed) {
@@ -612,7 +661,8 @@ void Engine::handle_bar_close(const market_data::MarketState& ms,
     // When false, the gate confidence/edge come from advisory factors alone and
     // the native setup still drives direction and sizing. RiskGate untouched.
     auto verdict = signal_engine::compose_gate_verdict(
-        signals, weights_, cfg_.engine.native_conviction_feeds_gate);
+        signals, weights_, cfg_.engine.native_conviction_feeds_gate, 0.05,
+        cfg_.adaptive.rule_based_weight_floor);
     o.confidence = verdict.confidence;
     o.edge = verdict.edge;
     o.model_agreement_count = verdict.agreement_count;
@@ -747,6 +797,73 @@ void Engine::consume_layer_toggles() {
            layer_toggles_.dnn_advisory_real);
     logsrc("whale", prev_layer_toggles_.whale_real, layer_toggles_.whale_real);
     prev_layer_toggles_ = layer_toggles_;
+}
+
+void Engine::consume_operator_controls() {
+    // Read the remaining operator controls (model toggles, budget, regime pins)
+    // from controls.json each iteration. Missing/malformed keeps the safe current
+    // behavior. Advisory/cost only, never a safety bypass.
+    operator_controls_ =
+        read_operator_controls(controls_path_, cfg_.strategy.whitelist);
+    if (operator_controls_ == prev_operator_controls_) return;
+    const std::string ts = util::now_iso8601();
+    auto logprov = [&](const char* slot, bool oldv, bool newv) {
+        if (oldv == newv) return;
+        storage_->append_event(
+            {ts, "model_toggle", "", "", "info",
+             std::string("Council provider ") + slot + ": " +
+                 (oldv ? "on" : "off") + " -> " + (newv ? "on" : "off"),
+             util::to_json({{"slot", slot}, {"old", oldv ? "on" : "off"},
+                            {"new", newv ? "on" : "off"}}, {})});
+    };
+    logprov("llm_primary", prev_operator_controls_.llm_primary,
+            operator_controls_.llm_primary);
+    logprov("llm_secondary", prev_operator_controls_.llm_secondary,
+            operator_controls_.llm_secondary);
+    logprov("llm_tertiary", prev_operator_controls_.llm_tertiary,
+            operator_controls_.llm_tertiary);
+    if (operator_controls_.council_daily_budget !=
+            prev_operator_controls_.council_daily_budget ||
+        operator_controls_.per_symbol_cooldown_minutes !=
+            prev_operator_controls_.per_symbol_cooldown_minutes) {
+        storage_->append_event(
+            {ts, "budget_change", "", "", "info",
+             "Council budget: budget " +
+                 std::to_string(prev_operator_controls_.council_daily_budget) +
+                 " -> " + std::to_string(operator_controls_.council_daily_budget) +
+                 ", cooldown " +
+                 std::to_string(prev_operator_controls_.per_symbol_cooldown_minutes) +
+                 " -> " +
+                 std::to_string(operator_controls_.per_symbol_cooldown_minutes),
+             util::to_json({}, {{"budget", static_cast<double>(
+                                              operator_controls_.council_daily_budget)},
+                                {"cooldown", static_cast<double>(
+                                                 operator_controls_.per_symbol_cooldown_minutes)}})});
+    }
+    auto pin_of = [](const OperatorControls& oc, const std::string& s) {
+        auto it = oc.regime_pins.find(s);
+        return it == oc.regime_pins.end() ? std::string() : it->second;
+    };
+    for (const auto& sym : cfg_.strategy.whitelist) {
+        std::string oldp = pin_of(prev_operator_controls_, sym);
+        std::string newp = pin_of(operator_controls_, sym);
+        if (oldp == newp) continue;
+        storage_->append_event(
+            {ts, "regime_pin", "", sym, "info",
+             "Regime pin " + sym + ": " + (oldp.empty() ? "auto" : oldp) +
+                 " -> " + (newp.empty() ? "auto (cleared)" : newp),
+             util::to_json({{"symbol", sym}, {"old", oldp.empty() ? "auto" : oldp},
+                            {"new", newp.empty() ? "auto" : newp}}, {})});
+    }
+    prev_operator_controls_ = operator_controls_;
+}
+
+strategy::Regime Engine::pinned_or(const std::string& symbol,
+                                   strategy::Regime detected) const {
+    auto it = operator_controls_.regime_pins.find(symbol);
+    if (it == operator_controls_.regime_pins.end() || it->second.empty())
+        return detected;
+    return strategy::regime_from_string(it->second);
 }
 
 void Engine::track_warm_state(const std::string& symbol, const std::string& venue,
@@ -885,6 +1002,7 @@ int Engine::run_iteration() {
     // switch as a loss-triggered halt). See consume_operator_kill_request.
     consume_operator_kill_request();
     consume_layer_toggles();
+    consume_operator_controls();
     auto states = feed_->poll();
     if (alpaca_feed_) {
         last_poll_live_ =

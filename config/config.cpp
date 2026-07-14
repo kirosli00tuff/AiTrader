@@ -285,6 +285,7 @@ Config load_config(const std::string& path) {
     a.adaptive_learning_enabled = get_bool(root, "adaptive.adaptive_learning_enabled", a.adaptive_learning_enabled);
     a.adaptive_weight_updates_enabled = get_bool(root, "adaptive.adaptive_weight_updates_enabled", a.adaptive_weight_updates_enabled);
     a.manual_weight_override_priority = get_bool(root, "adaptive.manual_weight_override_priority", a.manual_weight_override_priority);
+    a.rule_based_weight_floor = get_double(root, "adaptive.rule_based_weight_floor", a.rule_based_weight_floor);
     a.adaptive_threshold_update_frequency_trades = get_int(root, "adaptive.adaptive_threshold_update_frequency_trades", a.adaptive_threshold_update_frequency_trades);
     a.dnn_retrain_frequency_trades = get_int(root, "adaptive.dnn_retrain_frequency_trades", a.dnn_retrain_frequency_trades);
     a.dnn_challenger_evaluation_window_trades = get_int(root, "adaptive.dnn_challenger_evaluation_window_trades", a.dnn_challenger_evaluation_window_trades);
@@ -478,6 +479,13 @@ std::vector<std::string> validate_config(const Config& cfg) {
         problems.push_back("council.council_min_agreement must be >= 0");
     if (co.per_symbol_council_cooldown_minutes < 0)
         problems.push_back("council.per_symbol_council_cooldown_minutes must be >= 0");
+
+    // Adaptive rule_based weight floor: an advisory weight bound in [0, 0.6]
+    // (0.6 is the tuner's per-factor cap). It never touches a risk limit.
+    if (cfg.adaptive.rule_based_weight_floor < 0.0 ||
+        cfg.adaptive.rule_based_weight_floor > 0.6)
+        problems.push_back(
+            "adaptive.rule_based_weight_floor must be in [0, 0.6]");
 
     // RL advisory (deferred). The real-fill training gate must be non-negative;
     // rl_enabled defaults false so the factor stays out of the ensemble.

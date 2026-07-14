@@ -1,6 +1,7 @@
 #include "core/util.hpp"
 
 #include <chrono>
+#include <cstdio>
 #include <ctime>
 #include <sstream>
 
@@ -32,6 +33,24 @@ std::string epoch_to_iso8601(long epoch_seconds) {
     char buf[32];
     std::strftime(buf, sizeof(buf), "%Y-%m-%dT%H:%M:%SZ", &tm);
     return buf;
+}
+
+long iso8601_to_epoch(const std::string& ts) {
+    int y = 0, mo = 0, d = 0, h = 0, mi = 0, s = 0;
+    if (std::sscanf(ts.c_str(), "%d-%d-%dT%d:%d:%d", &y, &mo, &d, &h, &mi, &s) < 6)
+        return 0;  // malformed
+    std::tm tm{};
+    tm.tm_year = y - 1900;
+    tm.tm_mon = mo - 1;
+    tm.tm_mday = d;
+    tm.tm_hour = h;
+    tm.tm_min = mi;
+    tm.tm_sec = s;
+#if defined(_WIN32)
+    return static_cast<long>(_mkgmtime(&tm));
+#else
+    return static_cast<long>(timegm(&tm));
+#endif
 }
 
 namespace {

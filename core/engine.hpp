@@ -16,6 +16,7 @@
 #include "account_manager/account_manager.hpp"
 #include "core/feed_clock.hpp"
 #include "core/layer_toggles.hpp"
+#include "core/operator_controls.hpp"
 #include "config/config.hpp"
 #include "execution/execution.hpp"
 #include "learning/adaptive.hpp"
@@ -168,6 +169,14 @@ private:
                           const std::string& key, const std::string& ts);
     // Whether the symbol at `key` is warm enough to evaluate a native entry.
     bool symbol_is_warm(const std::string& key) const;
+    // Consume the remaining controls.json overrides each iteration (Task 2):
+    // council model toggles, runtime budget, and per-symbol regime pins. Logs
+    // each change with old and new. Advisory/cost only, never a safety bypass.
+    void consume_operator_controls();
+    // Apply an operator regime pin for `symbol` if present, else return the
+    // detected regime unchanged. The pin overrides the detector for that symbol.
+    strategy::Regime pinned_or(const std::string& symbol,
+                               strategy::Regime detected) const;
 
     config::Config cfg_;
     EngineOptions opts_;
@@ -224,6 +233,10 @@ private:
     std::string controls_path_;
     LayerToggles layer_toggles_;
     LayerToggles prev_layer_toggles_;
+    // Remaining operator controls (model toggles, budget, regime pins), read from
+    // controls.json each iteration like the layer toggles. Advisory/cost only.
+    OperatorControls operator_controls_;
+    OperatorControls prev_operator_controls_;
 
     // --- Offline feed / clock state (Tasks 2-4) ---------------------------
     // feed_mode_: flat_random_walk (tick path) | synthetic_regimes | replay.

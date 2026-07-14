@@ -70,22 +70,52 @@ std::vector<std::string> WeightState::apply_adaptive(
 }
 
 CombinedVerdict combine(const std::vector<FactorSignal>& signals,
-                        const WeightState& weights, double min_factor_conf) {
+                        const WeightState& weights, double min_factor_conf,
+                        double rule_based_min_share) {
     CombinedVerdict cv;
     auto norm = weights.normalized();
     if (norm.empty()) return cv;
 
-    double wbias = 0.0, wconf = 0.0, wedge = 0.0, used_weight = 0.0;
+    // Collect the effective normalized weight per signal-producing factor.
+    std::vector<std::pair<const FactorSignal*, double>> used;
+    double total = 0.0;
     for (const auto& s : signals) {
         auto it = norm.find(s.factor);
         if (it == norm.end()) continue;
         double w = it->second;
         if (w <= 0.0) continue;
-        wbias += w * s.bias;
-        wconf += w * s.confidence;
-        wedge += w * s.edge;
+        used.push_back({&s, w});
+        total += w;
+    }
+
+    // Guarantee rule_based at least `rule_based_min_share` of the used weight, so
+    // a saturated advisory set (every other factor at the cap) cannot dilute the
+    // native conviction below it. The other factors scale down proportionally.
+    // This only reweights the confidence/edge/bias average; it never changes
+    // which factors are present or the RiskGate thresholds.
+    if (rule_based_min_share > 0.0 && total > 0.0) {
+        double rb = 0.0;
+        for (const auto& [s, w] : used)
+            if (s->factor == "rule_based") rb += w;
+        if (rb > 0.0 && rb / total < rule_based_min_share) {
+            double others = total - rb;
+            double target_others = 1.0 - rule_based_min_share;
+            for (auto& [s, w] : used) {
+                if (s->factor == "rule_based")
+                    w = rule_based_min_share;
+                else
+                    w = others > 0.0 ? target_others * (w / others) : 0.0;
+            }
+        }
+    }
+
+    double wbias = 0.0, wconf = 0.0, wedge = 0.0, used_weight = 0.0;
+    for (const auto& [s, w] : used) {
+        wbias += w * s->bias;
+        wconf += w * s->confidence;
+        wedge += w * s->edge;
         used_weight += w;
-        cv.contributions[s.factor] = w;
+        cv.contributions[s->factor] = w;
     }
     if (used_weight > 0.0) {
         // Re-normalize across factors that actually produced a signal.
@@ -109,14 +139,21 @@ CombinedVerdict combine(const std::vector<FactorSignal>& signals,
 CombinedVerdict compose_gate_verdict(const std::vector<FactorSignal>& signals,
                                      const WeightState& weights,
                                      bool native_conviction_feeds_gate,
-                                     double min_factor_conf) {
-    CombinedVerdict full = combine(signals, weights, min_factor_conf);
+                                     double min_factor_conf,
+                                     double rule_based_min_share) {
+    // The rule_based share floor applies only when the native conviction feeds
+    // the gate (the default). It keeps the native confidence/edge from being
+    // diluted by a saturated advisory set, so native entries keep clearing the
+    // gate over a long run.
+    CombinedVerdict full =
+        combine(signals, weights, min_factor_conf, rule_based_min_share);
     if (native_conviction_feeds_gate) return full;
     // Flag OFF: the native setup still drives direction (bias) and sizing, but
     // the gate confidence and edge come from the ADVISORY factors alone. We
     // recompute confidence/edge over the ensemble minus `rule_based` and swap
-    // only those two fields. Bias, verdict, and agreement are unchanged. This
-    // never touches the RiskGate or its thresholds.
+    // only those two fields. Bias, verdict, and agreement are unchanged. The
+    // rule_based floor is moot here (rule_based is excluded). This never touches
+    // the RiskGate or its thresholds.
     std::vector<FactorSignal> advisory;
     advisory.reserve(signals.size());
     for (const auto& s : signals)

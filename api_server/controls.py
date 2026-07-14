@@ -202,6 +202,22 @@ def _write_controls(state: dict) -> None:
     srcs = state.get("layer_sources", {}) or {}
     for layer in SOURCE_LAYERS:
         out[f"{layer}_source"] = "mock" if srcs.get(layer) == "mock" else "real"
+    # Flat per-slot council model enables the C++ engine reads (llm_primary_enabled
+    # etc.), derived from the models map (keyed by model id) and the slot order.
+    models = state.get("models", {}) or {}
+    for slot, model_id in zip(("llm_primary", "llm_secondary", "llm_tertiary"),
+                              COUNCIL_MODELS):
+        out[f"{slot}_enabled"] = bool(models.get(model_id, True))
+    # Flat runtime budget the engine reads (rt_ prefix so they never collide with
+    # the nested budget block's keys under the tiny C++ JSON reader).
+    budget = state.get("budget", {}) or {}
+    if "council_daily_budget" in budget:
+        out["rt_council_daily_budget"] = budget["council_daily_budget"]
+    if "per_symbol_cooldown_minutes" in budget:
+        out["rt_per_symbol_cooldown_minutes"] = budget["per_symbol_cooldown_minutes"]
+    # Flat per-symbol regime pins the engine reads (regime_pin:<symbol>).
+    for sym, regime in (state.get("regime_pins", {}) or {}).items():
+        out[f"regime_pin:{sym}"] = regime
     with open(_controls_path(), "w") as fh:
         json.dump(out, fh, indent=2)
 
@@ -534,30 +550,69 @@ def set_regime(symbol: str, regime: str | None) -> dict:
             "regime_pins": st["regime_pins"]}
 
 
+def _registry_conn():
+    """Open a read-write connection to the shared DB for a registry role update.
+    Promotion/rollback are the only registry writes here and are gated + audited.
+    The model_registry table is the Python trainer's, not a C++ operational table."""
+    import sqlite3
+    return sqlite3.connect(store._db_path(), timeout=2.0)
+
+
 def request_promote() -> dict:
+    """Execute a manual dnn champion promotion through the registry path, gated by
+    meets_promotion_criteria (can_promote) so a runtime promote cannot bypass the
+    criteria. Retires the current champion, installs the challenger, audits the
+    change with old and new champion. The frontend requires a confirm."""
     summ = registry_summary()
     if not summ["can_promote"]:
         return {"ok": False,
                 "error": f"promotion gated: {summ['promote_reason']}",
                 "registry": summ}
+    chall = summ["challenger"] or {}
+    challenger_id = chall.get("model_id")
+    old_champ = (summ["champion"] or {}).get("model_id")
+    from ml_factor import registry as reg
+    try:
+        conn = _registry_conn()
+        try:
+            reg.promote(conn, challenger_id, chall.get("metrics", {}),
+                        "manual GUI promote")
+            conn.commit()
+        finally:
+            conn.close()
+    except Exception as e:
+        return {"ok": False, "error": f"promote failed: {e}"}
     st = read_controls()
-    req = {"model_id": (summ["challenger"] or {}).get("model_id"),
-           "ts": _now()}
-    st["pending_promote"] = req
+    st["pending_promote"] = {"model_id": challenger_id, "ts": _now(),
+                             "executed": True}
     _write_controls(st)
-    _audit("promote_request", None, req)
-    return {"ok": True, "request": req,
-            "note": "promote request recorded + audited; the trainer/registry "
-                    "applies it, never automatically"}
+    _audit("promote", old_champ, challenger_id)
+    return {"ok": True, "champion": challenger_id, "retired": old_champ}
 
 
 def request_rollback() -> dict:
+    """Execute a manual rollback to the previous champion through the registry
+    rollback path, audited with old and new champion. The frontend requires a
+    confirm. No-op refusal if there is no retired champion to roll back to."""
     summ = registry_summary()
     if not summ["can_rollback"]:
         return {"ok": False, "error": "no retired champion to roll back to"}
+    old_champ = (summ["champion"] or {}).get("model_id")
+    from ml_factor import registry as reg
+    try:
+        conn = _registry_conn()
+        try:
+            restored = reg.rollback(conn, "manual GUI rollback")
+            conn.commit()
+        finally:
+            conn.close()
+    except Exception as e:
+        return {"ok": False, "error": f"rollback failed: {e}"}
+    if not restored:
+        return {"ok": False, "error": "no retired champion to roll back to"}
     st = read_controls()
-    req = {"ts": _now()}
-    st["pending_rollback"] = req
+    st["pending_rollback"] = {"ts": _now(), "restored": restored,
+                              "executed": True}
     _write_controls(st)
-    _audit("rollback_request", None, req)
-    return {"ok": True, "request": req}
+    _audit("rollback", old_champ, restored)
+    return {"ok": True, "champion": restored, "was": old_champ}

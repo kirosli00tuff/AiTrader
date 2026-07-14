@@ -89,3 +89,28 @@ target_link_libraries(test_warm_start PRIVATE mal_core mal_market_data
                       mal_signal_engine mal_storage mal_risk mal_config mal_util)
 add_test(NAME warm_start COMMAND test_warm_start
          WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+# Tuner floor (Task 1): the tuner never drives rule_based below the floor,
+# compose_gate_verdict guarantees rule_based its min share, and a long synthetic
+# run keeps generating native entries past 100 closed trades (no plateau).
+add_executable(test_tuner_floor test_tuner_floor.cpp)
+target_link_libraries(test_tuner_floor PRIVATE mal_core mal_market_data
+                      mal_signal_engine mal_learning mal_storage mal_risk
+                      mal_config mal_util)
+add_test(NAME tuner_floor COMMAND test_tuner_floor
+         WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+# Operator controls reader (Task 2): flat-key model toggles, clamped runtime
+# budget, regime pins, and the at-least-one-provider rule. Pure, header-only.
+add_executable(test_operator_controls test_operator_controls.cpp)
+target_link_libraries(test_operator_controls PRIVATE mal_bridge)
+add_test(NAME operator_controls COMMAND test_operator_controls
+         WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+# Time modes (Task 3 + 4): iso8601_to_epoch round-trip for replay cooldown
+# spacing, and us_equity_market_open honoring the explicit time for the
+# simulated-clock market-hours skip.
+add_executable(test_time_modes test_time_modes.cpp)
+target_link_libraries(test_time_modes PRIVATE mal_util)
+add_test(NAME time_modes COMMAND test_time_modes
+         WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})

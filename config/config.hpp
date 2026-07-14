@@ -118,6 +118,18 @@ struct AdaptiveConfig {
     bool adaptive_learning_enabled = true;
     bool adaptive_weight_updates_enabled = true;
     bool manual_weight_override_priority = true;
+    // Floor on the rule_based (native) signal's weight. It serves two ends, both
+    // keeping the native conviction from being starved over a long run:
+    //   1. the tuner never nudges the raw rule_based weight below the floor, and
+    //   2. the gate verdict (compose_gate_verdict) guarantees rule_based at least
+    //      this NORMALIZED share, so the other factors saturating at the cap can
+    //      never dilute the native conviction below it.
+    // Without (2) the raw floor alone fails: five advisory factors at the 0.6 cap
+    // drive rule_based's normalized share toward zero, dropping the gate
+    // confidence below the RiskGate minimum and stalling native entries. This is
+    // an advisory weight bound, it touches no risk limit and never weakens a
+    // Layer-1 gate (the RiskGate still judges every order on its own thresholds).
+    double rule_based_weight_floor = 0.35;
     int adaptive_threshold_update_frequency_trades = 25;
     int dnn_retrain_frequency_trades = 50;
     int dnn_challenger_evaluation_window_trades = 100;

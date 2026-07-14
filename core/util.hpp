@@ -15,6 +15,11 @@ std::string now_iso8601();
 // per-day trade-cap bucket) independent of wall-clock time.
 std::string epoch_to_iso8601(long epoch_seconds);
 
+// Parse an ISO-8601 UTC timestamp (YYYY-MM-DDThh:mm:ssZ) to an epoch second.
+// Used by replay so council-cooldown spacing keys off the true historical bar
+// time. Returns 0 on a malformed string.
+long iso8601_to_epoch(const std::string& ts);
+
 // True if the US equity regular trading session (09:30–16:00 America/New_York,
 // Mon–Fri) is open at the given UTC time. Used by the continuous engine loop to
 // skip equity ticks when the market is closed (crypto + prediction markets are

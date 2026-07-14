@@ -72,10 +72,15 @@ private:
 };
 
 // Combine factor signals using normalized weights. `min_factor_conf` filters
-// out near-zero-confidence factors from the agreement count.
+// out near-zero-confidence factors from the agreement count. `rule_based_min_share`
+// (default 0 = off) guarantees the rule_based factor at least that share of the
+// normalized weight over the signal-producing factors, so a saturated advisory
+// set cannot dilute the native conviction below it. It never changes direction,
+// only how much the native confidence/edge feed the weighted average.
 CombinedVerdict combine(const std::vector<FactorSignal>& signals,
                         const WeightState& weights,
-                        double min_factor_conf = 0.05);
+                        double min_factor_conf = 0.05,
+                        double rule_based_min_share = 0.0);
 
 // Compose the confidence/edge the RiskGate sees, honoring
 // native_conviction_feeds_gate. When true (default) this returns the full
@@ -87,6 +92,7 @@ CombinedVerdict combine(const std::vector<FactorSignal>& signals,
 CombinedVerdict compose_gate_verdict(const std::vector<FactorSignal>& signals,
                                      const WeightState& weights,
                                      bool native_conviction_feeds_gate,
-                                     double min_factor_conf = 0.05);
+                                     double min_factor_conf = 0.05,
+                                     double rule_based_min_share = 0.0);
 
 }  // namespace mal::signal_engine

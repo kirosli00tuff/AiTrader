@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import ipaddress
+import json
 import os
 import sqlite3
 
@@ -522,6 +523,61 @@ def test_controls_budget_clamped(env, client):
 def test_controls_promote_and_rollback_gated(client):
     assert client.post("/controls/promote").json()["ok"] is False
     assert client.post("/controls/rollback").json()["ok"] is False
+
+
+def _seed_registry(db, champ_metrics, chall_metrics):
+    conn = sqlite3.connect(db)
+    conn.execute("INSERT INTO model_registry(ts,model_id,role,metrics_json,notes) "
+                 "VALUES(?,?,?,?,?)", ("2026-07-06T00:00:00Z", "dnn-champ",
+                 "champion", json.dumps(champ_metrics), "seed"))
+    conn.execute("INSERT INTO model_registry(ts,model_id,role,metrics_json,notes) "
+                 "VALUES(?,?,?,?,?)", ("2026-07-06T01:00:00Z", "dnn-chall",
+                 "challenger", json.dumps(chall_metrics), "seed"))
+    conn.commit()
+    conn.close()
+
+
+def test_controls_promote_and_rollback_execute(env, client):
+    # A qualifying challenger (real-data, >=200 samples, higher sharpe, no worse
+    # drawdown) so meets_promotion_criteria passes and the promote executes.
+    _seed_registry(env["db"],
+                   {"validation_sharpe": 0.5, "max_drawdown": 0.2,
+                    "provenance": "synthetic"},
+                   {"validation_sharpe": 0.9, "max_drawdown": 0.15,
+                    "provenance": "real-data", "n_samples": 300})
+    r = client.post("/controls/promote").json()
+    assert r["ok"] is True and r["champion"] == "dnn-chall" \
+        and r["retired"] == "dnn-champ"
+    assert client.get("/controls").json()["registry"]["champion"]["model_id"] \
+        == "dnn-chall"
+    # Rollback restores the previous champion through the registry path.
+    rb = client.post("/controls/rollback").json()
+    assert rb["ok"] is True and rb["champion"] == "dnn-champ"
+    assert client.get("/controls").json()["registry"]["champion"]["model_id"] \
+        == "dnn-champ"
+    # Both were audited to the append-only event log.
+    conn = sqlite3.connect(env["db"])
+    n = conn.execute("SELECT COUNT(*) FROM events WHERE kind='control_change' "
+                     "AND (message LIKE 'promote:%' OR message LIKE 'rollback:%')"
+                     ).fetchone()[0]
+    conn.close()
+    assert n >= 2
+
+
+def test_controls_flat_engine_keys(env, client):
+    # The engine reads flat keys from controls.json; the GUI setters must emit
+    # them: a disabled provider slot, the runtime budget, and a regime pin.
+    client.post("/controls/model", json={"model": "gpt-5.5", "enabled": False})
+    client.post("/controls/budget", json={"council_daily_budget": 12,
+                                          "per_symbol_cooldown_minutes": 45})
+    client.post("/controls/regime", json={"symbol": "BTC/USD",
+                                          "regime": "trending"})
+    with open(os.path.join(env["control"], "controls.json")) as fh:
+        j = json.load(fh)
+    assert j["llm_primary_enabled"] is False      # gpt-5.5 is the primary slot
+    assert j["rt_council_daily_budget"] == 12
+    assert j["rt_per_symbol_cooldown_minutes"] == 45
+    assert j["regime_pin:BTC/USD"] == "trending"
 
 
 def test_controls_never_writes_level1(env, client):
