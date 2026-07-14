@@ -76,6 +76,9 @@ Engine::Engine(config::Config cfg, EngineOptions opts)
         {"alpaca", "SPY", "SPY", "equity", 545.0},
         {"alpaca", "QQQ", "QQQ", "equity", 470.0},
     };
+    // Keep the universe so a runtime feed switch (Task 3) can rebuild the tick
+    // feed or the bar-driven generators without reconstructing the engine.
+    all_instruments_ = instruments;
 
     // Select the market-data source: CLI override else config. feed_mode
     // alpaca_paper forces the online Alpaca feed (the primary online loop).
@@ -113,6 +116,10 @@ Engine::Engine(config::Config cfg, EngineOptions opts)
     const std::string clock = !opts_.clock_mode.empty() ? opts_.clock_mode
                                                         : cfg_.simulation.clock_mode;
     simulated_clock_ = (clock == "simulated");
+    // Launch feed/clock is the fallback for the runtime toggle (Task 3): a
+    // missing/invalid controls.json value keeps what the engine launched with, so
+    // an offline run is never forced onto the live feed by an absent file.
+    launch_feed_clock_ = {feed_mode_, clock};
     bar_step_seconds_ = opts_.native_bar_seconds > 0 ? opts_.native_bar_seconds : 1;
     // Base the simulated clock at 2026-01-05T00:00:00Z (a Monday) so day buckets
     // and any market-hours checks land on sensible weekday dates.
@@ -292,6 +299,11 @@ void Engine::on_closed_bar(const market_data::MarketState& ms,
     storage_->upsert_regime(ms.symbol, strategy::regime_to_string(rr.regime),
                             rr.adx, rr.rvol, ms.ts);
 
+    // Warm-state tracking on the real path (Task 2): log a transition when the
+    // symbol crosses cold<->warm. Only the alpaca_paper (real) loop gates entry
+    // on warmth; offline feed modes keep building history for tests unchanged.
+    if (feed_mode_ == "alpaca_paper") track_warm_state(ms.symbol, ms.venue, key, ms.ts);
+
     // Native trading happens ONLY on a closed bar unless the legacy bootstrap
     // simulator is explicitly enabled. This is the single closed-bar path shared
     // by the tick feed and the synthetic/replay bar feeds.
@@ -300,6 +312,12 @@ void Engine::on_closed_bar(const market_data::MarketState& ms,
 
 void Engine::init_bar_mode(
     const std::vector<market_data::Instrument>& instruments) {
+    // Idempotent so a runtime feed switch (Task 3) can re-enter a bar-driven mode
+    // cleanly: clear any prior generators / replay queue first.
+    bar_instruments_.clear();
+    synth_gens_.clear();
+    replay_queue_.clear();
+    replay_pos_ = 0;
     for (const auto& i : instruments)
         if (is_whitelisted(i.symbol)) bar_instruments_.push_back(i);
 
@@ -490,6 +508,11 @@ void Engine::handle_bar_close(const market_data::MarketState& ms,
     }
 
     // ---------- ENTRY path: consider a new native strategy entry ----------
+    // Warm-state gate (Task 2): on the real paper path, do not evaluate a symbol
+    // for entry until its indicators are warm. A cold symbol waits (the cold/warm
+    // transition is logged in on_closed_bar); it never fires on partial data.
+    if (feed_mode_ == "alpaca_paper" && !symbol_is_warm(key)) return;
+
     // Per-day trade cap (UTC day bucket derived from the bar timestamp).
     std::string utc_day = ms.ts.size() >= 10 ? ms.ts.substr(0, 10) : ms.ts;
     if (trades_today_day_ != utc_day) {
@@ -724,6 +747,136 @@ void Engine::consume_layer_toggles() {
            layer_toggles_.dnn_advisory_real);
     logsrc("whale", prev_layer_toggles_.whale_real, layer_toggles_.whale_real);
     prev_layer_toggles_ = layer_toggles_;
+}
+
+void Engine::track_warm_state(const std::string& symbol, const std::string& venue,
+                              const std::string& key, const std::string& ts) {
+    const auto& hist = bar_history_[key];
+    const bool warm =
+        strategy::indicators_warm(static_cast<int>(hist.size()), cfg_.strategy);
+    auto it = symbol_warm_.find(key);
+    if (it != symbol_warm_.end() && it->second == warm) return;  // no transition
+    const bool first = it == symbol_warm_.end();
+    symbol_warm_[key] = warm;
+    const int need = strategy::min_bars_to_warm(cfg_.strategy);
+    const int have = static_cast<int>(hist.size());
+    const std::string when = ts.empty() ? util::now_iso8601() : ts;
+    const std::string bars_s =
+        std::to_string(have) + "/" + std::to_string(need) + " bars";
+    std::string msg =
+        warm ? "Indicators WARM for " + symbol + " (" + bars_s + ")"
+             : std::string(first ? "Indicators COLD for " : "Indicators back COLD for ") +
+                   symbol + " (" + bars_s + ") — waiting, no entry";
+    storage_->append_event(
+        {when, "warm_state", venue, symbol, "info", msg,
+         util::to_json({{"symbol", symbol}, {"state", warm ? "warm" : "cold"}},
+                       {{"bars", static_cast<double>(have)},
+                        {"need", static_cast<double>(need)}})});
+}
+
+bool Engine::symbol_is_warm(const std::string& key) const {
+    auto it = bar_history_.find(key);
+    const int n =
+        it == bar_history_.end() ? 0 : static_cast<int>(it->second.size());
+    return strategy::indicators_warm(n, cfg_.strategy);
+}
+
+std::vector<Engine::SymbolWarm> Engine::warm_states() const {
+    std::vector<SymbolWarm> out;
+    for (const auto& sym : cfg_.strategy.whitelist) {
+        const std::string key = "alpaca|" + sym;
+        auto it = bar_history_.find(key);
+        const int n =
+            it == bar_history_.end() ? 0 : static_cast<int>(it->second.size());
+        out.push_back({sym, strategy::indicator_warm_state(n, cfg_.strategy)});
+    }
+    return out;
+}
+
+void Engine::consume_feed_clock() {
+    // Read the runtime feed/clock toggle each iteration (same control-file
+    // pattern as the layer toggles). Fallback = the launch feed/clock, so a
+    // missing/invalid value never forces an offline run onto the live feed.
+    const FeedClock req = read_feed_clock(controls_path_, launch_feed_clock_);
+    const std::string ts = util::now_iso8601();
+
+    // Clock switch: applies immediately (run_iteration reads simulated_clock_ each
+    // tick). No open-position impact, so it is never blocked.
+    const bool want_sim = req.clock_mode == "simulated";
+    if (want_sim != simulated_clock_) {
+        storage_->append_event(
+            {ts, "clock_mode", "", "", "info",
+             std::string("Clock mode ") + (simulated_clock_ ? "simulated" : "real") +
+                 " -> " + (want_sim ? "simulated" : "real"),
+             util::to_json({{"old", simulated_clock_ ? "simulated" : "real"},
+                            {"new", want_sim ? "simulated" : "real"}}, {})});
+        simulated_clock_ = want_sim;
+    }
+
+    // Feed switch: enforce the open-position safety rule first.
+    if (req.feed_mode == feed_mode_) {
+        blocked_feed_request_.clear();
+        return;
+    }
+    if (feed_switch_orphans_position(feed_mode_, req.feed_mode,
+                                     has_open_positions())) {
+        if (blocked_feed_request_ != req.feed_mode) {  // log once per request
+            blocked_feed_request_ = req.feed_mode;
+            storage_->append_event(
+                {ts, "feed_mode_blocked", "", "", "warn",
+                 "Feed switch " + feed_mode_ + " -> " + req.feed_mode +
+                     " BLOCKED: " + std::to_string(open_positions_.size()) +
+                     " open paper position(s). Close them (or let native exits "
+                     "flatten) first; the loop keeps running on " + feed_mode_ + ".",
+                 util::to_json({{"old", feed_mode_}, {"new", req.feed_mode},
+                                {"reason", "open_position"}},
+                               {{"open", static_cast<double>(open_positions_.size())}})});
+        }
+        return;  // never orphan a position
+    }
+    blocked_feed_request_.clear();
+    apply_feed_switch(req.feed_mode, ts);
+}
+
+void Engine::apply_feed_switch(const std::string& new_feed, const std::string& ts) {
+    const std::string old_feed = feed_mode_;
+    feed_mode_ = new_feed;
+    if (new_feed == "synthetic_regimes" || new_feed == "replay") {
+        // Bar-driven modes build indicator history from the fed bars. Rebuild the
+        // generators / replay queue. Replay may refuse (empty bars) — do NOT
+        // crash the running loop; log and fall back to the prior feed.
+        try {
+            init_bar_mode(all_instruments_);
+        } catch (const std::exception& e) {
+            feed_mode_ = old_feed;
+            storage_->append_event(
+                {ts, "feed_mode_blocked", "", "", "warn",
+                 "Feed switch " + old_feed + " -> " + new_feed +
+                     " refused: " + e.what() + ". Loop stays on " + old_feed + ".",
+                 util::to_json({{"old", old_feed}, {"new", new_feed},
+                                {"reason", "feed_init_failed"}}, {})});
+            return;
+        }
+    } else {
+        // Tick-path modes: rebuild the feed source. alpaca_paper forces the online
+        // Alpaca feed; flat_random_walk uses the deterministic mock feed.
+        if (new_feed == "alpaca_paper") {
+            feed_ = std::make_unique<market_data::AlpacaFeed>(
+                all_instruments_, opts_.bridge_host, opts_.bridge_port, opts_.seed);
+            alpaca_feed_ = true;
+        } else {
+            feed_ = std::make_unique<market_data::MockFeed>(all_instruments_,
+                                                            opts_.seed);
+            alpaca_feed_ = false;
+        }
+    }
+    storage_->append_event(
+        {ts, "feed_mode", "", "", "info",
+         "Feed mode " + old_feed + " -> " + new_feed +
+             (new_feed == "alpaca_paper"
+                  ? " (warm-start gate re-armed: entries wait until warm)"
+                  : ""),
+         util::to_json({{"old", old_feed}, {"new", new_feed}}, {})});
 }
 
 int Engine::run_iteration() {
@@ -1069,52 +1222,54 @@ void Engine::run_forever(const volatile std::sig_atomic_t* stop_flag) {
         std::string src = alpaca_feed_ ? "alpaca" : "mock";
         storage_->append_event(
             {ts, "continuous_start", "", "", "info",
-             "Continuous paper loop started (source=" + src +
-                 ", interval=" + std::to_string(interval) + "s)",
+             "Continuous paper loop started (source=" + src + ", feed=" +
+                 feed_mode_ + ", interval=" + std::to_string(interval) + "s)",
              "{}"});
     }
 
-    // Bar-driven feed modes (synthetic_regimes / replay) step bars rather than
-    // polling the tick feed; replay stops cleanly at the end of its data. The
-    // tick-polling modes (flat_random_walk AND alpaca_paper, the primary online
-    // loop) fall through to run_iteration below, which polls the feed and
-    // aggregates ticks into closed bars. Routing alpaca_paper here would call
-    // step_bar_mode (synthetic/replay only) and exit immediately.
-    if (feed_mode_ == "synthetic_regimes" || feed_mode_ == "replay") {
-        int steps = 0;
-        while (!(stop_flag && *stop_flag)) {
-            if (step_bar_mode() == 0) break;  // replay exhausted
-            maybe_adapt(steps++);
-            if (!simulated_clock_ && cfg_.simulation.replay_speed == "realtime")
-                std::this_thread::sleep_for(std::chrono::seconds(1));
-        }
-        const std::string sts = util::now_iso8601();
-        storage_->append_event(
-            {sts, "continuous_stop", "", "", "info",
-             "Continuous bar-feed loop stopped after " + std::to_string(steps) +
-                 " steps, " + std::to_string(trade_count_) + " trades",
-             util::to_json({}, {{"final_equity", equity_}})});
-        return;
-    }
-
+    // The feed and clock are runtime-switchable (Task 3): consume the toggle at
+    // the top of every iteration and DISPATCH on the resulting feed_mode_, so a
+    // switch takes effect on the next iteration. Bar-driven modes (synthetic /
+    // replay) step one bar per iteration; the tick modes (alpaca_paper, the
+    // primary online loop, and flat_random_walk) poll the feed and aggregate
+    // ticks into closed bars. A switch never orphans an open position (enforced
+    // in consume_feed_clock). Sleeping in 1s slices lets a signal interrupt
+    // promptly and paces every mode uniformly at the loop interval.
     int iteration = 0;
+    bool replay_idle_logged = false;
     while (!(stop_flag && *stop_flag)) {
-        run_iteration();
-        maybe_adapt(iteration);
-        ++iteration;
-
-        // Sleep in 1s slices so a signal interrupts promptly (finish the slice,
-        // not the whole interval).
-        for (int s = 0; s < interval && !(stop_flag && *stop_flag); ++s) {
-            std::this_thread::sleep_for(std::chrono::seconds(1));
+        consume_feed_clock();
+        const bool bar_mode =
+            feed_mode_ == "synthetic_regimes" || feed_mode_ == "replay";
+        if (bar_mode) {
+            const int n = step_bar_mode();
+            if (n == 0) {
+                // Replay exhausted: idle (do NOT break) so the operator can still
+                // switch feeds via controls.json. Log the exhaustion once.
+                if (!replay_idle_logged) {
+                    replay_idle_logged = true;
+                    storage_->append_event(
+                        {util::now_iso8601(), "replay_exhausted", "", "", "info",
+                         "Replay reached the end of its bars; idling. Switch the "
+                         "feed from the GUI to resume another mode.", "{}"});
+                }
+            } else {
+                replay_idle_logged = false;
+                maybe_adapt(iteration++);
+            }
+        } else {
+            run_iteration();
+            maybe_adapt(iteration++);
         }
+        for (int s = 0; s < interval && !(stop_flag && *stop_flag); ++s)
+            std::this_thread::sleep_for(std::chrono::seconds(1));
     }
 
     const std::string ts = util::now_iso8601();
     storage_->append_event(
         {ts, "continuous_stop", "", "", "info",
          "Continuous paper loop stopped after " + std::to_string(iteration) +
-             " ticks, " + std::to_string(trade_count_) + " trades",
+             " iterations, " + std::to_string(trade_count_) + " trades",
          util::to_json({}, {{"final_equity", equity_}})});
     // SQLite writes autocommit per statement, so state is already durable.
 }

@@ -72,3 +72,20 @@ target_link_libraries(test_strict_mode PRIVATE mal_core mal_market_data
                       mal_signal_engine mal_storage mal_risk mal_config mal_util)
 add_test(NAME strict_mode COMMAND test_strict_mode
          WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+# Feed/clock runtime toggle (Task 3): read_feed_clock resolves each mode and
+# keeps the launch fallback on a missing/invalid value; feed_switch_orphans_
+# position enforces the open-position safety rule. Pure, header-only.
+add_executable(test_feed_clock test_feed_clock.cpp)
+target_link_libraries(test_feed_clock PRIVATE mal_bridge)
+add_test(NAME feed_clock COMMAND test_feed_clock
+         WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+# Warm-start (Task 1/2): the engine seeds indicators from the backfilled bars
+# table; warm_states() reports WARM above the longest lookback and COLD below;
+# the warm gate the entry path consults is the same pure predicate. Temp DB.
+add_executable(test_warm_start test_warm_start.cpp)
+target_link_libraries(test_warm_start PRIVATE mal_core mal_market_data
+                      mal_signal_engine mal_storage mal_risk mal_config mal_util)
+add_test(NAME warm_start COMMAND test_warm_start
+         WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})

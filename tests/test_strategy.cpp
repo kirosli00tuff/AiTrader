@@ -214,5 +214,25 @@ int main() {
               "council proceeds after daily budget reset");
     }
 
+    // --- Indicator warm-state (Task 1) --------------------------------------
+    {
+        config::StrategyConfig sc;  // production defaults (ema_slow 100 dominates)
+        const int need = strategy::min_bars_to_warm(sc);
+        check(need == sc.ema_slow + 2,
+              "min_bars_to_warm is the longest lookback (ema_slow + 2)");
+        check(!strategy::indicators_warm(need - 1, sc),
+              "a symbol reads COLD one bar below the longest lookback");
+        check(strategy::indicators_warm(need, sc),
+              "a symbol reads WARM once the longest lookback is satisfied");
+        auto cold = strategy::indicator_warm_state(sc.bb_period, sc);
+        check(cold.bollinger && !cold.ema_slow && !cold.all,
+              "at bb_period bars: Bollinger warm, 100-EMA cold, not all warm");
+        auto warm = strategy::indicator_warm_state(need, sc);
+        check(warm.ema_slow && warm.adx && warm.atr && warm.bollinger &&
+                  warm.rsi && warm.volume && warm.rvol && warm.all,
+              "at min_bars_to_warm every indicator is warm");
+        check(warm.bars == need, "warm-state reports the bar count");
+    }
+
     return report("strategy");
 }

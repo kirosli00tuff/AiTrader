@@ -23,6 +23,9 @@ vi.mock("../../api/client", () => {
     layers: { adaptive: true, council: true, dnn_advisory: true, whale: true },
     layer_sources: { council: "real", dnn_advisory: "real", whale: "real" },
     source_layers: ["council", "dnn_advisory", "whale"],
+    feed_mode: "alpaca_paper", clock_mode: "real",
+    feed_modes: ["alpaca_paper", "synthetic_regimes", "replay", "flat_random_walk"],
+    clock_modes: ["real", "simulated"], open_positions: 0,
     models: { "gpt-5.5": true, "claude-opus-4-8": true, "gemini-3.1-pro-preview": true },
     gate_enabled: true, auto_promote: false,
     budget: { council_daily_budget: 30, per_symbol_cooldown_minutes: 60 },
@@ -67,7 +70,8 @@ vi.mock("../../api/client", () => {
       kill: async () => ({ engine_kill_switch_tripped: false, request: { requested: false, reason: null, ts: null } }),
       requestKill: async () => ({ ok: true, request: { requested: true, reason: "x", ts: "x" }, engine: { engine_kill_switch_tripped: false, request: { requested: true, reason: "x", ts: "x" } } }),
       controls: async () => controls,
-      setWeights: okResult, setLayer: okResult, setModel: okResult, setRl: okResult,
+      setWeights: okResult, setLayer: okResult, setSource: okResult, setModel: okResult, setRl: okResult,
+      setFeedClock: okResult,
       setAutoPromote: okResult, promote: okResult, rollback: okResult, setRegime: okResult, setBudget: okResult,
     },
   };
@@ -114,6 +118,7 @@ describe("pages render", () => {
     expect(await screen.findByText("Ensemble weights (by layer)")).toBeInTheDocument();
     expect(await screen.findByText("Level 1 risk limits (read-only)")).toBeInTheDocument();
     expect(await screen.findByText(/ALWAYS ON/)).toBeInTheDocument();
+    expect(await screen.findByText("Feed & clock (runtime loop mode)")).toBeInTheDocument();
   });
 
   it("renders the Health page with integrations", async () => {

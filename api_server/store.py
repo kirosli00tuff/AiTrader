@@ -534,17 +534,24 @@ def runstate() -> dict:
     ap = approval()
     bridge = bridge_health()
     use_real = bool(llm.get("use_real_council", False))
+    # Prefer the runtime feed/clock from controls.json (the operator toggle the
+    # engine reads each iteration) over the static config, so the banner reflects
+    # the live loop state. Falls back to config when the control file is absent.
+    _feed = sim.get("feed_mode", "flat_random_walk")
+    _clock = sim.get("clock_mode", "real")
     try:
         from api_server import controls
         _ctl = controls.read_controls()
         _layers = _ctl.get("layers", {})
         _layer_sources = _ctl.get("layer_sources", {})
+        _feed = _ctl.get("feed_mode", _feed)
+        _clock = _ctl.get("clock_mode", _clock)
     except Exception:
         _layers = {}
         _layer_sources = {}
     council_mode = "real" if (use_real and bridge.get("reachable")) else "mock"
-    return {"feed_mode": sim.get("feed_mode", "flat_random_walk"),
-            "clock_mode": sim.get("clock_mode", "real"),
+    return {"feed_mode": _feed,
+            "clock_mode": _clock,
             "market_data_source": md.get("source", "mock"),
             "use_real_council": use_real,
             "gate_enabled": bool(llm.get("gate_enabled", True)),

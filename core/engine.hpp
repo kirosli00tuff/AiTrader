@@ -14,6 +14,7 @@
 #include <vector>
 
 #include "account_manager/account_manager.hpp"
+#include "core/feed_clock.hpp"
 #include "core/layer_toggles.hpp"
 #include "config/config.hpp"
 #include "execution/execution.hpp"
@@ -89,6 +90,16 @@ public:
     // at the top of run() and run_forever(); public so it is directly testable.
     void verify_real_layers_reachable();
 
+    // Per-symbol indicator warm-state (Task 1), computed from the in-memory bar
+    // history seeded from the backfilled bars table on construction. main.cpp
+    // prints one line per symbol at startup so the operator can confirm the
+    // backfill warmed the indicators. Read-only.
+    struct SymbolWarm {
+        std::string symbol;
+        strategy::WarmState state;
+    };
+    std::vector<SymbolWarm> warm_states() const;
+
 private:
     std::vector<signal_engine::FactorSignal> gather_factors(
         const market_data::MarketState& ms, const news::CatalystScore& cat,
@@ -137,6 +148,26 @@ private:
     // A toggle off drops that layer's factor from the ensemble. Safety has no
     // toggle and is never gated here. Advisory only, never a safety bypass.
     void consume_layer_toggles();
+    // Consume the runtime feed-mode + clock-mode toggle from controls.json each
+    // loop iteration (Task 3). A clock switch applies immediately. A feed switch
+    // rebuilds the feed source, but a switch AWAY from alpaca_paper with an open
+    // position is BLOCKED so it never orphans a position. Every applied switch
+    // logs old/new to the event log. Called only from the continuous loop.
+    void consume_feed_clock();
+    // Apply a validated feed switch: rebuild the tick feed (alpaca/mock) or the
+    // bar-driven generators (synthetic/replay). Entering alpaca_paper re-arms the
+    // warm-start gate through the per-symbol bar history that persists across the
+    // switch. Does not throw; a runtime switch never crashes the running loop.
+    void apply_feed_switch(const std::string& new_feed, const std::string& ts);
+    // Whether any native paper position is currently open (open-position safety
+    // rule for a feed switch).
+    bool has_open_positions() const { return !open_positions_.empty(); }
+    // Warm-state transition tracking on the real path: log a warm_state event
+    // when a symbol crosses cold<->warm. Called from on_closed_bar.
+    void track_warm_state(const std::string& symbol, const std::string& venue,
+                          const std::string& key, const std::string& ts);
+    // Whether the symbol at `key` is warm enough to evaluate a native entry.
+    bool symbol_is_warm(const std::string& key) const;
 
     config::Config cfg_;
     EngineOptions opts_;
@@ -202,6 +233,20 @@ private:
     bool simulated_clock_ = false;
     long sim_epoch_ = 0;               // advancing simulated UTC epoch (seconds)
     long bar_step_seconds_ = 300;      // sim-clock advance per bar step
+    // Full instrument universe, kept so a runtime feed switch can rebuild the
+    // tick feed or the bar-driven generators without reconstructing the engine.
+    std::vector<market_data::Instrument> all_instruments_;
+    // Launch feed/clock (resolved in the constructor), the fallback when
+    // controls.json has no or an invalid feed_mode/clock_mode, so a missing file
+    // never forces an offline run onto the live feed.
+    FeedClock launch_feed_clock_;
+    // Last feed a blocked switch was logged for, so a persistent unsafe request
+    // logs once (not every iteration).
+    std::string blocked_feed_request_;
+    // Per-symbol warm flag on the real path (key "venue|symbol"): absent = not
+    // yet evaluated, so the first computed state logs a transition. Tracked only
+    // when feed_mode_ is alpaca_paper.
+    std::map<std::string, bool> symbol_warm_;
     // synthetic_regimes: one deterministic generator per whitelisted instrument.
     std::vector<market_data::Instrument> bar_instruments_;
     std::vector<market_data::SyntheticRegimeGenerator> synth_gens_;

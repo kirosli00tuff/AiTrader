@@ -442,6 +442,44 @@ def test_controls_source_toggle_and_safety_rejected(env, client):
     assert client.get("/runstate").json()["layer_sources"]["council"] == "mock"
 
 
+def test_controls_feed_clock_toggle_and_open_position_safety(env, client):
+    j = client.get("/controls").json()
+    assert j["feed_mode"] in j["feed_modes"]
+    assert j["clock_mode"] in j["clock_modes"]
+    assert "open_positions" in j
+    # An invalid feed mode is refused.
+    assert client.post("/controls/feed_clock",
+                       json={"feed_mode": "bogus",
+                             "clock_mode": "real"}).json()["ok"] is False
+    # Put the loop on alpaca_paper (a same-or-into switch is always safe).
+    ok = client.post("/controls/feed_clock",
+                     json={"feed_mode": "alpaca_paper",
+                           "clock_mode": "real"}).json()
+    assert ok["ok"] is True and ok["feed_mode"] == "alpaca_paper"
+    # The seed has an open SPY paper position, so a switch AWAY from alpaca_paper
+    # is refused (it would orphan the position).
+    refused = client.post("/controls/feed_clock",
+                          json={"feed_mode": "synthetic_regimes",
+                                "clock_mode": "real"}).json()
+    assert refused["ok"] is False and refused["open_positions"] >= 1
+    # It did not change: the loop stays on alpaca_paper.
+    assert client.get("/controls").json()["feed_mode"] == "alpaca_paper"
+    # A clock-only change (feed unchanged) is always safe.
+    okc = client.post("/controls/feed_clock",
+                      json={"feed_mode": "alpaca_paper",
+                            "clock_mode": "simulated"}).json()
+    assert okc["ok"] is True and okc["clock_mode"] == "simulated"
+    # /runstate mirrors the runtime feed/clock for the banner + status strip.
+    rs = client.get("/runstate").json()
+    assert rs["feed_mode"] == "alpaca_paper" and rs["clock_mode"] == "simulated"
+    # The change was audited to the append-only event log (kind control_change).
+    conn = sqlite3.connect(env["db"])
+    n = conn.execute("SELECT COUNT(*) FROM events WHERE kind='control_change' "
+                     "AND message LIKE 'feed_clock%'").fetchone()[0]
+    conn.close()
+    assert n >= 1
+
+
 def test_controls_model_and_gate_toggle(env, client):
     assert client.post("/controls/model",
                        json={"model": "gpt-5.5", "enabled": False}).json()["ok"]

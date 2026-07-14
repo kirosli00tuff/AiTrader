@@ -60,6 +60,34 @@ struct Bollinger {
 };
 Bollinger bollinger(const std::vector<double>& closes, int period, double num_std);
 
+// --- Indicator warm-state (Task 1) ---------------------------------------
+// The native strategy needs enough closed bars before every indicator is
+// meaningful. On the real paper path the engine refuses to evaluate a symbol
+// for entry until it is warm, so a live run never fires on partial data. Warm
+// is a function of the bar COUNT alone: each indicator's minimum is its period.
+struct WarmState {
+    int bars = 0;
+    bool ema_slow = false;   // 100-period EMA (momentum cross reads n-1, n-2)
+    bool adx = false;        // ADX (Wilder smoothing needs 2*period+1 bars)
+    bool atr = false;        // ATR
+    bool bollinger = false;  // 20-period Bollinger bands
+    bool rsi = false;        // RSI 14 (reversion reads rsi[n-1] and rsi[n-2])
+    bool volume = false;     // N-bar average volume
+    bool rvol = false;       // realized-vol regime window
+    bool all = false;        // every indicator above is warm
+};
+
+// Minimum closed bars for every listed indicator to be warm. This is the
+// longest indicator lookback, so a symbol is warm exactly once it is satisfied.
+int min_bars_to_warm(const config::StrategyConfig& cfg);
+
+// Per-indicator warm/cold for a given bar count. Pure: only the count is needed
+// because each indicator's requirement is a function of its configured period.
+WarmState indicator_warm_state(int bar_count, const config::StrategyConfig& cfg);
+
+// True once bar_count satisfies every indicator lookback (== warm_state.all).
+bool indicators_warm(int bar_count, const config::StrategyConfig& cfg);
+
 // --- Regime detection ----------------------------------------------------
 enum class Regime { Trending, RangeBound, Neutral };
 std::string regime_to_string(Regime r);

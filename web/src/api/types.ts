@@ -192,6 +192,11 @@ export interface ControlsState {
   layers: Record<string, boolean>;
   layer_sources: Record<string, string>;   // layer -> "mock" | "real"
   source_layers: string[];                  // layers that carry a source axis
+  feed_mode: string;                        // runtime loop feed mode
+  clock_mode: string;                       // runtime clock mode
+  feed_modes: string[];                     // valid feed modes
+  clock_modes: string[];                    // valid clock modes
+  open_positions: number;                   // open native paper positions
   models: Record<string, boolean>;
   gate_enabled: boolean;
   auto_promote: boolean;

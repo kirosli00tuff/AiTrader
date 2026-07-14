@@ -225,6 +225,36 @@ Bollinger bollinger(const std::vector<double>& closes, int period,
     return b;
 }
 
+int min_bars_to_warm(const config::StrategyConfig& cfg) {
+    int need = cfg.ema_slow + 2;                     // momentum EMA cross
+    need = std::max(need, 2 * cfg.atr_period + 1);   // ADX (Wilder smoothing)
+    need = std::max(need, cfg.atr_period + 1);       // ATR
+    need = std::max(need, cfg.bb_period);            // Bollinger bands
+    need = std::max(need, cfg.rsi_period + 2);       // RSI (reversion reads n-2)
+    need = std::max(need, cfg.vol_lookback);         // average volume
+    need = std::max(need, cfg.vol_lookback + 1);     // realized vol
+    return need;
+}
+
+WarmState indicator_warm_state(int bar_count, const config::StrategyConfig& cfg) {
+    WarmState w;
+    w.bars = bar_count;
+    w.ema_slow = bar_count >= cfg.ema_slow + 2;
+    w.adx = bar_count >= 2 * cfg.atr_period + 1;
+    w.atr = bar_count >= cfg.atr_period + 1;
+    w.bollinger = bar_count >= cfg.bb_period;
+    w.rsi = bar_count >= cfg.rsi_period + 2;
+    w.volume = bar_count >= cfg.vol_lookback;
+    w.rvol = bar_count >= cfg.vol_lookback + 1;
+    w.all = w.ema_slow && w.adx && w.atr && w.bollinger && w.rsi && w.volume &&
+            w.rvol;
+    return w;
+}
+
+bool indicators_warm(int bar_count, const config::StrategyConfig& cfg) {
+    return bar_count >= min_bars_to_warm(cfg);
+}
+
 RegimeResult detect_regime(const std::vector<Bar>& bars,
                            const config::StrategyConfig& cfg) {
     RegimeResult r;

@@ -146,10 +146,19 @@ ITER=40 ops/run_demo.sh           # custom iteration count
 trading with all four decision levels active, in order, with a health check
 between steps and clean teardown on exit:
 
+0. **warm-start** — backfill real historical bars into the `bars` table for the
+   whitelist and verify every symbol is warm, so the first live bar evaluates
+   against warm indicators (the 100-period EMA, ADX, ATR, Bollinger, RSI, volume,
+   realized vol) instead of a cold start,
 1. the Python bridge (real LLM council + `dnn_advisory` + whale via SEC EDGAR),
 2. the C++ engine (`feed_mode alpaca_paper`, `clock real`) on the full whitelist
    (BTC/USD, ETH/USD, SPY, QQQ) — crypto 24/7, equities respect market hours,
 3. the GUI backend + frontend (open <http://127.0.0.1:5173>).
+
+The engine seeds its indicators from the backfilled bars on startup and prints a
+per-symbol per-indicator warm/cold line. On the real path it **gates entry on
+warmth**: a cold symbol waits and never fires on partial data (`warm_state`
+events record each cold/warm transition).
 
 ```bash
 scripts/start_paper_trading.sh                 # full stack + GUI
@@ -178,6 +187,23 @@ service is unreachable makes the engine **refuse to start**, printing exactly
 what is missing, rather than silently substituting a mock (a layer you set
 `on-mock` starts normally — that is a deliberate choice). The startup block prints
 the exact state of every level, and the GUI run-state banner mirrors it.
+
+### Feed and clock runtime toggle
+
+The Controls page also switches the **feed mode** (`alpaca_paper`,
+`synthetic_regimes`, `replay`, `flat_random_walk`) and **clock mode** (`real`,
+`simulated`) at runtime, through the same validated control-file the engine reads
+each iteration — no config edit, no restart. The run-state banner and the top
+status strip show the current feed and clock.
+
+A feed switch **never orphans an open position**: switching **away from**
+`alpaca_paper` while a paper position is open is **refused** (the position keeps
+being managed by its native exits on the current feed), and switching **into**
+`alpaca_paper` **re-arms the warm-start gate** so evaluation waits until the
+indicators are warm on real bars again. A clock switch applies immediately. Every
+switch is audited (`feed_mode` / `clock_mode` events); a blocked one logs
+`feed_mode_blocked`. A missing or invalid control value keeps the launch
+feed/clock, so it never forces an offline run onto the live feed.
 
 Two states are **on by design and not part of full activation**:
 

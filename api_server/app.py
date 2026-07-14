@@ -251,6 +251,19 @@ def post_source(body: SourceWrite):
     return controls.set_source(body.layer, body.source)
 
 
+class FeedClockWrite(BaseModel):
+    feed_mode: str
+    clock_mode: str
+
+
+@app.post("/controls/feed_clock")
+def post_feed_clock(body: FeedClockWrite):
+    # Runtime feed-mode + clock-mode toggle (Task 3). Validated server-side;
+    # refuses an unsafe switch away from alpaca_paper with an open position so it
+    # never orphans one. Same control-file write path, audited to the event log.
+    return controls.set_feed_clock(body.feed_mode, body.clock_mode)
+
+
 class ModelWrite(BaseModel):
     model: str
     enabled: bool

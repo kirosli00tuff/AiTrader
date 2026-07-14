@@ -3,11 +3,18 @@
 # levels active. Live trading stays OFF (Alpaca is paper + market-data only).
 #
 # Order, with a health check between steps:
+#   0. Warm-start: backfill real historical bars into the bars table and verify
+#      every whitelisted symbol is warm, so the first live bar evaluates against
+#      warm indicators (the 100-period EMA, ADX, ATR, Bollinger, RSI, volume,
+#      realized vol). The engine's warm-state gate holds a cold symbol back, so a
+#      run never fires on partial data.
 #   1. Python bridge (real council + dnn + whale via SEC EDGAR).
 #   2. C++ engine, feed_mode alpaca_paper, clock real, on the full whitelist
 #      (BTC/USD, ETH/USD, SPY, QQQ). Crypto trades 24/7; equities respect market
 #      hours via the existing skip. Strict mode: a layer set on-real that is not
-#      reachable refuses to start (no silent mock on the real path).
+#      reachable refuses to start (no silent mock on the real path). Feed mode and
+#      clock mode are runtime-switchable from the GUI (a switch away from
+#      alpaca_paper with an open position is blocked so it never orphans one).
 #   3. GUI backend (read-only) + frontend (Vite).
 #
 # Fails loudly if any component does not come up, and on exit cleanly stops
@@ -78,6 +85,60 @@ echo "Full four-level real-time paper trading"
 echo "======================================="
 echo "  SEC_EDGAR_ENABLED=$SEC_EDGAR_ENABLED  WHALE_LIVE_ENABLED=$WHALE_LIVE_ENABLED"
 echo "  DB=$DB"
+echo ""
+
+# --- 0. Warm-start: backfill real bars + verify every symbol warm -----------
+# Fills the shared bars table with real Alpaca history so the engine seeds warm
+# indicators on construction (>= 300 5-min bars per symbol via the 30-day 5-min
+# backfill). Then verifies each whitelisted symbol has enough bars for the
+# longest indicator lookback. A cold symbol is only a warning: the engine's
+# warm-state gate holds it back and never trades on partial data.
+echo "[0/4] warm-start: backfilling real historical bars into the bars table ..."
+"$PY" -m market_data.alpaca_source --db "$DB" 2>&1 | sed 's/^/       /' || true
+echo "[0/4] verifying every whitelisted symbol is warm ..."
+"$PY" - "$DB" <<'PYWARM'
+import sys, sqlite3, yaml
+db = sys.argv[1]
+cfg = (yaml.safe_load(open("config/default_config.yaml")) or {}).get("strategy", {}) or {}
+def _i(k, d):
+    try: return int(cfg.get(k, d))
+    except Exception: return d
+ema_slow=_i("ema_slow",100); atr=_i("atr_period",14); bb=_i("bb_period",20)
+rsi=_i("rsi_period",14); vlb=_i("vol_lookback",20)
+# Mirrors strategy::min_bars_to_warm (signal_engine/strategy.cpp).
+need = max(ema_slow+2, 2*atr+1, atr+1, bb, rsi+2, vlb, vlb+1)
+tf = str(cfg.get("bar_timeframe","5min"))
+wl = [s.strip() for s in str(cfg.get("whitelist","BTC/USD,ETH/USD,SPY,QQQ")).split(",") if s.strip()]
+allwarm = True
+print(f"       warm needs >= {need} {tf} bars per symbol")
+try:
+    con = sqlite3.connect(db)
+    for sym in wl:
+        try:
+            n = con.execute("SELECT COUNT(*) FROM bars WHERE symbol=? AND timeframe=?", (sym, tf)).fetchone()[0]
+        except Exception:
+            n = 0
+        warm = n >= need
+        allwarm = allwarm and warm
+        print(f"       {sym}: {n} bars -> {'WARM' if warm else 'COLD'}")
+    con.close()
+except Exception as e:
+    allwarm = False
+    print(f"       (bars table read skipped: {e})")
+# Seed the runtime feed/clock so the GUI and engine agree from the first tick.
+try:
+    from api_server import controls
+    controls.set_feed_clock("alpaca_paper", "real")
+    print("       seeded controls.json feed=alpaca_paper clock=real")
+except Exception as e:
+    print(f"       (feed/clock seed skipped: {e})")
+sys.exit(0 if allwarm else 3)
+PYWARM
+WARM_RC=$?
+if [ "$WARM_RC" != "0" ]; then
+  echo "      WARNING: not every symbol is warm (no data key, or thin market history)."
+  echo "      The engine's warm-state gate holds cold symbols back; it never trades on partial data."
+fi
 echo ""
 
 # --- 1. Python bridge (real council + dnn + whale) --------------------------

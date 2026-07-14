@@ -36,6 +36,12 @@ LAYERS = (ADAPTIVE, COUNCIL, DNN, WHALE)   # safety has NO toggle (always on)
 # Safety has neither axis: always on, always real.
 SOURCE_LAYERS = (COUNCIL, DNN, WHALE)
 SOURCES = ("mock", "real")
+# Runtime feed-mode + clock-mode toggle (Task 3), the same control-file pattern.
+# The engine reads these each loop iteration and switches the loop between real
+# Alpaca data and a synthetic feed, and between real and simulated time. A switch
+# away from alpaca_paper with an open position is refused (never orphans it).
+FEED_MODES = ("alpaca_paper", "synthetic_regimes", "replay", "flat_random_walk")
+CLOCK_MODES = ("real", "simulated")
 def _council_models() -> tuple[str, ...]:
     """The three council model ids straight from config (llm_primary/secondary/
     tertiary), so the per-model toggle keys never drift from the configured
@@ -107,10 +113,17 @@ def _defaults() -> dict:
     llm = cfg.get("llm", {}) or {}
     rl = cfg.get("rl", {}) or {}
     adaptive = cfg.get("adaptive", {}) or {}
+    sim = cfg.get("simulation", {}) or {}
+    feed = sim.get("feed_mode", "alpaca_paper")
+    clock = sim.get("clock_mode", "real")
     return {
         "layers": {layer: True for layer in LAYERS},
         # Source axis, default real (full-activation default on the paper path).
         "layer_sources": {layer: "real" for layer in SOURCE_LAYERS},
+        # Runtime feed/clock, defaulting from config; validated against the
+        # allow-lists so a hand-edited file can never pick an unknown mode.
+        "feed_mode": feed if feed in FEED_MODES else "alpaca_paper",
+        "clock_mode": clock if clock in CLOCK_MODES else "real",
         "models": {m: True for m in COUNCIL_MODELS},
         "gate_enabled": bool(llm.get("gate_enabled", True)),
         "auto_promote": bool(adaptive.get("dnn_auto_promote_if_better", False)),
@@ -141,6 +154,10 @@ def read_controls() -> dict:
     for k in ("gate_enabled", "auto_promote", "rl_enabled"):
         if k in saved:
             state[k] = bool(saved[k])
+    if saved.get("feed_mode") in FEED_MODES:
+        state["feed_mode"] = saved["feed_mode"]
+    if saved.get("clock_mode") in CLOCK_MODES:
+        state["clock_mode"] = saved["clock_mode"]
     for k in ("pending_promote", "pending_rollback"):
         if k in saved:
             state[k] = saved[k]
@@ -226,6 +243,15 @@ def rl_gate() -> int:
         return 500
 
 
+def open_position_count() -> int:
+    """Open native paper positions (qty > 0). Read-only. Used by the feed-switch
+    safety rule so a switch away from alpaca_paper never orphans an open position.
+    The engine enforces the same rule authoritatively from its in-memory state;
+    this is the server-side pre-check that refuses the unsafe request up front."""
+    row = store.query_one("SELECT COUNT(*) AS n FROM positions WHERE qty > 0")
+    return int(row["n"]) if row and row.get("n") is not None else 0
+
+
 def council_used_today() -> int:
     row = store.query_one(
         "SELECT COUNT(*) AS n FROM model_outputs WHERE substr(ts,1,10) = ?",
@@ -308,6 +334,11 @@ def control_state() -> dict:
         "layers": st["layers"],
         "layer_sources": st["layer_sources"],
         "source_layers": list(SOURCE_LAYERS),
+        "feed_mode": st["feed_mode"],
+        "clock_mode": st["clock_mode"],
+        "feed_modes": list(FEED_MODES),
+        "clock_modes": list(CLOCK_MODES),
+        "open_positions": open_position_count(),
         "models": st["models"],
         "gate_enabled": st["gate_enabled"],
         "auto_promote": st["auto_promote"],
@@ -395,6 +426,41 @@ def set_source(layer: str, source: str) -> dict:
     _write_controls(st)
     _audit(f"source.{layer}", old, source)
     return {"ok": True, "layer": layer, "source": source}
+
+
+def set_feed_clock(feed_mode: str, clock_mode: str) -> dict:
+    """Set the runtime feed and clock mode (Task 3), validated server-side.
+
+    Open-position safety rule: a switch AWAY from alpaca_paper while a paper
+    position is open is REFUSED, so it never orphans that position. Close the
+    position, or let native exits flatten it, before switching feeds. A clock
+    switch is always safe. The change takes effect on the engine's next
+    iteration and is audited to the event log; the engine enforces the same rule.
+    """
+    feed_mode = str(feed_mode).strip()
+    clock_mode = str(clock_mode).strip()
+    if feed_mode not in FEED_MODES:
+        return {"ok": False, "error": f"feed_mode must be one of {FEED_MODES}"}
+    if clock_mode not in CLOCK_MODES:
+        return {"ok": False, "error": f"clock_mode must be one of {CLOCK_MODES}"}
+    st = read_controls()
+    cur_feed, cur_clock = st["feed_mode"], st["clock_mode"]
+    open_positions = open_position_count()
+    if (cur_feed == "alpaca_paper" and feed_mode != "alpaca_paper"
+            and open_positions > 0):
+        return {"ok": False,
+                "error": (f"refused: {open_positions} open paper position(s). "
+                          "Switching away from alpaca_paper would orphan them. "
+                          "Close them, or let native exits flatten them, first."),
+                "open_positions": open_positions,
+                "feed_mode": cur_feed, "clock_mode": cur_clock}
+    old = {"feed_mode": cur_feed, "clock_mode": cur_clock}
+    st["feed_mode"] = feed_mode
+    st["clock_mode"] = clock_mode
+    _write_controls(st)
+    _audit("feed_clock", old, {"feed_mode": feed_mode, "clock_mode": clock_mode})
+    return {"ok": True, "feed_mode": feed_mode, "clock_mode": clock_mode,
+            "open_positions": open_positions}
 
 
 def set_model(model: str, enabled: bool) -> dict:

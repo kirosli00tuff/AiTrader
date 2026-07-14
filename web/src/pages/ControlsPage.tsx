@@ -54,6 +54,7 @@ export default function ControlsPage() {
   const c = useApi<ControlsState>(() => api.controls(), 0, []);
   const [w, setW] = useState<Record<string, number> | null>(null);
   const [budget, setBudget] = useState<{ b: number; c: number } | null>(null);
+  const [fc, setFc] = useState<{ feed: string; clock: string } | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
 
   useEffect(() => {
@@ -148,6 +149,46 @@ export default function ControlsPage() {
                   </div>
                 );
               })}
+            </Panel>
+
+            {/* --- Feed & clock (runtime loop mode) --- */}
+            <Panel title="Feed & clock (runtime loop mode)">
+              <div className="callout warn" style={{ marginBottom: 12 }}>
+                Switching the feed changes the whole loop. A switch away from
+                alpaca_paper while a position is open is refused, so it never
+                orphans that position, close it or let native exits flatten it
+                first. Switching into alpaca_paper re-arms the warm-start gate.
+                {" "}<b>{d.open_positions ?? 0}</b> open position(s) now.
+              </div>
+              <div className="ctrl-row">
+                <div className="ctrl-name">Feed mode
+                  <div className="ctrl-sub">Current: <b className="mono">{d.feed_mode ?? "alpaca_paper"}</b></div>
+                </div>
+                <select className="input" style={{ width: 180 }}
+                  value={fc?.feed ?? d.feed_mode ?? "alpaca_paper"}
+                  onChange={(e) => setFc({ feed: e.target.value, clock: fc?.clock ?? d.clock_mode ?? "real" })}>
+                  {(d.feed_modes ?? []).map((m) => <option key={m} value={m}>{m}</option>)}
+                </select>
+              </div>
+              <div className="ctrl-row">
+                <div className="ctrl-name">Clock mode
+                  <div className="ctrl-sub">Current: <b>{d.clock_mode ?? "real"}</b></div>
+                </div>
+                <select className="input" style={{ width: 180 }}
+                  value={fc?.clock ?? d.clock_mode ?? "real"}
+                  onChange={(e) => setFc({ feed: fc?.feed ?? d.feed_mode ?? "alpaca_paper", clock: e.target.value })}>
+                  {(d.clock_modes ?? []).map((m) => <option key={m} value={m}>{m}</option>)}
+                </select>
+              </div>
+              <div className="flex" style={{ marginTop: 10 }}>
+                <ConfirmButton label="Apply feed/clock" busyLabel="Switching…"
+                  onConfirm={async () => {
+                    const feed = fc?.feed ?? d.feed_mode ?? "alpaca_paper";
+                    const clock = fc?.clock ?? d.clock_mode ?? "real";
+                    await act(() => api.setFeedClock(feed, clock));
+                    setFc(null);
+                  }} />
+              </div>
             </Panel>
 
             {/* --- Council model toggles --- */}

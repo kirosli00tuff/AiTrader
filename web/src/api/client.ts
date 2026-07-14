@@ -74,6 +74,8 @@ export const api = {
     post<ControlResult>("/controls/layer", { layer, enabled }),
   setSource: (layer: string, source: "mock" | "real") =>
     post<ControlResult>("/controls/source", { layer, source }),
+  setFeedClock: (feed_mode: string, clock_mode: string) =>
+    post<ControlResult>("/controls/feed_clock", { feed_mode, clock_mode }),
   setModel: (model: string, enabled: boolean) =>
     post<ControlResult>("/controls/model", { model, enabled }),
   setRl: (enabled: boolean) => post<ControlResult>("/controls/rl", { enabled }),

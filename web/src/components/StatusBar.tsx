@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { api } from "../api/client";
 import { useApi } from "../api/useApi";
-import type { Account, Health, IntegrationsHealth, KillState, Pnl } from "../api/types";
+import type { Account, Health, IntegrationsHealth, KillState, Pnl, RunState } from "../api/types";
 import { money, pct, signClass } from "../api/format";
 
 // Top strip on every page: engine state, active mode, portfolio value, daily
@@ -15,6 +15,7 @@ export default function StatusBar({ activeView }: { activeView: string }) {
   // poll is a few minimal round trips, with no keys it makes no external call.
   const integ = useApi<IntegrationsHealth>(() => api.integrations(), 120000, []);
   const killApi = useApi<KillState>(() => api.kill(), 6000, []);
+  const runApi = useApi<RunState>(() => api.runstate(), 8000, []);
   const [arming, setArming] = useState(false);
   const [busy, setBusy] = useState(false);
 
@@ -54,6 +55,11 @@ export default function StatusBar({ activeView }: { activeView: string }) {
       </div>
       <div className="status-sep" />
       <div className="status-item">Mode <b>{activeView}</b></div>
+      <div className="status-sep" />
+      <div className="status-item">
+        Loop <b className="mono">{runApi.data?.feed_mode ?? "…"}</b>
+        <span className="dim" style={{ fontSize: 11 }}>{runApi.data?.clock_mode ?? ""}</span>
+      </div>
       <div className="status-sep" />
       <div className="status-item">
         Portfolio <b className="mono">{money(equity)}</b>

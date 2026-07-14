@@ -337,6 +337,27 @@ int main(int argc, char** argv) {
                       << "  ----------------------------------------------------\n";
         }
 
+        // Per-symbol indicator warm-state (Task 1): confirm the backfill warmed
+        // the native indicators. On the real paper path a cold symbol waits (the
+        // warm-state gate) and never fires an entry on partial data.
+        {
+            std::cout << "  warm-start: native indicators seeded from the bars "
+                         "table (backfill first for a live entry)\n";
+            for (const auto& ws : engine.warm_states()) {
+                const auto& s = ws.state;
+                auto f = [](bool b) { return b ? '+' : '-'; };
+                std::cout << "    " << ws.symbol << ": " << s.bars << " bars -> "
+                          << (s.all ? "WARM" : "COLD") << "  [ema100" << f(s.ema_slow)
+                          << " adx" << f(s.adx) << " atr" << f(s.atr) << " bb"
+                          << f(s.bollinger) << " rsi" << f(s.rsi) << " vol"
+                          << f(s.volume) << " rvol" << f(s.rvol) << "]\n";
+            }
+            std::cout << "  feed/clock: " << eff_feed << " / " << eff_clock
+                      << " (runtime-switchable via controls.json + GUI; a switch "
+                         "away from alpaca_paper with an open position is blocked)\n"
+                      << "  ----------------------------------------------------\n";
+        }
+
         if (continuous) {
             std::signal(SIGINT, handle_stop);
             std::signal(SIGTERM, handle_stop);
