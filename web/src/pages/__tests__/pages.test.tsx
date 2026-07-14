@@ -69,6 +69,15 @@ vi.mock("../../api/client", () => {
       saveCredential: okResult, testConnection: async () => ({ ok: true, message: "ok", source: "env" }),
       kill: async () => ({ engine_kill_switch_tripped: false, request: { requested: false, reason: null, ts: null } }),
       requestKill: async () => ({ ok: true, request: { requested: true, reason: "x", ts: "x" }, engine: { engine_kill_switch_tripped: false, request: { requested: true, reason: "x", ts: "x" } } }),
+      engineState: async () => ({
+        ok: true, error: null, state: "not_running", owned: false, warm: [],
+        all_warm: false, engine_pid: null, bridge_pid: null, bridge_port: 8765,
+        api_port: 8000, interval_seconds: 30, feed_mode: "alpaca_paper",
+        clock_mode: "real", started_ts: null,
+        lock: { present: false, alive: false, stale: false, engine_pid: null, bridge_pid: null, source: null },
+        history: [], whitelist: ["BTC/USD", "ETH/USD", "SPY", "QQQ"],
+      }),
+      engineStart: okResult, engineStop: okResult,
       controls: async () => controls,
       setWeights: okResult, setLayer: okResult, setSource: okResult, setModel: okResult, setRl: okResult,
       setFeedClock: okResult,
@@ -133,6 +142,17 @@ describe("pages render", () => {
     expect(await screen.findByText("Council skip reasons")).toBeInTheDocument();
     expect(await screen.findByText("Decision layers")).toBeInTheDocument();
     expect(await screen.findByText(/ALWAYS ON/)).toBeInTheDocument();
+  });
+
+  it("renders the Ops engine Start/Stop controls with a lifecycle state", async () => {
+    at("/ops");
+    // The supervisor Start/Stop panel and its lifecycle label render.
+    expect(await screen.findByText("Paper trading engine")).toBeInTheDocument();
+    expect(await screen.findByText("Not running")).toBeInTheDocument();
+    expect(await screen.findByText("Start paper trading")).toBeInTheDocument();
+    // The kill switch stays a separate control in the top strip, not replaced
+    // by the stop button.
+    expect(await screen.findByText("Kill")).toBeInTheDocument();
   });
 
   it("renders the Settings page with categories", async () => {

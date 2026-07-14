@@ -51,6 +51,8 @@ cleanup() {
     [ -n "$pid" ] && kill "$pid" 2>/dev/null || true
   done
   wait 2>/dev/null || true
+  # Clear the single-instance lock so the next start (script or GUI) is clean.
+  "$PY" -m api_server.stack clear-lock >/dev/null 2>&1 || true
   echo "All stopped."
 }
 trap cleanup EXIT INT TERM
@@ -96,45 +98,12 @@ echo ""
 echo "[0/4] warm-start: backfilling real historical bars into the bars table ..."
 "$PY" -m market_data.alpaca_source --db "$DB" 2>&1 | sed 's/^/       /' || true
 echo "[0/4] verifying every whitelisted symbol is warm ..."
-"$PY" - "$DB" <<'PYWARM'
-import sys, sqlite3, yaml
-db = sys.argv[1]
-cfg = (yaml.safe_load(open("config/default_config.yaml")) or {}).get("strategy", {}) or {}
-def _i(k, d):
-    try: return int(cfg.get(k, d))
-    except Exception: return d
-ema_slow=_i("ema_slow",100); atr=_i("atr_period",14); bb=_i("bb_period",20)
-rsi=_i("rsi_period",14); vlb=_i("vol_lookback",20)
-# Mirrors strategy::min_bars_to_warm (signal_engine/strategy.cpp).
-need = max(ema_slow+2, 2*atr+1, atr+1, bb, rsi+2, vlb, vlb+1)
-tf = str(cfg.get("bar_timeframe","5min"))
-wl = [s.strip() for s in str(cfg.get("whitelist","BTC/USD,ETH/USD,SPY,QQQ")).split(",") if s.strip()]
-allwarm = True
-print(f"       warm needs >= {need} {tf} bars per symbol")
-try:
-    con = sqlite3.connect(db)
-    for sym in wl:
-        try:
-            n = con.execute("SELECT COUNT(*) FROM bars WHERE symbol=? AND timeframe=?", (sym, tf)).fetchone()[0]
-        except Exception:
-            n = 0
-        warm = n >= need
-        allwarm = allwarm and warm
-        print(f"       {sym}: {n} bars -> {'WARM' if warm else 'COLD'}")
-    con.close()
-except Exception as e:
-    allwarm = False
-    print(f"       (bars table read skipped: {e})")
+# Shared warm-report logic: the SAME api_server.stack callable the GUI supervisor
+# uses, so the script and the GUI never drift (exit 0 all warm, 3 otherwise).
+"$PY" -m api_server.stack warm-report 2>&1 | sed 's/^/       /'
+WARM_RC="${PIPESTATUS[0]}"
 # Seed the runtime feed/clock so the GUI and engine agree from the first tick.
-try:
-    from api_server import controls
-    controls.set_feed_clock("alpaca_paper", "real")
-    print("       seeded controls.json feed=alpaca_paper clock=real")
-except Exception as e:
-    print(f"       (feed/clock seed skipped: {e})")
-sys.exit(0 if allwarm else 3)
-PYWARM
-WARM_RC=$?
+"$PY" -c "from api_server import stack; stack.seed_feed_clock(); print('seeded controls.json feed=alpaca_paper clock=real')" 2>/dev/null | sed 's/^/       /' || true
 if [ "$WARM_RC" != "0" ]; then
   echo "      WARNING: not every symbol is warm (no data key, or thin market history)."
   echo "      The engine's warm-state gate holds cold symbols back; it never trades on partial data."
@@ -162,6 +131,9 @@ sleep 3
 kill -0 "$ENGINE_PID" 2>/dev/null \
   || die "engine exited immediately (strict mode may have refused an on-real layer; see the log above)"
 echo "      engine running (pid $ENGINE_PID). Crypto 24/7; equities respect market hours."
+# Record the single-instance lock the SAME way the GUI supervisor does, so a GUI
+# start refuses to launch a second engine over this one. Cleared on exit.
+"$PY" -c "from api_server import stack; stack.write_lock($ENGINE_PID, $BRIDGE_PID, source='script')" 2>/dev/null || true
 
 # --- 3. GUI backend ----------------------------------------------------------
 echo "[3/4] starting GUI backend on 127.0.0.1:${API_PORT} ..."

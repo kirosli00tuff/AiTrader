@@ -1,8 +1,13 @@
 import { useState } from "react";
 import { api } from "../api/client";
 import { useApi } from "../api/useApi";
-import type { Account, Health, IntegrationsHealth, KillState, Pnl, RunState } from "../api/types";
+import type { Account, EngineState, Health, IntegrationsHealth, KillState, Pnl, RunState } from "../api/types";
 import { money, pct, signClass } from "../api/format";
+
+// Supervisor lifecycle -> dot color for the compact engine indicator.
+const ENG_DOT: Record<string, string> = {
+  not_running: "d", starting: "a", warming: "a", running: "g", stopping: "a",
+};
 
 // Top strip on every page: engine state, active mode, portfolio value, daily
 // PnL, kill-switch status (plus the bridge link). Polls /health, /account, and
@@ -16,8 +21,11 @@ export default function StatusBar({ activeView }: { activeView: string }) {
   const integ = useApi<IntegrationsHealth>(() => api.integrations(), 120000, []);
   const killApi = useApi<KillState>(() => api.kill(), 6000, []);
   const runApi = useApi<RunState>(() => api.runstate(), 8000, []);
+  const engApi = useApi<EngineState>(() => api.engineState(), 3000, []);
   const [arming, setArming] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [engArm, setEngArm] = useState(false);
+  const [engBusy, setEngBusy] = useState(false);
 
   const eng = health.data?.engine;
   const running = eng?.running ?? false;
@@ -36,6 +44,23 @@ export default function StatusBar({ activeView }: { activeView: string }) {
   const apisDot = configured === 0 ? "d" : sum?.all_ok ? "g" : "a";
   const apisLabel = configured === 0 ? "none" : sum?.all_ok ? "ok" : "issues";
   const tripped = kill || (killApi.data?.engine_kill_switch_tripped ?? false);
+
+  // Supervisor lifecycle, mirrored compactly. Distinct from the kill strip: this
+  // is the ordinary Start/Stop, the kill switch below is the safety halt.
+  const lifecycle = engApi.data?.state ?? (running ? "running" : "not_running");
+  const engCanStart = lifecycle === "not_running";
+  const engCanStop = lifecycle === "running" || lifecycle === "warming" || lifecycle === "starting";
+  const startEngine = async () => {
+    setEngBusy(true);
+    try { await api.engineStart(); engApi.reload(); health.reload(); }
+    finally { setEngBusy(false); setEngArm(false); }
+  };
+  const stopEngine = async () => {
+    setEngBusy(true);
+    try { await api.engineStop(); engApi.reload(); health.reload(); }
+    finally { setEngBusy(false); }
+  };
+
   const confirmKill = async () => {
     setBusy(true);
     try {
@@ -50,8 +75,22 @@ export default function StatusBar({ activeView }: { activeView: string }) {
   return (
     <div className="statusbar">
       <div className="status-item">
-        <span className={`dot ${running ? "g" : "d"}`} />
-        Engine <b>{running ? "running" : "offline"}</b>
+        <span className={`dot ${ENG_DOT[lifecycle] ?? "d"}`} />
+        Engine <b>{lifecycle.replace("_", " ")}</b>
+        {engCanStart ? (
+          !engArm ? (
+            <button className="btn sm" onClick={() => setEngArm(true)}>start</button>
+          ) : (
+            <>
+              <button className="btn sm" disabled={engBusy} onClick={startEngine}>
+                {engBusy ? "…" : "go"}
+              </button>
+              <button className="btn ghost sm" disabled={engBusy} onClick={() => setEngArm(false)}>x</button>
+            </>
+          )
+        ) : engCanStop ? (
+          <button className="btn ghost sm" disabled={engBusy} onClick={stopEngine}>stop</button>
+        ) : null}
       </div>
       <div className="status-sep" />
       <div className="status-item">Mode <b>{activeView}</b></div>

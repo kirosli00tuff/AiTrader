@@ -250,6 +250,36 @@ export interface IntegrationsHealth {
 export interface SkipRow {
   ts: string; kind: string; symbol: string | null; reason: string; message: string | null;
 }
+
+// --- Engine lifecycle (GUI Start/Stop through the supervisor) --------------
+export type EngineLifecycle =
+  "not_running" | "starting" | "warming" | "running" | "stopping";
+export interface EngineWarm { symbol: string; bars: number; warm: boolean; }
+export interface EngineLock {
+  present: boolean; alive: boolean; stale: boolean;
+  engine_pid: number | null; bridge_pid: number | null;
+  source: string | null; ts?: string | null;
+}
+export interface EngineState {
+  ok?: boolean;
+  error?: string | null;
+  note?: string;
+  state: EngineLifecycle;
+  owned: boolean;
+  warm: EngineWarm[];
+  all_warm: boolean;
+  engine_pid: number | null;
+  bridge_pid: number | null;
+  bridge_port: number;
+  api_port: number;
+  interval_seconds: number;
+  feed_mode: string;
+  clock_mode: string;
+  started_ts: string | null;
+  lock: EngineLock;
+  history: { state?: string; note?: string; ts: string }[];
+  whitelist: string[];
+}
 export interface RunState {
   feed_mode: string; clock_mode: string; market_data_source: string;
   use_real_council: boolean; gate_enabled: boolean; council_mode: string;

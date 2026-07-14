@@ -170,6 +170,38 @@ assumes you run the bridge and hold keystore keys; without `--bridge` the loop
 stays in-process mock, and any provider without a resolvable key degrades to a
 labelled mock.
 
+### Start and stop from the GUI (supervisor)
+
+You can start and stop the same warmed stack from the GUI, without the terminal.
+The **Ops** page carries a **Start paper trading** / **Stop** control, mirrored
+in the top status strip. A small backend **supervisor** owns the bridge and
+engine lifecycle and runs the exact same sequence as the script through one
+shared callable (`api_server/stack.py`), so the two never drift:
+
+- **Start** (a confirm step) runs: backfill real bars, verify warm, bring up the
+  bridge with the real council, then the engine (`feed_mode alpaca_paper`,
+  `clock real`, full whitelist), health checked between steps. It reports the
+  live lifecycle: `not_running` → `starting` → `warming` (with per-symbol warm
+  progress) → `running`. Strict no-silent-mock still applies: if a layer set
+  on-real is unreachable, Start **fails loudly** in the GUI with what is missing.
+- **Stop** is a **graceful shutdown** of the bridge and engine the supervisor
+  started. It is not the kill switch.
+- **Single instance:** the supervisor refuses a start when an engine already
+  runs, whether launched by the script or a prior GUI start (a shared
+  `.control/engine.lock` records the pids). A stale lock from a crashed run is
+  detected and cleared on the next start.
+- Backend endpoints: `GET /engine/state`, `POST /engine/start`,
+  `POST /engine/stop`, all read-only on the operational tables and bound to
+  loopback.
+
+> The **kill switch stays independent** of the GUI and the supervisor. The C++
+> engine reads the kill-request control file itself at the top of every loop
+> iteration, so a kill halts the engine even with the GUI, the backend, and the
+> supervisor all down. The GUI Stop button is a graceful shutdown, the kill
+> switch is the safety halt, they are different and the safety halt never routes
+> through the supervisor. The always-visible kill switch is never replaced by the
+> Stop button.
+
 ### Per-level toggles: off / on-mock / on-real
 
 Each advisory level has **two independent axes**, surfaced on the Controls page

@@ -2,7 +2,7 @@
 // The WebSocket stream lives in useStream.ts.
 import type {
   Account, Approval, Category, ControlResult, ControlsState, Council,
-  Credential, Health, IntegrationsHealth, KillState, Mode, Order, Pnl, Position, SignalsResponse,
+  Credential, EngineState, Health, IntegrationsHealth, KillState, Mode, Order, Pnl, Position, SignalsResponse,
   Trade, Venue, DaySummary, ProviderCost, RunState, SkipRow, TradeDetail,
 } from "./types";
 
@@ -65,6 +65,12 @@ export const api = {
   requestKill: (reason: string) =>
     post<{ ok: boolean; request: KillState["request"]; engine: KillState }>(
       "/kill", { requested: true, reason }),
+
+  // --- Engine lifecycle (supervisor). Stop is a graceful shutdown, NOT the
+  // kill switch, which stays on the /kill path above and is independent.
+  engineState: () => get<EngineState>("/engine/state"),
+  engineStart: () => post<EngineState>("/engine/start", {}),
+  engineStop: () => post<EngineState>("/engine/stop", {}),
 
   // --- Controls -------------------------------------------------------------
   controls: () => get<ControlsState>("/controls"),

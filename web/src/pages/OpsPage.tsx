@@ -6,6 +6,7 @@ import { Toggle, SourceToggle } from "../components/controls";
 import SkipFeed from "../components/SkipFeed";
 import DaySummary from "../components/DaySummary";
 import ProviderCostPanel from "../components/ProviderCostPanel";
+import EngineControl from "../components/EngineControl";
 import { Panel } from "../components/ui";
 
 const LAYER_LABEL: Record<string, string> = {
@@ -74,7 +75,8 @@ export default function OpsPage() {
   return (
     <div>
       <h1 className="page-title">Operations</h1>
-      <p className="page-sub">Decision layers, day summary, council skip reasons, and provider spend.</p>
+      <p className="page-sub">Start and stop paper trading, decision layers, day summary, council skip reasons, and provider spend.</p>
+      <div style={{ marginBottom: 14 }}><EngineControl /></div>
       <div style={{ marginBottom: 14 }}><DaySummary /></div>
       <div className="cols">
         <LayerTogglesPanel />

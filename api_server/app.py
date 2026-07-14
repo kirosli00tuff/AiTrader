@@ -21,6 +21,7 @@ from api_server import store
 from api_server import controls
 from api_server import health
 from api_server import providers_cost
+from api_server import supervisor
 
 HOST = "127.0.0.1"        # loopback only, asserted by the test suite
 PORT = int(os.environ.get("MAL_API_PORT", "8000"))
@@ -349,3 +350,33 @@ def get_providers_cost():
 @app.get("/trade/{trade_id}")
 def get_trade_detail(trade_id: int):
     return store.trade_detail(trade_id)
+
+
+# --- Engine lifecycle: GUI Start/Stop through the supervisor ----------------
+# The supervisor owns the bridge + engine processes and runs the same sequence
+# as scripts/start_paper_trading.sh through the shared api_server.stack callable.
+# These endpoints never enable live and never route the kill switch: the engine
+# reads the kill-request control file itself, independent of the supervisor.
+
+@app.get("/engine/state")
+def get_engine_state():
+    """Live lifecycle: not_running, starting, warming (with per-symbol warm
+    progress), running, stopping. Read-only, never returns a key value."""
+    return supervisor.SUPERVISOR.state()
+
+
+@app.post("/engine/start")
+def post_engine_start():
+    """Start the warmed paper stack (backfill, warm, bridge, engine), health
+    checked between steps. Refuses a second start when one is already running,
+    clears a stale lock from a crashed run. Strict mode: an unreachable on-real
+    layer fails the start with what is missing."""
+    return supervisor.SUPERVISOR.start()
+
+
+@app.post("/engine/stop")
+def post_engine_stop():
+    """Graceful shutdown of the bridge + engine the supervisor started. This is
+    NOT the kill switch. The safety halt is the kill-request control file the
+    engine reads on its own, independent of this endpoint."""
+    return supervisor.SUPERVISOR.stop()

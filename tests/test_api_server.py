@@ -785,3 +785,186 @@ def test_runstate_reflects_layer_toggle(env, client):
     n = conn.execute("SELECT COUNT(*) FROM events WHERE kind='control_change'").fetchone()[0]
     conn.close()
     assert n >= 1
+
+
+# --- Engine supervisor: GUI Start/Stop with fully mocked process control -----
+# No real subprocess, no network. api_server.stack is the process-control seam;
+# every function it exposes is patched here so the lifecycle is deterministic.
+
+class FakeProc:
+    """Stand-in for a subprocess.Popen: poll() is None while alive."""
+    def __init__(self, pid=12345, alive=True, exit_code=1):
+        self.pid = pid
+        self._alive = alive
+        self._code = exit_code
+
+    def poll(self):
+        return None if self._alive else self._code
+
+    def terminate(self):
+        self._alive = False
+
+    def kill(self):
+        self._alive = False
+
+    def wait(self, timeout=None):
+        self._alive = False
+        return 0
+
+
+def _mk_spawn(engine_alive=True):
+    """A spawn() that returns a live bridge and an engine whose liveness is
+    configurable. When the engine is not alive it writes a strict-mode failure
+    line to the engine log, the way a real strict-mode refusal would."""
+    def _spawn(cmd, env=None, log_path=None):
+        is_engine = any("mal_engine" in str(c) for c in cmd)
+        if is_engine and not engine_alive:
+            if log_path:
+                os.makedirs(os.path.dirname(log_path), exist_ok=True)
+                with open(log_path, "w") as fh:
+                    fh.write("FATAL: council set on-real but the bridge reports "
+                             "council_real=false. Missing OPENAI_API_KEY.\n")
+            return FakeProc(pid=222, alive=False, exit_code=1)
+        return FakeProc(pid=(222 if is_engine else 111), alive=True)
+    return _spawn
+
+
+_WARM_ALL = {
+    "need": 102, "timeframe": "5min", "all_warm": True,
+    "symbols": [{"symbol": s, "bars": 9000, "warm": True}
+                for s in ("BTC/USD", "ETH/USD", "SPY", "QQQ")],
+}
+
+
+@pytest.fixture()
+def sup(env, monkeypatch, tmp_path):
+    """The supervisor singleton, reset, with api_server.stack fully mocked so no
+    real process or network is touched."""
+    monkeypatch.setenv("MAL_RUN_DIR", str(tmp_path / "run"))
+    from api_server import stack, supervisor
+    supervisor.SUPERVISOR._reset_for_test()
+    monkeypatch.setattr(supervisor, "ENGINE_SETTLE_SECONDS", 0.0)
+    monkeypatch.setattr(stack, "sleep", lambda s: None)
+    monkeypatch.setattr(stack, "run_backfill", lambda db=None: None)
+    monkeypatch.setattr(stack, "seed_feed_clock", lambda: None)
+    monkeypatch.setattr(stack, "http_ok", lambda *a, **k: True)
+    monkeypatch.setattr(stack, "warm_report", lambda db=None: dict(_WARM_ALL))
+    monkeypatch.setattr(stack, "pid_alive", lambda pid: True)
+    monkeypatch.setattr(stack, "spawn", _mk_spawn(engine_alive=True))
+    yield supervisor.SUPERVISOR
+    supervisor.SUPERVISOR._reset_for_test()
+
+
+def test_engine_state_shape_and_no_key(sup, client):
+    j = client.get("/engine/state").json()
+    assert j["state"] == "not_running"
+    for k in ("warm", "lock", "history", "bridge_port", "feed_mode"):
+        assert k in j
+    # No credential-shaped value is ever surfaced by the lifecycle state.
+    blob = json.dumps(j).lower()
+    for bad in ("api_key", "secret", "apca", "sk-", "bearer"):
+        assert bad not in blob
+
+
+def test_engine_start_warms_to_running_then_stops(sup, client):
+    assert client.get("/engine/state").json()["state"] == "not_running"
+    r = client.post("/engine/start").json()
+    assert r["ok"] is True
+    sup.join(4)
+    st = client.get("/engine/state").json()
+    assert st["state"] == "running"
+    # It transitioned through warming (Task 1 lifecycle).
+    assert "warming" in [h.get("state") for h in st["history"]]
+    # Stop is a graceful shutdown back to not_running.
+    s = client.post("/engine/stop").json()
+    assert s["ok"] is True
+    assert client.get("/engine/state").json()["state"] == "not_running"
+
+
+def test_engine_second_start_refused_while_running(sup, client):
+    client.post("/engine/start")
+    sup.join(4)
+    assert client.get("/engine/state").json()["state"] == "running"
+    r = client.post("/engine/start").json()
+    assert r["ok"] is False and "already" in r["error"]
+
+
+def test_engine_start_refused_by_live_foreign_lock(sup, client):
+    # A lock left by the start SCRIPT (or another process) with a live pid blocks
+    # a GUI start, rather than fighting for the same engine.
+    from api_server import stack
+    stack.write_lock(4242, 4243, source="script")   # pid_alive is True here
+    r = client.post("/engine/start").json()
+    assert r["ok"] is False and "already running" in r["error"]
+    # The GUI still reflects the foreign engine as running.
+    assert client.get("/engine/state").json()["state"] == "running"
+
+
+def test_engine_stale_lock_cleared_then_start(sup, client, monkeypatch):
+    from api_server import stack
+    # Dead pids: the lock is stale, not a running instance.
+    monkeypatch.setattr(stack, "pid_alive", lambda pid: pid in (222, 111))
+    stack.write_lock(999999, 999998, source="script")
+    assert stack.lock_status()["stale"] is True
+    r = client.post("/engine/start").json()
+    assert r["ok"] is True
+    sup.join(4)
+    assert client.get("/engine/state").json()["state"] == "running"
+
+
+def test_engine_strict_mode_start_fails_loudly(sup, monkeypatch):
+    from api_server import stack, supervisor
+    # The engine exits on start (strict mode refused an unreachable on-real
+    # layer). The supervisor surfaces what is missing, not a silent mock.
+    monkeypatch.setattr(stack, "spawn", _mk_spawn(engine_alive=False))
+    supervisor.SUPERVISOR.start(background=False)
+    st = supervisor.SUPERVISOR.state()
+    assert st["state"] == "not_running"
+    assert st["error"] and "on-real" in st["error"]
+
+
+def test_kill_path_independent_of_supervisor(sup, client, env):
+    """Task 2: the kill switch halts the engine even with the supervisor down.
+    It writes the control file the C++ engine reads on its own, no supervisor."""
+    client.post("/engine/start")
+    sup.join(4)
+    assert client.get("/engine/state").json()["state"] == "running"
+    # Simulate the supervisor + backend process being gone.
+    sup._engine = None
+    sup._bridge = None
+    sup._state = "not_running"
+    # The kill request still records the durable halt the engine consumes.
+    r = client.post("/kill", json={"requested": True, "reason": "halt"})
+    assert r.json()["ok"] is True
+    assert os.path.exists(os.path.join(env["control"], "kill_request.json"))
+    # Structural: the kill write path never routes through the supervisor.
+    import inspect
+    from api_server import store, app as appmod
+    assert "supervisor" not in inspect.getsource(store.write_kill_request).lower()
+    assert "supervisor" not in inspect.getsource(appmod.post_kill).lower()
+
+
+def test_supervisor_never_touches_kill_request_file():
+    """The supervisor and its stack must never read or write the kill-request
+    file, so start/stop can never interfere with the safety halt."""
+    import inspect
+    from api_server import supervisor, stack
+    src = (inspect.getsource(supervisor) + inspect.getsource(stack)).lower()
+    assert "kill_request" not in src
+
+
+def test_warm_report_reads_bars_table(env):
+    """warm_report reports per-symbol warm state from the bars table, no network.
+    The seed DB has no 5-min bars for the whitelist, so every symbol is cold."""
+    from api_server import stack
+    rep = stack.warm_report(env["db"])
+    assert set(rep) >= {"need", "timeframe", "symbols", "all_warm"}
+    assert rep["need"] >= 102
+    assert rep["all_warm"] is False
+    assert {"BTC/USD", "SPY"} <= {s["symbol"] for s in rep["symbols"]}
+
+
+def test_engine_endpoints_bind_loopback():
+    """The lifecycle endpoints ride the same loopback-bound app, no new bind."""
+    from api_server.app import HOST
+    assert HOST == "127.0.0.1"
