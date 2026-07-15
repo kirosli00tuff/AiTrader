@@ -718,9 +718,13 @@ void Engine::handle_bar_close(const market_data::MarketState& ms,
     // keeps the native rule_based conviction feeding the gate confidence/edge.
     // When false, the gate confidence/edge come from advisory factors alone and
     // the native setup still drives direction and sizing. RiskGate untouched.
+    // council_allowed tells compose_gate_verdict whether the three LLM slots hold
+    // a real council opinion. On a fast tier (or any council skip) they are only
+    // neutral mocks, so the gate confidence/edge come from the native rule_based
+    // conviction plus the real advisory factors, not the un-consulted council.
     auto verdict = signal_engine::compose_gate_verdict(
         signals, weights_, cfg_.engine.native_conviction_feeds_gate, 0.05,
-        cfg_.adaptive.rule_based_weight_floor);
+        cfg_.adaptive.rule_based_weight_floor, council_allowed);
     o.confidence = verdict.confidence;
     o.edge = verdict.edge;
     o.model_agreement_count = verdict.agreement_count;
@@ -729,8 +733,27 @@ void Engine::handle_bar_close(const market_data::MarketState& ms,
     if (!gate.allowed) {
         storage_->insert_blocked({ts, o.venue, o.symbol, o.side, o.qty,
                                   gate.reason, gate.layer});
-        storage_->append_event({ts, "risk_block", o.venue, o.symbol, "warn",
-                                "Native entry blocked: " + gate.reason, "{}"});
+        // Every block carries its real numbers: the composed confidence and the
+        // threshold it was compared against, the tier, the factor, and the
+        // symbol. No more empty payload on a confidence (or any) block.
+        storage_->append_event(
+            {ts, "risk_block", o.venue, o.symbol, "warn",
+             "Native entry blocked: " + gate.reason,
+             util::to_json(
+                 {{"reason", gate.reason},
+                  {"layer", gate.layer},
+                  {"tier", tier == signal_engine::Tier::Fast ? "fast" : "council"},
+                  {"council_ran", council_allowed ? "yes" : "no"},
+                  {"factor", sig.factor},
+                  {"symbol", o.symbol}},
+                 {{"confidence", o.confidence},
+                  {"min_confidence", cfg_.risk.min_confidence_default},
+                  {"edge", o.edge},
+                  {"min_edge", cfg_.risk.min_edge_default},
+                  {"agreement", static_cast<double>(o.model_agreement_count)},
+                  {"required_agreement",
+                   static_cast<double>(cfg_.risk.required_model_agreement_count)},
+                  {"notional", o.notional}})});
         return;
     }
 
@@ -1149,8 +1172,21 @@ int Engine::run_iteration() {
         if (!decision.allowed) {
             storage_->insert_blocked({ts, o.venue, o.symbol, o.side, o.qty,
                                       decision.reason, decision.layer});
-            storage_->append_event({ts, "risk_block", o.venue, o.symbol, "warn",
-                                    "Order blocked: " + decision.reason, "{}"});
+            storage_->append_event(
+                {ts, "risk_block", o.venue, o.symbol, "warn",
+                 "Order blocked: " + decision.reason,
+                 util::to_json(
+                     {{"reason", decision.reason},
+                      {"layer", decision.layer},
+                      {"tier", "legacy"},
+                      {"symbol", o.symbol}},
+                     {{"confidence", o.confidence},
+                      {"min_confidence", cfg_.risk.min_confidence_default},
+                      {"edge", o.edge},
+                      {"min_edge", cfg_.risk.min_edge_default},
+                      {"agreement", static_cast<double>(o.model_agreement_count)},
+                      {"required_agreement",
+                       static_cast<double>(cfg_.risk.required_model_agreement_count)}})});
             continue;
         }
 
@@ -1658,6 +1694,18 @@ void Engine::maybe_run_research_pass(const market_data::MarketState& ms,
     if (!gate.allowed) {
         storage_->insert_blocked({ts, o.venue, o.symbol, o.side, o.qty, gate.reason,
                                   gate.layer});
+        storage_->append_event(
+            {ts, "risk_block", o.venue, o.symbol, "warn",
+             "Satellite entry blocked: " + gate.reason,
+             util::to_json(
+                 {{"reason", gate.reason},
+                  {"layer", gate.layer},
+                  {"tier", "research"},
+                  {"symbol", o.symbol}},
+                 {{"confidence", o.confidence},
+                  {"min_confidence", cfg_.risk.min_confidence_default},
+                  {"edge", o.edge},
+                  {"min_edge", cfg_.risk.min_edge_default}})});
         return;
     }
     // Open the satellite position. Long-term hold: a wide ATR target, no time stop.

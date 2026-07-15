@@ -14,6 +14,38 @@ Commit message:
 
 ---
 
+## Prompt: Log real confidence values on blocks, trace and fix fast-tier native confidence
+
+Date: 2026-07-15
+Model: Opus 4.8
+Prompt summary: Autonomous, operator away. Do not touch RiskGate logic, the live-trading gate, or the adaptive limit-weakening invariant. Live off. RL gated. Context from a supervised run, fast-tier native entries on BTC/USD and ETH/USD block immediately on warm with "confidence below min_confidence_default" and an empty event payload, so the real confidence value is not recorded. Determine whether native confidence is genuinely low or defaults to a value that can never clear the floor, and make the block diagnosable. Task 1, on a native or council confidence block record the actual confidence, the min_confidence threshold, the tier, the factor, and the symbol in payload_json, same for a RiskGate confidence refusal, no more empty payload. Task 2, trace how a fast-tier native entry computes and reports confidence from the strategy factor to the min_confidence check, report where it comes from and what BTC and ETH produced, if the fast tier reuses a council-oriented confidence field native signals never populate that is the bug. Task 3, distinguish genuine-low from default-low, do not change the floor, if a miscompute fix the computation so native signals report a real confidence, if genuinely weak change nothing. Task 4, bounded synthetic-regimes run confirming real numbers log and a sufficient-confidence native signal passes the fast-tier check. Task 5, tests. Task 6, document and commit.
+Changes: Task 1 populated every risk_block event payload_json with the real numbers. A block previously logged an empty "{}". It now carries reason, layer, tier (fast/council), council_ran (yes/no), factor, symbol, and the numbers confidence, min_confidence, edge, min_edge, agreement, required_agreement, notional, so whichever RiskGate check fired is diagnosable. Applied to the native entry block (core/engine.cpp on_closed_bar), the legacy bootstrap-sim block, and the research-satellite entry block. Task 2 traced the fast-tier native confidence. The native strategy IS the rule_based factor. On a native entry gather_factors drives rule_based from the real technical setup (confidence = clamp01(0.7 + 0.3*strength), so 0.7 to 0.88 for a fast-tier entry whose strength is <= 0.6). compose_gate_verdict then blends the factors into the gate confidence, and o.confidence = verdict.confidence is what the RiskGate checks against min_confidence_default (0.65). THE BUG: a fast tier deliberately runs NO council, so the three LLM slots (llm_primary/secondary/tertiary) stay on their neutral in-process mocks (~0.5). Those three un-consulted mocks were blended into the gate confidence, and because rule_based is capped at its floor share (0.35), the neutral mocks pulled a genuine 0.7+ native conviction below 0.65. That is the council-oriented confidence field native fast-tier entries never populate but were still gated on. Task 3 verdict: DEFAULT-LOW / miscompute for BTC and ETH, GENUINE-LOW for the equities seen. The floor was NOT changed. Fix: compose_gate_verdict gained a council_ran flag (signal_engine, default true). When the council did not run (fast tier, spend-ceiling or market-hours skip, all providers disabled) the gate confidence and edge are recomposed from the factors that actually produced a signal (native rule_based + real advisory dnn/whale), excluding the neutral council mocks. Bias, verdict, and agreement stay from the full set, so agreement is never eased and a genuinely weak advisory read still blocks. The engine passes council_allowed into council_ran. The council tier is unchanged. Nothing in the RiskGate or its thresholds changed. Task 4 ran a bounded synthetic_regimes run under active_quant (6000 iters, no crash), traced values below. Task 5 added tests/test_fast_tier_confidence.cpp (the controlled before/after plus the no-forced-trades and council-tier-unchanged cases) and confirmed no path logs a key value and the bridge stays loopback. Task 6 documented in PROGRESS.md, CONTEXT.md (Key Decisions), and this entry. NOT touched: RiskGate logic, the live-trading gate, the adaptive limit-weakening invariant. Live OFF, RL gated 0/500.
+
+Traced fast-tier confidence and verification (2026-07-15, offline synthetic_regimes under active_quant, no API spend):
+
+| Symbol | Tier | Factor | Composed confidence | min_confidence | Outcome |
+| --- | --- | --- | --- | --- | --- |
+| BTC/USD | fast | reversion | 0.7192 | 0.65 | ABOVE floor now. Confidence block RESOLVED. Blocks only on agreement (1 vs 2 required, a separate legitimate RiskGate check on a lone signal, left untouched) |
+| ETH/USD | fast | reversion | 0.7128 | 0.65 | ABOVE floor now. Confidence block RESOLVED. Blocks only on agreement (1 vs 2) |
+| ETH/USD | fast | (native) | 0.662 to 0.678 | 0.65 | PASSED. 6 native fast-tier trades executed (a sufficient-confidence native signal is not falsely blocked) |
+| SPY | fast | momentum | 0.6448, 0.6466 | 0.65 | GENUINELY just below the floor (weak equity advisory read), correctly still blocked on confidence, real numbers now logged |
+| QQQ | fast | momentum | 0.6216 | 0.65 | GENUINELY below the floor, correctly blocked, real numbers logged |
+
+| Check | Result |
+| --- | --- |
+| C++ ctest | 18/18 passed (new fast_tier_confidence) |
+| Python pytest | 274 passed (unchanged, no Python change) |
+| Empty-payload risk_block events in the run | 0 |
+| Fast-tier native trades executed at sufficient confidence | 6 (ETH/USD, conf 0.662 to 0.678) |
+| Unit test controlled before/after | full blend 0.645 below floor (would block) vs council-skipped 0.73 clears it; weak advisory still blocks; council_ran=true equals the full combine |
+| Confidence floor changed | NO (0.65 unchanged) |
+| RiskGate logic / live gate / adaptive invariant | untouched |
+
+Note: the real warm loop over the bridge (real council + real Alpaca bars) was NOT run unattended to avoid API spend while the operator is away. The synthetic_regimes run reliably produces native fast-tier signals, which is what the fix targets, and the unit test is the controlled before/after. On the real week the same council_ran=false path applies to fast-tier entries with the real advisory dnn/whale in place of the mocks.
+Commit message: `Log real confidence values on blocks, trace and fix fast-tier native confidence, live trading untouched`
+
+---
+
 ## Prompt: Add watchdog with notifications, nightly backups, growth safeguards, scheduled DNN challenger training, week configuration and pre-registered success criteria
 
 Date: 2026-07-15
@@ -666,3 +698,25 @@ $ git diff --cached --stat
 | Gemini 3.1 Pro | working | - | 1230.0 ms |
 | Alpaca paper market data | working | one quote ok | 325.1 ms |
 | Alpaca paper order-auth (validation-only) | working | paper account auth ok | 241.7 ms |
+
+### Run 2026-07-15T21:10:26Z
+
+| Integration | Result | Detail | Latency |
+| --- | --- | --- | --- |
+| OpenAI GPT-5.5 | working | - | 2198.3 ms |
+| Anthropic Opus 4.8 | working | - | 1593.6 ms |
+| Anthropic Haiku 4.5 (gate path) | working | - | 565.4 ms |
+| Gemini 3.1 Pro | working | - | 1412.2 ms |
+| Alpaca paper market data | working | one quote ok | 252.4 ms |
+| Alpaca paper order-auth (validation-only) | working | paper account auth ok | 267.3 ms |
+
+### Run 2026-07-15T22:21:34Z
+
+| Integration | Result | Detail | Latency |
+| --- | --- | --- | --- |
+| OpenAI GPT-5.5 | working | - | 3349.9 ms |
+| Anthropic Opus 4.8 | working | - | 1215.3 ms |
+| Anthropic Haiku 4.5 (gate path) | working | - | 865.5 ms |
+| Gemini 3.1 Pro | working | - | 1511.5 ms |
+| Alpaca paper market data | working | one quote ok | 248.8 ms |
+| Alpaca paper order-auth (validation-only) | working | paper account auth ok | 238.6 ms |

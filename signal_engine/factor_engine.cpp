@@ -136,31 +136,53 @@ CombinedVerdict combine(const std::vector<FactorSignal>& signals,
     return cv;
 }
 
+bool is_council_factor(const std::string& factor) {
+    return factor == "llm_primary" || factor == "llm_secondary" ||
+           factor == "llm_tertiary";
+}
+
 CombinedVerdict compose_gate_verdict(const std::vector<FactorSignal>& signals,
                                      const WeightState& weights,
                                      bool native_conviction_feeds_gate,
                                      double min_factor_conf,
-                                     double rule_based_min_share) {
+                                     double rule_based_min_share,
+                                     bool council_ran) {
     // The rule_based share floor applies only when the native conviction feeds
     // the gate (the default). It keeps the native confidence/edge from being
     // diluted by a saturated advisory set, so native entries keep clearing the
     // gate over a long run.
     CombinedVerdict full =
         combine(signals, weights, min_factor_conf, rule_based_min_share);
-    if (native_conviction_feeds_gate) return full;
-    // Flag OFF: the native setup still drives direction (bias) and sizing, but
-    // the gate confidence and edge come from the ADVISORY factors alone. We
-    // recompute confidence/edge over the ensemble minus `rule_based` and swap
-    // only those two fields. Bias, verdict, and agreement are unchanged. The
-    // rule_based floor is moot here (rule_based is excluded). This never touches
-    // the RiskGate or its thresholds.
-    std::vector<FactorSignal> advisory;
-    advisory.reserve(signals.size());
-    for (const auto& s : signals)
-        if (s.factor != "rule_based") advisory.push_back(s);
-    CombinedVerdict adv = combine(advisory, weights, min_factor_conf);
-    full.confidence = adv.confidence;
-    full.edge = adv.edge;
+
+    // Decide which factors may drive the gate confidence/edge. Two independent
+    // exclusions can apply, and they compose:
+    //   drop_rule_based  — native_conviction_feeds_gate is OFF, so the gate
+    //                      confidence/edge come from the advisory factors alone
+    //                      (the native setup still drives bias and sizing).
+    //   drop_council     — the council did NOT run (fast tier, spend-ceiling or
+    //                      market-hours skip, all providers off), so the three
+    //                      LLM slots hold only neutral mocks that were never
+    //                      consulted. They must not drag a genuine native
+    //                      conviction below the RiskGate floor.
+    // Bias, verdict, and agreement always stay from the full set, so this only
+    // reweights confidence/edge and never makes the gate any easier on agreement.
+    const bool drop_rule_based = !native_conviction_feeds_gate;
+    const bool drop_council = !council_ran;
+    if (!drop_rule_based && !drop_council) return full;
+
+    std::vector<FactorSignal> subset;
+    subset.reserve(signals.size());
+    for (const auto& s : signals) {
+        if (drop_rule_based && s.factor == "rule_based") continue;
+        if (drop_council && is_council_factor(s.factor)) continue;
+        subset.push_back(s);
+    }
+    if (subset.empty()) return full;  // nothing real to recompute from; keep full
+    // Keep the rule_based floor only when rule_based remains in the subset.
+    const double share = drop_rule_based ? 0.0 : rule_based_min_share;
+    CombinedVerdict sub = combine(subset, weights, min_factor_conf, share);
+    full.confidence = sub.confidence;
+    full.edge = sub.edge;
     return full;
 }
 

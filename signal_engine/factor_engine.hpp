@@ -82,17 +82,36 @@ CombinedVerdict combine(const std::vector<FactorSignal>& signals,
                         double min_factor_conf = 0.05,
                         double rule_based_min_share = 0.0);
 
+// Names of the three LLM council slots. On a fast-tier (council-skipped) entry
+// these carry only neutral in-process mocks, so they must not feed the gate.
+bool is_council_factor(const std::string& factor);
+
 // Compose the confidence/edge the RiskGate sees, honoring
-// native_conviction_feeds_gate. When true (default) this returns the full
-// ensemble verdict (native rule_based conviction feeds the gate). When false,
-// bias/verdict/agreement stay from the full ensemble but confidence/edge come
-// from the advisory factors alone (rule_based excluded), so a genuine technical
-// setup drives direction and sizing without also inflating the gate
-// confidence/edge. This never touches the RiskGate or its thresholds.
+// native_conviction_feeds_gate and whether the council actually ran.
+//
+// native_conviction_feeds_gate: when true (default) the native rule_based
+// conviction feeds the gate confidence/edge. When false, bias/verdict/agreement
+// stay from the full ensemble but confidence/edge come from the advisory factors
+// alone (rule_based excluded), so a genuine technical setup drives direction and
+// sizing without also inflating the gate confidence/edge.
+//
+// council_ran: when false (a fast-tier entry, a spend-ceiling or market-hours
+// skip, or all providers disabled) the three LLM council slots hold only neutral
+// mocks the fast tier never consulted. Feeding those mocks into the blend drags a
+// genuine native conviction (0.7+) below the RiskGate min_confidence floor and
+// structurally blocks every fast-tier entry. When council_ran is false the gate
+// confidence/edge are recomputed from the factors that actually produced a signal
+// (native rule_based plus any real advisory), so the gate sees the native
+// signal's real confidence. Bias, verdict, and agreement stay from the full set.
+//
+// This only reweights confidence/edge. It never touches the RiskGate or its
+// thresholds: the gate still judges the resulting confidence against
+// min_confidence_default unchanged.
 CombinedVerdict compose_gate_verdict(const std::vector<FactorSignal>& signals,
                                      const WeightState& weights,
                                      bool native_conviction_feeds_gate,
                                      double min_factor_conf = 0.05,
-                                     double rule_based_min_share = 0.0);
+                                     double rule_based_min_share = 0.0,
+                                     bool council_ran = true);
 
 }  // namespace mal::signal_engine

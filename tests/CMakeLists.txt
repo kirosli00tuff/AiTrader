@@ -62,6 +62,15 @@ target_link_libraries(test_native_conviction_gate PRIVATE mal_signal_engine)
 add_test(NAME native_conviction_gate COMMAND test_native_conviction_gate
          WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 
+# Fast-tier native confidence: the council-skipped fast tier must NOT let the
+# un-consulted neutral LLM mocks drag a genuine native conviction below the
+# RiskGate floor, while a genuinely weak advisory read still blocks (no forced
+# trades) and the council tier stays the full-ensemble blend.
+add_executable(test_fast_tier_confidence test_fast_tier_confidence.cpp)
+target_link_libraries(test_fast_tier_confidence PRIVATE mal_signal_engine)
+add_test(NAME fast_tier_confidence COMMAND test_fast_tier_confidence
+         WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
 # Per-layer toggles (controls.json): read defaults all ON on a missing/malformed
 # file, explicit toggles are respected, a layer off drops its factor, and
 # rule_based (safety-adjacent) is never gated so the RiskGate is unaffected.
