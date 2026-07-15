@@ -292,6 +292,37 @@ struct CouncilConfig {
     double council_monthly_spend_ceiling_usd = 0.0; // 0 = disabled
 };
 
+// Core-satellite hybrid sleeves. The quant_core sleeve runs the systematic
+// RSI-2 + momentum stack. The research_satellite sleeve uses the LLM council for
+// deep research, taking fewer, larger, longer-held positions. The split is
+// enforced MECHANICALLY: the satellite can never exceed its target allocation
+// plus the drift band (a hard cap in code, a research conviction can never
+// override it). research_satellite_enabled ships OFF so nothing changes until the
+// operator opts in. The RiskGate still judges every order in BOTH sleeves with
+// all Level-1 limits unchanged. This block never weakens a Level-1 limit.
+struct SleeveConfig {
+    bool quant_core_enabled = true;
+    bool research_satellite_enabled = false;      // OFF by default (operator opt-in)
+    double quant_core_target_pct = 0.80;          // target share of equity
+    double research_satellite_target_pct = 0.20;
+    double drift_band_pct = 0.05;                 // absolute band around each target
+    // Research decision path (deep-research council pass on a schedule).
+    std::vector<std::string> research_whitelist{
+        "BTC/USD", "ETH/USD", "SPY", "QQQ", "AAPL", "MSFT", "NVDA"};
+    double research_conviction_threshold = 0.70;  // min council conviction to open a satellite position
+    int research_passes_per_day = 3;              // scheduled deep-research passes per day
+    int research_daily_budget = 6;                // max deep-research council calls per day
+    double research_est_cost_per_call_usd = 0.08; // deep research is pricier per call
+    // Rebalancing (trims the overweight sleeve through the normal exit path).
+    bool rebalance_on_drift = true;               // drift-band trigger
+    int rebalance_check_minutes = 360;            // scheduled check cadence
+    // Combined monthly spend ceiling across BOTH sleeves (quant council + research
+    // council). When reached the engine pauses new council AND research calls in
+    // both sleeves, logged. 0.0 disables. Sized so a month stays near or under 100
+    // dollars. This is a cost control that can only SKIP spend, never widen risk.
+    double combined_monthly_spend_ceiling_usd = 100.0;
+};
+
 // Ensemble weights. Editable in UI, auto-normalized, lockable.
 struct ModelWeights {
     double llm_primary_weight = 0.27;
@@ -354,6 +385,7 @@ struct Config {
     DashboardConfig dashboard;
     SimulationConfig simulation;
     IbkrConfig ibkr;
+    SleeveConfig sleeves;
     ModelWeights model_weights;
 
     const VenueConfig* find_venue(const std::string& name) const;

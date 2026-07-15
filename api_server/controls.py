@@ -165,6 +165,18 @@ def read_controls() -> dict:
         for layer in LAYERS:
             if layer in saved["layers"]:
                 state["layers"][layer] = bool(saved["layers"][layer])
+    # Core-satellite sleeve enable toggles + a manual rebalance request. Advisory
+    # only, never a Level-1 value. The engine reads sleeve enable from config at
+    # startup; the runtime toggle + manual rebalance mirror the control-file
+    # pattern (engine consumption is a documented follow-up).
+    state.setdefault("sleeves", {"quant_core": True, "research_satellite": False})
+    if isinstance(saved.get("sleeves"), dict):
+        for s in ("quant_core", "research_satellite"):
+            if s in saved["sleeves"]:
+                state["sleeves"][s] = bool(saved["sleeves"][s])
+    state.setdefault("rebalance_requested", False)
+    if "rebalance_requested" in saved:
+        state["rebalance_requested"] = bool(saved["rebalance_requested"])
     if isinstance(saved.get("layer_sources"), dict):
         for layer in SOURCE_LAYERS:
             v = saved["layer_sources"].get(layer)
@@ -418,6 +430,70 @@ def set_layer(layer: str, enabled: bool) -> dict:
     _write_controls(st)
     _audit(f"layer.{layer}", old, bool(enabled))
     return {"ok": True, "layer": layer, "enabled": bool(enabled)}
+
+
+def sleeve_state() -> dict:
+    """Core-satellite allocation panel data: live per-sleeve capital, the target
+    split, drift band, hard cap, enable toggles, and a rebalance-due flag. Pure
+    read (config + positions), never a key value, never a Level-1 write."""
+    sl = store.load_config().get("sleeves", {}) or {}
+    def _f(k, d):
+        try:
+            return float(sl.get(k, d))
+        except (TypeError, ValueError):
+            return d
+    core_target = _f("quant_core_target_pct", 0.80)
+    sat_target = _f("research_satellite_target_pct", 0.20)
+    band = _f("drift_band_pct", 0.05)
+    alloc = store.sleeve_allocation()
+    total = alloc.get("invested_total", 0.0) or 0.0
+    sat_val = alloc["research_satellite"]["allocation"]
+    core_val = alloc["quant_core"]["allocation"]
+    sat_share = (sat_val / total) if total > 0 else 0.0
+    # A rebalance is due when the satellite share drifts past its band.
+    rebalance_due = total > 0 and (
+        sat_share > sat_target + band or sat_share < sat_target - band)
+    st = read_controls()
+    return {
+        "targets": {"quant_core": core_target, "research_satellite": sat_target},
+        "drift_band": band,
+        "hard_cap_pct": sat_target + band,
+        "allocation": {"quant_core": core_val, "research_satellite": sat_val,
+                       "invested_total": total},
+        "satellite_share": round(sat_share, 4),
+        "rebalance_due": bool(rebalance_due),
+        "enabled": st.get("sleeves", {"quant_core": True,
+                                      "research_satellite": False}),
+        "research_satellite_config_enabled":
+            bool(sl.get("research_satellite_enabled", False)),
+        "open_positions": {
+            "quant_core": alloc["quant_core"]["open_positions"],
+            "research_satellite": alloc["research_satellite"]["open_positions"]},
+    }
+
+
+def set_sleeve(sleeve: str, enabled: bool) -> dict:
+    """Toggle a core-satellite sleeve enable (quant_core | research_satellite).
+    Validated server-side; writes the control file, never a Level-1 value."""
+    if sleeve not in ("quant_core", "research_satellite"):
+        return {"ok": False, "error": f"unknown sleeve: {sleeve}"}
+    st = read_controls()
+    old = st["sleeves"].get(sleeve)
+    st["sleeves"][sleeve] = bool(enabled)
+    _write_controls(st)
+    _audit(f"sleeve.{sleeve}", old, bool(enabled))
+    return {"ok": True, "sleeve": sleeve, "enabled": bool(enabled)}
+
+
+def request_rebalance() -> dict:
+    """Request a manual sleeve rebalance. Writes a control-file flag (the engine's
+    normal drift/scheduled rebalance runs through the RiskGate-approved exit path).
+    Never a Level-1 value, never a forced bypass."""
+    st = read_controls()
+    st["rebalance_requested"] = True
+    _write_controls(st)
+    _audit("sleeve.rebalance_requested", False, True)
+    return {"ok": True, "rebalance_requested": True}
 
 
 def set_source(layer: str, source: str) -> dict:

@@ -90,6 +90,43 @@ def get_pnl(mode: str = Query(store.PAPER)):
     return store.pnl(_mode(mode))
 
 
+@app.get("/sleeves")
+def get_sleeves():
+    # Core-satellite allocation panel: live per-sleeve capital + the target split,
+    # drift band, hard cap, and a rebalance-due flag. Read-only. No key value.
+    return controls.sleeve_state()
+
+
+@app.get("/sleeves/history")
+def get_sleeve_history(sleeve: str | None = Query(None),
+                       limit: int = Query(200, le=1000)):
+    return {"history": store.sleeve_history(sleeve, limit)}
+
+
+@app.get("/research/theses")
+def get_research_theses(limit: int = Query(100, le=500)):
+    # Research feed + satellite positions: each deep-research pass with its thesis.
+    return {"theses": store.research_theses(limit)}
+
+
+class SleeveWrite(BaseModel):
+    sleeve: str
+    enabled: bool
+
+
+@app.post("/controls/sleeve")
+def post_sleeve(body: SleeveWrite):
+    # Independent sleeve enable toggle. Validated server-side; control-file write.
+    return controls.set_sleeve(body.sleeve, body.enabled)
+
+
+@app.post("/controls/rebalance")
+def post_rebalance():
+    # Manual rebalance-now request. The engine rebalances through the normal
+    # RiskGate-approved exit path (no forced bypass, no new write path).
+    return controls.request_rebalance()
+
+
 @app.get("/signals")
 def get_signals(limit: int = Query(100, le=500),
                 category: str | None = Query(None)):

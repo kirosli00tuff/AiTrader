@@ -1174,3 +1174,56 @@ def test_supervisor_teardown_never_touches_kill_request(sup, env, monkeypatch):
     supervisor.SUPERVISOR.start(background=False)
     assert supervisor.SUPERVISOR.state()["state"] == "not_running"
     assert not os.path.exists(os.path.join(env["control"], "kill_request.json"))
+
+
+# --- Core-satellite sleeve GUI endpoints (Q) -------------------------------
+
+def test_sleeves_endpoint_reports_split_and_cap(env, client):
+    r = client.get("/sleeves")
+    assert r.status_code == 200
+    d = r.json()
+    # Default 80/20 split, 5% band, hard cap 25% of equity.
+    assert d["targets"]["quant_core"] == 0.80
+    assert d["targets"]["research_satellite"] == 0.20
+    assert d["drift_band"] == 0.05
+    assert abs(d["hard_cap_pct"] - 0.25) < 1e-9
+    assert "allocation" in d and "rebalance_due" in d
+    # research_satellite ships OFF by default.
+    assert d["research_satellite_config_enabled"] is False
+    assert d["enabled"]["research_satellite"] is False
+
+
+def test_research_theses_endpoint(env, client):
+    r = client.get("/research/theses")
+    assert r.status_code == 200
+    assert isinstance(r.json()["theses"], list)
+
+
+def test_sleeve_history_endpoint(env, client):
+    r = client.get("/sleeves/history")
+    assert r.status_code == 200
+    assert isinstance(r.json()["history"], list)
+
+
+def test_sleeve_toggle_writes_control_file(env, client):
+    r = client.post("/controls/sleeve",
+                    json={"sleeve": "research_satellite", "enabled": True})
+    assert r.status_code == 200 and r.json()["ok"] is True
+    # The toggle persists to the control file and reads back through /sleeves.
+    assert client.get("/sleeves").json()["enabled"]["research_satellite"] is True
+    # An unknown sleeve is refused server-side.
+    bad = client.post("/controls/sleeve", json={"sleeve": "moon", "enabled": True})
+    assert bad.json()["ok"] is False
+
+
+def test_manual_rebalance_request(env, client):
+    r = client.post("/controls/rebalance")
+    assert r.status_code == 200 and r.json()["rebalance_requested"] is True
+    # It writes the control file, never a kill-request file.
+    assert not os.path.exists(os.path.join(env["control"], "kill_request.json"))
+
+
+def test_sleeve_endpoints_never_return_a_key(env, client):
+    blob = (client.get("/sleeves").text + client.get("/research/theses").text +
+            client.get("/sleeves/history").text)
+    assert "sk-" not in blob and "API_KEY" not in blob

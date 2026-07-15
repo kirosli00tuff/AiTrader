@@ -144,6 +144,39 @@ active_quant`); the `active_quant:` block holds the overriding thresholds,
 whitelist, budget, cooldown, and spend ceiling. Every value is operator-tunable
 and none touches a Level-1 risk limit.
 
+## Core-satellite hybrid (two sleeves)
+
+The portfolio splits into two sleeves with distinct roles:
+
+- **`quant_core` (systematic core, ~80%).** Runs the RSI-2 + momentum stack
+  above. Frequent, selective, systematic.
+- **`research_satellite` (tactical satellite, ~20%).** Uses the LLM council for
+  **deep research** on individual instruments, taking **fewer, larger,
+  longer-held** positions. Each pass produces a structured thesis (direction,
+  conviction, horizon, rationale) persisted with the position. Ships **OFF by
+  default** — the operator opts in, and it earns a wider allocation only through
+  paper results (the same graduate-when-proven discipline as RL).
+
+**The split is enforced mechanically.** The satellite can **never exceed its
+target allocation plus the drift band** (default 20% + 5% = a hard 25% cap in
+`core/sleeves.hpp`). A research conviction can never override the cap. When a
+sleeve drifts past the band, rules-based **rebalancing** trims the overweight
+sleeve back toward target through the normal **RiskGate-approved exit path**
+(never a bypass), on a drift trigger and a scheduled cadence, logged with
+before/after allocations.
+
+**Every position is tagged to its sleeve** and accounted independently
+(`sleeve_history`). The **RiskGate judges every order in both sleeves** with all
+Level-1 limits unchanged — the satellite's larger positions still respect every
+cap, so a long-term hold never means unbounded size. A **combined monthly spend
+ceiling** (quant council + research) pauses both sleeves when reached, keeping the
+combined API spend near or under **100 dollars** a month.
+
+The GUI Controls page shows a **sleeve allocation panel** (live split vs target,
+drift band, rebalance-due flag), per-sleeve **enable toggles**, a **rebalance-now**
+button, and the **research thesis feed** — so the higher-equity long-term
+decisions are transparent. Enable via `sleeves.research_satellite_enabled: true`.
+
 ## Repository layout
 
 | Path | Module | Language |

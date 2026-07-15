@@ -317,6 +317,18 @@ int main(int argc, char** argv) {
                 << "/day, $" << co.council_monthly_spend_ceiling_usd
                 << "/month @ ~$" << co.council_est_cost_per_call_usd
                 << "/call (0=off, forces fast tier when reached)\n"
+                << "  sleeves:   quant_core " << (cfg.sleeves.quant_core_target_pct * 100)
+                << "% / research_satellite " << (cfg.sleeves.research_satellite_target_pct * 100)
+                << "% (band " << (cfg.sleeves.drift_band_pct * 100) << "%), satellite "
+                << (cfg.sleeves.research_satellite_enabled ? "ON" : "OFF (opt-in)")
+                << ", hard cap "
+                << ((cfg.sleeves.research_satellite_target_pct + cfg.sleeves.drift_band_pct) * 100)
+                << "% of equity\n"
+                << "  research:  " << cfg.sleeves.research_passes_per_day
+                << " passes/day, budget " << cfg.sleeves.research_daily_budget
+                << " calls/day, conviction>=" << cfg.sleeves.research_conviction_threshold
+                << ", combined ceiling $" << cfg.sleeves.combined_monthly_spend_ceiling_usd
+                << "/month (pauses both sleeves)\n"
                 << "  cost cuts: risk pre-check ON; equities market-hours-only "
                 << (cfg.engine.equities_market_hours_only ? "ON" : "off")
                 << " (crypto 24/7)\n"

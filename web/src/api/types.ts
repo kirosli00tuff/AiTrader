@@ -308,3 +308,25 @@ export interface TradeDetail {
   regime: { regime: string; adx: number | null; rvol: number | null; updated_ts: string } | null;
   events: { ts: string; kind: string; severity: string; message: string }[];
 }
+
+// Core-satellite sleeves.
+export interface SleeveState {
+  targets: { quant_core: number; research_satellite: number };
+  drift_band: number;
+  hard_cap_pct: number;
+  allocation: { quant_core: number; research_satellite: number; invested_total: number };
+  satellite_share: number;
+  rebalance_due: boolean;
+  enabled: { quant_core: boolean; research_satellite: boolean };
+  research_satellite_config_enabled: boolean;
+  open_positions: { quant_core: number; research_satellite: number };
+}
+export interface ResearchThesis {
+  ts: string;
+  symbol: string;
+  direction: string;
+  conviction: number | null;
+  horizon: string | null;
+  rationale: string | null;
+  status: string;
+}

@@ -1,5 +1,6 @@
 #include "config/config.hpp"
 
+#include <cmath>
 #include <stdexcept>
 
 #include "config/yaml.hpp"
@@ -331,6 +332,25 @@ Config load_config(const std::string& path) {
     ib.connection_enabled = get_bool(root, "ibkr.connection_enabled", ib.connection_enabled);
     ib.market_data = get_bool(root, "ibkr.market_data", ib.market_data);
 
+    // sleeves (core-satellite hybrid; research_satellite ships OFF by default)
+    auto& sl = c.sleeves;
+    sl.quant_core_enabled = get_bool(root, "sleeves.quant_core_enabled", sl.quant_core_enabled);
+    sl.research_satellite_enabled = get_bool(root, "sleeves.research_satellite_enabled", sl.research_satellite_enabled);
+    sl.quant_core_target_pct = get_double(root, "sleeves.quant_core_target_pct", sl.quant_core_target_pct);
+    sl.research_satellite_target_pct = get_double(root, "sleeves.research_satellite_target_pct", sl.research_satellite_target_pct);
+    sl.drift_band_pct = get_double(root, "sleeves.drift_band_pct", sl.drift_band_pct);
+    sl.research_conviction_threshold = get_double(root, "sleeves.research_conviction_threshold", sl.research_conviction_threshold);
+    sl.research_passes_per_day = get_int(root, "sleeves.research_passes_per_day", sl.research_passes_per_day);
+    sl.research_daily_budget = get_int(root, "sleeves.research_daily_budget", sl.research_daily_budget);
+    sl.research_est_cost_per_call_usd = get_double(root, "sleeves.research_est_cost_per_call_usd", sl.research_est_cost_per_call_usd);
+    sl.rebalance_on_drift = get_bool(root, "sleeves.rebalance_on_drift", sl.rebalance_on_drift);
+    sl.rebalance_check_minutes = get_int(root, "sleeves.rebalance_check_minutes", sl.rebalance_check_minutes);
+    sl.combined_monthly_spend_ceiling_usd = get_double(root, "sleeves.combined_monthly_spend_ceiling_usd", sl.combined_monthly_spend_ceiling_usd);
+    {
+        auto rw = split_csv(get_str(root, "sleeves.research_whitelist", ""));
+        if (!rw.empty()) sl.research_whitelist = rw;
+    }
+
     // adaptive
     auto& a = c.adaptive;
     a.adaptive_learning_enabled = get_bool(root, "adaptive.adaptive_learning_enabled", a.adaptive_learning_enabled);
@@ -592,6 +612,26 @@ std::vector<std::string> validate_config(const Config& cfg) {
     // rl_enabled defaults false so the factor stays out of the ensemble.
     if (cfg.rl.rl_min_real_fills < 0)
         problems.push_back("rl.rl_min_real_fills must be >= 0");
+
+    // Sleeves (core-satellite). Targets are shares of equity that must sum to ~1,
+    // the band is a fraction, budgets/cadence non-negative. None weakens a limit.
+    const auto& sl = cfg.sleeves;
+    pct("sleeves.quant_core_target_pct", sl.quant_core_target_pct);
+    pct("sleeves.research_satellite_target_pct", sl.research_satellite_target_pct);
+    pct("sleeves.drift_band_pct", sl.drift_band_pct);
+    pct("sleeves.research_conviction_threshold", sl.research_conviction_threshold);
+    if (std::abs(sl.quant_core_target_pct + sl.research_satellite_target_pct - 1.0) > 1e-6)
+        problems.push_back("sleeves quant_core_target_pct + research_satellite_target_pct must sum to 1.0");
+    if (sl.drift_band_pct > sl.research_satellite_target_pct)
+        problems.push_back("sleeves.drift_band_pct must not exceed the satellite target (a band wider than the target would let the satellite exceed 2x its target)");
+    if (sl.research_passes_per_day < 0 || sl.research_daily_budget < 0)
+        problems.push_back("sleeves research passes/budget must be >= 0");
+    if (sl.rebalance_check_minutes < 0)
+        problems.push_back("sleeves.rebalance_check_minutes must be >= 0");
+    if (sl.research_est_cost_per_call_usd < 0.0 || sl.combined_monthly_spend_ceiling_usd < 0.0)
+        problems.push_back("sleeves cost values must be >= 0");
+    if (sl.research_whitelist.empty())
+        problems.push_back("sleeves.research_whitelist must not be empty");
 
     return problems;
 }

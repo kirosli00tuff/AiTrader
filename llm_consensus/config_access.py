@@ -183,6 +183,68 @@ def fast_tier_max_conviction(cfg_path: str | None = None) -> float:
     return _spend_num("fast_tier_max_conviction", cfg_path)
 
 
+# --- Core-satellite sleeves (research_satellite cost control) ---------------
+# Mirrors the C++ sleeves: block. The engine owns real enforcement; these let the
+# Python research path and the GUI reason about the budget and combined ceiling.
+_SLEEVE_DEFAULTS: dict[str, float] = {
+    "research_conviction_threshold": 0.70,
+    "research_daily_budget": 6,
+    "research_est_cost_per_call_usd": 0.08,
+    "combined_monthly_spend_ceiling_usd": 100.0,
+}
+
+
+def _sleeves(cfg_path: str | None) -> dict:
+    return _cfg(cfg_path).get("sleeves", {}) or {}
+
+
+def _sleeve_num(key: str, cfg_path: str | None):
+    default = _SLEEVE_DEFAULTS[key]
+    try:
+        return type(default)(_sleeves(cfg_path).get(key, default))
+    except (TypeError, ValueError):
+        return default
+
+
+def research_satellite_enabled(cfg_path: str | None = None) -> bool:
+    """True when the research_satellite sleeve is on (OFF by default)."""
+    return bool(_sleeves(cfg_path).get("research_satellite_enabled", False))
+
+
+def research_conviction_threshold(cfg_path: str | None = None) -> float:
+    """Min council conviction to open a satellite position."""
+    return float(_sleeve_num("research_conviction_threshold", cfg_path))
+
+
+def research_daily_budget(cfg_path: str | None = None) -> int:
+    """Max deep-research council calls per day."""
+    return int(_sleeve_num("research_daily_budget", cfg_path))
+
+
+def research_est_cost_per_call_usd(cfg_path: str | None = None) -> float:
+    """Estimated cost of one deep-research council call."""
+    return float(_sleeve_num("research_est_cost_per_call_usd", cfg_path))
+
+
+def combined_monthly_spend_ceiling_usd(cfg_path: str | None = None) -> float:
+    """Combined (quant council + research) monthly spend ceiling (0 = off)."""
+    return float(_sleeve_num("combined_monthly_spend_ceiling_usd", cfg_path))
+
+
+def combined_spend_ceiling_reached(council_calls_month: int,
+                                   research_calls_month: int,
+                                   cfg_path: str | None = None) -> bool:
+    """True when combined council + research spend reaches the monthly ceiling,
+    which pauses new council AND research calls in BOTH sleeves. Mirrors the C++
+    Engine::combined_spend_ceiling_reached."""
+    ceiling = combined_monthly_spend_ceiling_usd(cfg_path)
+    if ceiling <= 0.0:
+        return False
+    council = council_calls_month * council_est_cost_per_call_usd(cfg_path)
+    research = research_calls_month * research_est_cost_per_call_usd(cfg_path)
+    return council + research >= ceiling
+
+
 def spend_ceiling_reached(calls_today: int, calls_month: int,
                           cfg_path: str | None = None) -> bool:
     """True when estimated council spend has reached a daily or monthly ceiling.

@@ -4,6 +4,7 @@ import type {
   Account, Approval, Category, ControlResult, ControlsState, Council,
   Credential, EngineState, Health, IntegrationsHealth, KillState, Mode, Order, Pnl, Position, SignalsResponse,
   Trade, Venue, DaySummary, ProviderCost, RunState, SkipRow, TradeDetail,
+  SleeveState, ResearchThesis,
 } from "./types";
 
 export const API_BASE = import.meta.env.VITE_API_BASE ?? "http://127.0.0.1:8000";
@@ -94,4 +95,13 @@ export const api = {
   setBudget: (council_daily_budget: number, per_symbol_cooldown_minutes: number) =>
     post<ControlResult>("/controls/budget",
       { council_daily_budget, per_symbol_cooldown_minutes }),
+
+  // --- Core-satellite sleeves ----------------------------------------------
+  sleeves: () => get<SleeveState>("/sleeves"),
+  researchTheses: (limit = 100) =>
+    get<{ theses: ResearchThesis[] }>(`/research/theses?limit=${limit}`),
+  setSleeve: (sleeve: string, enabled: boolean) =>
+    post<ControlResult>("/controls/sleeve", { sleeve, enabled }),
+  requestRebalance: () =>
+    post<{ ok: boolean; rebalance_requested: boolean }>("/controls/rebalance", {}),
 };

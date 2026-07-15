@@ -37,7 +37,8 @@ CREATE TABLE IF NOT EXISTS trades (
     outcome       TEXT,                      -- win | loss | open | flat
     combined_conf REAL,
     combined_edge REAL,
-    decision_id   INTEGER
+    decision_id   INTEGER,
+    sleeve        TEXT    DEFAULT 'quant_core'  -- quant_core | research_satellite
 );
 CREATE INDEX IF NOT EXISTS idx_trades_ts ON trades(ts);
 
@@ -54,8 +55,38 @@ CREATE TABLE IF NOT EXISTS positions (
     notional  REAL NOT NULL,
     opened_ts TEXT NOT NULL,
     unrealized_pnl REAL DEFAULT 0,
+    sleeve    TEXT DEFAULT 'quant_core',  -- quant_core | research_satellite
     UNIQUE(venue, symbol)
 );
+
+-- Research satellite theses. One row per LLM deep-research decision. Attached to
+-- a research_satellite position so the operator can read why each long-term hold
+-- exists. rationale is council prose, never a key value.
+CREATE TABLE IF NOT EXISTS research_thesis (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts         TEXT NOT NULL,
+    symbol     TEXT NOT NULL,
+    direction  TEXT,                        -- long | short | flat
+    conviction REAL,                        -- council conviction [0,1]
+    horizon    TEXT,                         -- e.g. weeks | months
+    rationale  TEXT,
+    status     TEXT DEFAULT 'open'           -- open | invalidated | target | closed
+);
+CREATE INDEX IF NOT EXISTS idx_research_symbol ON research_thesis(symbol, status);
+
+-- Per-sleeve accounting history for the GUI (a snapshot per sleeve over time).
+CREATE TABLE IF NOT EXISTS sleeve_history (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts             TEXT NOT NULL,
+    sleeve         TEXT NOT NULL,            -- quant_core | research_satellite
+    allocation     REAL DEFAULT 0,           -- capital deployed in the sleeve
+    realized_pnl   REAL DEFAULT 0,
+    unrealized_pnl REAL DEFAULT 0,
+    open_positions INTEGER DEFAULT 0,
+    wins           INTEGER DEFAULT 0,
+    losses         INTEGER DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_sleeve_history_ts ON sleeve_history(sleeve, ts);
 
 -- Raw signals from factor families (one row per factor per evaluation).
 CREATE TABLE IF NOT EXISTS signals (

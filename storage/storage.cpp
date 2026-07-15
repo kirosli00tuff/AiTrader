@@ -79,6 +79,18 @@ void Storage::init_schema(const std::string& schema_sql_path) {
     sqlite3_exec(db_, "ALTER TABLE regime_state ADD COLUMN active_factor TEXT",
                  nullptr, nullptr, &err);
     if (err) sqlite3_free(err);
+    // Sleeve tag on trades/positions (default quant_core so existing rows read as
+    // the systematic core). Tolerant: a duplicate-column error on a fresh DB is
+    // expected and ignored.
+    const char* migrations[] = {
+        "ALTER TABLE trades ADD COLUMN sleeve TEXT DEFAULT 'quant_core'",
+        "ALTER TABLE positions ADD COLUMN sleeve TEXT DEFAULT 'quant_core'",
+    };
+    for (const char* m : migrations) {
+        char* e = nullptr;
+        sqlite3_exec(db_, m, nullptr, nullptr, &e);
+        if (e) sqlite3_free(e);
+    }
 }
 
 long long Storage::append_event(const EventRow& e) {
@@ -94,13 +106,14 @@ long long Storage::append_event(const EventRow& e) {
 long long Storage::insert_trade(const TradeRow& t) {
     Stmt s(db_,
            "INSERT INTO trades(ts,venue,symbol,market,category,side,qty,price,"
-           "notional,fee,mode,pnl,outcome,combined_conf,combined_edge)"
-           " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)");
+           "notional,fee,mode,pnl,outcome,combined_conf,combined_edge,sleeve)"
+           " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)");
     s.bind(1, t.ts).bind(2, t.venue).bind(3, t.symbol).bind(4, t.market)
         .bind(5, t.category).bind(6, t.side).bind(7, t.qty).bind(8, t.price)
         .bind(9, t.notional).bind(10, t.fee).bind(11, t.mode);
     if (t.pnl) s.bind(12, *t.pnl); else s.bind_null(12);
-    s.bind(13, t.outcome).bind(14, t.combined_conf).bind(15, t.combined_edge);
+    s.bind(13, t.outcome).bind(14, t.combined_conf).bind(15, t.combined_edge)
+        .bind(16, t.sleeve);
     s.step_done();
     return sqlite3_last_insert_rowid(db_);
 }
@@ -208,17 +221,52 @@ void Storage::upsert_position(const std::string& venue, const std::string& symbo
                               const std::string& category,
                               const std::string& side, double qty,
                               double avg_price, double notional,
-                              const std::string& opened_ts) {
+                              const std::string& opened_ts,
+                              const std::string& sleeve) {
     Stmt s(db_,
            "INSERT INTO positions(venue,symbol,market,category,side,qty,"
-           "avg_price,notional,opened_ts) VALUES(?,?,?,?,?,?,?,?,?)"
+           "avg_price,notional,opened_ts,sleeve) VALUES(?,?,?,?,?,?,?,?,?,?)"
            " ON CONFLICT(venue,symbol) DO UPDATE SET qty=excluded.qty,"
            " avg_price=excluded.avg_price, notional=excluded.notional,"
-           " side=excluded.side");
+           " side=excluded.side, sleeve=excluded.sleeve");
     s.bind(1, venue).bind(2, symbol).bind(3, market).bind(4, category)
         .bind(5, side).bind(6, qty).bind(7, avg_price).bind(8, notional)
-        .bind(9, opened_ts);
+        .bind(9, opened_ts).bind(10, sleeve);
     s.step_done();
+}
+
+long long Storage::insert_research_thesis(const ResearchThesisRow& t) {
+    Stmt s(db_,
+           "INSERT INTO research_thesis(ts,symbol,direction,conviction,horizon,"
+           "rationale,status) VALUES(?,?,?,?,?,?,?)");
+    s.bind(1, t.ts).bind(2, t.symbol).bind(3, t.direction).bind(4, t.conviction)
+        .bind(5, t.horizon).bind(6, t.rationale).bind(7, t.status);
+    s.step_done();
+    return sqlite3_last_insert_rowid(db_);
+}
+
+void Storage::update_research_thesis_status(const std::string& symbol,
+                                            const std::string& status,
+                                            const std::string& ts) {
+    // Update the most recent open thesis for the symbol.
+    Stmt s(db_,
+           "UPDATE research_thesis SET status=?, ts=? WHERE id=("
+           "SELECT id FROM research_thesis WHERE symbol=? AND status='open'"
+           " ORDER BY id DESC LIMIT 1)");
+    s.bind(1, status).bind(2, ts).bind(3, symbol);
+    s.step_done();
+}
+
+long long Storage::insert_sleeve_snapshot(const SleeveSnapshotRow& r) {
+    Stmt s(db_,
+           "INSERT INTO sleeve_history(ts,sleeve,allocation,realized_pnl,"
+           "unrealized_pnl,open_positions,wins,losses)"
+           " VALUES(?,?,?,?,?,?,?,?)");
+    s.bind(1, r.ts).bind(2, r.sleeve).bind(3, r.allocation).bind(4, r.realized_pnl)
+        .bind(5, r.unrealized_pnl).bind(6, r.open_positions).bind(7, r.wins)
+        .bind(8, r.losses);
+    s.step_done();
+    return sqlite3_last_insert_rowid(db_);
 }
 
 void Storage::upsert_bar(const BarRow& b) {

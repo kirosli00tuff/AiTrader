@@ -23,6 +23,7 @@
 #include "market_data/market_data.hpp"
 #include "market_data/synthetic_feed.hpp"
 #include "news_ingestion/news_ingestion.hpp"
+#include "core/sleeves.hpp"
 #include "risk/risk_gate.hpp"
 #include "signal_engine/council_gate.hpp"
 #include "signal_engine/factor_engine.hpp"
@@ -178,6 +179,31 @@ private:
     strategy::Regime pinned_or(const std::string& symbol,
                                strategy::Regime detected) const;
 
+    // --- Core-satellite sleeves (Q) --------------------------------------
+    // Sum the currently-open position notionals per sleeve (quant_core vs
+    // research_satellite). Uninvested equity is cash. Used for the hard cap and
+    // rebalancing. Pure read of open_positions_.
+    sleeve::Allocations current_allocations() const;
+    // Persist a per-sleeve accounting snapshot (allocation, realized/unrealized
+    // pnl, open positions, wins/losses) to sleeve_history for the GUI.
+    void snapshot_sleeves(const std::string& ts);
+    // Rebalance the sleeves when one drifts past target +/- band. Trims the
+    // OVERWEIGHT sleeve back toward target through the normal native exit path
+    // (never a bypass), logs before/after allocations. Runs on the drift trigger
+    // and on the scheduled cadence. A no-op when the satellite sleeve is off.
+    void maybe_rebalance(const std::string& ts, long now_epoch);
+    // Run a scheduled deep-research pass for the research_satellite sleeve: query
+    // the bridge for a structured thesis per candidate, and open a satellite
+    // position (through the RiskGate, under the HARD CAP) when the conviction
+    // clears the threshold and the sleeve has room. Guarded by
+    // research_satellite_enabled AND the bridge being available AND the combined
+    // spend ceiling / research budget. A no-op otherwise. Never touches quant_core.
+    void maybe_run_research_pass(const market_data::MarketState& ms,
+                                 const std::string& ts, long now_epoch);
+    // Whether combined council + research spend has reached the monthly ceiling
+    // (pauses new council AND research calls in both sleeves). 0.0 = disabled.
+    bool combined_spend_ceiling_reached() const;
+
     config::Config cfg_;
     EngineOptions opts_;
     std::unique_ptr<storage::Storage> storage_;
@@ -209,9 +235,21 @@ private:
         strategy::OpenPosition pos;
         std::vector<signal_engine::FactorSignal> entry_signals;
         double entry_bias = 0.0;
+        // Core-satellite sleeve this position belongs to. Native strategy entries
+        // are always quant_core; research_satellite positions come from the
+        // deep-research path.
+        std::string sleeve = "quant_core";
     };
     std::map<std::string, ActivePosition> open_positions_;  // key "venue|symbol"
     signal_engine::CouncilGateState council_state_;
+    // Core-satellite scheduling + combined spend tracking (Q). research/rebalance
+    // run on cadence, not per tick. calls_month feeds the combined spend ceiling.
+    std::string research_day_;          // UTC day bucket for the research budget
+    int research_calls_today_ = 0;      // deep-research council calls today
+    long research_calls_month_ = 0;     // deep-research calls this month (combined ceiling)
+    std::string research_month_;        // UTC month bucket (YYYY-MM)
+    long last_rebalance_epoch_ = 0;     // last scheduled rebalance (epoch seconds)
+    long last_research_epoch_ = 0;      // last scheduled research pass (epoch seconds)
     int trades_today_ = 0;              // native entries today (max_trades_per_day)
     std::string trades_today_day_;      // UTC day bucket for the counter above
     long closed_trade_count_ = 0;       // closed native trades (min-sample gate)

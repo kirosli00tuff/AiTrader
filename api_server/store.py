@@ -185,6 +185,48 @@ def positions(mode: str, category: str | None = None) -> list[dict]:
             and _in_category(r["symbol"], category)]
 
 
+def sleeve_allocation() -> dict:
+    """Current capital per sleeve (open-position notional), read-only. Powers the
+    sleeve allocation panel. Never returns a key value."""
+    rows = query(
+        "SELECT COALESCE(sleeve,'quant_core') AS sleeve, "
+        "SUM(notional) AS allocation, COUNT(*) AS open_positions "
+        "FROM positions WHERE qty != 0 GROUP BY COALESCE(sleeve,'quant_core')")
+    out = {"quant_core": {"allocation": 0.0, "open_positions": 0},
+           "research_satellite": {"allocation": 0.0, "open_positions": 0}}
+    total = 0.0
+    for r in rows:
+        s = r["sleeve"] if r["sleeve"] in out else "quant_core"
+        out[s] = {"allocation": float(r["allocation"] or 0.0),
+                  "open_positions": int(r["open_positions"] or 0)}
+        total += float(r["allocation"] or 0.0)
+    out["invested_total"] = total
+    return out
+
+
+def sleeve_history(sleeve: str | None = None, limit: int = 200) -> list[dict]:
+    """Per-sleeve accounting snapshots over time, read-only."""
+    limit = max(1, min(int(limit), 1000))
+    if sleeve in ("quant_core", "research_satellite"):
+        return query(
+            "SELECT ts, sleeve, allocation, realized_pnl, unrealized_pnl, "
+            "open_positions, wins, losses FROM sleeve_history WHERE sleeve=? "
+            "ORDER BY id DESC LIMIT ?", (sleeve, limit))
+    return query(
+        "SELECT ts, sleeve, allocation, realized_pnl, unrealized_pnl, "
+        "open_positions, wins, losses FROM sleeve_history ORDER BY id DESC LIMIT ?",
+        (limit,))
+
+
+def research_theses(limit: int = 100) -> list[dict]:
+    """LLM deep-research theses (research feed + satellite positions), read-only.
+    rationale is council prose, never a key value."""
+    limit = max(1, min(int(limit), 500))
+    return query(
+        "SELECT ts, symbol, direction, conviction, horizon, rationale, status "
+        "FROM research_thesis ORDER BY id DESC LIMIT ?", (limit,))
+
+
 def orders(mode: str, limit: int = 50,
            category: str | None = None) -> list[dict]:
     mode = valid_mode(mode)

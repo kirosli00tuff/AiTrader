@@ -336,6 +336,15 @@ void Engine::on_closed_bar(const market_data::MarketState& ms,
     // simulator is explicitly enabled. This is the single closed-bar path shared
     // by the tick feed and the synthetic/replay bar feeds.
     if (!opts_.bootstrap_sim) handle_bar_close(ms, closed, epoch);
+
+    // Core-satellite maintenance (Q). No-op unless the research_satellite sleeve
+    // is enabled, so default quant-only behavior is unchanged. Runs on schedule:
+    // a deep-research pass (opens satellite positions under the hard cap) and a
+    // drift/scheduled rebalance (trims the overweight sleeve via the exit path).
+    if (cfg_.sleeves.research_satellite_enabled) {
+        maybe_run_research_pass(ms, ms.ts, epoch);
+        maybe_rebalance(ms.ts, epoch);
+    }
 }
 
 void Engine::init_bar_mode(
@@ -508,6 +517,7 @@ void Engine::handle_bar_close(const market_data::MarketState& ms,
         tr.side = close_side; tr.qty = ap.pos.qty; tr.price = exit_price;
         tr.notional = notional; tr.fee = fee; tr.mode = "paper"; tr.pnl = pnl;
         tr.outcome = win ? "win" : "loss";
+        tr.sleeve = ap.sleeve;  // attribute the close to the position's sleeve
         auto exit_verdict = signal_engine::combine(ap.entry_signals, weights_);
         tr.combined_conf = exit_verdict.confidence;
         tr.combined_edge = exit_verdict.edge;
@@ -515,7 +525,10 @@ void Engine::handle_bar_close(const market_data::MarketState& ms,
         // Mark the position flat (qty 0) in the positions table.
         storage_->upsert_position(ms.venue, ms.symbol, ap.pos.market,
                                   ap.pos.category, close_side, 0.0, exit_price,
-                                  0.0, ts);
+                                  0.0, ts, ap.sleeve);
+        // A closed research_satellite position marks its thesis closed.
+        if (ap.sleeve == "research_satellite")
+            storage_->update_research_thesis_status(ms.symbol, "closed", ts);
         storage_->append_event(
             {ts, "trade_exit", ms.venue, ms.symbol, "info",
              "Native exit (" + strategy::exit_reason_to_string(reason) + ") " +
@@ -1436,6 +1449,250 @@ void Engine::run_forever(const volatile std::sig_atomic_t* stop_flag) {
              " iterations, " + std::to_string(trade_count_) + " trades",
          util::to_json({}, {{"final_equity", equity_}})});
     // SQLite writes autocommit per statement, so state is already durable.
+}
+
+// --- Core-satellite sleeves (Q) ------------------------------------------
+
+sleeve::Allocations Engine::current_allocations() const {
+    sleeve::Allocations a;
+    for (const auto& [key, ap] : open_positions_) {
+        double notional = ap.pos.entry_price * ap.pos.qty;
+        if (ap.sleeve == "research_satellite")
+            a.research_satellite += notional;
+        else
+            a.quant_core += notional;
+    }
+    a.cash = std::max(0.0, equity_ - a.invested());
+    return a;
+}
+
+bool Engine::combined_spend_ceiling_reached() const {
+    double ceiling = cfg_.sleeves.combined_monthly_spend_ceiling_usd;
+    if (ceiling <= 0.0) return false;
+    double council = council_state_.calls_month *
+                     cfg_.council.council_est_cost_per_call_usd;
+    double research = research_calls_month_ *
+                      cfg_.sleeves.research_est_cost_per_call_usd;
+    return council + research >= ceiling;
+}
+
+void Engine::snapshot_sleeves(const std::string& ts) {
+    auto a = current_allocations();
+    auto count_open = [&](const std::string& sleeve) {
+        int n = 0;
+        for (const auto& [key, ap] : open_positions_)
+            if (ap.sleeve == sleeve) ++n;
+        return n;
+    };
+    storage::SleeveSnapshotRow core{ts, "quant_core", a.quant_core, 0.0, 0.0,
+                                    count_open("quant_core"), 0, 0};
+    storage::SleeveSnapshotRow sat{ts, "research_satellite", a.research_satellite,
+                                   0.0, 0.0, count_open("research_satellite"), 0, 0};
+    storage_->insert_sleeve_snapshot(core);
+    storage_->insert_sleeve_snapshot(sat);
+}
+
+void Engine::maybe_rebalance(const std::string& ts, long now_epoch) {
+    // No sleeves without the satellite: the quant core uses the full account and
+    // there is nothing to rebalance. This keeps default behavior unchanged.
+    if (!cfg_.sleeves.research_satellite_enabled) return;
+    // Scheduled cadence OR the drift trigger. On the very first call last_rebalance
+    // is 0, so run once to seed.
+    long interval = static_cast<long>(cfg_.sleeves.rebalance_check_minutes) * 60;
+    bool scheduled = last_rebalance_epoch_ == 0 ||
+                     (interval > 0 && now_epoch - last_rebalance_epoch_ >= interval);
+    auto before = current_allocations();
+    auto dec = sleeve::decide_rebalance(cfg_.sleeves, before, equity_);
+    bool drift = cfg_.sleeves.rebalance_on_drift &&
+                 dec.action != sleeve::RebalanceAction::None;
+    if (!scheduled && !drift) return;
+    last_rebalance_epoch_ = now_epoch;
+    snapshot_sleeves(ts);
+    if (dec.action == sleeve::RebalanceAction::None) return;
+
+    // Trim the OVERWEIGHT sleeve back toward target by closing its positions
+    // through the normal exit accounting (never a bypass). Close smallest-first
+    // until the trim amount is met.
+    const std::string trim_sleeve =
+        dec.action == sleeve::RebalanceAction::TrimSatellite ? "research_satellite"
+                                                             : "quant_core";
+    double remaining = dec.trim_amount;
+    std::vector<std::string> keys;
+    for (const auto& [key, ap] : open_positions_)
+        if (ap.sleeve == trim_sleeve) keys.push_back(key);
+    for (const auto& key : keys) {
+        if (remaining <= 0.0) break;
+        auto it = open_positions_.find(key);
+        if (it == open_positions_.end()) continue;
+        auto& ap = it->second;
+        // Exit at the last known bar close (else the entry price).
+        double px = ap.pos.entry_price;
+        auto hb = bar_history_.find(ap.pos.venue + "|" + ap.pos.symbol);
+        if (hb != bar_history_.end() && !hb->second.empty())
+            px = hb->second.back().close;
+        double notional = px * ap.pos.qty;
+        double fee = notional * 0.0001;
+        double pnl = strategy::realized_pnl(ap.pos, px) - fee;
+        equity_ += pnl;
+        peak_equity_ = std::max(peak_equity_, equity_);
+        pstate_.realized_pnl_today_total += pnl;
+        std::string side = ap.pos.direction == strategy::Direction::Long ? "sell" : "buy";
+        storage::TradeRow tr;
+        tr.ts = ts; tr.venue = ap.pos.venue; tr.symbol = ap.pos.symbol;
+        tr.market = ap.pos.market; tr.category = ap.pos.category; tr.side = side;
+        tr.qty = ap.pos.qty; tr.price = px; tr.notional = notional; tr.fee = fee;
+        tr.mode = "paper"; tr.pnl = pnl; tr.outcome = pnl >= 0 ? "win" : "loss";
+        tr.sleeve = ap.sleeve;
+        storage_->insert_trade(tr);
+        storage_->upsert_position(ap.pos.venue, ap.pos.symbol, ap.pos.market,
+                                  ap.pos.category, side, 0.0, px, 0.0, ts, ap.sleeve);
+        if (ap.sleeve == "research_satellite")
+            storage_->update_research_thesis_status(ap.pos.symbol, "closed", ts);
+        remaining -= notional;
+        open_positions_.erase(it);
+        ++closed_trade_count_;
+    }
+    auto after = current_allocations();
+    storage_->append_event(
+        {ts, "sleeve_rebalance", "", "", "info",
+         "Rebalance " + sleeve::rebalance_action_to_string(dec.action) +
+             ": satellite " + std::to_string(before.research_satellite) + " -> " +
+             std::to_string(after.research_satellite),
+         util::to_json({{"action", sleeve::rebalance_action_to_string(dec.action)}},
+                       {{"satellite_before", before.research_satellite},
+                        {"satellite_after", after.research_satellite},
+                        {"core_before", before.quant_core},
+                        {"core_after", after.quant_core},
+                        {"target", dec.satellite_target * equity_}})});
+}
+
+void Engine::maybe_run_research_pass(const market_data::MarketState& ms,
+                                     const std::string& ts, long now_epoch) {
+    if (!cfg_.sleeves.research_satellite_enabled) return;
+    if (!opts_.use_bridge) return;  // no research brain offline (deterministic)
+    // Roll the day/month budget buckets.
+    std::string day = ts.size() >= 10 ? ts.substr(0, 10) : ts;
+    std::string month = ts.size() >= 7 ? ts.substr(0, 7) : ts;
+    if (research_day_ != day) { research_day_ = day; research_calls_today_ = 0; }
+    if (research_month_ != month) { research_month_ = month; research_calls_month_ = 0; }
+    // Schedule: research_passes_per_day evenly spaced. First call seeds.
+    int passes = std::max(1, cfg_.sleeves.research_passes_per_day);
+    long interval = 86400 / passes;
+    if (last_research_epoch_ != 0 && now_epoch - last_research_epoch_ < interval)
+        return;
+    // Only research a symbol on the research whitelist.
+    bool candidate = false;
+    for (const auto& s : cfg_.sleeves.research_whitelist)
+        if (s == ms.symbol) candidate = true;
+    if (!candidate) return;
+    // Cost controls: research budget and the combined spend ceiling pause it.
+    if (research_calls_today_ >= cfg_.sleeves.research_daily_budget) return;
+    if (combined_spend_ceiling_reached()) {
+        storage_->append_event(
+            {ts, "research_skip", ms.venue, ms.symbol, "warn",
+             "Research paused: combined monthly spend ceiling reached", "{}"});
+        return;
+    }
+    // Already hold a satellite position for this symbol? Skip a new entry.
+    auto key = ms.venue + "|" + ms.symbol;
+    if (open_positions_.count(key)) return;
+    last_research_epoch_ = now_epoch;
+    ++research_calls_today_;
+    ++research_calls_month_;
+
+    // Ask the bridge for a structured deep-research thesis. The Haiku gate screens
+    // inside the bridge, same cost-control pattern as the council.
+    std::string body = util::to_json({{"symbol", ms.symbol},
+                                      {"venue", ms.venue},
+                                      {"category", ms.category}},
+                                     {{"price", ms.price}});
+    auto resp = bridge::http_post_json(opts_.bridge_host, opts_.bridge_port,
+                                       "/research/thesis", body,
+                                       cfg_.council.engine_council_call_timeout_ms);
+    if (!resp) return;  // bridge unreachable or slow; try again next schedule
+    std::string dir = bridge::json_get_string(*resp, "direction", "flat");
+    double conviction = bridge::json_get_number(*resp, "conviction", 0.0);
+    std::string horizon = bridge::json_get_string(*resp, "horizon", "");
+    std::string rationale = bridge::json_get_string(*resp, "rationale", "");
+
+    // Persist the thesis regardless (research feed), so the operator sees passes.
+    storage_->insert_research_thesis(
+        {ts, ms.symbol, dir, conviction, horizon, rationale, "open"});
+    storage_->append_event(
+        {ts, "research_pass", ms.venue, ms.symbol, "info",
+         "Research thesis " + dir + " conviction " + std::to_string(conviction),
+         util::to_json({{"direction", dir}, {"horizon", horizon}},
+                       {{"conviction", conviction}})});
+
+    // Only open a satellite position above the conviction threshold, long only
+    // (paper), AND only with room under the HARD CAP.
+    if (conviction < cfg_.sleeves.research_conviction_threshold) return;
+    if (dir != "long") return;  // paper is long-only for satellite entries
+    // Satellite position sized to a fraction of equity, then clamped by the cap.
+    double target_notional = cfg_.sleeves.research_satellite_target_pct * equity_ /
+                             std::max(1, cfg_.sleeves.research_daily_budget);
+    auto alloc = current_allocations();
+    double room = sleeve::satellite_cap_value(cfg_.sleeves, equity_) -
+                  alloc.research_satellite;
+    double notional = std::min(target_notional, room);
+    if (!sleeve::satellite_has_room(cfg_.sleeves, alloc, notional, equity_)) {
+        storage_->append_event(
+            {ts, "sleeve_cap", ms.venue, ms.symbol, "info",
+             "Satellite entry refused: hard cap reached (research conviction cannot override)",
+             "{}"});
+        return;
+    }
+    const auto* venue_cfg = cfg_.find_venue(ms.venue);
+    if (!venue_cfg || ms.price <= 0.0) return;
+    double qty = notional / ms.price;
+
+    risk::OrderProposal o;
+    o.venue = ms.venue; o.symbol = ms.symbol; o.market = ms.market;
+    o.category = ms.category; o.side = "buy"; o.qty = qty; o.price = ms.price;
+    o.notional = notional; o.signal_age_minutes = 0; o.is_live = false;
+    o.confidence = conviction; o.edge = 0.02;
+    o.model_agreement_count = cfg_.risk.required_model_agreement_count;
+    sync_portfolio_state();
+    // Level-1 RiskGate judges the satellite order exactly like any other order.
+    auto gate = gate_->evaluate(o, pstate_);
+    if (!gate.allowed) {
+        storage_->insert_blocked({ts, o.venue, o.symbol, o.side, o.qty, gate.reason,
+                                  gate.layer});
+        return;
+    }
+    // Open the satellite position. Long-term hold: a wide ATR target, no time stop.
+    // Thesis-invalidation and the target are the exits; the RiskGate keeps its stop.
+    double atr_v = 0.0;
+    auto hb = bar_history_.find(key);
+    if (hb != bar_history_.end())
+        atr_v = strategy::atr(hb->second, cfg_.strategy.atr_period);
+    ActivePosition ap;
+    ap.pos.venue = o.venue; ap.pos.symbol = o.symbol; ap.pos.market = o.market;
+    ap.pos.category = o.category; ap.pos.factor = "research"; ap.pos.opened_ts = ts;
+    ap.pos.direction = strategy::Direction::Long; ap.pos.entry_price = o.price;
+    ap.pos.qty = o.qty;
+    ap.pos.stop_price = o.price - cfg_.strategy.crypto_atr_stop_mult *
+                                      (atr_v > 0 ? atr_v : o.price * 0.05);
+    ap.pos.target_price = o.price + cfg_.strategy.atr_target_mult *
+                                        (atr_v > 0 ? atr_v : o.price * 0.05) * 3.0;
+    ap.pos.time_stop_bars = 0;  // long-term hold, no time stop
+    ap.sleeve = "research_satellite";
+    storage::TradeRow tr;
+    tr.ts = ts; tr.venue = o.venue; tr.symbol = o.symbol; tr.market = o.market;
+    tr.category = o.category; tr.side = "buy"; tr.qty = o.qty; tr.price = o.price;
+    tr.notional = o.notional; tr.fee = notional * 0.0001; tr.mode = "paper";
+    tr.outcome = "open"; tr.combined_conf = conviction; tr.combined_edge = 0.02;
+    tr.sleeve = "research_satellite";
+    storage_->insert_trade(tr);
+    storage_->upsert_position(o.venue, o.symbol, o.market, o.category, "buy", o.qty,
+                              o.price, o.notional, ts, "research_satellite");
+    storage_->append_event(
+        {ts, "trade_entry", o.venue, o.symbol, "info",
+         "Research satellite long " + o.symbol + " (conviction " +
+             std::to_string(conviction) + ")",
+         util::to_json({{"sleeve", "research_satellite"}, {"direction", dir}},
+                       {{"conviction", conviction}, {"notional", notional}})});
+    open_positions_[key] = std::move(ap);
 }
 
 }  // namespace mal::core

@@ -18,6 +18,12 @@ add_executable(test_strategy test_strategy.cpp)
 target_link_libraries(test_strategy PRIVATE mal_signal_engine mal_config)
 add_test(NAME strategy COMMAND test_strategy WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 
+# Core-satellite sleeves: hard cap holds against over-conviction, drift-band
+# rebalancing trims the overweight sleeve, sleeve config validates. Pure header.
+add_executable(test_sleeves test_sleeves.cpp)
+target_link_libraries(test_sleeves PRIVATE mal_config)
+add_test(NAME sleeves COMMAND test_sleeves WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
 # Header-only pure predicate (learning/adapt_gate.hpp) — no library link needed.
 add_executable(test_tuner_minsample test_tuner_minsample.cpp)
 add_test(NAME tuner_minsample COMMAND test_tuner_minsample

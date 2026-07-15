@@ -259,6 +259,30 @@ council:
   council_monthly_spend_ceiling_usd: 0.0
 
 # -----------------------------------------------------------------------------
+# Core-satellite hybrid sleeves. quant_core runs the systematic RSI-2 + momentum
+# stack; research_satellite uses the LLM council for deep research, taking fewer,
+# larger, longer-held positions. The split is enforced MECHANICALLY: the
+# satellite can never exceed its target plus the drift band (a hard cap in code).
+# research_satellite_enabled ships OFF so nothing changes until the operator opts
+# in. The RiskGate judges every order in BOTH sleeves with all Level-1 limits
+# unchanged. Nothing here weakens a Level-1 limit.
+# -----------------------------------------------------------------------------
+sleeves:
+  quant_core_enabled: true
+  research_satellite_enabled: false        # OFF by default (operator opt-in)
+  quant_core_target_pct: 0.80
+  research_satellite_target_pct: 0.20
+  drift_band_pct: 0.05                      # absolute band around each target
+  research_whitelist: "BTC/USD,ETH/USD,SPY,QQQ,AAPL,MSFT,NVDA"
+  research_conviction_threshold: 0.70       # min council conviction to open a satellite position
+  research_passes_per_day: 3
+  research_daily_budget: 6                  # deep-research council calls per day
+  research_est_cost_per_call_usd: 0.08
+  rebalance_on_drift: true
+  rebalance_check_minutes: 360
+  combined_monthly_spend_ceiling_usd: 100.0 # pauses BOTH sleeves when reached (0=off)
+
+# -----------------------------------------------------------------------------
 # RL advisory (Layer 3, DEFERRED). Ships toggled OFF. While rl_enabled is false
 # the engine never scores an RL factor and it stays out of the ensemble entirely.
 # The PPO trainer (rl_advisory/) refuses to run until at least rl_min_real_fills

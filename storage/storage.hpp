@@ -33,6 +33,25 @@ struct TradeRow {
     std::optional<double> pnl;
     std::string outcome;
     double combined_conf = 0, combined_edge = 0;
+    // Core-satellite sleeve tag ("quant_core" | "research_satellite").
+    std::string sleeve = "quant_core";
+};
+
+// A persisted LLM deep-research thesis attached to a research_satellite position,
+// so the operator can read why each long-term hold exists.
+struct ResearchThesisRow {
+    std::string ts, symbol, direction;   // direction: long | short | flat
+    double conviction = 0;               // council conviction [0,1]
+    std::string horizon;                 // e.g. "weeks" | "months"
+    std::string rationale;               // written thesis (never a key value)
+    std::string status = "open";         // open | invalidated | target | closed
+};
+
+// A per-sleeve accounting snapshot for the GUI (equity/pnl/positions per sleeve).
+struct SleeveSnapshotRow {
+    std::string ts, sleeve;
+    double allocation = 0, realized_pnl = 0, unrealized_pnl = 0;
+    int open_positions = 0, wins = 0, losses = 0;
 };
 
 struct SignalRow {
@@ -105,10 +124,19 @@ public:
                             const std::string& last_checked_ts,
                             const std::string& readiness_json);
 
+    // Persist a research thesis (research_satellite sleeve) and update its status.
+    long long insert_research_thesis(const ResearchThesisRow& t);
+    void update_research_thesis_status(const std::string& symbol,
+                                       const std::string& status,
+                                       const std::string& ts);
+    // Persist a per-sleeve accounting snapshot (history for the GUI).
+    long long insert_sleeve_snapshot(const SleeveSnapshotRow& s);
+
     void upsert_position(const std::string& venue, const std::string& symbol,
                          const std::string& market, const std::string& category,
                          const std::string& side, double qty, double avg_price,
-                         double notional, const std::string& opened_ts);
+                         double notional, const std::string& opened_ts,
+                         const std::string& sleeve = "quant_core");
 
     // Historical bars. upsert_bar is idempotent on (venue,symbol,timeframe,
     // timestamp). recent_bars returns up to `limit` most-recent bars for a

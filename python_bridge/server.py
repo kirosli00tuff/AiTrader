@@ -33,6 +33,7 @@ if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
 from llm_consensus import consensus, council_status_line, use_real_council  # noqa: E402
+from research_satellite import research_thesis  # noqa: E402  (deep-research sleeve)
 from ml_factor import score_state             # noqa: E402
 from rl_advisory import rl_enabled, rl_min_real_fills, score_rl  # noqa: E402  (light: no torch/gym)
 from whale_signal import whale_signal_for     # noqa: E402
@@ -117,6 +118,12 @@ def _handle(path: str, payload: dict) -> dict:
         return _bridge_status()
     if path == "/score/llm":
         return consensus(payload).to_dict()
+    if path == "/research/thesis":
+        # Deep-research thesis for the research_satellite sleeve. The Haiku gate
+        # screens the candidate inside consensus before the full council runs.
+        # Returns direction/conviction/horizon/rationale; the engine enforces the
+        # hard cap, the conviction threshold, and the RiskGate on any order.
+        return research_thesis(payload)
     if path == "/score/dnn":
         return score_state(payload)
     if path == "/score/rl":
