@@ -320,8 +320,12 @@ void Engine::on_closed_bar(const market_data::MarketState& ms,
     // that symbol so the UI and the council neutral-skip both see the pin.
     auto rr = strategy::detect_regime(hist, cfg_.strategy);
     rr.regime = pinned_or(ms.symbol, rr.regime);
+    // Persist the regime AND the factor the regime selects to lead (momentum in
+    // trending, reversion in range-bound, blend in neutral), for the GUI.
     storage_->upsert_regime(ms.symbol, strategy::regime_to_string(rr.regime),
-                            rr.adx, rr.rvol, ms.ts);
+                            rr.adx, rr.rvol,
+                            strategy::active_factor_for(rr.regime, cfg_.strategy),
+                            ms.ts);
 
     // Warm-state tracking on the real path (Task 2): log a transition when the
     // symbol crosses cold<->warm. Only the alpaca_paper (real) loop gates entry
@@ -472,7 +476,14 @@ void Engine::handle_bar_close(const market_data::MarketState& ms,
     if (it != open_positions_.end()) {
         auto& ap = it->second;
         ++ap.pos.bars_held;
-        auto reason = strategy::check_exit(ap.pos, bar);
+        // RSI-2 reversion positions add a native signal exit: close when RSI-2
+        // rises back above its exit threshold. Computed from the symbol's bar
+        // history. Bollinger reversion and momentum have no indicator exit.
+        bool indicator_exit =
+            cfg_.strategy.reversion_style == "rsi2" &&
+            ap.pos.factor == "reversion" &&
+            strategy::rsi2_exit_triggered(bar_history_[key], cfg_.strategy);
+        auto reason = strategy::check_exit(ap.pos, bar, indicator_exit);
         if (reason == strategy::ExitReason::None) return;
 
         double exit_price = strategy::exit_fill_price(ap.pos, reason, bar);
@@ -619,12 +630,19 @@ void Engine::handle_bar_close(const market_data::MarketState& ms,
     // runtime budget override (controls.json) adjusts the daily budget and the
     // per-symbol cooldown within their validated bounds; a -1 keeps the config.
     reset_if_new_day(council_state_, utc_day);
+    signal_engine::reset_if_new_month(council_state_,
+                                      utc_day.size() >= 7 ? utc_day.substr(0, 7) : utc_day);
     config::CouncilConfig rc = cfg_.council;
     if (operator_controls_.council_daily_budget >= 0)
         rc.council_daily_budget = operator_controls_.council_daily_budget;
     if (operator_controls_.per_symbol_cooldown_minutes >= 0)
         rc.per_symbol_council_cooldown_minutes =
             operator_controls_.per_symbol_cooldown_minutes;
+    // Two-tier routing (Task 5). A small, low-conviction entry takes the FAST
+    // tier: native signal + RiskGate only, NO council. Larger or higher-conviction
+    // entries take the COUNCIL tier. Decided on the native notional + strength,
+    // both known before the council. Swing defaults never fast-tier a real entry.
+    const auto tier = signal_engine::decide_tier(rc, notional, equity_, sig.strength);
     bool council_allowed;
     if (market_hours_skip) {
         council_allowed = false;
@@ -633,6 +651,24 @@ void Engine::handle_bar_close(const market_data::MarketState& ms,
              "Council skipped: equities outside US regular trading hours",
              util::to_json({{"reason", "market_hours"}, {"symbol", ms.symbol}},
                            {})});
+    } else if (tier == signal_engine::Tier::Fast) {
+        // Fast tier: bounded native entry, no council spend. RiskGate still gates.
+        council_allowed = false;
+        storage_->append_event(
+            {ts, "council_skip", ms.venue, ms.symbol, "info",
+             "Council skipped: fast tier (small, low-conviction native entry)",
+             util::to_json({{"reason", "fast_tier"}, {"symbol", ms.symbol}},
+                           {{"notional", notional}, {"strength", sig.strength}})});
+    } else if (signal_engine::spend_ceiling_reached(rc, council_state_)) {
+        // Spend ceiling reached: force the fast tier (skip the council), logged.
+        council_allowed = false;
+        storage_->append_event(
+            {ts, "council_skip", ms.venue, ms.symbol, "warn",
+             "Council skipped: spend ceiling reached (forcing fast tier)",
+             util::to_json({{"reason", "spend_ceiling"}, {"symbol", ms.symbol}},
+                           {{"calls_today", static_cast<double>(council_state_.calls_today)},
+                            {"calls_month", static_cast<double>(council_state_.calls_month)},
+                            {"est_cost_per_call", rc.council_est_cost_per_call_usd}})});
     } else if (!any_council_provider(operator_controls_)) {
         // Model toggles disabled every provider: the council cannot run, so fall
         // back to a clearly logged skip. Native factors + execution still run.

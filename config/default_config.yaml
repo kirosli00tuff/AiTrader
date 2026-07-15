@@ -125,14 +125,29 @@ sizing:
 #   whitelist is a comma-separated scalar (the minimal YAML parser has no lists).
 # -----------------------------------------------------------------------------
 strategy:
+  # Profile selector. swing (default, the slower stack, unchanged) or active_quant
+  # (RSI-2 reversion + dual-MA momentum, two-tier + spend-ceiling cost controls,
+  # wider whitelist). Default stays swing so nothing changes silently. The
+  # active_quant block below is applied ONLY when profile is active_quant.
+  profile: swing
   momentum_enabled: true
   reversion_enabled: true
+  # Which mean-reversion factor the reversion slot uses: bollinger (default) or
+  # rsi2 (Connors RSI-2, long-only dips inside an uptrend).
+  reversion_style: bollinger
   # Strategy A — trend / momentum
   ema_fast: 20
   ema_slow: 100
   adx_min: 20.0
   atr_period: 14
   atr_vol_floor: 0.0
+  # Time-series momentum dual trend filter (OFF for swing; active_quant turns on).
+  # When on, a long also needs price above BOTH MAs (and a positive lookback
+  # return when ts_momentum_lookback > 0).
+  momentum_dual_ma_filter: false
+  momentum_medium_ma: 50
+  momentum_long_ma: 200
+  ts_momentum_lookback: 0                 # 0 = crossover only; >0 requires ret>0 over N bars
   # Strategy B — mean reversion (whitelisted symbols only)
   bb_period: 20
   bb_std: 2.0
@@ -141,6 +156,17 @@ strategy:
   rsi_overbought: 70.0
   vol_lookback: 20
   vol_multiple: 1.0                       # reversion needs volume > vol_multiple * avg
+  # Connors RSI-2 mean reversion (used when reversion_style is rsi2). Long only,
+  # only above the long trend MA (dips bought inside an uptrend), with a
+  # cross-back confirmation, an ATR volatility band, and a volume filter.
+  rsi2_period: 2
+  rsi2_entry_crypto: 10.0                 # oversold trigger, looser for crypto
+  rsi2_entry_equity: 5.0                  # oversold trigger, tighter for equities
+  rsi2_exit: 67.0                         # exit when RSI-2 rises back above this (65-70)
+  rsi2_crossback_confirm: true            # wait for RSI-2 to tick back above entry
+  trend_ma_period: 200                    # long trend filter (SMA); the longest lookback
+  atr_mean_period: 100                    # ATR mean window for the volatility band
+  atr_band_std: 1.0                       # ATR must be within this many SD of its mean
   # Regime detector (ADX + realized volatility)
   regime_adx_trend: 25.0
   regime_rvol_high: 0.02
@@ -149,6 +175,7 @@ strategy:
   # Native exits
   atr_stop_mult: 2.0
   atr_target_mult: 3.0
+  crypto_atr_stop_mult: 2.0               # WIDER stop for crypto (large 2-day selloffs)
   time_stop_bars: 24
   # Regime -> (momentum, reversion) blend weights
   trending_momentum_weight: 0.70
@@ -159,6 +186,34 @@ strategy:
   neutral_reversion_weight: 0.50
   bar_timeframe: 5min
   whitelist: "BTC/USD,ETH/USD,SPY,QQQ"
+
+# -----------------------------------------------------------------------------
+# active_quant profile overlay. Applied ONLY when strategy.profile is active_quant.
+# It overrides the swing base above with the evidence-backed short-term stack:
+# RSI-2 reversion, dual-MA momentum, a wider liquid whitelist, and cost controls
+# (two-tier routing + a spend ceiling) sized so a month stays near or under 100
+# dollars. Every key is operator-tunable. It never touches a Level-1 risk value.
+# The timeframe stays 5min so the existing 5Min Alpaca backfill still warms the
+# 200-period trend filter; cadence rises from RSI-2's higher signal frequency and
+# the wider whitelist, not a sub-5min bar.
+# -----------------------------------------------------------------------------
+active_quant:
+  reversion_style: rsi2
+  momentum_dual_ma_filter: true
+  ts_momentum_lookback: 20
+  bar_timeframe: 5min
+  crypto_atr_stop_mult: 2.0
+  rsi2_entry_crypto: 10.0
+  rsi2_entry_equity: 5.0
+  rsi2_exit: 67.0
+  whitelist: "BTC/USD,ETH/USD,SOL/USD,SPY,QQQ,AAPL,MSFT,NVDA"
+  fast_tier_max_notional_pct: 0.01        # entries at/below 1% of equity can fast-tier
+  fast_tier_max_conviction: 0.6           # and at/below this native strength
+  council_daily_budget: 40
+  per_symbol_council_cooldown_minutes: 60
+  council_daily_spend_ceiling_usd: 5.0
+  council_monthly_spend_ceiling_usd: 100.0
+  council_est_cost_per_call_usd: 0.04
 
 # -----------------------------------------------------------------------------
 # Council cost controls — the full LLM council runs ONLY on a native strategy
@@ -188,6 +243,20 @@ council:
   engine_bridge_call_timeout_ms: 8000     # engine wait for a fast call (dnn/whale/rl/status)
   provider_timeout_seconds: 30            # bridge per-provider call; one slow provider fails alone
   gate_timeout_seconds: 15                # bridge Haiku base-check gate call
+  # Two-tier execution (cost control). A candidate is FAST tier (native + RiskGate,
+  # NO council) only when its notional is at/below fast_tier_max_notional_pct of
+  # equity AND its native strength is at/below fast_tier_max_conviction. Swing keeps
+  # 0.0/0.0 so NO entry is fast-tiered (behavior unchanged); active_quant sets real
+  # thresholds. Both tiers respect every Level-1 limit.
+  fast_tier_max_notional_pct: 0.0
+  fast_tier_max_conviction: 0.0
+  # Hard spend ceiling (cost control). When estimated council spend (calls times
+  # council_est_cost_per_call_usd) reaches a ceiling the engine forces the fast
+  # tier, logged council_skip reason spend_ceiling. 0.0 disables. Swing leaves both
+  # 0.0; active_quant sets them so a month stays near or under 100 dollars.
+  council_est_cost_per_call_usd: 0.04
+  council_daily_spend_ceiling_usd: 0.0
+  council_monthly_spend_ceiling_usd: 0.0
 
 # -----------------------------------------------------------------------------
 # RL advisory (Layer 3, DEFERRED). Ships toggled OFF. While rl_enabled is false

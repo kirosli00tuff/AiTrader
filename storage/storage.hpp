@@ -124,9 +124,11 @@ public:
                                       const std::string& start_ts,
                                       const std::string& end_ts);
 
-    // Persist the current regime for a symbol (single row per symbol).
+    // Persist the current regime + the regime-selected active factor for a symbol
+    // (single row per symbol). active_factor is momentum | reversion | blend.
     void upsert_regime(const std::string& symbol, const std::string& regime,
-                       double adx, double rvol, const std::string& updated_ts);
+                       double adx, double rvol, const std::string& active_factor,
+                       const std::string& updated_ts);
 
     // Count rows in a table (used by tests/demo verification).
     long long count(const std::string& table);

@@ -19,6 +19,34 @@ void reset_if_new_day(CouncilGateState& state, const std::string& utc_day) {
     }
 }
 
+void reset_if_new_month(CouncilGateState& state, const std::string& utc_month) {
+    if (state.utc_month != utc_month) {
+        state.utc_month = utc_month;
+        state.calls_month = 0;
+    }
+}
+
+Tier decide_tier(const config::CouncilConfig& cfg, double notional, double equity,
+                 double conviction) {
+    double notional_cap = cfg.fast_tier_max_notional_pct * equity;
+    bool small = notional <= notional_cap;
+    bool low_conviction = conviction <= cfg.fast_tier_max_conviction;
+    return (small && low_conviction) ? Tier::Fast : Tier::Council;
+}
+
+bool spend_ceiling_reached(const config::CouncilConfig& cfg,
+                           const CouncilGateState& state) {
+    double est = cfg.council_est_cost_per_call_usd;
+    if (est <= 0.0) return false;
+    if (cfg.council_daily_spend_ceiling_usd > 0.0 &&
+        state.calls_today * est >= cfg.council_daily_spend_ceiling_usd)
+        return true;
+    if (cfg.council_monthly_spend_ceiling_usd > 0.0 &&
+        state.calls_month * est >= cfg.council_monthly_spend_ceiling_usd)
+        return true;
+    return false;
+}
+
 CouncilDecision decide_council(const config::CouncilConfig& cfg,
                                const CouncilGateState& state,
                                strategy::Regime regime, double signal_strength,
@@ -48,6 +76,7 @@ CouncilDecision decide_council(const config::CouncilConfig& cfg,
 void record_council_call(CouncilGateState& state, const std::string& symbol,
                          long now_epoch) {
     ++state.calls_today;
+    ++state.calls_month;
     state.last_call_epoch[symbol] = now_epoch;
 }
 

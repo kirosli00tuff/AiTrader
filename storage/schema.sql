@@ -214,9 +214,10 @@ CREATE INDEX IF NOT EXISTS idx_bars_lookup ON bars(symbol, timeframe, timestamp)
 -- Current market regime per symbol (trending | range_bound | neutral). Written
 -- by the regime detector; read by the dashboard to show the per-symbol regime.
 CREATE TABLE IF NOT EXISTS regime_state (
-    symbol     TEXT PRIMARY KEY,
-    regime     TEXT NOT NULL,              -- trending | range_bound | neutral
-    adx        REAL,
-    rvol       REAL,
-    updated_ts TEXT NOT NULL
+    symbol        TEXT PRIMARY KEY,
+    regime        TEXT NOT NULL,           -- trending | range_bound | neutral
+    adx           REAL,
+    rvol          REAL,
+    active_factor TEXT,                    -- momentum | reversion | blend (regime-selected)
+    updated_ts    TEXT NOT NULL
 );

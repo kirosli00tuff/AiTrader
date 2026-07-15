@@ -173,14 +173,32 @@ struct DashboardConfig {
 // detector. Entries set native ATR stop / target / time-stop at order creation;
 // exits execute natively without the council.
 struct StrategyConfig {
+    // Profile selector. "swing" (default, the current slower stack, so nothing
+    // changes silently) or "active_quant" (faster timeframe, RSI-2 reversion,
+    // dual-MA momentum, tighter tiers, wider whitelist). The active_quant preset
+    // is applied in load_config BEFORE the strategy/council YAML keys are read, so
+    // any explicit key still wins. See apply_active_quant_profile.
+    std::string profile = "swing";
     bool momentum_enabled = true;
     bool reversion_enabled = true;
+    // Which mean-reversion factor the reversion slot uses:
+    //   "bollinger" (default) — Bollinger reentry confirmed by RSI + volume.
+    //   "rsi2"                — Connors RSI-2: long-only dips inside an uptrend.
+    std::string reversion_style = "bollinger";
     // Strategy A — trend / momentum.
     int ema_fast = 20;
     int ema_slow = 100;
     double adx_min = 20.0;             // ADX filter floor
     int atr_period = 14;
     double atr_vol_floor = 0.0;        // min ATR/price to allow an entry
+    // Dual trend filter for time-series momentum (evidence: price above BOTH a
+    // medium and a long MA lifts the long win rate). OFF by default so swing is
+    // unchanged; active_quant turns it on. When on, a long also needs price above
+    // both MAs and (if ts_momentum_lookback > 0) a positive lookback return.
+    bool momentum_dual_ma_filter = false;
+    int momentum_medium_ma = 50;      // medium trend MA (SMA on closes)
+    int momentum_long_ma = 200;       // long trend MA (SMA on closes)
+    int ts_momentum_lookback = 0;     // 0 = crossover only; >0 requires ret>0 over N bars
     // Strategy B — mean reversion (whitelisted symbols only).
     int bb_period = 20;
     double bb_std = 2.0;
@@ -189,6 +207,18 @@ struct StrategyConfig {
     double rsi_overbought = 70.0;
     int vol_lookback = 20;            // bars for average-volume confirmation
     double vol_multiple = 1.0;        // reversion needs volume > vol_multiple * avg
+    // Connors RSI-2 mean reversion (active_quant). All config-driven. Long only,
+    // and only inside a confirmed uptrend (price above the long trend MA), so dips
+    // are bought only when the higher-timeframe trend is up. Never in a strong
+    // trend (the regime gate handles that): the blend routes RSI-2 to range-bound.
+    int rsi2_period = 2;              // Connors uses a 2-period RSI
+    double rsi2_entry_crypto = 10.0; // oversold trigger, looser for crypto
+    double rsi2_entry_equity = 5.0;  // oversold trigger, tighter for equities
+    double rsi2_exit = 67.0;         // exit when RSI-2 rises back above this (65-70)
+    bool rsi2_crossback_confirm = true;  // wait for RSI-2 to tick back above entry (cuts whipsaw ~20%)
+    int trend_ma_period = 200;       // long trend filter (SMA); the longest lookback
+    int atr_mean_period = 100;       // ATR mean window for the volatility band
+    double atr_band_std = 1.0;       // ATR must be within this many SD of its mean
     // Regime detector thresholds (ADX + realized volatility).
     double regime_adx_trend = 25.0;   // ADX above => trending
     double regime_rvol_high = 0.02;   // realized vol above => volatile/range-bound
@@ -197,6 +227,11 @@ struct StrategyConfig {
     // Native exits (set at order creation; NO council on exit).
     double atr_stop_mult = 2.0;
     double atr_target_mult = 3.0;
+    // Crypto-specific volatility stop multiple. Crypto sees large two-day selloffs
+    // even in uptrends, so it uses a WIDER ATR stop than equities. Equities keep
+    // atr_stop_mult. This is a NATIVE stop; the RiskGate keeps its own stops
+    // unconditionally and this never weakens a Level-1 limit.
+    double crypto_atr_stop_mult = 2.0;
     int time_stop_bars = 24;          // force-close after N unresolved bars
     // Regime -> (momentum, reversion) blend weights.
     double trending_momentum_weight = 0.70;
@@ -236,6 +271,25 @@ struct CouncilConfig {
     // that one provider gracefully after this, the council proceeds on the rest.
     int provider_timeout_seconds = 30;            // per real provider call
     int gate_timeout_seconds = 15;                // Haiku base-check gate call
+    // Two-tier execution (Task 5). Small, low-conviction entries take the FAST
+    // tier: native signal + RiskGate only, NO council call, so council spend stays
+    // bounded. Larger or higher-conviction entries take the COUNCIL tier: gate
+    // then council then RiskGate. A candidate is fast-tier only when its notional
+    // is at or below fast_tier_max_notional_pct of equity AND its native strength
+    // is at or below fast_tier_max_conviction. Swing defaults are 0.0/0.0 so NO
+    // entry is ever fast-tiered (swing behavior is unchanged); active_quant sets
+    // real thresholds. Both tiers respect every Level-1 limit.
+    double fast_tier_max_notional_pct = 0.0;      // <= this fraction of equity => fast-tier eligible
+    double fast_tier_max_conviction = 0.0;        // <= this native strength => fast-tier eligible
+    // Hard spend ceiling (Task 9). A rough per-council-call cost estimate times the
+    // running daily/monthly council-call counts. When the estimated spend reaches a
+    // ceiling the engine forces the fast tier (skips the council), logged as a
+    // council_skip with reason spend_ceiling. 0.0 disables a ceiling. Swing leaves
+    // both at 0.0 (no ceiling); active_quant sets them so a month stays near or
+    // under 100 dollars. This can only SKIP spend, never widen risk.
+    double council_est_cost_per_call_usd = 0.04;  // gate + three providers, realistic estimate
+    double council_daily_spend_ceiling_usd = 0.0; // 0 = disabled
+    double council_monthly_spend_ceiling_usd = 0.0; // 0 = disabled
 };
 
 // Ensemble weights. Editable in UI, auto-normalized, lockable.

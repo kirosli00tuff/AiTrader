@@ -111,12 +111,93 @@ def _council(cfg_path: str | None) -> dict:
     return _cfg(cfg_path).get("council", {}) or {}
 
 
+def profile(cfg_path: str | None = None) -> str:
+    """Active strategy profile: swing (default) or active_quant. Mirrors the C++
+    strategy.profile. When active_quant, the active_quant block overlays the
+    council cost controls (budget, cooldown, spend ceiling, tier thresholds)."""
+    return str((_cfg(cfg_path).get("strategy", {}) or {}).get("profile", "swing"))
+
+
+def _active_quant(cfg_path: str | None) -> dict:
+    return _cfg(cfg_path).get("active_quant", {}) or {}
+
+
 def _council_num(key: str, cfg_path: str | None):
     default = _COUNCIL_DEFAULTS[key]
+    src = _council(cfg_path)
+    # active_quant overlays the council block, matching the C++ loader.
+    if profile(cfg_path) == "active_quant" and key in _active_quant(cfg_path):
+        src = _active_quant(cfg_path)
     try:
-        return type(default)(_council(cfg_path).get(key, default))
+        return type(default)(src.get(key, default))
     except (TypeError, ValueError):
         return default
+
+
+# Cost controls (Task 9). A rough per-call cost estimate times the running
+# council-call counts, checked against a daily and a monthly ceiling. 0.0 = off.
+# The C++ engine owns real enforcement; this mirror lets the Python cost/UI side
+# reason about the ceiling. Swing leaves the ceilings 0.0 (disabled).
+_SPEND_DEFAULTS: dict[str, float] = {
+    "council_est_cost_per_call_usd": 0.04,
+    "council_daily_spend_ceiling_usd": 0.0,
+    "council_monthly_spend_ceiling_usd": 0.0,
+    "fast_tier_max_notional_pct": 0.0,
+    "fast_tier_max_conviction": 0.0,
+}
+
+
+def _spend_num(key: str, cfg_path: str | None) -> float:
+    default = _SPEND_DEFAULTS[key]
+    src = _council(cfg_path)
+    if profile(cfg_path) == "active_quant" and key in _active_quant(cfg_path):
+        src = _active_quant(cfg_path)
+    try:
+        return float(src.get(key, default))
+    except (TypeError, ValueError):
+        return default
+
+
+def council_est_cost_per_call_usd(cfg_path: str | None = None) -> float:
+    """Estimated cost of one full council call (gate + three providers)."""
+    return _spend_num("council_est_cost_per_call_usd", cfg_path)
+
+
+def council_daily_spend_ceiling_usd(cfg_path: str | None = None) -> float:
+    """Daily council spend ceiling in USD (0.0 = disabled)."""
+    return _spend_num("council_daily_spend_ceiling_usd", cfg_path)
+
+
+def council_monthly_spend_ceiling_usd(cfg_path: str | None = None) -> float:
+    """Monthly council spend ceiling in USD (0.0 = disabled)."""
+    return _spend_num("council_monthly_spend_ceiling_usd", cfg_path)
+
+
+def fast_tier_max_notional_pct(cfg_path: str | None = None) -> float:
+    """Fast-tier notional threshold as a fraction of equity (0.0 = never fast)."""
+    return _spend_num("fast_tier_max_notional_pct", cfg_path)
+
+
+def fast_tier_max_conviction(cfg_path: str | None = None) -> float:
+    """Fast-tier native conviction threshold (0.0 = never fast)."""
+    return _spend_num("fast_tier_max_conviction", cfg_path)
+
+
+def spend_ceiling_reached(calls_today: int, calls_month: int,
+                          cfg_path: str | None = None) -> bool:
+    """True when estimated council spend has reached a daily or monthly ceiling.
+    Mirrors signal_engine::spend_ceiling_reached. When true the engine forces the
+    fast tier (skips the council)."""
+    est = council_est_cost_per_call_usd(cfg_path)
+    if est <= 0.0:
+        return False
+    daily = council_daily_spend_ceiling_usd(cfg_path)
+    monthly = council_monthly_spend_ceiling_usd(cfg_path)
+    if daily > 0.0 and calls_today * est >= daily:
+        return True
+    if monthly > 0.0 and calls_month * est >= monthly:
+        return True
+    return False
 
 
 def council_max_tokens(cfg_path: str | None = None) -> int:

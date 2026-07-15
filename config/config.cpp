@@ -216,8 +216,23 @@ Config load_config(const std::string& path) {
 
     // strategy (native signal layer — evaluated on closed bars only)
     auto& st = c.strategy;
+    st.profile = get_str(root, "strategy.profile", st.profile);
     st.momentum_enabled = get_bool(root, "strategy.momentum_enabled", st.momentum_enabled);
     st.reversion_enabled = get_bool(root, "strategy.reversion_enabled", st.reversion_enabled);
+    st.reversion_style = get_str(root, "strategy.reversion_style", st.reversion_style);
+    st.momentum_dual_ma_filter = get_bool(root, "strategy.momentum_dual_ma_filter", st.momentum_dual_ma_filter);
+    st.momentum_medium_ma = get_int(root, "strategy.momentum_medium_ma", st.momentum_medium_ma);
+    st.momentum_long_ma = get_int(root, "strategy.momentum_long_ma", st.momentum_long_ma);
+    st.ts_momentum_lookback = get_int(root, "strategy.ts_momentum_lookback", st.ts_momentum_lookback);
+    st.rsi2_period = get_int(root, "strategy.rsi2_period", st.rsi2_period);
+    st.rsi2_entry_crypto = get_double(root, "strategy.rsi2_entry_crypto", st.rsi2_entry_crypto);
+    st.rsi2_entry_equity = get_double(root, "strategy.rsi2_entry_equity", st.rsi2_entry_equity);
+    st.rsi2_exit = get_double(root, "strategy.rsi2_exit", st.rsi2_exit);
+    st.rsi2_crossback_confirm = get_bool(root, "strategy.rsi2_crossback_confirm", st.rsi2_crossback_confirm);
+    st.trend_ma_period = get_int(root, "strategy.trend_ma_period", st.trend_ma_period);
+    st.atr_mean_period = get_int(root, "strategy.atr_mean_period", st.atr_mean_period);
+    st.atr_band_std = get_double(root, "strategy.atr_band_std", st.atr_band_std);
+    st.crypto_atr_stop_mult = get_double(root, "strategy.crypto_atr_stop_mult", st.crypto_atr_stop_mult);
     st.ema_fast = get_int(root, "strategy.ema_fast", st.ema_fast);
     st.ema_slow = get_int(root, "strategy.ema_slow", st.ema_slow);
     st.adx_min = get_double(root, "strategy.adx_min", st.adx_min);
@@ -260,6 +275,38 @@ Config load_config(const std::string& path) {
     co.engine_bridge_call_timeout_ms = get_int(root, "council.engine_bridge_call_timeout_ms", co.engine_bridge_call_timeout_ms);
     co.provider_timeout_seconds = get_int(root, "council.provider_timeout_seconds", co.provider_timeout_seconds);
     co.gate_timeout_seconds = get_int(root, "council.gate_timeout_seconds", co.gate_timeout_seconds);
+    co.fast_tier_max_notional_pct = get_double(root, "council.fast_tier_max_notional_pct", co.fast_tier_max_notional_pct);
+    co.fast_tier_max_conviction = get_double(root, "council.fast_tier_max_conviction", co.fast_tier_max_conviction);
+    co.council_est_cost_per_call_usd = get_double(root, "council.council_est_cost_per_call_usd", co.council_est_cost_per_call_usd);
+    co.council_daily_spend_ceiling_usd = get_double(root, "council.council_daily_spend_ceiling_usd", co.council_daily_spend_ceiling_usd);
+    co.council_monthly_spend_ceiling_usd = get_double(root, "council.council_monthly_spend_ceiling_usd", co.council_monthly_spend_ceiling_usd);
+
+    // active_quant profile overlay. Applied AFTER the base strategy/council blocks
+    // so it overrides the swing base, and each key stays operator-tunable via the
+    // active_quant block. Default profile is swing, so this is a no-op unless the
+    // operator selects active_quant. Never touches a Level-1 risk value.
+    if (st.profile == "active_quant") {
+        st.reversion_style = get_str(root, "active_quant.reversion_style", "rsi2");
+        st.momentum_dual_ma_filter = get_bool(root, "active_quant.momentum_dual_ma_filter", true);
+        st.ts_momentum_lookback = get_int(root, "active_quant.ts_momentum_lookback", 20);
+        st.bar_timeframe = get_str(root, "active_quant.bar_timeframe", st.bar_timeframe);
+        st.crypto_atr_stop_mult = get_double(root, "active_quant.crypto_atr_stop_mult", 2.0);
+        st.rsi2_entry_crypto = get_double(root, "active_quant.rsi2_entry_crypto", st.rsi2_entry_crypto);
+        st.rsi2_entry_equity = get_double(root, "active_quant.rsi2_entry_equity", st.rsi2_entry_equity);
+        st.rsi2_exit = get_double(root, "active_quant.rsi2_exit", st.rsi2_exit);
+        {
+            auto wl = split_csv(get_str(root, "active_quant.whitelist",
+                "BTC/USD, ETH/USD, SOL/USD, SPY, QQQ, AAPL, MSFT, NVDA"));
+            if (!wl.empty()) st.whitelist = wl;
+        }
+        co.fast_tier_max_notional_pct = get_double(root, "active_quant.fast_tier_max_notional_pct", 0.01);
+        co.fast_tier_max_conviction = get_double(root, "active_quant.fast_tier_max_conviction", 0.6);
+        co.council_daily_budget = get_int(root, "active_quant.council_daily_budget", 40);
+        co.per_symbol_council_cooldown_minutes = get_int(root, "active_quant.per_symbol_council_cooldown_minutes", 60);
+        co.council_daily_spend_ceiling_usd = get_double(root, "active_quant.council_daily_spend_ceiling_usd", 5.0);
+        co.council_monthly_spend_ceiling_usd = get_double(root, "active_quant.council_monthly_spend_ceiling_usd", 100.0);
+        co.council_est_cost_per_call_usd = get_double(root, "active_quant.council_est_cost_per_call_usd", co.council_est_cost_per_call_usd);
+    }
 
     // rl advisory (deferred; ships OFF, trains only past the real-fill gate)
     auto& rl = c.rl;
@@ -457,6 +504,32 @@ std::vector<std::string> validate_config(const Config& cfg) {
         problems.push_back("strategy periods (ema/atr/bb/rsi/vol) must be >= 1");
     if (st.bb_std <= 0.0)
         problems.push_back("strategy.bb_std must be > 0");
+    if (st.profile != "swing" && st.profile != "active_quant")
+        problems.push_back("strategy.profile must be 'swing' or 'active_quant', got '" +
+                           st.profile + "'");
+    if (st.reversion_style != "bollinger" && st.reversion_style != "rsi2")
+        problems.push_back("strategy.reversion_style must be 'bollinger' or 'rsi2', got '" +
+                           st.reversion_style + "'");
+    if (st.rsi2_period < 1)
+        problems.push_back("strategy.rsi2_period must be >= 1");
+    if (st.rsi2_entry_crypto <= 0.0 || st.rsi2_entry_crypto >= 100.0 ||
+        st.rsi2_entry_equity <= 0.0 || st.rsi2_entry_equity >= 100.0)
+        problems.push_back("strategy RSI-2 entry thresholds must be in (0,100)");
+    if (st.rsi2_exit <= 0.0 || st.rsi2_exit >= 100.0)
+        problems.push_back("strategy.rsi2_exit must be in (0,100)");
+    if (st.rsi2_exit <= st.rsi2_entry_crypto || st.rsi2_exit <= st.rsi2_entry_equity)
+        problems.push_back("strategy.rsi2_exit must exceed the RSI-2 entry thresholds");
+    if (st.trend_ma_period < 1 || st.atr_mean_period < 2 ||
+        st.momentum_medium_ma < 1 || st.momentum_long_ma < 1)
+        problems.push_back("strategy trend/atr-mean/dual-MA periods must be valid (>=1, atr_mean>=2)");
+    if (st.momentum_medium_ma >= st.momentum_long_ma)
+        problems.push_back("strategy.momentum_medium_ma must be < strategy.momentum_long_ma");
+    if (st.atr_band_std <= 0.0)
+        problems.push_back("strategy.atr_band_std must be > 0");
+    if (st.ts_momentum_lookback < 0)
+        problems.push_back("strategy.ts_momentum_lookback must be >= 0");
+    if (st.crypto_atr_stop_mult <= 0.0)
+        problems.push_back("strategy.crypto_atr_stop_mult must be > 0");
 
     // Offline simulation controls (never affect live behavior).
     const auto& sim = cfg.simulation;
@@ -497,6 +570,16 @@ std::vector<std::string> validate_config(const Config& cfg) {
         problems.push_back("council.council_min_agreement must be >= 0");
     if (co.per_symbol_council_cooldown_minutes < 0)
         problems.push_back("council.per_symbol_council_cooldown_minutes must be >= 0");
+    // Two-tier + spend ceiling (Task 5 / Task 9). All are cost controls that can
+    // only SKIP spend, never widen risk, so they need only be non-negative.
+    pct("council.fast_tier_max_notional_pct", co.fast_tier_max_notional_pct);
+    pct("council.fast_tier_max_conviction", co.fast_tier_max_conviction);
+    if (co.council_est_cost_per_call_usd < 0.0)
+        problems.push_back("council.council_est_cost_per_call_usd must be >= 0");
+    if (co.council_daily_spend_ceiling_usd < 0.0)
+        problems.push_back("council.council_daily_spend_ceiling_usd must be >= 0");
+    if (co.council_monthly_spend_ceiling_usd < 0.0)
+        problems.push_back("council.council_monthly_spend_ceiling_usd must be >= 0");
 
     // Adaptive rule_based weight floor: an advisory weight bound in [0, 0.6]
     // (0.6 is the tuner's per-factor cap). It never touches a risk limit.

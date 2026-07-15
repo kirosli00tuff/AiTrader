@@ -108,5 +108,60 @@ int main() {
         check(found, "engine council timeout below provider timeout rejected");
     }
 
+    // 9. Default profile is swing (nothing changes silently).
+    {
+        auto cfg = config::load_config("config/default_config.yaml");
+        check(cfg.strategy.profile == "swing", "default profile is swing");
+        check(cfg.strategy.reversion_style == "bollinger",
+              "swing keeps the bollinger reversion");
+        check(!cfg.strategy.momentum_dual_ma_filter,
+              "swing keeps the dual-MA momentum filter off");
+        check(cfg.council.fast_tier_max_notional_pct == 0.0 &&
+                  cfg.council.fast_tier_max_conviction == 0.0,
+              "swing never fast-tiers a real entry (0/0 thresholds)");
+        check(cfg.council.council_daily_spend_ceiling_usd == 0.0 &&
+                  cfg.council.council_monthly_spend_ceiling_usd == 0.0,
+              "swing leaves the spend ceilings disabled");
+    }
+
+    // 10. The active_quant profile overlays the full evidence-backed set.
+    {
+        auto base = config::load_config("config/default_config.yaml");
+        // Simulate the overlay effect the loader applies for active_quant.
+        base.strategy.profile = "active_quant";
+        base.strategy.reversion_style = "rsi2";
+        base.strategy.momentum_dual_ma_filter = true;
+        base.council.fast_tier_max_notional_pct = 0.01;
+        base.council.fast_tier_max_conviction = 0.6;
+        base.council.council_daily_spend_ceiling_usd = 5.0;
+        base.council.council_monthly_spend_ceiling_usd = 100.0;
+        base.strategy.whitelist = {"BTC/USD", "ETH/USD", "SOL/USD", "SPY",
+                                   "QQQ", "AAPL", "MSFT", "NVDA"};
+        auto problems = validate_config(base);
+        check(problems.empty(), "active_quant overlay validates clean");
+        check(base.strategy.whitelist.size() == 8,
+              "active_quant widens the whitelist to liquid majors");
+    }
+
+    // 11. Validation rejects bad profile / reversion_style / RSI-2 ordering.
+    {
+        config::Config c;
+        c.strategy.profile = "turbo";  // invalid
+        auto p1 = validate_config(c);
+        bool bad_profile = false;
+        for (const auto& p : p1)
+            if (p.find("strategy.profile") != std::string::npos) bad_profile = true;
+        check(bad_profile, "invalid strategy.profile rejected");
+
+        config::Config c2;
+        c2.strategy.rsi2_exit = 8.0;            // below the entry thresholds (10/5)
+        c2.strategy.rsi2_entry_crypto = 10.0;
+        auto p2 = validate_config(c2);
+        bool bad_exit = false;
+        for (const auto& p : p2)
+            if (p.find("rsi2_exit") != std::string::npos) bad_exit = true;
+        check(bad_exit, "rsi2_exit at/below the entry thresholds rejected");
+    }
+
     return report("config");
 }

@@ -245,7 +245,18 @@ int main(int argc, char** argv) {
                 << (st.crypto_allow_short ? "[crypto short ON]" : "[long-only]")
                 << "\n"
                 << "  regime:    ADX>=" << st.regime_adx_trend
-                << " trending / rvol>=" << st.regime_rvol_high << " range-bound\n"
+                << " trending / rvol>=" << st.regime_rvol_high << " range-bound"
+                << " (leads: trending->momentum, range->reversion, neutral->blend)\n"
+                << "  profile:   " << st.profile << "  (reversion=" << st.reversion_style
+                << ", dual-MA momentum=" << (st.momentum_dual_ma_filter ? "on" : "off")
+                << ")\n"
+                << "  rsi-2:     period " << st.rsi2_period << " entry crypto<"
+                << static_cast<int>(st.rsi2_entry_crypto) << " equity<"
+                << static_cast<int>(st.rsi2_entry_equity) << " exit>"
+                << static_cast<int>(st.rsi2_exit) << " trendMA " << st.trend_ma_period
+                << " crossback " << (st.rsi2_crossback_confirm ? "on" : "off")
+                << (st.reversion_style == "rsi2" ? "  [ACTIVE]" : "  [idle: bollinger]")
+                << "\n"
                 << "  feed:      " << eff_feed << " / clock " << eff_clock
                 << (eff_feed == "alpaca_paper"
                         ? " (PRIMARY online paper loop)"
@@ -298,6 +309,14 @@ int main(int argc, char** argv) {
                 << "  council $:  budget " << co.council_daily_budget
                 << "/day, cooldown " << co.per_symbol_council_cooldown_minutes
                 << "m, max_tokens " << co.council_max_tokens << "\n"
+                << "  tiers:     fast tier when notional<="
+                << (co.fast_tier_max_notional_pct * 100) << "% equity AND strength<="
+                << co.fast_tier_max_conviction
+                << " (else council); 0/0 => council-eligible (swing)\n"
+                << "  spend cap: $" << co.council_daily_spend_ceiling_usd
+                << "/day, $" << co.council_monthly_spend_ceiling_usd
+                << "/month @ ~$" << co.council_est_cost_per_call_usd
+                << "/call (0=off, forces fast tier when reached)\n"
                 << "  cost cuts: risk pre-check ON; equities market-hours-only "
                 << (cfg.engine.equities_market_hours_only ? "ON" : "off")
                 << " (crypto 24/7)\n"

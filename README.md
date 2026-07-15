@@ -99,6 +99,51 @@ Live enablement requires passing **all** `live_approval:` checks (connected
 credentials, kill switch configured, visible recent performance, positive paper
 expectancy, drawdown below threshold, explicit manual confirmation).
 
+## Native strategy: RSI-2 + momentum, regime-driven, two profiles
+
+The native signal layer (`signal_engine/strategy.*`, closed-bar evaluation only)
+blends two evidence-backed factors, switched by the regime detector, behind a
+`strategy.profile` selector:
+
+- **`swing` (default).** The current stack, unchanged. EMA fast/slow momentum
+  crossover plus Bollinger mean reversion. Nothing changes unless you opt in.
+- **`active_quant`.** Trades more actively but selectively. A **Connors RSI-2**
+  mean-reversion factor: long only, only **above the 200-period trend MA** (buy
+  dips inside a confirmed uptrend), on RSI-2 below a config entry threshold
+  (crypto 10, equity 5), with an optional **cross-back confirmation**, an **ATR
+  volatility band**, and a **volume filter**. It exits on the RSI-2 cross above
+  `rsi2_exit` (65 to 70), plus the RiskGate stops and the ATR target. Momentum
+  gains a **dual-MA trend filter** (price above a medium and a long MA) for
+  trending regimes.
+
+The **regime detector selects which factor leads**: trending favors momentum,
+range-bound favors RSI-2, neutral blends. The two profit in opposite regimes,
+which smooths the equity curve. The engine persists the regime and the active
+factor per symbol for the GUI.
+
+**Two-tier execution (cost-bounded).** Small, low-conviction entries take the
+**fast tier**: native signal plus RiskGate only, no council call. Larger or
+higher-conviction entries take the **council tier**: gate then council then
+RiskGate. A hard **spend ceiling** (`council_daily_spend_ceiling_usd`,
+`council_monthly_spend_ceiling_usd`) forces the fast tier when reached, so a
+month of `active_quant` stays near or under **100 dollars** (projected ~$20 to
+$48). Both tiers respect every Level-1 limit and use native ATR exits.
+
+**Crypto stop.** Crypto uses a wider volatility stop (`crypto_atr_stop_mult`,
+default 2x) since crypto sees large two-day selloffs even in uptrends. Equities
+keep the existing ATR stop. Every stop stays inside the RiskGate's authority; the
+RiskGate keeps its own stops unconditionally, so no native stop weakens a limit.
+
+**Honest expectations.** Realistic target Sharpe is roughly 1.4 to 1.7 with
+drawdowns consistent with the Level-1 limits. Any result implying Sharpe above 3
+signals a methodology error to investigate, not a win. Realized PnL charges a fee
+before it reaches the tuner and the DNN training data, so both learn net of cost.
+
+Select the profile in `config/default_config.yaml` (`strategy.profile:
+active_quant`); the `active_quant:` block holds the overriding thresholds,
+whitelist, budget, cooldown, and spend ceiling. Every value is operator-tunable
+and none touches a Level-1 risk limit.
+
 ## Repository layout
 
 | Path | Module | Language |

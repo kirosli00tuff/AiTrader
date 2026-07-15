@@ -231,6 +231,19 @@ Bollinger bollinger(const std::vector<double>& closes, int period,
     return b;
 }
 
+// The long trend MA / dual-MA / ATR-band lookbacks only gate warmth when the
+// RSI-2 reversion style or the dual-MA momentum filter is active. Swing (dual-MA
+// off, reversion bollinger) is unchanged: this returns 0 so min_bars_to_warm
+// stays the ema_slow+2 longest lookback.
+static int trend_warm_need(const config::StrategyConfig& cfg) {
+    bool active = cfg.reversion_style == "rsi2" || cfg.momentum_dual_ma_filter;
+    if (!active) return 0;
+    int need = cfg.trend_ma_period;
+    need = std::max(need, cfg.momentum_long_ma);
+    need = std::max(need, cfg.atr_mean_period + cfg.atr_period + 1);
+    return need;
+}
+
 int min_bars_to_warm(const config::StrategyConfig& cfg) {
     int need = cfg.ema_slow + 2;                     // momentum EMA cross
     need = std::max(need, 2 * cfg.atr_period + 1);   // ADX (Wilder smoothing)
@@ -239,6 +252,7 @@ int min_bars_to_warm(const config::StrategyConfig& cfg) {
     need = std::max(need, cfg.rsi_period + 2);       // RSI (reversion reads n-2)
     need = std::max(need, cfg.vol_lookback);         // average volume
     need = std::max(need, cfg.vol_lookback + 1);     // realized vol
+    need = std::max(need, trend_warm_need(cfg));     // long trend MA (RSI-2/dual-MA)
     return need;
 }
 
@@ -252,9 +266,27 @@ WarmState indicator_warm_state(int bar_count, const config::StrategyConfig& cfg)
     w.rsi = bar_count >= cfg.rsi_period + 2;
     w.volume = bar_count >= cfg.vol_lookback;
     w.rvol = bar_count >= cfg.vol_lookback + 1;
+    // trend_ma is true when the trend filter is inactive, so it never gates swing.
+    int tw = trend_warm_need(cfg);
+    w.trend_ma = tw == 0 || bar_count >= tw;
     w.all = w.ema_slow && w.adx && w.atr && w.bollinger && w.rsi && w.volume &&
-            w.rvol;
+            w.rvol && w.trend_ma;
     return w;
+}
+
+std::string active_factor_for(Regime r, const config::StrategyConfig& cfg) {
+    double mom = 0.0, rev = 0.0;
+    switch (r) {
+        case Regime::Trending:
+            mom = cfg.trending_momentum_weight; rev = cfg.trending_reversion_weight; break;
+        case Regime::RangeBound:
+            mom = cfg.range_momentum_weight; rev = cfg.range_reversion_weight; break;
+        case Regime::Neutral:
+            mom = cfg.neutral_momentum_weight; rev = cfg.neutral_reversion_weight; break;
+    }
+    if (mom > rev) return "momentum";
+    if (rev > mom) return "reversion";
+    return "blend";
 }
 
 bool indicators_warm(int bar_count, const config::StrategyConfig& cfg) {
@@ -279,7 +311,7 @@ RegimeResult detect_regime(const std::vector<Bar>& bars,
 
 StrategySignal evaluate_momentum(const std::vector<Bar>& bars,
                                  const config::StrategyConfig& cfg,
-                                 bool allow_short) {
+                                 bool allow_short, bool is_crypto) {
     StrategySignal sig;
     sig.factor = "momentum";
     if (static_cast<int>(bars.size()) < cfg.ema_slow + 2) return sig;
@@ -295,6 +327,26 @@ StrategySignal evaluate_momentum(const std::vector<Bar>& bars,
     bool adx_ok = adx_v >= cfg.adx_min;
     bool vol_ok = price > 0 && (atr_v / price) >= cfg.atr_vol_floor;
     if (!adx_ok || !vol_ok) return sig;
+    // Dual trend filter for time-series momentum. A long needs price above BOTH
+    // the medium and long MA (and, when ts_momentum_lookback > 0, a positive
+    // return over that lookback). A short is the mirror. OFF by default so swing
+    // is unchanged. The evidence: the dual filter lifts the long win rate.
+    if (cfg.momentum_dual_ma_filter) {
+        double med = sma(closes, cfg.momentum_medium_ma);
+        double lng = sma(closes, cfg.momentum_long_ma);
+        if (med == 0.0 || lng == 0.0) return sig;  // not enough history yet
+        bool long_trend_ok = price > med && price > lng;
+        bool short_trend_ok = price < med && price < lng;
+        if (cfg.ts_momentum_lookback > 0 &&
+            n > static_cast<size_t>(cfg.ts_momentum_lookback)) {
+            double past = closes[n - 1 - cfg.ts_momentum_lookback];
+            double ret = past != 0.0 ? (price - past) / past : 0.0;
+            long_trend_ok = long_trend_ok && ret > 0.0;
+            short_trend_ok = short_trend_ok && ret < 0.0;
+        }
+        if (cross_up && !long_trend_ok) cross_up = false;
+        if (cross_down && !short_trend_ok) cross_down = false;
+    }
     Direction dir = Direction::None;
     if (cross_up) dir = Direction::Long;
     else if (cross_down && allow_short) dir = Direction::Short;
@@ -305,22 +357,25 @@ StrategySignal evaluate_momentum(const std::vector<Bar>& bars,
     double adx_span = std::max(1.0, 50.0 - cfg.adx_min);
     sig.strength = std::clamp((adx_v - cfg.adx_min) / adx_span, 0.0, 1.0);
     sig.time_stop_bars = cfg.time_stop_bars;
+    // Crypto uses the wider crypto ATR stop; equities keep atr_stop_mult.
+    double stop_mult = is_crypto ? cfg.crypto_atr_stop_mult : cfg.atr_stop_mult;
     if (dir == Direction::Long) {
-        sig.stop_price = price - cfg.atr_stop_mult * atr_v;
+        sig.stop_price = price - stop_mult * atr_v;
         sig.target_price = price + cfg.atr_target_mult * atr_v;
     } else {
-        sig.stop_price = price + cfg.atr_stop_mult * atr_v;
+        sig.stop_price = price + stop_mult * atr_v;
         sig.target_price = price - cfg.atr_target_mult * atr_v;
     }
     sig.rationale = "EMA" + std::to_string(cfg.ema_fast) + "/" +
                     std::to_string(cfg.ema_slow) + " cross, ADX " +
-                    std::to_string(static_cast<int>(adx_v));
+                    std::to_string(static_cast<int>(adx_v)) +
+                    (cfg.momentum_dual_ma_filter ? " [dual-MA]" : "");
     return sig;
 }
 
 StrategySignal evaluate_reversion(const std::vector<Bar>& bars,
                                   const config::StrategyConfig& cfg,
-                                  bool allow_short) {
+                                  bool allow_short, bool is_crypto) {
     StrategySignal sig;
     sig.factor = "reversion";
     int need = std::max({cfg.bb_period, cfg.rsi_period + 2, cfg.vol_lookback,
@@ -354,13 +409,98 @@ StrategySignal evaluate_reversion(const std::vector<Bar>& bars,
                               0.0, 1.0);
     sig.time_stop_bars = cfg.time_stop_bars;
     // Target is the mean (the reversion thesis); stop is an ATR beyond entry.
+    // Crypto uses the wider crypto ATR stop; equities keep atr_stop_mult.
+    double stop_mult = is_crypto ? cfg.crypto_atr_stop_mult : cfg.atr_stop_mult;
     sig.target_price = bb.mid;
     if (dir == Direction::Long)
-        sig.stop_price = price - cfg.atr_stop_mult * atr_v;
+        sig.stop_price = price - stop_mult * atr_v;
     else
-        sig.stop_price = price + cfg.atr_stop_mult * atr_v;
+        sig.stop_price = price + stop_mult * atr_v;
     sig.rationale = "BB reentry, RSI " + std::to_string(static_cast<int>(rsi_now));
     return sig;
+}
+
+StrategySignal evaluate_rsi2_reversion(const std::vector<Bar>& bars,
+                                       const config::StrategyConfig& cfg,
+                                       bool is_crypto) {
+    StrategySignal sig;
+    sig.factor = "reversion";  // same ensemble slot as Bollinger reversion
+    // Need enough bars for the long trend MA, the ATR band, and the RSI-2 series.
+    int need = std::max({cfg.trend_ma_period, cfg.atr_mean_period + cfg.atr_period + 1,
+                         cfg.rsi2_period + 2, cfg.vol_lookback + 1});
+    if (static_cast<int>(bars.size()) < need) return sig;
+    auto closes = closes_of(bars);
+    size_t n = closes.size();
+    double price = closes[n - 1];
+
+    // Trend filter: LONG ONLY, and only above the long trend MA (buy dips inside
+    // a confirmed uptrend). RSI-2 is a long-only reversion factor here.
+    double trend_ma = sma(closes, cfg.trend_ma_period);
+    if (trend_ma <= 0.0 || price <= trend_ma) return sig;
+
+    // Oversold trigger: RSI-2 below the entry threshold (looser for crypto). With
+    // cross-back confirmation, wait for RSI-2 to tick back above the threshold
+    // (prev below, now above), which cuts whipsaw. Without it, enter while below.
+    auto rs = rsi_series(closes, cfg.rsi2_period);
+    double rsi_now = rs[n - 1], rsi_prev = rs[n - 2];
+    double entry = is_crypto ? cfg.rsi2_entry_crypto : cfg.rsi2_entry_equity;
+    bool trigger;
+    if (cfg.rsi2_crossback_confirm)
+        trigger = rsi_prev <= entry && rsi_now > entry;
+    else
+        trigger = rsi_now <= entry;
+    if (!trigger) return sig;
+
+    // Volatility band: ATR within atr_band_std SD of its atr_mean_period mean, so
+    // entries skip abnormally quiet or violent tape (improves profit factor).
+    double atr_v = atr(bars, cfg.atr_period);
+    std::vector<double> atr_hist;
+    atr_hist.reserve(cfg.atr_mean_period);
+    for (int k = cfg.atr_mean_period; k >= 1; --k) {
+        std::vector<Bar> window(bars.begin(), bars.end() - (k - 1));
+        if (static_cast<int>(window.size()) > cfg.atr_period)
+            atr_hist.push_back(atr(window, cfg.atr_period));
+    }
+    if (atr_hist.size() >= 2) {
+        double mean = 0.0;
+        for (double a : atr_hist) mean += a;
+        mean /= atr_hist.size();
+        double var = 0.0;
+        for (double a : atr_hist) var += (a - mean) * (a - mean);
+        var /= atr_hist.size();
+        double sd = std::sqrt(var);
+        if (sd > 0.0 && std::fabs(atr_v - mean) > cfg.atr_band_std * sd) return sig;
+    }
+
+    // Volume filter: skip below-average volume.
+    double vavg = avg_volume(bars, cfg.vol_lookback);
+    if (vavg > 0 && bars[n - 1].volume < vavg) return sig;
+
+    sig.has_signal = true;
+    sig.direction = Direction::Long;
+    sig.entry_price = price;
+    // Strength scales with how deep RSI-2 dipped below the entry threshold.
+    double depth = std::clamp((entry - std::min(rsi_prev, rsi_now)) /
+                              std::max(1.0, entry), 0.0, 1.0);
+    sig.strength = std::clamp(0.4 + 0.6 * depth, 0.0, 1.0);
+    sig.time_stop_bars = cfg.time_stop_bars;
+    // WIDE ATR stop (crypto wider still): a tight stop cuts the snapback. The
+    // primary exit is the RSI-2 cross above rsi2_exit (engine, ExitReason::Indicator);
+    // the ATR target is a profit backstop and the RiskGate keeps its own stops.
+    double stop_mult = is_crypto ? cfg.crypto_atr_stop_mult : cfg.atr_stop_mult;
+    sig.stop_price = price - stop_mult * atr_v;
+    sig.target_price = price + cfg.atr_target_mult * atr_v;
+    sig.rationale = "RSI-2 " + std::to_string(static_cast<int>(rsi_now)) +
+                    " dip in uptrend (>MA" + std::to_string(cfg.trend_ma_period) + ")";
+    return sig;
+}
+
+bool rsi2_exit_triggered(const std::vector<Bar>& bars,
+                         const config::StrategyConfig& cfg) {
+    auto closes = closes_of(bars);
+    if (static_cast<int>(closes.size()) <= cfg.rsi2_period + 1) return false;
+    double r = rsi(closes, cfg.rsi2_period);
+    return r >= cfg.rsi2_exit;
 }
 
 std::string exit_reason_to_string(ExitReason r) {
@@ -368,12 +508,15 @@ std::string exit_reason_to_string(ExitReason r) {
         case ExitReason::Stop: return "stop";
         case ExitReason::Target: return "target";
         case ExitReason::TimeStop: return "time_stop";
+        case ExitReason::Indicator: return "indicator";
         case ExitReason::None: return "none";
     }
     return "none";
 }
 
-ExitReason check_exit(const OpenPosition& pos, const Bar& latest_bar) {
+ExitReason check_exit(const OpenPosition& pos, const Bar& latest_bar,
+                      bool indicator_exit) {
+    // Risk-first: the stop is always checked before any profit or signal exit.
     if (pos.direction == Direction::Long) {
         if (latest_bar.low <= pos.stop_price) return ExitReason::Stop;
         if (latest_bar.high >= pos.target_price) return ExitReason::Target;
@@ -381,6 +524,9 @@ ExitReason check_exit(const OpenPosition& pos, const Bar& latest_bar) {
         if (latest_bar.high >= pos.stop_price) return ExitReason::Stop;
         if (latest_bar.low <= pos.target_price) return ExitReason::Target;
     }
+    // Strategy-signal exit (RSI-2 crossed above its exit threshold), after the
+    // stop/target but before the time-stop.
+    if (indicator_exit) return ExitReason::Indicator;
     if (pos.time_stop_bars > 0 && pos.bars_held >= pos.time_stop_bars)
         return ExitReason::TimeStop;
     return ExitReason::None;
@@ -391,6 +537,7 @@ double exit_fill_price(const OpenPosition& pos, ExitReason reason,
     switch (reason) {
         case ExitReason::Stop: return pos.stop_price;
         case ExitReason::Target: return pos.target_price;
+        case ExitReason::Indicator:
         case ExitReason::TimeStop:
         case ExitReason::None: return latest_bar.close;
     }
@@ -422,11 +569,17 @@ BlendedDecision evaluate(const std::vector<Bar>& bars,
             break;
     }
     StrategySignal mom = cfg.momentum_enabled
-                             ? evaluate_momentum(bars, cfg, allow_short)
+                             ? evaluate_momentum(bars, cfg, allow_short, is_crypto)
                              : StrategySignal{};
-    StrategySignal rev = cfg.reversion_enabled
-                             ? evaluate_reversion(bars, cfg, allow_short)
-                             : StrategySignal{};
+    // Reversion slot uses the RSI-2 factor when reversion_style is rsi2 (long
+    // only, dips inside an uptrend), else the Bollinger reentry. Same ensemble
+    // slot either way (factor "reversion").
+    StrategySignal rev;
+    if (cfg.reversion_enabled) {
+        rev = cfg.reversion_style == "rsi2"
+                  ? evaluate_rsi2_reversion(bars, cfg, is_crypto)
+                  : evaluate_reversion(bars, cfg, allow_short, is_crypto);
+    }
     // Rank by regime-weighted strength; -1 sentinel keeps a no-signal factor last.
     double mom_w = mom.has_signal ? d.momentum_weight * mom.strength : -1.0;
     double rev_w = rev.has_signal ? d.reversion_weight * rev.strength : -1.0;

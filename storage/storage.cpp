@@ -71,6 +71,14 @@ void Storage::init_schema(const std::string& schema_sql_path) {
     std::ostringstream ss;
     ss << f.rdbuf();
     exec(ss.str());
+    // Additive migrations for DBs created before a column existed. CREATE TABLE
+    // IF NOT EXISTS never alters an existing table, so add new columns tolerantly
+    // (a duplicate-column error on a fresh DB is expected and ignored). Never a
+    // destructive change.
+    char* err = nullptr;
+    sqlite3_exec(db_, "ALTER TABLE regime_state ADD COLUMN active_factor TEXT",
+                 nullptr, nullptr, &err);
+    if (err) sqlite3_free(err);
 }
 
 long long Storage::append_event(const EventRow& e) {
@@ -297,14 +305,17 @@ std::vector<BarRow> Storage::bars_in_range(const std::string& symbol,
 
 void Storage::upsert_regime(const std::string& symbol, const std::string& regime,
                             double adx, double rvol,
+                            const std::string& active_factor,
                             const std::string& updated_ts) {
     Stmt s(db_,
-           "INSERT INTO regime_state(symbol,regime,adx,rvol,updated_ts)"
-           " VALUES(?,?,?,?,?)"
+           "INSERT INTO regime_state(symbol,regime,adx,rvol,active_factor,updated_ts)"
+           " VALUES(?,?,?,?,?,?)"
            " ON CONFLICT(symbol) DO UPDATE SET regime=excluded.regime,"
            " adx=excluded.adx, rvol=excluded.rvol,"
+           " active_factor=excluded.active_factor,"
            " updated_ts=excluded.updated_ts");
-    s.bind(1, symbol).bind(2, regime).bind(3, adx).bind(4, rvol).bind(5, updated_ts);
+    s.bind(1, symbol).bind(2, regime).bind(3, adx).bind(4, rvol)
+        .bind(5, active_factor).bind(6, updated_ts);
     s.step_done();
 }
 

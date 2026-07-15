@@ -232,6 +232,211 @@ int main() {
                   warm.rsi && warm.volume && warm.rvol && warm.all,
               "at min_bars_to_warm every indicator is warm");
         check(warm.bars == need, "warm-state reports the bar count");
+        // Swing (dual-MA off, bollinger reversion) is unchanged: the trend MA
+        // never gates warmth, so trend_ma is true and min stays ema_slow+2.
+        check(warm.trend_ma, "swing profile: trend_ma warm flag is true (inactive)");
+    }
+
+    // --- Regime selects the leading factor (Task 3) -------------------------
+    {
+        config::StrategyConfig cfg;  // trending 0.70/0.30, range 0.30/0.70, neutral 0.50/0.50
+        check(strategy::active_factor_for(strategy::Regime::Trending, cfg) == "momentum",
+              "trending regime leads with momentum");
+        check(strategy::active_factor_for(strategy::Regime::RangeBound, cfg) == "reversion",
+              "range-bound regime leads with reversion");
+        check(strategy::active_factor_for(strategy::Regime::Neutral, cfg) == "blend",
+              "neutral regime blends (equal weights)");
+    }
+
+    // --- Momentum dual-MA trend filter (Task 2) -----------------------------
+    {
+        auto cfg = small_cfg();
+        cfg.momentum_dual_ma_filter = true;
+        cfg.momentum_medium_ma = 3;
+        cfg.momentum_long_ma = 6;
+        cfg.ts_momentum_lookback = 0;
+        // Flat then a jump up: crossover fires AND price is above both MAs.
+        auto up = flat_bars(28, 100.0);
+        up.push_back(Bar{100, 121, 100, 120, 5000});
+        auto sig_up = strategy::evaluate_momentum(up, cfg, /*allow_short=*/false);
+        check(sig_up.has_signal && sig_up.direction == strategy::Direction::Long,
+              "dual-MA momentum fires when price is above both MAs");
+        // A crossover where price sits BELOW the long MA is blocked by the filter.
+        // High plateau then a decline to a low crossover point.
+        std::vector<Bar> down;
+        for (int i = 0; i < 20; ++i) down.push_back(Bar{150, 150.5, 149.5, 150, 1000});
+        for (int i = 0; i < 8; ++i) {
+            double c = 150 - (i + 1) * 6.0;  // fall from 150 toward ~102
+            down.push_back(Bar{c + 6, c + 0.5, c - 0.5, c, 1000});
+        }
+        down.push_back(Bar{102, 105, 101, 104, 5000});  // small uptick (cross up), price << long MA
+        auto sig_dn = strategy::evaluate_momentum(down, cfg, /*allow_short=*/false);
+        check(!sig_dn.has_signal,
+              "dual-MA momentum blocked when price is below the long MA");
+    }
+
+    // --- Connors RSI-2 reversion (Task 1) -----------------------------------
+    // Build a clear uptrend (price above the trend MA), a sharp pullback that
+    // drops RSI-2 below the entry threshold, then a bounce (RSI-2 crosses back).
+    auto rsi2_cfg = []() {
+        config::StrategyConfig c;
+        c.reversion_style = "rsi2";
+        c.rsi2_period = 2;
+        c.rsi2_entry_crypto = 20.0;
+        c.rsi2_entry_equity = 20.0;
+        c.rsi2_exit = 60.0;
+        c.rsi2_crossback_confirm = true;
+        c.trend_ma_period = 20;
+        c.atr_mean_period = 10;
+        c.atr_band_std = 8.0;   // wide, does not gate
+        c.atr_period = 14;
+        c.vol_lookback = 20;
+        return c;
+    };
+    // Uptrend then pullback then bounce. Returns the bar vector.
+    auto rsi2_bars = [](double bounce_vol) {
+        std::vector<Bar> b;
+        for (int i = 0; i < 28; ++i) {
+            double c = 100 + i;                 // 100..127 uptrend
+            b.push_back(Bar{c - 1, c + 0.5, c - 1.0, c, 1000});
+        }
+        b.push_back(Bar{127, 127, 123.5, 124, 1000});  // pullback
+        b.push_back(Bar{124, 124, 120.5, 121, 1000});  // deeper pullback (RSI-2 low)
+        b.push_back(Bar{121, 123.5, 121, 123, bounce_vol});  // bounce (RSI-2 crosses back)
+        return b;
+    };
+    {
+        auto cfg = rsi2_cfg();
+        auto bars = rsi2_bars(1000);
+        auto sig = strategy::evaluate_rsi2_reversion(bars, cfg, /*is_crypto=*/true);
+        check(sig.has_signal && sig.direction == strategy::Direction::Long,
+              "RSI-2 fires long on a dip inside an uptrend with cross-back");
+        check(sig.stop_price < sig.entry_price, "RSI-2 long stop below entry (wide ATR)");
+        check(sig.target_price > sig.entry_price, "RSI-2 target above entry");
+
+        // Trend filter: the SAME dip below the trend MA does NOT fire (long only
+        // inside a confirmed uptrend).
+        std::vector<Bar> downtrend;
+        for (int i = 0; i < 28; ++i) {
+            double c = 160 - i;                 // 160..133 downtrend
+            downtrend.push_back(Bar{c + 1, c + 1.0, c - 0.5, c, 1000});
+        }
+        downtrend.push_back(Bar{133, 133, 129.5, 130, 1000});
+        downtrend.push_back(Bar{130, 130, 126.5, 127, 1000});
+        downtrend.push_back(Bar{127, 129.5, 127, 129, 1000});  // bounce but price < trend MA
+        auto no_sig = strategy::evaluate_rsi2_reversion(downtrend, cfg, /*is_crypto=*/true);
+        check(!no_sig.has_signal,
+              "RSI-2 does not fire when price is below the trend MA");
+
+        // Volume filter: a below-average bounce volume gates the entry.
+        auto low_vol = strategy::evaluate_rsi2_reversion(rsi2_bars(50), cfg, true);
+        check(!low_vol.has_signal, "RSI-2 gated on below-average volume");
+
+        // Cross-back confirmation: with confirm OFF, entry may fire on the deep
+        // pullback bar itself (RSI-2 already below the threshold), a different
+        // trigger than the confirmed cross-back.
+        auto cfg_no_confirm = rsi2_cfg();
+        cfg_no_confirm.rsi2_crossback_confirm = false;
+        auto bars_pullback = rsi2_bars(1000);
+        bars_pullback.pop_back();  // drop the bounce; end on the deep pullback bar
+        auto without = strategy::evaluate_rsi2_reversion(bars_pullback, cfg_no_confirm, true);
+        auto with = strategy::evaluate_rsi2_reversion(bars_pullback, rsi2_cfg(), true);
+        check(without.has_signal && !with.has_signal,
+              "cross-back confirm gates the un-confirmed dip (fires only without confirm)");
+    }
+
+    // --- RSI-2 native exit (Task 1) -----------------------------------------
+    {
+        auto cfg = rsi2_cfg();
+        // A strictly rising tail pushes RSI-2 high => exit triggers.
+        std::vector<Bar> rising;
+        for (int i = 0; i < 10; ++i) {
+            double c = 100 + i * 2;
+            rising.push_back(Bar{c - 1, c + 0.5, c - 1, c, 1000});
+        }
+        check(strategy::rsi2_exit_triggered(rising, cfg),
+              "RSI-2 exit triggers when RSI-2 rises above the exit threshold");
+        // A falling tail keeps RSI-2 low => no exit.
+        std::vector<Bar> falling;
+        for (int i = 0; i < 10; ++i) {
+            double c = 120 - i * 2;
+            falling.push_back(Bar{c + 1, c + 1, c - 0.5, c, 1000});
+        }
+        check(!strategy::rsi2_exit_triggered(falling, cfg),
+              "RSI-2 exit does not trigger while RSI-2 stays low");
+        // check_exit routes an indicator exit after stop/target, before time-stop.
+        strategy::OpenPosition pos;
+        pos.direction = strategy::Direction::Long;
+        pos.entry_price = 100; pos.stop_price = 90; pos.target_price = 200;
+        pos.time_stop_bars = 100; pos.bars_held = 1;
+        Bar inside{100, 101, 99, 100, 1000};
+        check(strategy::check_exit(pos, inside, /*indicator_exit=*/true) ==
+                  strategy::ExitReason::Indicator,
+              "check_exit returns Indicator when the RSI-2 exit fires");
+        check(strategy::check_exit(pos, inside, /*indicator_exit=*/false) ==
+                  strategy::ExitReason::None,
+              "check_exit stays open with no indicator exit and stop/target not hit");
+    }
+
+    // --- Blend selects RSI-2 (engine's evaluate() path) ---------------------
+    {
+        auto cfg = rsi2_cfg();  // reversion_style rsi2
+        cfg.momentum_enabled = true;  // both factors active; blend must pick RSI-2
+        auto bars = rsi2_bars(1500);
+        auto d = strategy::evaluate(bars, cfg, /*is_crypto=*/true);
+        check(d.signal.has_signal, "evaluate() with rsi2 style produces a signal");
+        check(d.signal.factor == "reversion",
+              "evaluate() selects the RSI-2 reversion factor on a dip in an uptrend");
+        check(d.signal.direction == strategy::Direction::Long,
+              "the selected RSI-2 signal is long");
+    }
+
+    // --- Two-tier routing (Task 5) ------------------------------------------
+    {
+        config::CouncilConfig co;  // swing defaults: 0.0 / 0.0
+        check(signal_engine::decide_tier(co, /*notional=*/50.0, /*equity=*/100000.0,
+                                         /*conviction=*/0.1) ==
+                  signal_engine::Tier::Council,
+              "swing (0/0 thresholds): no real entry is fast-tiered");
+        // active_quant thresholds: small + low-conviction => Fast, else Council.
+        co.fast_tier_max_notional_pct = 0.01;   // 1% of equity
+        co.fast_tier_max_conviction = 0.6;
+        check(signal_engine::decide_tier(co, 500.0, 100000.0, 0.3) ==
+                  signal_engine::Tier::Fast,
+              "small + low-conviction entry takes the fast tier");
+        check(signal_engine::decide_tier(co, 5000.0, 100000.0, 0.3) ==
+                  signal_engine::Tier::Council,
+              "large entry takes the council tier");
+        check(signal_engine::decide_tier(co, 500.0, 100000.0, 0.9) ==
+                  signal_engine::Tier::Council,
+              "high-conviction entry takes the council tier");
+    }
+
+    // --- Spend ceiling (Task 9) ---------------------------------------------
+    {
+        config::CouncilConfig co;
+        co.council_est_cost_per_call_usd = 0.5;
+        signal_engine::CouncilGateState st;
+        // Disabled ceilings (0.0): never reached.
+        st.calls_today = 100; st.calls_month = 1000;
+        check(!signal_engine::spend_ceiling_reached(co, st),
+              "spend ceiling disabled at 0.0 is never reached");
+        // Daily ceiling $1 at $0.5/call: reached at 2 calls, not at 1.
+        co.council_daily_spend_ceiling_usd = 1.0;
+        st.calls_today = 1; st.calls_month = 1;
+        check(!signal_engine::spend_ceiling_reached(co, st),
+              "one call below the daily ceiling is allowed");
+        st.calls_today = 2;
+        check(signal_engine::spend_ceiling_reached(co, st),
+              "the daily spend ceiling forces fast tier when reached");
+        // Monthly ceiling independently.
+        config::CouncilConfig cm;
+        cm.council_est_cost_per_call_usd = 0.5;
+        cm.council_monthly_spend_ceiling_usd = 100.0;
+        signal_engine::CouncilGateState sm;
+        sm.calls_today = 0; sm.calls_month = 200;  // 200*0.5 = 100 >= 100
+        check(signal_engine::spend_ceiling_reached(cm, sm),
+              "the monthly spend ceiling forces fast tier when reached");
     }
 
     return report("strategy");

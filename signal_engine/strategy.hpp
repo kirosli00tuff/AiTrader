@@ -74,6 +74,7 @@ struct WarmState {
     bool rsi = false;        // RSI 14 (reversion reads rsi[n-1] and rsi[n-2])
     bool volume = false;     // N-bar average volume
     bool rvol = false;       // realized-vol regime window
+    bool trend_ma = false;   // long trend MA (RSI-2 / dual-MA); true when inactive
     bool all = false;        // every indicator above is warm
 };
 
@@ -103,6 +104,11 @@ struct RegimeResult {
 RegimeResult detect_regime(const std::vector<Bar>& bars,
                            const config::StrategyConfig& cfg);
 
+// The factor the regime selects to LEAD ("momentum" | "reversion" | "blend").
+// Trending favors momentum, range-bound favors reversion, neutral blends. The
+// engine persists this alongside the regime for the GUI.
+std::string active_factor_for(Regime r, const config::StrategyConfig& cfg);
+
 // --- Signals -------------------------------------------------------------
 enum class Direction { None, Long, Short };
 std::string direction_to_string(Direction d);
@@ -121,15 +127,36 @@ struct StrategySignal {
 
 // Strategy A — trend/momentum: EMA fast/slow crossover, ADX filter, ATR vol
 // floor. Equities are long-only in paper; `allow_short` gates the short side.
+// When cfg.momentum_dual_ma_filter is on, a long also needs price above BOTH the
+// medium and long MA (and a positive lookback return when ts_momentum_lookback>0).
+// `is_crypto` selects the wider crypto ATR stop; it defaults false (equity stop).
 StrategySignal evaluate_momentum(const std::vector<Bar>& bars,
                                  const config::StrategyConfig& cfg,
-                                 bool allow_short);
+                                 bool allow_short, bool is_crypto = false);
 
 // Strategy B — mean reversion: Bollinger reentry toward the mean, confirmed by
-// RSI leaving oversold/overbought AND volume above the N-bar average.
+// RSI leaving oversold/overbought AND volume above the N-bar average. `is_crypto`
+// selects the wider crypto ATR stop; it defaults false (equity stop).
 StrategySignal evaluate_reversion(const std::vector<Bar>& bars,
                                   const config::StrategyConfig& cfg,
-                                  bool allow_short);
+                                  bool allow_short, bool is_crypto = false);
+
+// Strategy B (RSI-2 variant) — Connors RSI-2 mean reversion. Long only. Fires
+// only when price is above the long trend MA (dips bought inside an uptrend) and
+// RSI-2 is below the entry threshold (crypto vs equity), with an optional
+// cross-back confirmation (wait for RSI-2 to tick back above the entry), an ATR
+// volatility band (ATR within atr_band_std of its atr_mean_period mean), and a
+// volume filter (volume at/above the N-bar average). The stop is a WIDE ATR stop
+// (crypto uses crypto_atr_stop_mult), since a tight stop cuts the snapback. The
+// engine also exits on the RSI-2 cross above rsi2_exit (see rsi2_exit_triggered).
+StrategySignal evaluate_rsi2_reversion(const std::vector<Bar>& bars,
+                                       const config::StrategyConfig& cfg,
+                                       bool is_crypto);
+
+// True when the latest RSI-2 has risen at/above cfg.rsi2_exit. The engine checks
+// this for an open RSI-2 reversion position as a native exit (ExitReason::Indicator).
+bool rsi2_exit_triggered(const std::vector<Bar>& bars,
+                         const config::StrategyConfig& cfg);
 
 // Regime-weighted blend of both strategies. `is_crypto` selects the short
 // policy (crypto may short only when cfg.crypto_allow_short; equities never).
@@ -148,7 +175,8 @@ BlendedDecision evaluate(const std::vector<Bar>& bars,
 // Positions opened by the strategy carry their own stop / target / time-stop,
 // set at entry. Exits are evaluated natively on each closed bar and executed
 // WITHOUT the council. This is pure decision logic; the engine owns execution.
-enum class ExitReason { None, Stop, Target, TimeStop };
+// Indicator = a strategy-signal exit (RSI-2 crossed above its exit threshold).
+enum class ExitReason { None, Stop, Target, TimeStop, Indicator };
 std::string exit_reason_to_string(ExitReason r);
 
 struct OpenPosition {
@@ -162,8 +190,12 @@ struct OpenPosition {
 
 // Decide whether an open position must exit given the latest CLOSED bar.
 // Risk-first priority: stop is checked before target (assume the adverse level
-// could trade first within the bar), then the time-stop. None => stay open.
-ExitReason check_exit(const OpenPosition& pos, const Bar& latest_bar);
+// could trade first within the bar), then the indicator exit (RSI-2 cross above
+// its exit threshold, computed by the engine from bar history and passed as
+// `indicator_exit`), then the time-stop. None => stay open. `indicator_exit`
+// defaults false, so a caller with no strategy-signal exit is unaffected.
+ExitReason check_exit(const OpenPosition& pos, const Bar& latest_bar,
+                      bool indicator_exit = false);
 
 // The fill price to book for a given exit: stop_price / target_price for those
 // triggers, else the bar close (time-stop or discretionary close).
