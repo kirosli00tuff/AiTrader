@@ -108,6 +108,34 @@ def bar_timeframe() -> str:
     return str(cfg.get("bar_timeframe", "5min"))
 
 
+def materialize_week_config(out_path: str) -> str:
+    """Write a COMPLETE config for the week-long paper run by layering the week
+    overrides over the canonical default_config (so nothing drifts): active_quant
+    profile, BOTH sleeves enabled at 80/20, all advisory layers on-real, feed
+    alpaca_paper, clock real, live OFF, RL OFF. Default_config stays conservative
+    (swing, research off); this materialized file is the explicit week launch
+    config. Returns out_path."""
+    import yaml
+    cfg = store.load_config() or {}
+    cfg.setdefault("strategy", {})["profile"] = "active_quant"
+    sl = cfg.setdefault("sleeves", {})
+    sl["quant_core_enabled"] = True
+    sl["research_satellite_enabled"] = True   # both sleeves ON for the paper week
+    sl["quant_core_target_pct"] = 0.80
+    sl["research_satellite_target_pct"] = 0.20
+    sl["drift_band_pct"] = 0.05
+    sim = cfg.setdefault("simulation", {})
+    sim["feed_mode"] = "alpaca_paper"
+    sim["clock_mode"] = "real"
+    cfg.setdefault("llm", {})["use_real_council"] = True
+    cfg.setdefault("rl", {})["rl_enabled"] = False           # RL stays gated OFF
+    # Live stays OFF: never flip any live flag here.
+    os.makedirs(os.path.dirname(os.path.abspath(out_path)), exist_ok=True)
+    with open(out_path, "w") as fh:
+        yaml.safe_dump(cfg, fh, sort_keys=False)
+    return out_path
+
+
 # --- command builders --------------------------------------------------------
 
 def backfill_cmd(db: str | None = None) -> list[str]:
@@ -595,6 +623,10 @@ def _cli(argv: list[str]) -> int:
     if cmd == "stop-tracked":
         for s in stop_tracked_pids():
             print(f"stopped {s['name']} pid {s['pid']}")
+        return 0
+    if cmd == "week-config":
+        out = argv[1] if len(argv) > 1 else ".run/week_config.yaml"
+        print(materialize_week_config(out))
         return 0
     print(f"unknown stack command: {cmd}", flush=True)
     return 2

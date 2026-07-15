@@ -66,6 +66,16 @@ New flags from the feed-work session (2026-07-05, `369b6a6`):
 
 ## Session Log
 
+### 2026-07-15 (Opus 4.8) — add watchdog + notifications, nightly backups, growth safeguards, scheduled DNN challenger training, week config + success criteria
+
+- Crash watchdog. ops/watchdog.py runs as a separate process (launched by the start script, stopped by the teardown trap). Every few minutes it checks engine/bridge/backend health + crypto bar staleness, attempts ONE clean restart via the supervisor on a failure, and notifies via ntfy.sh either way (topic from config, component status only, never a key or position). It never touches the kill-request file, and a kill-switch trip is notified but never auto-resumed (manual resume stays required).
+- Nightly backups. ops/backup.py takes a consistent sqlite online-backup snapshot into a gitignored backups/ dir with dated names + retention (default 14), restore-verified by counting trades rows. backups/ and logs/ are gitignored.
+- Growth safeguards. ops/maintenance.py prunes informational events older than a window, never deleting trades, positions, bars, or audit-relevant events, and estimates events/day for the week-size projection. The week projects to a few MB of events, bounded by the prune.
+- Scheduled DNN challenger. ops/maintenance.maybe_train_challenger runs the real-data challenger daily, refusing cleanly below the 200-sample minimum. Promotion stays gated + MANUAL: the existing GUI registry surface (champion vs challenger with validation metrics + a can_promote flag gated on meets_promotion_criteria) shows a waiting challenger for the operator's deliberate promote. Auto-promote stays off.
+- Week config. stack.materialize_week_config writes a COMPLETE week config (both sleeves 80/20, active_quant, all advisory layers on-real, feed alpaca_paper, clock real, live OFF, RL OFF) by layering the week overrides over default_config, which stays conservative. CLI: python -m api_server.stack week-config. The C++ startup block renders it correctly (verified).
+- Success criteria. CONTEXT.md gained a pre-registered Success Criteria section (min closed fills, drawdown within Level-1, sleeve split holds within band unattended, combined spend at/under $100/month, uptime target with watchdog restarts counted, research judged on thesis quality with the option to stay capped or be cut, mid-week changes limited to trading-blocking defects).
+- Tests + verify. Python pytest 274 passed (up from 262, 12 new ops tests: watchdog detects a dead engine + stale feed, attempts one restart, notifies both outcomes, never auto-resumes a kill trip, never touches the kill-request file; backup restorable + retention prunes; prune protects audit + tables; challenger refuses/reports without auto-promote). C++ ctest 17/17 unchanged (no C++ change this session). NOT touched: RiskGate, live-trading gate, adaptive invariant. Live OFF, RL gated 0/500.
+
 ### 2026-07-15 (Opus 4.8) — add core-satellite hybrid: quant core + LLM-research satellite, hard satellite cap, drift-band rebalancing, sleeve GUI
 
 - Two sleeves. quant_core (the systematic RSI-2 + momentum stack) and research_satellite (LLM deep-research, fewer/larger/longer-held positions). Config split 80/20, drift band 5 percent. research_satellite ships OFF by default (operator opt-in), so the default quant loop is untouched.

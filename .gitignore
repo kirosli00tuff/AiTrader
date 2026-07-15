@@ -37,6 +37,12 @@ ui/weight_overrides.json
 # --- Local 24/7 launcher runtime state (ops/start.sh) ---
 .run/
 
+# --- Nightly DB backups (dated snapshots; not a deliverable) ---
+backups/
+
+# --- Rotated file logs (week-long run) ---
+logs/
+
 # --- Scratch API captures (whale-fixture recording; not a deliverable) ---
 scratch_captures/
 

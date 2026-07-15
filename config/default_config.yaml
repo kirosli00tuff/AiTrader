@@ -267,6 +267,32 @@ council:
 # in. The RiskGate judges every order in BOTH sleeves with all Level-1 limits
 # unchanged. Nothing here weakens a Level-1 limit.
 # -----------------------------------------------------------------------------
+# -----------------------------------------------------------------------------
+# Week-long unattended run operations (Python-consumed only; the C++ engine
+# ignores these keys). watchdog = crash detection + ntfy notifications + one
+# clean restart. backups = nightly sqlite .backup with retention. dnn_schedule =
+# scheduled real-data challenger training (promotion stays manual + gated).
+# -----------------------------------------------------------------------------
+watchdog:
+  enabled: true
+  check_interval_seconds: 180              # health check cadence
+  bar_staleness_seconds: 900               # crypto bar older than this => stale
+  ntfy_topic: ""                           # ntfy.sh topic; empty => notifications off
+  ntfy_server: "https://ntfy.sh"
+  max_restarts_per_hour: 3                 # give up auto-restart past this (still notifies)
+
+backups:
+  enabled: true
+  dir: "backups"                           # gitignored
+  retention: 14                            # keep this many dated snapshots
+  hour_utc: 6                              # nightly backup hour (UTC)
+
+dnn_schedule:
+  challenger_training_enabled: true        # scheduled real-data challenger training
+  interval_hours: 24                       # daily attempt; refuses cleanly below min samples
+  # Promotion stays gated + MANUAL: a trained challenger waits for the operator's
+  # promote action from the GUI. auto_promote stays adaptive.dnn_auto_promote_if_better.
+
 sleeves:
   quant_core_enabled: true
   research_satellite_enabled: false        # OFF by default (operator opt-in)

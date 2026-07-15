@@ -177,6 +177,35 @@ drift band, rebalance-due flag), per-sleeve **enable toggles**, a **rebalance-no
 button, and the **research thesis feed** — so the higher-equity long-term
 decisions are transparent. Enable via `sleeves.research_satellite_enabled: true`.
 
+## Unattended week-long run (watchdog, backups, DNN challenger)
+
+For a week-long unattended paper run, the start script launches a **crash
+watchdog** (`ops/watchdog.py`) as a separate process (stopped by the teardown
+trap). Every few minutes it checks engine/bridge/backend health and crypto bar
+staleness, attempts **one clean restart** through the supervisor on a failure, and
+sends an **ntfy.sh notification** either way (set `watchdog.ntfy_topic` in config;
+notifications carry component status only, never a key or position). It **never
+touches the kill-request file**, and a kill-switch trip is **notified but never
+auto-resumed** (manual resume stays required).
+
+**Nightly backups** (`python -m ops.backup`, or cron) take a consistent
+`sqlite3 .backup` snapshot into the gitignored `backups/` directory with dated
+names and a retention count (default 14), restore-verified by counting `trades`
+rows. **Events-table pruning** (`ops/maintenance.py`) caps growth over the week
+and never deletes trades, positions, bars, or audit-relevant events.
+
+**Mid-week DNN challenger training** runs on a daily schedule
+(`ops/maintenance.maybe_train_challenger`): it attempts a real-data challenger from
+accumulated fills, refuses cleanly below the sample minimum, and **promotion stays
+gated and manual** — a trained challenger waits in the GUI (champion vs challenger
+with validation Sharpe and drawdown) for the operator's deliberate **Promote**.
+
+Materialize the exact week config with
+`python -m api_server.stack week-config .run/week_config.yaml` (both sleeves at
+80/20, `active_quant`, all advisory layers on-real, feed `alpaca_paper`, clock
+real, **live off**, RL off) and launch the engine with `--config` pointing at it.
+The default config stays conservative; the week config is an explicit opt-in file.
+
 ## Repository layout
 
 | Path | Module | Language |

@@ -40,14 +40,14 @@ DB="${MAL_DB_PATH:-$ROOT/market_ai_lab.db}"
 INTERVAL="${MAL_INTERVAL_SECONDS:-30}"
 export MAL_API_PORT="$API_PORT" MAL_DB_PATH="$DB"
 
-BRIDGE_PID=""; ENGINE_PID=""; API_PID=""; VITE_PID=""
+BRIDGE_PID=""; ENGINE_PID=""; API_PID=""; VITE_PID=""; WATCHDOG_PID=""
 
 die() { echo "FATAL: $*" >&2; exit 1; }
 
 cleanup() {
   echo ""
   echo "Stopping components..."
-  for pid in "$VITE_PID" "$API_PID" "$ENGINE_PID" "$BRIDGE_PID"; do
+  for pid in "$WATCHDOG_PID" "$VITE_PID" "$API_PID" "$ENGINE_PID" "$BRIDGE_PID"; do
     [ -n "$pid" ] && kill "$pid" 2>/dev/null || true
   done
   wait 2>/dev/null || true
@@ -157,6 +157,16 @@ API_PID=$!
 wait_http "http://127.0.0.1:${API_PORT}/health" "api" 40 \
   || die "GUI backend did not become healthy on port ${API_PORT}"
 echo "      GUI backend healthy."
+
+# --- 3b. Crash watchdog (separate process; stopped by the teardown trap) -----
+# Checks engine/bridge/backend health + crypto bar staleness, attempts ONE clean
+# restart via the supervisor on a failure, and notifies via ntfy.sh. It never
+# touches the kill-request file and never auto-resumes a kill trip.
+echo "[3b] starting crash watchdog ..."
+"$PY" -m ops.watchdog &
+WATCHDOG_PID=$!
+"$PY" -m api_server.stack record-pid watchdog "$WATCHDOG_PID" >/dev/null 2>&1 || true
+echo "      watchdog running (pid $WATCHDOG_PID)."
 
 # --- 4. Frontend (unless headless) ------------------------------------------
 if [ "${MAL_HEADLESS:-0}" = "1" ]; then
