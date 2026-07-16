@@ -38,7 +38,18 @@ CREATE TABLE IF NOT EXISTS trades (
     combined_conf REAL,
     combined_edge REAL,
     decision_id   INTEGER,
-    sleeve        TEXT    DEFAULT 'quant_core'  -- quant_core | research_satellite
+    sleeve        TEXT    DEFAULT 'quant_core', -- quant_core | research_satellite
+    -- WHAT DECIDED THIS TRADE. Not cosmetic: the real-fill GATES read it.
+    --   strategy      the native strategy decided (entry or its own exit)
+    --   adaptive_react a live news event trimmed or exited it
+    --   rebalance      a sleeve drift trim closed it
+    -- count_closed_trades (ml_factor/real_dataset.py) counts ONLY 'strategy'
+    -- rows, because it gates the DNN real-data trainer AND the RL 500-fill
+    -- activation (rl_min_real_fills, a CLAUDE.md hard rule). An event-driven
+    -- exit and a drift trim are real fills, but neither is a decision the
+    -- policy made, so neither is evidence the policy has been exercised.
+    -- Counting them opens a training gate on trades that taught nothing.
+    origin        TEXT    DEFAULT 'strategy'
 );
 CREATE INDEX IF NOT EXISTS idx_trades_ts ON trades(ts);
 

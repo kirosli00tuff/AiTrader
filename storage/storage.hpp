@@ -35,6 +35,11 @@ struct TradeRow {
     double combined_conf = 0, combined_edge = 0;
     // Core-satellite sleeve tag ("quant_core" | "research_satellite").
     std::string sleeve = "quant_core";
+    // What DECIDED this trade: "strategy" | "adaptive_react" | "rebalance".
+    // Defaults to strategy so every existing call site keeps its meaning; only
+    // the two non-strategy paths set it. Read by the real-fill gates, which
+    // count strategy fills only.
+    std::string origin = "strategy";
 };
 
 // A persisted LLM deep-research thesis attached to a research_satellite position,

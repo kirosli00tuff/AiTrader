@@ -1100,6 +1100,10 @@ bool Engine::apply_defensive_action(const core::DefensiveAction& a,
     tr.qty = qty; tr.price = px; tr.notional = notional; tr.fee = fee;
     tr.mode = "paper"; tr.pnl = pnl; tr.outcome = win ? "win" : "loss";
     tr.sleeve = ap.sleeve;
+    // A news event decided this, not the strategy. The real-fill gates count
+    // strategy fills only, so tagging it keeps an event-driven exit from
+    // counting toward "the policy has traded enough to learn from".
+    tr.origin = "adaptive_react";
     storage_->insert_trade(tr);
 
     const double remaining_qty = ap.pos.qty - qty;
@@ -1861,6 +1865,11 @@ void Engine::maybe_rebalance(const std::string& ts, long now_epoch) {
         tr.qty = ap.pos.qty; tr.price = px; tr.notional = notional; tr.fee = fee;
         tr.mode = "paper"; tr.pnl = pnl; tr.outcome = pnl >= 0 ? "win" : "loss";
         tr.sleeve = ap.sleeve;
+        // Drift mechanics decided this, not the strategy. Same reasoning as the
+        // adaptive exit: a rebalance trim is a real fill but not a policy
+        // decision, so it must not inflate the real-fill gates either. This bug
+        // predates the adaptive layer; the discriminator fixes both at once.
+        tr.origin = "rebalance";
         storage_->insert_trade(tr);
         storage_->upsert_position(ap.pos.venue, ap.pos.symbol, ap.pos.market,
                                   ap.pos.category, side, 0.0, px, 0.0, ts, ap.sleeve);

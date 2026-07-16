@@ -14,6 +14,33 @@ Commit message:
 
 ---
 
+## Prompt: Fix the RL/DNN real-fill gate inflation
+
+Date: 2026-07-16
+Model: Opus 4.8
+Prompt summary: "can you fix the RL/DNN issues?" — the remaining half of self-review finding 6, logged in Known Issues after the fix pass.
+Changes: Added an `origin` discriminator to `trades` (`strategy` | `adaptive_react` | `rebalance`, default strategy, with an additive migration that backfills existing rows to strategy). The engine tags the two paths that are NOT policy decisions: apply_defensive_action writes `adaptive_react`, and the sleeve rebalance trim writes `rebalance`. `count_closed_trades` (ml_factor/real_dataset.py) now counts strategy fills only. VERIFIED the mechanism first rather than assuming it: both build_real_dataset and build_rl_dataset assemble features from `bars`, so count_closed_trades is purely a GATE (`n_real_fills`), which is why the original review finding's "training-set pollution" framing was wrong and the real harm is gate inflation. The gates in question are the DNN real-data trainer and the RL 500-fill activation (`rl_min_real_fills`), the latter a CLAUDE.md hard rule. FIXED THE PRE-EXISTING HALF TOO: the sleeve rebalance trim had the identical bug since before the adaptive layer existed, and the discriminator resolves both at the same depth rather than special-casing my own code. NOT touched: RiskGate logic, the live-trading gate, the adaptive limit-weakening invariant, or any Level-1 value.
+Safest-choice notes: (1) Filtering makes both gates STRICTER, never looser: they open later, on fewer but more meaningful fills. That is the safe direction for a gate whose entire job is to say "not yet", and it is why this is a fix rather than a behavior change to argue about. (2) A DB predating the migration has no column to filter on, so count_closed_trades falls back to the unfiltered pre-`origin` count rather than crashing a trainer. The information to tell those fills apart was never recorded and cannot be recovered retroactively; pre-existing rebalance trims in an old DB stay miscounted, and that is stated in Known Issues rather than papered over. (3) `origin` defaults to "strategy" on TradeRow, so every existing call site keeps its meaning untouched and only the two non-strategy paths set it. A new exit path added later inherits the safe-for-callers default but the WRONG gate semantics if its author forgets, which is why the schema comment says what the column is for rather than just listing its values.
+Verification (2026-07-16):
+
+| Check | Result |
+| --- | --- |
+| Python pytest | 585 passed (up from 579, +6 new) |
+| C++ ctest | 22/22 passed |
+| **The gate counts strategy fills only** | **PASS: 3 strategy + 5 adaptive_react + 4 rebalance = 12 closed fills, gate reads 3** |
+| 600 news exits never open the RL 500-fill gate | PASS: gate reads 0 |
+| A rebalance trim does not count either (pre-existing bug) | PASS: 50 trims, gate reads 0 |
+| An unset origin defaults to strategy | PASS: existing call sites keep their meaning |
+| An open trade still does not count | PASS |
+| An old DB without the column falls back, not crashes | PASS: pre-origin behavior preserved |
+| origin is actually WRITTEN on a real run | PASS: 12000-step run, 272/272 rows tagged `strategy` |
+| The gate on a real run | PASS: 136 strategy fills, matching the closed count |
+| **Flags off = behavior unchanged** | **PASS: 272 trades / 136 closed, unchanged** |
+| RiskGate / live gate / Level-1 untouched | PASS |
+Commit message: `Count only strategy fills toward the real-fill gates, an adaptive exit or rebalance trim no longer inflates the DNN and RL activation gates, live trading untouched`
+
+---
+
 ## Prompt: Self-review the adaptive layer and fix every finding
 
 Date: 2026-07-16

@@ -84,6 +84,12 @@ void Storage::init_schema(const std::string& schema_sql_path) {
     // expected and ignored.
     const char* migrations[] = {
         "ALTER TABLE trades ADD COLUMN sleeve TEXT DEFAULT 'quant_core'",
+        // Trade provenance for the real-fill gates. Existing rows backfill to
+        // 'strategy', which is right for any DB predating the adaptive layer.
+        // A pre-existing rebalance trim in an old DB also backfills to
+        // 'strategy' and stays miscounted: the information to tell them apart
+        // was never recorded, so it cannot be recovered retroactively.
+        "ALTER TABLE trades ADD COLUMN origin TEXT DEFAULT 'strategy'",
         "ALTER TABLE positions ADD COLUMN sleeve TEXT DEFAULT 'quant_core'",
         // Long-term thesis fields (discovery.long_term_sleeve_enabled, OFF by
         // default). NULL on a thesis from the original council-mapped path.
@@ -112,14 +118,14 @@ long long Storage::append_event(const EventRow& e) {
 long long Storage::insert_trade(const TradeRow& t) {
     Stmt s(db_,
            "INSERT INTO trades(ts,venue,symbol,market,category,side,qty,price,"
-           "notional,fee,mode,pnl,outcome,combined_conf,combined_edge,sleeve)"
-           " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)");
+           "notional,fee,mode,pnl,outcome,combined_conf,combined_edge,sleeve,"
+           "origin) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)");
     s.bind(1, t.ts).bind(2, t.venue).bind(3, t.symbol).bind(4, t.market)
         .bind(5, t.category).bind(6, t.side).bind(7, t.qty).bind(8, t.price)
         .bind(9, t.notional).bind(10, t.fee).bind(11, t.mode);
     if (t.pnl) s.bind(12, *t.pnl); else s.bind_null(12);
     s.bind(13, t.outcome).bind(14, t.combined_conf).bind(15, t.combined_edge)
-        .bind(16, t.sleeve);
+        .bind(16, t.sleeve).bind(17, t.origin);
     s.step_done();
     return sqlite3_last_insert_rowid(db_);
 }

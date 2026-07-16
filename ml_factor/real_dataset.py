@@ -130,8 +130,53 @@ def load_bars(conn: sqlite3.Connection, symbol: str,
     ]
 
 
+def _has_origin_column(conn: sqlite3.Connection) -> bool:
+    """Whether this DB records trade provenance.
+
+    A DB written by an engine older than the `origin` migration has no column to
+    filter on. Falling back to the unfiltered count there is the honest option:
+    the information to tell a strategy fill from a rebalance trim was never
+    recorded, so it cannot be recovered retroactively.
+    """
+    try:
+        cols = conn.execute("PRAGMA table_info(trades)").fetchall()
+    except sqlite3.Error:
+        return False
+    return any(c[1] == "origin" for c in cols)
+
+
 def count_closed_trades(conn: sqlite3.Connection) -> int:
-    """Closed paper/live trades with a realized outcome (provenance signal)."""
+    """Closed STRATEGY fills with a realized outcome. The real-fill gate.
+
+    This is a GATE, not a dataset: both build_real_dataset and the RL trainer
+    build their features from `bars`, and read this only to decide whether enough
+    real trading has happened to train on. So the question it has to answer is
+    "has the POLICY been exercised enough", not "have any fills occurred".
+
+    Which is why it counts `origin = 'strategy'` only. An adaptive defensive exit
+    (a live news event trimmed a position) and a sleeve rebalance trim (drift
+    mechanics closed one) are both real fills that moved real money, but neither
+    is a decision the policy made, so neither is evidence about the policy. Left
+    unfiltered they inflate two gates that exist precisely to withhold training
+    until the evidence is real: the DNN real-data trainer, and the RL
+    `rl_min_real_fills` activation (500 fills, a CLAUDE.md hard rule).
+
+    Filtering makes both gates STRICTER, never looser: they open later, on fewer
+    but more meaningful fills. That is the safe direction for a gate whose whole
+    job is to say "not yet".
+    """
+    if not _has_origin_column(conn):
+        return _count_all_closed(conn)
+    row = conn.execute(
+        "SELECT COUNT(*) FROM trades WHERE outcome IN ('win','loss','flat')"
+        " AND pnl IS NOT NULL AND COALESCE(origin, 'strategy') = 'strategy'"
+    ).fetchone()
+    return int(row[0]) if row else 0
+
+
+def _count_all_closed(conn: sqlite3.Connection) -> int:
+    """Every closed fill regardless of what decided it. The pre-`origin`
+    behavior, kept for DBs that predate the column."""
     row = conn.execute(
         "SELECT COUNT(*) FROM trades WHERE outcome IN ('win','loss','flat')"
         " AND pnl IS NOT NULL"
