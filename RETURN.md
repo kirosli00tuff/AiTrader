@@ -14,6 +14,31 @@ Commit message:
 
 ---
 
+## Prompt: Add daily week-review digest and week-end summary, reporting layer only, no trading behavior changed
+
+Date: 2026-07-15
+Model: Opus 4.8
+Prompt summary: Autonomous, operator away. Do not touch RiskGate logic, the live-trading gate, or the adaptive limit-weakening invariant. Live off. This is a reporting layer only, do not change any trading behavior. Raw data stays in the database unchanged. Goal, a week-review report file WEEKLOG.md at the repo root, appended daily by an automated job, that distills the day's trading evidence from the database into a structured readable digest, handed to a reviewer at week end for calibration analysis. Task 1, ops/weeklog.py run daily by the existing maintenance scheduling alongside the backup job, each run appends one dated section summarizing the prior 24 hours, timestamps shown in both UTC and America/Vancouver. Task 2, digest contents with real DB numbers (trades, blocks and near-misses, council and cost, sleeves, sessions, health, anomalies). Task 3, python -m ops.weeklog --summarize appends a week-summary: totals, full near-miss table, the success-criteria checklist from CONTEXT.md marked met or not met from data, open calibration questions. Task 4, pytest with a seeded test DB. Task 5, document and commit.
+Changes: Task 1 added ops/weeklog.py, a read-only reporter (DB opened mode=ro) that appends one dated section per run to WEEKLOG.md summarizing the prior 24 hours, every timestamp shown in both UTC and America/Vancouver (zoneinfo). Task 2, each section carries real DB numbers: trades (by sleeve and symbol, entries vs exits, win rate, gross and net PnL after fees where gross adds the fee back, average hold via FIFO entry/exit pairing, best and worst with their trade_entry factor+regime reason), blocks and near-misses (risk_block by reason plus a near-miss table of blocks whose confidence fell below its min but within 0.10, with symbol, confidence, agreement, tier, council_ran), council and cost (calls vs budget, gate skips by reason, per-provider verdicts and errors, est spend day and week at the configured $0.04/call), sleeves (allocation vs the 20 percent satellite cap, rebalance events, per-sleeve PnL, research theses with conviction and status), sessions (crypto trades and PnL tagged Asia/London/NY by UTC window, mirroring regional_session.hpp), health (engine starts/stops, watchdog restarts, kill-switch changes, DNN challenger attempts, RL fills vs the 500 gate), and anomalies (empty payloads, unparseable verdicts, feed staleness, repeated provider failures). Task 3 added the --summarize CLI, appending a week-summary over the 7-day window: totals, the success-criteria checklist from CONTEXT.md marked met/not met/review from the data, the full near-miss table, and open calibration questions. Task 4 added tests/test_weeklog.py (seeded temp DB). Wiring, ops/maintenance.py runs append_weeklog daily alongside the backup job, failure-isolated. Task 5, README paragraph, PROGRESS entry, WEEKLOG.md committed with a header and the first daily section from the current DB. NOT touched: RiskGate logic, the live-trading gate, the adaptive limit-weakening invariant, any trading behavior. Read-only over the DB, no network, no key or credential in the file. Live OFF, RL gated 240/500.
+Safest-choice notes: (1) The current DB carries empty-payload risk_block events from before the confidence-logging fix; the digest surfaces those as an anomaly and shows near-misses only from blocks with real numbers (one real ETH/USD near-miss appears in the last 24h). (2) Qualitative criteria (uptime, research quality, discipline) are marked "review" with the supporting numbers rather than a false met/not-met, since they are not a numeric bar. (3) A disabled satellite (no sleeve snapshots) reports "satellite off", not a false drift, since the band concern is the satellite exceeding its cap, not sitting under it.
+Verification (2026-07-15):
+
+| Check | Result |
+| --- | --- |
+| Python pytest | 289 passed (6 new weeklog tests, up from 283) |
+| Digest counts and PnL from known rows | PASS: seeded 4 trades -> 3 closed (2 win, 1 loss), net $38.0, gross $38.1, best/worst with entry reason |
+| Near-miss table includes only in-band blocks | PASS: a 0.04-gap block is a near-miss, a 0.25-gap block is not, an empty-payload block is an anomaly not a near-miss |
+| Summary marks criteria against thresholds | PASS: <40 closed -> not met, no kill breach -> met, $0 est spend -> met; a 45-closed week flips the fills criterion to met |
+| Append without clobbering | PASS: header once, two daily sections plus a summary coexist |
+| No key or credential in the file | PASS: a seeded secret-shaped payload never appears in the rendered file |
+| Crypto session tagging | PASS: a 17:00Z crypto fill tags to the NY window |
+| --summarize end to end (real DB) | PASS: week-summary with criteria checklist, full near-miss table, calibration questions |
+| First WEEKLOG.md section from the real DB | Generated and committed (2 closed, 1 near-miss, 4 empty-payload anomalies flagged) |
+| Reporting only, no trading change | PASS: DB opened mode=ro, only WEEKLOG.md written |
+Commit message: `Add daily week-review digest and week-end summary, reporting layer only, no trading behavior changed`
+
+---
+
 ## Prompt: Display timestamps in operator local timezone in the GUI, storage stays UTC
 
 Date: 2026-07-15

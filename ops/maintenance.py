@@ -77,6 +77,21 @@ def prune_events(db: str | None = None, keep_days: int = 30) -> dict:
     return {"deleted": int(deleted), "cutoff": cutoff}
 
 
+def append_weeklog(db: str | None = None, path: str | None = None) -> dict:
+    """Append the daily week-review digest to WEEKLOG.md. Reporting only: it reads
+    the database read-only and writes the digest file, never a trade or a limit. A
+    failure here never breaks the rest of maintenance (returns an error dict)."""
+    db = _db_path(db)
+    try:
+        from ops import weeklog
+    except Exception as e:  # zoneinfo/deps missing in a minimal env
+        return {"status": "unavailable", "reason": type(e).__name__}
+    try:
+        return weeklog.append_daily_digest(db, path or weeklog.WEEKLOG_PATH)
+    except Exception as e:
+        return {"status": "error", "reason": type(e).__name__}
+
+
 def maybe_train_challenger(db: str | None = None,
                            symbols: list[str] | None = None) -> dict:
     """Attempt a real-data DNN challenger. Refuses cleanly below the sample
@@ -103,8 +118,13 @@ if __name__ == "__main__":
     ap.add_argument("--db", default=None)
     ap.add_argument("--keep-days", type=int, default=30)
     ap.add_argument("--no-train", action="store_true")
+    ap.add_argument("--no-weeklog", action="store_true")
     args = ap.parse_args()
     print("prune:", prune_events(args.db, args.keep_days))
     print("events/day:", events_per_day(args.db))
+    # Weeklog runs daily alongside the backup job: it appends the day's digest to
+    # WEEKLOG.md, read-only over the DB. It is failure-isolated from the rest.
+    if not args.no_weeklog:
+        print("weeklog:", append_weeklog(args.db))
     if not args.no_train:
         print("challenger:", maybe_train_challenger(args.db))

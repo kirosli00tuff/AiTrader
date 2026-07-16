@@ -200,6 +200,18 @@ accumulated fills, refuses cleanly below the sample minimum, and **promotion sta
 gated and manual** — a trained challenger waits in the GUI (champion vs challenger
 with validation Sharpe and drawdown) for the operator's deliberate **Promote**.
 
+**Week-review digest** (`ops/weeklog.py`) runs daily alongside the backup job and
+appends one dated section to `WEEKLOG.md` at the repo root, distilling the prior
+24 hours from the database: trades (by sleeve and symbol, win rate, gross and net
+PnL, best and worst with entry reasons), risk blocks and a confidence near-miss
+table (blocks within 0.10 of the floor, the calibration evidence), council and
+cost, sleeves, crypto sessions, health, and anomalies. It is read-only over the
+database and never writes a key or credential. At week end run
+`python -m ops.weeklog --summarize` to append a week-summary with totals, the full
+near-miss table, the pre-registered success-criteria checklist marked from the
+data, and open calibration questions. Timestamps show UTC and America/Vancouver.
+The operator hands the one file to a reviewer.
+
 Materialize the exact week config with
 `python -m api_server.stack week-config .run/week_config.yaml` (both sleeves at
 80/20, `active_quant`, all advisory layers on-real, feed `alpaca_paper`, clock
