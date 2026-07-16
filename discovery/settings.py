@@ -28,6 +28,7 @@ _DEFAULTS: dict[str, object] = {
     "crypto_interval_minutes": 60,
     "equity_interval_minutes": 60,
     "prescreen_min_score": 0.15,
+    "stage_a_whale_weight": 0.15,
     "watchlist_max_size": 40,
     "watchlist_stale_hours": 48,
 }
@@ -124,6 +125,21 @@ def equity_interval_minutes(cfg_path: str | None = None) -> int:
 def prescreen_min_score(cfg_path: str | None = None) -> float:
     """Stage A floor: below this an instrument is dropped as low-signal."""
     return float(_num("prescreen_min_score", cfg_path))
+
+
+def stage_a_whale_weight(cfg_path: str | None = None) -> float:
+    """Weight of whale activity in the Stage-A pre-screen rank.
+
+    Operator-tunable without touching code. The five fixed components sum to 1.0
+    (momentum 0.30, volatility 0.25, gap 0.15, sentiment 0.15, native 0.15), and
+    this adds on top before normalization. At the default 0.15 whale is one sixth
+    of the total: level with sentiment and native, below momentum and volatility,
+    so it can lift a name into the finalist set but can never dominate the
+    pre-screen on its own. Set 0.0 to turn surfacing off entirely, which restores
+    the exact pre-whale ranking. This is a SURFACING weight only: the Stage-C
+    Level-4 whale evaluation keeps its own 0.35 cap, untouched.
+    """
+    return float(_num("stage_a_whale_weight", cfg_path))
 
 
 def watchlist_max_size(cfg_path: str | None = None) -> int:

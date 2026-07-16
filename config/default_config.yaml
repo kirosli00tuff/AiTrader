@@ -355,6 +355,21 @@ discovery:
   max_council_calls_per_pass: 5             # Stage C ceiling per pass
   prescreen_min_score: 0.15                 # Stage A floor (below = too quiet)
 
+  # Whale activity as a Stage-A candidate-surfacing signal. Whale data does TWO
+  # jobs, deliberately: it SURFACES candidates here (free, no LLM cost, using the
+  # already-active SEC EDGAR and crypto whale sources), and it still EVALUATES
+  # survivors as the Level-4 advisory factor at its own 0.35 cap in Stage C. Same
+  # data, two questions, not a duplication bug.
+  #
+  # The five fixed components sum to 1.0 (momentum 0.30, volatility 0.25, gap
+  # 0.15, sentiment 0.15, native 0.15) and this adds on top before normalization,
+  # so at 0.15 whale is one sixth of the total: level with sentiment and native,
+  # below momentum and volatility. Enough to lift a name whales moved into into
+  # the finalist set, never enough to dominate the pre-screen on its own.
+  # Raise it to surface more on whale flow, lower it to surface less.
+  # 0.0 disables surfacing and restores the exact pre-whale ranking.
+  stage_a_whale_weight: 0.15
+
   # Daily discovery council budget. SEPARATE from and ADDITIVE to the trading
   # council budget (council.council_daily_budget), so a discovery pass can never
   # eat the quant loop's calls. Combined monthly estimate at full use:

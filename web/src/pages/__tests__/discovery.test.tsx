@@ -55,6 +55,7 @@ const PASS = {
   budget_remaining: 10,
   status: "ok",
   reason: "",
+  whale_surfaced_count: 0,
   drops: [
     { symbol: "DOGE/USD", stage: "A", reason: "below_min_score", score: 0.04 },
     { symbol: "ADA/USD", stage: "B", reason: "gate: too quiet", score: 0.33 },
@@ -65,8 +66,8 @@ const PASS = {
 const WATCHLIST = [
   { symbol: "NVDA", asset_class: "equity", added_ts: "2026-07-15T02:00:00Z",
     updated_ts: "2026-07-16T02:05:00Z", source: "discovery",
-    reason: "discovery buy conviction 0.88", sleeve_target: "research_satellite",
-    score: 0.88, status: "active" },
+    reason: "discovery buy conviction 0.88 · surfaced by whale accumulation",
+    sleeve_target: "research_satellite", score: 0.88, status: "active" },
   { symbol: "SOL/USD", asset_class: "crypto", added_ts: "2026-07-16T02:00:00Z",
     updated_ts: "2026-07-16T02:00:00Z", source: "discovery",
     reason: "discovery buy conviction 0.82", sleeve_target: "quant_core",
@@ -239,7 +240,7 @@ describe("watchlist view, populated", () => {
     view(<WatchlistPage />);
     const table = await screen.findByTestId("watchlist-table");
     expect(within(table).getByText("NVDA")).toBeTruthy();
-    expect(within(table).getByText("discovery buy conviction 0.88")).toBeTruthy();
+    expect(within(table).getByText(/discovery buy conviction 0\.88/)).toBeTruthy();
     // Sleeve target reads as a plain word, not a raw enum.
     expect(within(table).getByText("long-term")).toBeTruthy();
     expect(within(table).getByText("quant")).toBeTruthy();
@@ -325,6 +326,50 @@ describe("long-term sleeve view, populated", () => {
       sleeve_toggle_enabled: true });
     view(<LongTermPage />);
     expect(await screen.findByText(/predates the long-term strategy/)).toBeTruthy();
+  });
+});
+
+// --- whale surfacing tags ---------------------------------------------------
+
+describe("whale-surfaced tagging", () => {
+  it("marks whale-surfaced finalists on the funnel view", async () => {
+    mockState.mockResolvedValue(STATE_ON);
+    mockLatest.mockResolvedValue({
+      passes: [{ ...PASS, whale_surfaced_count: 2 }], enabled: true });
+    view(<DiscoveryPage />);
+    expect(await screen.findByText("whale-surfaced")).toBeTruthy();
+    expect(screen.getByText(/2 finalists reached the set because of whale/))
+      .toBeTruthy();
+    // It states the two-jobs design, so the tag does not read as a duplicate.
+    expect(screen.getByText(/still evaluates survivors in Stage C/)).toBeTruthy();
+  });
+
+  it("shows no whale tag when whale surfaced nothing", async () => {
+    mockState.mockResolvedValue(STATE_ON);
+    mockLatest.mockResolvedValue({
+      passes: [{ ...PASS, whale_surfaced_count: 0 }], enabled: true });
+    view(<DiscoveryPage />);
+    await screen.findByTestId("funnel");
+    expect(screen.queryByText("whale-surfaced")).toBeNull();
+  });
+
+  it("shows on the watchlist when whale put an instrument there", async () => {
+    mockState.mockResolvedValue(STATE_ON);
+    mockWatchlist.mockResolvedValue({
+      watchlist: WATCHLIST, events: WATCHLIST_EVENTS, enabled: true });
+    view(<WatchlistPage />);
+    const table = await screen.findByTestId("watchlist-table");
+    expect(within(table).getByText("whale")).toBeTruthy();
+    expect(within(table).getByText(/surfaced by whale accumulation/)).toBeTruthy();
+  });
+
+  it("shows no whale tag for a technically-found watchlist entry", async () => {
+    mockState.mockResolvedValue(STATE_ON);
+    mockWatchlist.mockResolvedValue({
+      watchlist: [WATCHLIST[1]], events: [], enabled: true });
+    view(<WatchlistPage />);
+    const table = await screen.findByTestId("watchlist-table");
+    expect(within(table).queryByText("whale")).toBeNull();
   });
 });
 

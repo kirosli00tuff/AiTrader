@@ -325,3 +325,11 @@ input[type=range]:disabled { opacity: 0.5; }
 .tag.tag-ok { background: var(--green-dim); color: var(--green); }
 .tag.tag-warn { background: var(--red-dim); color: var(--red); }
 .tag.tag-muted { background: var(--surface-3); color: var(--text-dim); }
+
+/* Whale-surfaced: a candidate whale activity found, not the technicals. Uses
+   the accent so it reads as notable, not as an error. */
+.tag.tag-whale { background: var(--accent-dim); color: var(--accent);
+  margin-left: 6px; }
+.whale-line { display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  padding: 8px 0; font-size: 12px; border-top: 1px solid var(--border);
+  margin-top: 8px; }

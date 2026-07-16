@@ -102,7 +102,12 @@ CREATE TABLE IF NOT EXISTS discovery_pass (
     est_cost_usd     REAL DEFAULT 0,
     budget_remaining INTEGER DEFAULT 0,      -- of the daily discovery budget
     status           TEXT DEFAULT 'ok',
-    reason           TEXT
+    reason           TEXT,
+    -- Finalists that reached the set BECAUSE of whale activity: they would not
+    -- have made the cut on price, volume, momentum, and sentiment alone. Whale
+    -- data does two jobs, deliberately: it SURFACES here in Stage A, and it
+    -- still EVALUATES survivors in Stage C at its own 0.35 cap.
+    whale_surfaced_count INTEGER DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_discovery_pass_ts ON discovery_pass(asset_class, ts);
 
@@ -131,6 +136,8 @@ CREATE TABLE IF NOT EXISTS discovery_candidate (
     horizon       TEXT,
     sleeve_target TEXT,                      -- quant_core | research_satellite
     rationale     TEXT,
+    whale_surfaced INTEGER DEFAULT 0,        -- 1 = whale activity surfaced it
+    whale_reason   TEXT,                     -- e.g. "whale accumulation (delayed)"
     extra_json    TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_discovery_candidate_pass ON discovery_candidate(pass_id);

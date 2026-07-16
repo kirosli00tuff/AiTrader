@@ -375,6 +375,16 @@ struct DiscoveryConfig {
     int crypto_interval_minutes = 60;
     int equity_interval_minutes = 60;
     double prescreen_min_score = 0.15;       // Stage A floor (below = too quiet)
+    // Weight of whale activity in the Stage-A pre-screen rank. Whale data does
+    // TWO jobs, deliberately: it SURFACES candidates here (cheap, free, no LLM
+    // cost), and it still EVALUATES survivors as the Level-4 advisory factor at
+    // its own 0.35 cap in Stage C. Same data, two questions, not a duplication.
+    // The five fixed components sum to 1.0, and this adds on top before
+    // normalization, so at 0.15 whale is one sixth of the total: enough to lift
+    // a name whales moved into into the finalist set, never enough to dominate
+    // price, volume, momentum, and sentiment. 0.0 disables surfacing and
+    // restores the exact pre-whale ranking. Mirrored in discovery/settings.py.
+    double stage_a_whale_weight = 0.15;
     // Watchlist bounds. The universe is the wide end, the watchlist the narrow
     // end, so it stays capped and prunes what goes stale.
     int watchlist_max_size = 40;

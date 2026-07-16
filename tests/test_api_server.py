@@ -85,14 +85,16 @@ INSERT INTO discovery_drop(pass_id, ts, symbol, stage, reason, score) VALUES
   (3,'2026-07-06T02:05:00Z','KO','A','below_min_score',0.02);
 
 INSERT INTO discovery_candidate(pass_id, ts, symbol, verdict, direction,
-    conviction, edge, agreement, size_pct, horizon, sleeve_target, rationale)
+    conviction, edge, agreement, size_pct, horizon, sleeve_target, rationale,
+    whale_surfaced, whale_reason)
     VALUES
   (1,'2026-07-06T02:00:00Z','SOL/USD','buy','long',0.82,0.05,3,0.41,'days',
-   'quant_core','Council buy on SOL/USD: bias 0.60, agreement 3'),
+   'quant_core','Council buy on SOL/USD: bias 0.60, agreement 3',0,''),
   (1,'2026-07-06T02:00:00Z','AVAX/USD','avoid','flat',0.30,0.0,1,0.0,'days',
-   'quant_core','Council hold on AVAX/USD: bias 0.02'),
+   'quant_core','Council hold on AVAX/USD: bias 0.02',0,''),
   (3,'2026-07-06T02:05:00Z','NVDA','buy','long',0.88,0.06,3,0.44,'months',
-   'research_satellite','Long-term long on NVDA. Quality 0.71, catalyst earnings');
+   'research_satellite','Long-term long on NVDA. Quality 0.71, catalyst earnings',
+   1,'whale accumulation (delayed)');
 
 INSERT INTO watchlist(symbol, asset_class, added_ts, updated_ts, source, reason,
     sleeve_target, score, status, removed_ts, removed_reason) VALUES
@@ -868,6 +870,24 @@ def test_discovery_views_are_empty_but_valid_when_the_tables_are_absent(
     assert c.get("/discovery/latest").json()["passes"] == []
     assert c.get("/watchlist").json()["watchlist"] == []
     assert c.get("/discovery/state").json()["watchlist_size"] == 0
+
+
+def test_discovery_candidates_carry_the_whale_surfaced_tag(env, client):
+    """Whale surfacing and whale evaluation are two jobs, and the tag says which
+    candidates whale FOUND. The Level-4 evaluation is unaffected by this."""
+    cands = {c["symbol"]: c
+             for c in client.get("/discovery/candidates").json()["candidates"]}
+    assert cands["NVDA"]["whale_surfaced"] == 1
+    assert cands["NVDA"]["whale_reason"] == "whale accumulation (delayed)"
+    # A technically-found candidate is NOT tagged.
+    assert cands["SOL/USD"]["whale_surfaced"] == 0
+
+
+def test_discovery_latest_reports_the_whale_surfaced_count(env, client):
+    passes = {p["asset_class"]: p
+              for p in client.get("/discovery/latest").json()["passes"]}
+    # Seeded 0 for crypto; the column exists and reads back rather than 500ing.
+    assert passes["crypto"]["whale_surfaced_count"] == 0
 
 
 def test_discovery_views_write_nothing(env, client):

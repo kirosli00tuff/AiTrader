@@ -190,7 +190,7 @@ engine screens a **curated universe** down to a few vetted candidates every hour
 
 | Stage | What runs | Input → output | Cost |
 | --- | --- | --- | --- |
-| **A** | Free pre-screen: price, volume, volatility, momentum, gap, Finnhub **pre-computed** sentiment, native technical signal | whole universe → **12 finalists** | **0 LLM tokens** |
+| **A** | Free pre-screen: price, volume, volatility, momentum, gap, Finnhub **pre-computed** sentiment, native technical signal, **whale activity** | whole universe → **12 finalists** | **0 LLM tokens** |
 | **B** | Cheap **Claude Haiku** base-check gate | finalists → **5 survivors** | fractions of a cent each |
 | **C** | Full **four-level** evaluation (council + DNN advisory + whale) producing a verdict (`buy`/`sell`/`avoid`), sizing, rationale | survivors → verdicts | full council, **a handful** |
 
@@ -221,6 +221,24 @@ never eat the quant loop's calls. Worst case combined: 52 calls/day × $0.04 × 
 **Cadence.** Crypto **hourly, 24/7**. Equities at the **US session open and hourly
 through US regular hours** only. An equity pass after hours would rank a market
 nobody can trade.
+
+**Whale activity does two jobs, deliberately.** It **surfaces** candidates in
+Stage A (a strong signal raises an instrument's free pre-screen rank, so a name
+whales moved into can reach the finalist set even when price and volume alone
+would not have surfaced it), and it still **evaluates** survivors in Stage C as
+the Level-4 advisory factor at its unchanged **0.35 cap**. Same data, two
+questions, not a duplication bug: surfacing asks *is this worth looking at*,
+evaluation asks *what should we do*. A surfaced name still has to clear the Haiku
+gate and the full four levels, so whale only buys a name a look.
+
+`discovery.stage_a_whale_weight` (default **0.15**) tunes surfacing strength
+without touching code. The five fixed components sum to 1.0 and whale adds on top
+before normalization, so at 0.15 it sits level with sentiment and native and below
+momentum and volatility: enough to lift a **borderline** name over the cut, never
+enough to rescue a dead-flat one or dominate the tape. Set `0.0` to restore the
+exact pre-whale ranking. Candidates whale surfaced are **tagged** in the discovery
+and watchlist views. The tag is a *counterfactual*: it fires only when the name
+would **not** have made the cut without whale, so it means something.
 
 **Dynamic watchlist.** Stage-C survivors join a living candidate list
 (`watchlist`) that **both sleeves draw entry candidates from**; entries prune when
@@ -996,6 +1014,18 @@ are enabled, so a layer off by operator choice is never mistaken for a broken on
   contradiction flag.
 
 ## Whale / smart-money sources
+
+**Whale data does two jobs, deliberately.** It **surfaces** candidates in the
+discovery funnel's free Stage-A pre-screen (a strong signal raises an
+instrument's rank, so a name whales moved into can reach the finalist set even
+when price and volume alone would not have surfaced it), and it still
+**evaluates** survivors in Stage C as the Level-4 advisory factor at its
+unchanged **0.35 cap**. Same data, two questions, not a duplication bug:
+surfacing asks *is this worth looking at*, evaluation asks *what should we do*. A
+surfaced name still clears the Haiku gate and the full four levels, so whale only
+buys a name a look. Tune surfacing with `discovery.stage_a_whale_weight`
+(default 0.15, moderate by design); `0.0` disables surfacing and leaves Level 4
+untouched. Both roles ship behind the discovery flags, default off.
 
 Free-first by default — the app runs with **no paid keys**:
 

@@ -246,8 +246,10 @@ def discovery_latest(asset_class: str | None = None) -> list[dict]:
         row = query_one(
             "SELECT id, ts, asset_class, universe_count, finalists_count, "
             "survivors_count, evaluated_count, council_calls, gate_calls, "
-            "est_cost_usd, budget_remaining, status, reason FROM discovery_pass "
-            "WHERE asset_class = ? ORDER BY ts DESC, id DESC LIMIT 1", (ac,))
+            "est_cost_usd, budget_remaining, status, reason, "
+            "COALESCE(whale_surfaced_count, 0) AS whale_surfaced_count "
+            "FROM discovery_pass WHERE asset_class = ? "
+            "ORDER BY ts DESC, id DESC LIMIT 1", (ac,))
         if not row:
             continue
         row["drops"] = query(
@@ -274,7 +276,8 @@ def discovery_candidates(limit: int = 50) -> list[dict]:
     return query(
         f"SELECT c.ts, c.symbol, c.verdict, c.direction, c.conviction, c.edge, "
         f"c.agreement, c.size_pct, c.horizon, c.sleeve_target, c.rationale, "
-        f"p.asset_class FROM discovery_candidate c "
+        f"COALESCE(c.whale_surfaced, 0) AS whale_surfaced, "
+        f"c.whale_reason, p.asset_class FROM discovery_candidate c "
         f"JOIN discovery_pass p ON p.id = c.pass_id "
         f"WHERE c.pass_id IN ({placeholders}) "
         f"ORDER BY c.conviction DESC LIMIT ?", (*ids, limit))

@@ -337,6 +337,9 @@ export interface DiscoveryPass {
   status: string;
   reason: string | null;
   drops: DiscoveryDrop[];
+  // Finalists that reached the set BECAUSE of whale activity: they would not
+  // have made the cut on price, volume, momentum, and sentiment alone.
+  whale_surfaced_count: number;
 }
 
 export interface DiscoveryCandidate {
@@ -352,6 +355,10 @@ export interface DiscoveryCandidate {
   sleeve_target: string | null;
   rationale: string | null;
   asset_class: string;
+  // Whale did two jobs: it SURFACED this candidate in Stage A, and it still
+  // evaluated it in Stage C at its 0.35 cap. Same data, two questions.
+  whale_surfaced: number;
+  whale_reason: string | null;
 }
 
 export interface DiscoveryState {

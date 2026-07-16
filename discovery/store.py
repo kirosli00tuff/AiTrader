@@ -31,7 +31,8 @@ SCHEMA_DDL = (
         est_cost_usd     REAL DEFAULT 0,
         budget_remaining INTEGER DEFAULT 0,
         status           TEXT DEFAULT 'ok',
-        reason           TEXT
+        reason           TEXT,
+        whale_surfaced_count INTEGER DEFAULT 0
     )
     """,
     "CREATE INDEX IF NOT EXISTS idx_discovery_pass_ts ON discovery_pass(asset_class, ts)",
@@ -62,6 +63,8 @@ SCHEMA_DDL = (
         horizon       TEXT,
         sleeve_target TEXT,
         rationale     TEXT,
+        whale_surfaced INTEGER DEFAULT 0,
+        whale_reason   TEXT,
         extra_json    TEXT
     )
     """,
@@ -69,10 +72,26 @@ SCHEMA_DDL = (
 )
 
 
+# Additive migrations for a DB created before a column existed. CREATE TABLE IF
+# NOT EXISTS never alters an existing table, so add new columns tolerantly (a
+# duplicate-column error on a fresh DB is expected and ignored). Mirrors the C++
+# storage.cpp migration pattern. Never destructive.
+_MIGRATIONS = (
+    "ALTER TABLE discovery_pass ADD COLUMN whale_surfaced_count INTEGER DEFAULT 0",
+    "ALTER TABLE discovery_candidate ADD COLUMN whale_surfaced INTEGER DEFAULT 0",
+    "ALTER TABLE discovery_candidate ADD COLUMN whale_reason TEXT",
+)
+
+
 def ensure_schema(conn: sqlite3.Connection) -> None:
-    """Create the discovery tables if absent. Idempotent."""
+    """Create the discovery tables if absent, and add new columns. Idempotent."""
     for ddl in SCHEMA_DDL:
         conn.execute(ddl)
+    for mig in _MIGRATIONS:
+        try:
+            conn.execute(mig)
+        except sqlite3.OperationalError:
+            pass  # duplicate column on a fresh DB: expected
 
 
 def _utcnow_iso() -> str:
@@ -104,13 +123,15 @@ def record_pass(conn: sqlite3.Connection, result: dict) -> int:
     cur = conn.execute(
         "INSERT INTO discovery_pass(ts,asset_class,universe_count,finalists_count,"
         "survivors_count,evaluated_count,council_calls,gate_calls,est_cost_usd,"
-        "budget_remaining,status,reason) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+        "budget_remaining,status,reason,whale_surfaced_count) "
+        "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
         (ts, str(result.get("asset_class", "")),
          _i(result.get("universe_count")), _i(result.get("finalists_count")),
          _i(result.get("survivors_count")), _i(result.get("evaluated_count")),
          _i(result.get("council_calls")), _i(result.get("gate_calls")),
          _f(result.get("est_cost_usd")), _i(result.get("budget_remaining")),
-         str(result.get("status", "ok")), str(result.get("reason", ""))))
+         str(result.get("status", "ok")), str(result.get("reason", "")),
+         _i(result.get("whale_surfaced_count"))))
     pass_id = int(cur.lastrowid or 0)
 
     for d in result.get("drops", []) or []:
@@ -124,19 +145,23 @@ def record_pass(conn: sqlite3.Connection, result: dict) -> int:
     # extra_json, so a provider payload can never smuggle a raw blob into one.
     known = {"symbol", "verdict", "direction", "conviction", "edge",
              "agreement", "agreement_count", "size_pct", "horizon",
-             "sleeve_target", "rationale"}
+             "sleeve_target", "rationale", "whale_surfaced", "whale_reason",
+             "prescreen_score"}
     for c in result.get("candidates", []) or []:
         extra = {k: v for k, v in c.items() if k not in known}
         conn.execute(
             "INSERT INTO discovery_candidate(pass_id,ts,symbol,verdict,direction,"
             "conviction,edge,agreement,size_pct,horizon,sleeve_target,rationale,"
-            "extra_json) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            "whale_surfaced,whale_reason,extra_json) "
+            "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (pass_id, ts, str(c.get("symbol", "")), str(c.get("verdict", "")),
              str(c.get("direction", "")), _f(c.get("conviction")),
              _f(c.get("edge")),
              _i(c.get("agreement", c.get("agreement_count"))),
              _f(c.get("size_pct")), str(c.get("horizon", "")),
              str(c.get("sleeve_target", "")), str(c.get("rationale", ""))[:2000],
+             1 if c.get("whale_surfaced") else 0,
+             str(c.get("whale_reason", "")),
              json.dumps(extra) if extra else None))
     return pass_id
 
@@ -146,7 +171,7 @@ def last_pass_ts(conn: sqlite3.Connection, asset_class: str) -> str | None:
     ensure_schema(conn)
     row = conn.execute(
         "SELECT ts FROM discovery_pass WHERE asset_class=? "
-        "ORDER BY id DESC LIMIT 1", (asset_class,)).fetchone()
+        "ORDER BY ts DESC, id DESC LIMIT 1", (asset_class,)).fetchone()
     return row[0] if row else None
 
 
@@ -170,8 +195,9 @@ def latest_pass(conn: sqlite3.Connection, asset_class: str) -> dict | None:
     row = conn.execute(
         "SELECT id,ts,asset_class,universe_count,finalists_count,survivors_count,"
         "evaluated_count,council_calls,gate_calls,est_cost_usd,budget_remaining,"
-        "status,reason FROM discovery_pass WHERE asset_class=? "
-        "ORDER BY id DESC LIMIT 1", (asset_class,)).fetchone()
+        "status,reason,whale_surfaced_count FROM discovery_pass "
+        "WHERE asset_class=? ORDER BY ts DESC, id DESC LIMIT 1",
+        (asset_class,)).fetchone()
     if not row:
         return None
     pass_id = row[0]
@@ -180,19 +206,22 @@ def latest_pass(conn: sqlite3.Connection, asset_class: str) -> dict | None:
         "ORDER BY stage, symbol", (pass_id,)).fetchall()
     cands = conn.execute(
         "SELECT symbol,verdict,direction,conviction,edge,agreement,size_pct,"
-        "horizon,sleeve_target,rationale FROM discovery_candidate "
-        "WHERE pass_id=? ORDER BY conviction DESC", (pass_id,)).fetchall()
+        "horizon,sleeve_target,rationale,whale_surfaced,whale_reason "
+        "FROM discovery_candidate WHERE pass_id=? ORDER BY conviction DESC",
+        (pass_id,)).fetchall()
     return {
         "pass_id": pass_id, "ts": row[1], "asset_class": row[2],
         "universe_count": row[3], "finalists_count": row[4],
         "survivors_count": row[5], "evaluated_count": row[6],
         "council_calls": row[7], "gate_calls": row[8], "est_cost_usd": row[9],
         "budget_remaining": row[10], "status": row[11], "reason": row[12],
+        "whale_surfaced_count": row[13],
         "drops": [{"symbol": d[0], "stage": d[1], "reason": d[2], "score": d[3]}
                   for d in drops],
         "candidates": [{"symbol": c[0], "verdict": c[1], "direction": c[2],
                         "conviction": c[3], "edge": c[4], "agreement": c[5],
                         "size_pct": c[6], "horizon": c[7],
-                        "sleeve_target": c[8], "rationale": c[9]}
+                        "sleeve_target": c[8], "rationale": c[9],
+                        "whale_surfaced": bool(c[10]), "whale_reason": c[11]}
                        for c in cands],
     }

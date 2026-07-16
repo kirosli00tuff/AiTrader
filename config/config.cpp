@@ -371,6 +371,7 @@ Config load_config(const std::string& path) {
         dc.crypto_interval_minutes = get_int(root, "discovery.crypto_interval_minutes", dc.crypto_interval_minutes);
         dc.equity_interval_minutes = get_int(root, "discovery.equity_interval_minutes", dc.equity_interval_minutes);
         dc.prescreen_min_score = get_double(root, "discovery.prescreen_min_score", dc.prescreen_min_score);
+        dc.stage_a_whale_weight = get_double(root, "discovery.stage_a_whale_weight", dc.stage_a_whale_weight);
         dc.watchlist_max_size = get_int(root, "discovery.watchlist_max_size", dc.watchlist_max_size);
         dc.watchlist_stale_hours = get_int(root, "discovery.watchlist_stale_hours", dc.watchlist_stale_hours);
     }
@@ -698,6 +699,10 @@ std::vector<std::string> validate_config(const Config& cfg) {
     // nothing at 03:00.
     const auto& dc = cfg.discovery;
     pct("discovery.prescreen_min_score", dc.prescreen_min_score);
+    // A surfacing weight, not a risk value. Bounded [0,1] so it cannot swamp
+    // the fixed components; the Stage-C whale cap (0.35) is separate and
+    // untouched by this.
+    pct("discovery.stage_a_whale_weight", dc.stage_a_whale_weight);
     if (dc.crypto_active_max < 0)
         problems.push_back("discovery.crypto_active_max must be >= 0");
     if (dc.max_finalists < 0 || dc.max_survivors < 0 ||

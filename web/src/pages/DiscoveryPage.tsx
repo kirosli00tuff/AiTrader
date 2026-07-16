@@ -119,6 +119,17 @@ function PassCard({ pass, budget }: {
           {budget ? ` / ${budget.daily}` : ""} calls
         </span>
       </div>
+      {pass.whale_surfaced_count > 0 && (
+        <div className="whale-line">
+          <span className="tag tag-whale">whale-surfaced</span>
+          <span className="muted">
+            {pass.whale_surfaced_count} finalist
+            {pass.whale_surfaced_count === 1 ? "" : "s"} reached the set because
+            of whale activity, and would not have on price and volume alone. The
+            same whale data still evaluates survivors in Stage C.
+          </span>
+        </div>
+      )}
       <div className="panel-subtitle">Dropped, with reasons</div>
       <DropTable drops={pass.drops} />
     </Panel>

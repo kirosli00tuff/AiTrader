@@ -22,7 +22,8 @@ import logging
 import sqlite3
 from datetime import datetime, timezone
 
-from discovery import evaluate, funnel, settings, store, universe, watchlist
+from discovery import (evaluate, funnel, settings, store, universe,
+                       watchlist, whale_surfacer)
 
 log = logging.getLogger("discovery.run")
 
@@ -131,7 +132,13 @@ def run_once(asset_class: str, *, db_path: str = "market_ai_lab.db",
                                   "the free pre-screen data"}
             client = FinnhubClient()
 
-        snapshots = funnel.build_snapshots(symbols, client)
+        # Whale surfacing: free, keyless, bounded, and cached hard. Absent whale
+        # data simply scores 0, which is the pre-whale ranking. The SAME whale
+        # data still evaluates survivors at its 0.35 cap in Stage C.
+        whale = None
+        if settings.stage_a_whale_weight(cfg_path) > 0:
+            whale = whale_surfacer.WhaleSurfacer()
+        snapshots = funnel.build_snapshots(symbols, client, whale=whale)
         if not snapshots:
             return {"status": "no_data", "asset_class": asset_class,
                     "reason": "no quotes resolved for the universe"}
@@ -155,6 +162,9 @@ def run_once(asset_class: str, *, db_path: str = "market_ai_lab.db",
 
         payload = result.to_dict()
         pass_id = store.record_pass(conn, payload)
+        whale_surfaced = set(payload.get("whale_surfaced") or [])
+        whale_reasons = {f.symbol: f.whale_reason for f in result.finalists
+                         if f.whale_surfaced}
 
         # Stage-C survivors join the watchlist. An "avoid" verdict is NOT added:
         # the watchlist is a CANDIDATE list, not an archive of rejections. The
@@ -163,10 +173,16 @@ def run_once(asset_class: str, *, db_path: str = "market_ai_lab.db",
         for c in payload.get("candidates", []):
             if c.get("verdict") == "avoid":
                 continue
+            # Say WHY it is on the list, including when whale surfaced it, so
+            # the operator can tell a whale-found name from a technical one.
+            sym = str(c.get("symbol", ""))
+            reason = (f"discovery {c.get('verdict')} conviction "
+                      f"{c.get('conviction')}")
+            if sym in whale_surfaced:
+                reason += f" · surfaced by {whale_reasons.get(sym, 'whale activity')}"
             r = watchlist.add_from_discovery(
-                conn, str(c.get("symbol", "")),
-                reason=f"discovery {c.get('verdict')} conviction "
-                       f"{c.get('conviction')}",
+                conn, sym,
+                reason=reason,
                 sleeve_target=str(c.get("sleeve_target", "quant_core")),
                 score=float(c.get("conviction") or 0.0),
                 asset_class=asset_class, ts=ts)
@@ -189,6 +205,7 @@ def run_once(asset_class: str, *, db_path: str = "market_ai_lab.db",
             "evaluated": payload["evaluated_count"],
             "council_calls": payload["council_calls"],
             "est_cost_usd": payload["est_cost_usd"],
+            "whale_surfaced": payload.get("whale_surfaced", []),
             "watchlist_added": added,
             "watchlist_pruned": pruned["pruned"],
             "watchlist_capped": capped["dropped"],

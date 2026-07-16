@@ -55,14 +55,25 @@ class Drop:
 
 @dataclass(frozen=True)
 class Finalist:
-    """A Stage-A survivor plus the free signals that ranked it."""
+    """A Stage-A survivor plus the free signals that ranked it.
+
+    ``whale_surfaced`` is a COUNTERFACTUAL, not a threshold: it is true only when
+    this instrument made the finalist set WITH whale activity and would NOT have
+    made it without. That is the honest reading of "surfaced primarily due to
+    whale activity", and it is what lets the operator tell a whale-found candidate
+    from a technical one at a glance.
+    """
     symbol: str
     score: float
     signals: dict = field(default_factory=dict)
+    whale_surfaced: bool = False
+    whale_reason: str = ""
 
     def to_dict(self) -> dict:
         return {"symbol": self.symbol, "score": round(self.score, 4),
-                "signals": self.signals}
+                "signals": self.signals,
+                "whale_surfaced": self.whale_surfaced,
+                "whale_reason": self.whale_reason}
 
 
 @dataclass
@@ -81,6 +92,9 @@ class PassResult:
     budget_remaining: int = 0
     status: str = "ok"
     reason: str = ""
+    # Finalists that reached the set BECAUSE of whale activity: they would not
+    # have made the cut on price, volume, momentum, and sentiment alone.
+    whale_surfaced: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict:
         return {
@@ -90,6 +104,8 @@ class PassResult:
             "finalists_count": len(self.finalists),
             "survivors_count": len(self.survivors),
             "evaluated_count": len(self.candidates),
+            "whale_surfaced": list(self.whale_surfaced),
+            "whale_surfaced_count": len(self.whale_surfaced),
             "finalists": [f.to_dict() for f in self.finalists],
             "survivors": list(self.survivors),
             "candidates": list(self.candidates),
@@ -123,18 +139,31 @@ _W_GAP = 0.15
 _W_SENTIMENT = 0.15
 _W_NATIVE = 0.15
 
+# The five fixed components sum to 1.0. The whale weight is CONFIGURABLE and adds
+# on top, so the score is normalized by the total. Two consequences worth stating:
+#   * with whale weight 0 the normalization is a no-op, so the pre-screen scores
+#     exactly as it did before whale surfacing existed.
+#   * whale can never dominate: at the default 0.15 it is one sixth of the total,
+#     level with sentiment and native, and below momentum and volatility.
+_W_FIXED_TOTAL = _W_MOMENTUM + _W_VOLATILITY + _W_GAP + _W_SENTIMENT + _W_NATIVE
+
 # Normalization scales: the move size at which a component saturates to 1.0.
 _MOMENTUM_FULL_PCT = 5.0     # a 5% daily move is a strong signal
 _VOLATILITY_FULL = 0.06      # 6% intraday range saturates
 _GAP_FULL_PCT = 3.0          # a 3% gap saturates
 
 
-def prescreen_score(snap: dict) -> tuple[float, dict]:
+def prescreen_score(snap: dict, whale_weight: float = 0.0) -> tuple[float, dict]:
     """Score one instrument on free data. Returns (score, component breakdown).
 
     A snapshot needs at minimum a positive ``price``. A missing component scores
     0 rather than blocking, so a name with partial data still ranks on what is
     known. Score is in [0,1].
+
+    ``whale_weight`` is the operator-tunable weight of whale surfacing activity.
+    At 0 (the default here) this function behaves exactly as it did before whale
+    surfacing existed, which is what keeps the change inert for callers that do
+    not opt in.
     """
     try:
         price = float(snap.get("price") or 0.0)
@@ -176,46 +205,98 @@ def prescreen_score(snap: dict) -> tuple[float, dict]:
     # Native technical strength from the engine's own strategy layer, [0,1].
     native = _clamp01(_f("native_strength"))
 
-    score = (_W_MOMENTUM * momentum + _W_VOLATILITY * volatility +
-             _W_GAP * gap + _W_SENTIMENT * sentiment + _W_NATIVE * native)
+    # Whale surfacing: accumulation with real evidence behind it. Already scored
+    # by discovery.whale_surfacer and carried on the snapshot, so this stays a
+    # pure function. Costs no LLM tokens. The SAME whale data still informs the
+    # Stage-C verdict at its 0.35 cap; surfacing and evaluation are two jobs.
+    whale = _clamp01(_f("whale_component"))
+    w_whale = max(0.0, float(whale_weight or 0.0))
+
+    raw = (_W_MOMENTUM * momentum + _W_VOLATILITY * volatility +
+           _W_GAP * gap + _W_SENTIMENT * sentiment + _W_NATIVE * native +
+           w_whale * whale)
+    # Normalize by the active total so the score stays in [0,1] and no component
+    # can dominate by the weights simply summing past 1. With w_whale 0 this is a
+    # division by 1.0, so the pre-whale behavior is preserved exactly.
+    total = _W_FIXED_TOTAL + w_whale
+    score = raw / total if total > 0 else 0.0
+
     components = {
         "momentum": round(momentum, 4),
         "volatility": round(volatility, 4),
         "gap": round(gap, 4),
         "sentiment": round(sentiment, 4),
         "native": round(native, 4),
+        "whale": round(whale, 4),
     }
     return round(_clamp01(score), 4), components
 
 
-def prescreen(snapshots: list[dict], max_finalists: int,
-              min_score: float) -> tuple[list[Finalist], list[Drop]]:
+def _rank(snapshots: list[dict], max_finalists: int, min_score: float,
+          whale_weight: float) -> tuple[list[tuple[float, str, dict]], set[str]]:
+    """Score and rank the universe at a given whale weight. Pure.
+
+    Returns (scored rows sorted best first, the set of symbols making the cut).
+    Factored out so the whale counterfactual can rank twice without duplicating
+    the ordering rules.
+    """
+    scored: list[tuple[float, str, dict]] = []
+    for snap in snapshots:
+        symbol = str(snap.get("symbol", ""))
+        if not symbol:
+            continue
+        score, components = prescreen_score(snap, whale_weight)
+        scored.append((score, symbol, components))
+    # Highest score first, symbol as a stable tiebreaker so a pass is reproducible.
+    scored.sort(key=lambda t: (-t[0], t[1]))
+    made_cut = {s for score, s, _ in scored[:max(0, max_finalists)]
+                if score >= min_score}
+    return scored, made_cut
+
+
+def prescreen(snapshots: list[dict], max_finalists: int, min_score: float,
+              whale_weight: float = 0.0) -> tuple[list[Finalist], list[Drop]]:
     """Stage A. Rank the universe for free, keep the top ``max_finalists``.
 
     Two drop reasons, both explicit:
       * below_min_score  too quiet to be worth even a cent
       * not_top_ranked   cleared the floor but lost the ranking
     Spends NO LLM tokens by construction: this function takes no gate and no
-    council, so it cannot call one.
+    council, so it cannot call one. Whale surfacing does not change that: the
+    whale score is already on the snapshot, and whale data is free.
+
+    When ``whale_weight`` is non-zero the universe is ranked TWICE, once with
+    whale and once without, purely to answer "would this name have made it
+    anyway". Both rankings are pure arithmetic over data already in hand, so the
+    second costs nothing but a little CPU, and it buys an honest whale-surfaced
+    tag instead of a guess.
     """
-    scored: list[tuple[float, Finalist]] = []
+    scored, made_cut = _rank(snapshots, max_finalists, min_score, whale_weight)
+
+    # The counterfactual: who would have made the cut with NO whale input.
+    without_cut: set[str] = made_cut
+    if whale_weight > 0:
+        _, without_cut = _rank(snapshots, max_finalists, min_score, 0.0)
+
+    by_symbol = {str(s.get("symbol", "")): s for s in snapshots}
+    keep: list[Finalist] = []
     drops: list[Drop] = []
-    for snap in snapshots:
-        symbol = str(snap.get("symbol", ""))
-        if not symbol:
-            continue
-        score, components = prescreen_score(snap)
+    limit = max(0, max_finalists)
+
+    for idx, (score, symbol, components) in enumerate(scored):
         if score < min_score:
             drops.append(Drop(symbol, STAGE_A, "below_min_score", score))
             continue
-        scored.append((score, Finalist(symbol, score, components)))
-
-    # Highest score first, symbol as a stable tiebreaker so a pass is reproducible.
-    scored.sort(key=lambda t: (-t[0], t[1].symbol))
-    limit = max(0, max_finalists)
-    keep = [f for _, f in scored[:limit]]
-    for _, f in scored[limit:]:
-        drops.append(Drop(f.symbol, STAGE_A, "not_top_ranked", f.score))
+        if idx >= limit:
+            drops.append(Drop(symbol, STAGE_A, "not_top_ranked", score))
+            continue
+        # Whale-surfaced: it made the cut, and it would not have without whale.
+        surfaced = whale_weight > 0 and symbol not in without_cut
+        reason = ""
+        if surfaced:
+            reason = str(by_symbol.get(symbol, {}).get("whale_reason", "")
+                         or "whale activity")
+        keep.append(Finalist(symbol, score, components, surfaced, reason))
     return keep, drops
 
 
@@ -335,13 +416,20 @@ def sleeve_target_for(verdict: dict, cfg_path: str | None = None) -> str:
 
 def build_snapshots(symbols: list[str], client, *,
                     native_strength: dict[str, float] | None = None,
-                    with_sentiment: bool = True) -> list[dict]:
+                    with_sentiment: bool = True, whale=None) -> list[dict]:
     """Assemble Stage-A snapshots from free Finnhub data plus native technicals.
 
     Costs no LLM tokens. A symbol with no resolvable quote is skipped: no price
     means no score. Sentiment is fetched only for equities (Finnhub does not
     cover crypto news sentiment) and only when asked, since it is one extra REST
     call per name against the 60/min ceiling.
+
+    ``whale`` is an optional discovery.whale_surfacer.WhaleSurfacer. When given,
+    each snapshot carries a whale surfacing score, so a name whales moved into can
+    out-rank a quiet one. Whale data is free (SEC EDGAR is keyless), and the
+    surfacer bounds its own fetches and caches hard, so this adds no LLM cost and
+    bounded network cost. Absent whale data scores 0, which is simply the
+    pre-whale ranking.
     """
     from discovery.finnhub_source import parse_news_sentiment, parse_quote
 
@@ -358,6 +446,11 @@ def build_snapshots(symbols: list[str], client, *,
             if sentiment:
                 snap["sentiment_score"] = sentiment.get("score")
                 snap["buzz"] = sentiment.get("buzz")
+        if whale is not None:
+            from discovery.whale_surfacer import surfacing_label, whale_component
+            sig = whale.signal_for(symbol)
+            snap["whale_component"] = whale_component(sig)
+            snap["whale_reason"] = surfacing_label(sig)
         out.append(snap)
     return out
 
@@ -385,12 +478,15 @@ def run_pass(asset_class: str, *, snapshots: list[dict], gate, evaluator,
     result.budget_remaining = remaining
 
     # Stage A: free. No gate and no council are in scope here, so no token can
-    # be spent even by accident.
+    # be spent even by accident. Whale surfacing is part of this stage and is
+    # also free: the whale sources are keyless and already active.
     finalists, drops_a = prescreen(snapshots,
                                    settings.max_finalists(cfg_path),
-                                   settings.prescreen_min_score(cfg_path))
+                                   settings.prescreen_min_score(cfg_path),
+                                   settings.stage_a_whale_weight(cfg_path))
     result.finalists = finalists
     result.drops.extend(drops_a)
+    result.whale_surfaced = [f.symbol for f in finalists if f.whale_surfaced]
     if not finalists:
         result.status = "no_finalists"
         result.reason = "every instrument scored below the pre-screen floor"
@@ -427,7 +523,13 @@ def run_pass(asset_class: str, *, snapshots: list[dict], gate, evaluator,
     result.budget_remaining = max(0, remaining - calls)
 
     # Route each verdict to a sleeve. Routing only, the engine enforces the cap.
+    # Carry the whale-surfaced tag through from Stage A, so the operator can see
+    # which candidates whale activity found versus which the technicals found.
+    surfaced = {f.symbol: f for f in finalists if f.whale_surfaced}
     for verdict in candidates:
         verdict["sleeve_target"] = sleeve_target_for(verdict, cfg_path)
+        f = surfaced.get(str(verdict.get("symbol", "")))
+        verdict["whale_surfaced"] = f is not None
+        verdict["whale_reason"] = f.whale_reason if f else ""
     result.candidates = candidates
     return result

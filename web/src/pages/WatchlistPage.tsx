@@ -94,7 +94,15 @@ export default function WatchlistPage() {
                       <tr key={w.symbol}>
                         <td><strong>{w.symbol}</strong></td>
                         <td><SleeveTag sleeve={w.sleeve_target} /></td>
-                        <td className="muted">{w.reason ?? "—"}</td>
+                        <td className="muted">
+                          {w.reason ?? "—"}
+                          {/* The reason string carries the whale attribution the
+                              runner wrote, so an operator can tell a whale-found
+                              name from a technical one at a glance. */}
+                          {(w.reason ?? "").includes("whale") && (
+                            <span className="tag tag-whale">whale</span>
+                          )}
+                        </td>
                         <td className="mono">{shortTs(w.added_ts)}</td>
                         <td className="mono">{shortTs(w.updated_ts)}</td>
                         <td className="num">
