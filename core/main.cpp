@@ -336,6 +336,30 @@ int main(int argc, char** argv) {
                 << "  cost cuts: risk pre-check ON; equities market-hours-only "
                 << (cfg.engine.equities_market_hours_only ? "ON" : "off")
                 << " (crypto 24/7)\n"
+                << "  global:    equity rotation "
+                << (cfg.regional.global_equity_rotation_enabled
+                        ? "ENABLED"
+                        : "DISABLED (scaffold)")
+                << "; open session now "
+                << mal::config::region_name(mal::config::open_session(
+                       std::time(nullptr), cfg.regional))
+                << "\n"
+                << "  equities:  NY "
+                << (mal::config::venue_available_for(mal::config::Region::NY,
+                                                     cfg.regional)
+                        ? "tradeable via Alpaca"
+                        : "venue-unavailable")
+                << ", London "
+                << (mal::config::venue_available_for(mal::config::Region::London,
+                                                     cfg.regional)
+                        ? "tradeable"
+                        : "venue-unavailable")
+                << ", Asia "
+                << (mal::config::venue_available_for(mal::config::Region::Asia,
+                                                     cfg.regional)
+                        ? "tradeable"
+                        : "venue-unavailable")
+                << " (only reachable regions trade; crypto 24/7 unaffected)\n"
                 << "  rl:        "
                 << (cfg.rl.rl_enabled ? "ON" : "OFF (ships off)")
                 << " — advisory cap 0.5, real-fills gate "

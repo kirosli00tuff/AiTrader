@@ -341,6 +341,40 @@ rl:
 #   clock_mode : real (wall-clock; online Alpaca loop + continuous mode) | simulated
 #     (bar time advances internally so finite/synthetic runs actually close bars).
 # -----------------------------------------------------------------------------
+# Global-session equity rotation (future live phase). SCAFFOLD, DISABLED.
+# The equity sleeve would follow the open regional market, Asia then London then
+# NY, trading each region's equities during its session. It ships DISABLED because
+# the paper venue Alpaca is US-only and cannot reach Asian or European exchanges.
+# THE safety rule: the engine only trades an equity region when a connected venue
+# can reach that region's exchange. Today only NY (Alpaca) is reachable, so only
+# US equities trade during US hours, exactly as now. London and Asia are defined
+# but venue_available false. Enabling rotation requires IBKR global market access,
+# per-region equity whitelists, and global_equity_rotation_enabled true, and it
+# stays off until the operator is deliberately live on IBKR. Hours are minutes
+# since UTC midnight (the local exchange session converted to UTC).
+# -----------------------------------------------------------------------------
+global_sessions:
+  global_equity_rotation_enabled: false   # SCAFFOLD, DISABLED. Always false for now.
+  ny_exchange: us_equities
+  ny_tz: America/New_York
+  ny_open_utc_min: 810                     # 13:30 UTC (09:30 ET)
+  ny_close_utc_min: 1200                   # 20:00 UTC (16:00 ET)
+  ny_venue_available: true                 # Alpaca reaches US equities
+  ny_whitelist: "SPY,QQQ,AAPL,MSFT,NVDA"   # placeholder, the current US set
+  london_exchange: lse
+  london_tz: Europe/London
+  london_open_utc_min: 480                 # 08:00 UTC
+  london_close_utc_min: 990                # 16:30 UTC
+  london_venue_available: false            # no connected venue reaches the LSE
+  london_whitelist: ""                     # placeholder, empty until IBKR
+  asia_exchange: tse
+  asia_tz: Asia/Tokyo
+  asia_open_utc_min: 0                      # 00:00 UTC (09:00 JST)
+  asia_close_utc_min: 360                   # 06:00 UTC (15:00 JST)
+  asia_venue_available: false               # no connected venue reaches the TSE
+  asia_whitelist: ""                        # placeholder, empty until IBKR
+
+# -----------------------------------------------------------------------------
 simulation:
   feed_mode: flat_random_walk
   clock_mode: real

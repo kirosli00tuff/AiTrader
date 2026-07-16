@@ -351,6 +351,39 @@ Config load_config(const std::string& path) {
         if (!rw.empty()) sl.research_whitelist = rw;
     }
 
+    // global-session equity rotation (SCAFFOLD, DISABLED). Config-driven regional
+    // equity sessions. Only NY (Alpaca US equities) has a reachable venue today;
+    // London and Asia are defined but venue_unavailable. Adding IBKR global
+    // routing later is a venue mapping here, not an engine rewrite.
+    {
+        auto& rg = c.regional;
+        rg.global_equity_rotation_enabled = get_bool(
+            root, "global_sessions.global_equity_rotation_enabled",
+            rg.global_equity_rotation_enabled);
+        // Flat per-region keys under global_sessions (e.g. global_sessions.ny_exchange).
+        auto region = [&](Region r, const std::string& p, const char* ex,
+                          const char* tz, int open_def, int close_def,
+                          bool venue_def) {
+            RegionSession s;
+            s.region = r;
+            s.exchange_id = get_str(root, p + "exchange", ex);
+            s.tz_label = get_str(root, p + "tz", tz);
+            s.open_min_utc = get_int(root, p + "open_utc_min", open_def);
+            s.close_min_utc = get_int(root, p + "close_utc_min", close_def);
+            s.venue_available =
+                get_bool(root, p + "venue_available", venue_def);
+            s.whitelist = split_csv(get_str(root, p + "whitelist", ""));
+            rg.sessions.push_back(s);
+        };
+        // NY is the only region a connected venue can reach today (Alpaca).
+        region(Region::NY, "global_sessions.ny_", "us_equities",
+               "America/New_York", 810, 1200, true);
+        region(Region::London, "global_sessions.london_", "lse",
+               "Europe/London", 480, 990, false);
+        region(Region::Asia, "global_sessions.asia_", "tse", "Asia/Tokyo", 0,
+               360, false);
+    }
+
     // adaptive
     auto& a = c.adaptive;
     a.adaptive_learning_enabled = get_bool(root, "adaptive.adaptive_learning_enabled", a.adaptive_learning_enabled);

@@ -14,6 +14,32 @@ Commit message:
 
 ---
 
+## Prompt: Scaffold global-session equity rotation gated on venue capability, disabled pending IBKR global access
+
+Date: 2026-07-15
+Model: Opus 4.8
+Prompt summary: Autonomous, operator away. Do not touch RiskGate logic, the live-trading gate, or the adaptive limit-weakening invariant. Live off. Goal, scaffold global-session equity rotation for the future live phase, where the equity sleeve follows the open regional market, Asia then London then NY, trading each region's equities during its session. Ships DISABLED because Alpaca is US-only and cannot reach Asian or European exchanges. Build the architecture, gate it off, keep the validation week US-equities-plus-crypto exactly as now. Task 1, config-driven regional equity session model, Asia, London, NY, each with trading hours in the correct timezone, an exchange id, and a symbol whitelist placeholder, only NY has a live venue today (Alpaca US equities), Asia and London marked venue_unavailable, respect clock_mode, structure so adding IBKR global routing later is a venue mapping not an engine rewrite. Task 2, venue-capability gating (the safety rule), the engine only evaluates and trades an equity region when a connected venue can reach that region's exchange, an equity order for a region with no capable venue is refused before any adapter with a logged reason venue_unavailable_for_region. Task 3, config global_equity_rotation_enabled default false, when false equities behave exactly as today, do not implement live rotation beyond the disabled scaffold and the venue gate. Task 4, crypto unchanged, always on, never gated by regional session. Task 5, IBKR readiness note in the adapter and LIVE_READINESS.md. Task 6, startup and run-state banner show the current global session and which equity region is tradeable now. Task 7, tests. Task 8, document and commit.
+Changes: Task 1 added a config-driven regional equity session model (config/regional_session.hpp, pure header): three regions NY, London, Asia, each with an exchange id, a tz label, session hours as minutes since UTC midnight, a venue_available flag, and a per-region equity whitelist placeholder, plus pure helpers region_for_equity, venue_available_for, and open_session. Parsed from a new global_sessions config block (config.cpp), and Config gained a RegionalSessionConfig regional member. Only NY has a reachable venue today (Alpaca US equities); London and Asia are venue_unavailable. Structured as a venue mapping so adding IBKR global routing later is config plus an adapter mapping, not an engine rewrite. Task 2 enforced the venue-capability safety rule in the engine (core/engine.cpp on_closed_bar): for an equity, region_for_equity maps the symbol to a region and venue_available_for checks capability; an equity in a region with no capable venue is refused BEFORE any adapter and logged venue_unavailable_for_region with the region and symbol. The rule holds whether or not rotation is enabled. Task 3 added global_equity_rotation_enabled (default false). No live rotation behavior beyond the disabled scaffold and the venue gate, documented that enabling requires IBKR global access, per-region whitelists, and the flag on. Task 4 left crypto unchanged: the gate is equity-only (if category == equity), so crypto trades 24/7, never gated by a regional session. Task 5 documented IBKR readiness in execution/ibkr_adapter.py and a new LIVE_READINESS.md (IBKR unlocks rotation, what is needed, stays off until deliberately live on IBKR, no global routing wired now). Task 6 extended the startup block (core/main.cpp) to print the rotation state, the current open global session, and which equity region is tradeable now (NY tradeable via Alpaca, London and Asia venue-unavailable). Task 7 added tests/test_regional_session.cpp. Task 8 documented in README, LIVE_READINESS.md, CONTEXT.md Key Decisions, PROGRESS.md, and this entry. NOT touched: RiskGate logic, the live-trading gate, the adaptive limit-weakening invariant. Live OFF, RL gated 0/500. The safest choice for the ambiguous per-region hours was to store them as minutes since UTC midnight with the local exchange session converted to UTC, avoiding a timezone library in the scaffold, and to default region_for_equity to NY so US equities behave exactly as before while no non-US symbol is configured.
+
+Verification (2026-07-15, offline, no API spend):
+
+| Check | Result |
+| --- | --- |
+| C++ ctest | 19/19 passed (new regional_session) |
+| Python pytest | 283 passed (unchanged) |
+| Rotation disabled by default | PASS (global_equity_rotation_enabled false) |
+| Only NY tradeable today | PASS (NY venue_available true, London/Asia false) |
+| Venue gate refuses an unreachable region | PASS end-to-end: SPY mapped into Asia logged venue_unavailable_for_region 77x and SPY never traded; payload {"reason":"venue_unavailable_for_region","region":"Asia","symbol":"SPY"} |
+| Never reaches an adapter | PASS (0 SPY trades when SPY is Asia; refused before the adapter) |
+| Crypto unaffected in all sessions | PASS (BTC/USD traded 20x in the same run, never session-gated) |
+| US-equities-during-US-hours unchanged | PASS (default config: SPY maps to NY and trades, exactly as before) |
+| Session detection uses simulated time | PASS by ctest (02:00 UTC Asia, 09:00 London, 14:00 NY, from a supplied epoch) |
+| Startup shows session + tradeable region | PASS (global: DISABLED scaffold, open session now, NY tradeable via Alpaca, London/Asia venue-unavailable) |
+| No IBKR global routing wired | Correct (documented path only, per the prompt) |
+Commit message: `Scaffold global-session equity rotation gated on venue capability, disabled pending IBKR global access, live trading untouched`
+
+---
+
 ## Prompt: Add Whale Alert crypto whale adapter for trial evaluation, opt-in and capped at 0.35
 
 Date: 2026-07-15

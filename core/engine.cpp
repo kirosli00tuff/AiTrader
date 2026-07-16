@@ -586,6 +586,29 @@ void Engine::handle_bar_close(const market_data::MarketState& ms,
     const auto& sig = decision.signal;
     if (!sig.has_signal) return;
 
+    // ---------- Venue-capability gate (global-session safety rule) ----------
+    // Crypto trades 24/7 and is NEVER gated by a regional session. For an equity,
+    // the engine only trades a region a connected venue can actually reach. Today
+    // only NY (Alpaca US equities) is reachable, so US equities trade exactly as
+    // now; an equity whose region has no capable venue is refused HERE, before any
+    // adapter, logged as venue_unavailable_for_region. This standing safety rule
+    // holds whether or not global_equity_rotation_enabled is set. It never routes
+    // an order to an exchange no connected venue can reach.
+    if (ms.category == "equity") {
+        const auto region = config::region_for_equity(ms.symbol, cfg_.regional);
+        if (!config::venue_available_for(region, cfg_.regional)) {
+            storage_->append_event(
+                {ts, "venue_unavailable_for_region", ms.venue, ms.symbol, "info",
+                 "Equity entry refused: no connected venue reaches " +
+                     config::region_name(region) + " equities",
+                 util::to_json({{"reason", "venue_unavailable_for_region"},
+                                {"region", config::region_name(region)},
+                                {"symbol", ms.symbol}},
+                               {})});
+            return;
+        }
+    }
+
     // ---------- Council cost cuts (Task 5) — decided BEFORE any council call --
     // Sizing is a function of the native signal alone (independent of the
     // council), so the order + the cheap risk pre-check can run first.

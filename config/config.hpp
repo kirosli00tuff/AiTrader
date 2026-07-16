@@ -10,6 +10,8 @@
 #include <string>
 #include <vector>
 
+#include "config/regional_session.hpp"
+
 namespace mal::config {
 
 enum class VenueMode { Disabled, RecommendationOnly, Paper, Live };
@@ -386,6 +388,7 @@ struct Config {
     SimulationConfig simulation;
     IbkrConfig ibkr;
     SleeveConfig sleeves;
+    RegionalSessionConfig regional;  // global-session equity rotation (disabled)
     ModelWeights model_weights;
 
     const VenueConfig* find_venue(const std::string& name) const;

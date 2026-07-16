@@ -24,6 +24,14 @@ add_executable(test_sleeves test_sleeves.cpp)
 target_link_libraries(test_sleeves PRIVATE mal_config)
 add_test(NAME sleeves COMMAND test_sleeves WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 
+# Global-session equity rotation scaffold: config-driven regional sessions, the
+# venue-capability gate (only NY/Alpaca reachable today), disabled rotation flag,
+# and simulated-time session detection.
+add_executable(test_regional_session test_regional_session.cpp)
+target_link_libraries(test_regional_session PRIVATE mal_config)
+add_test(NAME regional_session COMMAND test_regional_session
+         WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
 # Header-only pure predicate (learning/adapt_gate.hpp) — no library link needed.
 add_executable(test_tuner_minsample test_tuner_minsample.cpp)
 add_test(NAME tuner_minsample COMMAND test_tuner_minsample

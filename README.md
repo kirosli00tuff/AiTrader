@@ -887,6 +887,26 @@ deterministic mock, so the demo always runs offline. 13F rows are flagged
 trade flow. These signals are advisory research data for paper/model-training
 only — never live order flow.
 
+## Global-session equity rotation (scaffold, disabled)
+
+Global-session equity rotation lets the equity sleeve follow the open regional
+market — Asia, then London, then NY — trading each region's equities during its
+session. It is **scaffolded for the live IBKR phase and DISABLED now** because
+Alpaca is US-only and cannot reach Asian or European exchanges.
+
+The engine enforces a standing **venue-capability** safety rule: it only
+evaluates and trades an equity region a connected venue can actually reach. Today
+only **NY (Alpaca US equities)** is reachable, so only US equities trade during US
+hours, exactly as now. London and Asia are defined but `venue_unavailable`. An
+equity order for a region with no capable venue is refused before it reaches any
+adapter, logged `venue_unavailable_for_region`; the engine never routes an order
+to an unreachable market. **Crypto is never gated** by a regional session — it
+trades 24/7. The model is config-driven (`config/regional_session.hpp`, the
+`global_sessions` config block) and structured as a venue mapping, so adding IBKR
+global routing later is config plus an adapter mapping, not an engine rewrite.
+Enabling it needs IBKR global access, per-region whitelists, and
+`global_equity_rotation_enabled: true`. See **LIVE_READINESS.md**.
+
 ## Configuration & secrets
 
 - `config/default_config.yaml` — safe defaults (live disabled everywhere).

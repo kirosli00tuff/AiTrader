@@ -15,6 +15,18 @@ nothing.
 ib_insync is the client. It is imported lazily so the bridge and the whole app
 run offline with no IBKR dependency installed. Tests inject a fake ib_insync
 module, so no real network or socket is ever opened under test.
+
+Global-session equity rotation readiness. IBKR is the venue that unlocks global
+session equity rotation (the equity sleeve following the open regional market,
+Asia then London then NY). That feature ships DISABLED because Alpaca is US-only
+and cannot reach Asian or European exchanges, and the engine refuses any equity
+order for a region no connected venue can reach (venue_unavailable_for_region).
+Enabling it requires all of: IBKR connected and authenticated with global market
+access, per-region equity whitelists populated (config global_sessions.*_whitelist),
+and global_equity_rotation_enabled set true. It stays off until the operator is
+deliberately live on IBKR with global access. No IBKR global routing is wired
+here yet; adding it later is a venue mapping (region to IBKR exchange), not an
+engine rewrite. See LIVE_READINESS.md.
 """
 from __future__ import annotations
 
