@@ -19,7 +19,19 @@ const CATEGORIES: Category[] = [
     note: "Coinbase, sim-only market access. Live keys reserved, no paper credentials." },
   { title: "Whale data", groups: ["sec_api", "whale_alert"],
     note: "SEC EDGAR is the sole active whale feed, free and delayed. Whale Alert reserved." },
+  { title: "Discovery data", groups: ["finnhub"],
+    note: "Finnhub feeds the discovery funnel's free Stage-A pre-screen: quotes, sentiment, fundamentals, analyst ratings, earnings. Free tier, 60 calls/min. Needed only if you enable discovery, which ships off." },
 ];
+
+// Groups no category above claims. CATEGORIES is a hardcoded allowlist, so a
+// credential added to the backend registry renders NOWHERE until someone
+// remembers to list it here. That is exactly how the Finnhub key went missing
+// after the discovery build registered it. This catch-all makes that failure
+// impossible: an uncategorized credential surfaces instead of vanishing.
+const UNCATEGORIZED_TITLE = "Other credentials";
+const UNCATEGORIZED_NOTE =
+  "Credentials the backend exposes that no category above claims. If something " +
+  "lands here it still saves normally, but it wants a category.";
 
 function CredField({ c, onSaved }: { c: Credential; onSaved: () => void }) {
   const [val, setVal] = useState("");
@@ -77,6 +89,19 @@ export default function SettingsPage() {
     for (const v of venuesApi.data?.venues ?? []) m[v.venue] = v;
     return m;
   }, [venuesApi.data]);
+
+  // The categories to render: the fixed list, plus a catch-all for any group the
+  // backend exposes that no category claims. Appending a category rather than a
+  // second render block keeps one rendering path, so an uncategorized credential
+  // saves through exactly the same masked field as every other one.
+  const shownCategories = useMemo(() => {
+    const claimed = new Set(CATEGORIES.flatMap((c) => c.groups));
+    const leftover = Object.keys(byGroup).filter((g) => !claimed.has(g)).sort();
+    if (!leftover.length) return CATEGORIES;
+    return [...CATEGORIES,
+            { title: UNCATEGORIZED_TITLE, groups: leftover,
+              note: UNCATEGORIZED_NOTE }];
+  }, [byGroup]);
 
   const runTest = async (group: string, mode?: string) => {
     try {
@@ -136,7 +161,7 @@ export default function SettingsPage() {
       </Panel>
 
       <DataState loading={credsApi.loading && !credsApi.data} error={credsApi.error}>
-        {CATEGORIES.map((cat) => {
+        {shownCategories.map((cat) => {
           const groups = cat.groups.filter((g) => byGroup[g]?.length);
           if (!groups.length) return null;
           return (

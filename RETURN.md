@@ -14,6 +14,39 @@ Commit message:
 
 ---
 
+## Prompt: Add Finnhub API key field to Settings
+
+Date: 2026-07-16
+Model: Opus 4.8
+Prompt summary: Autonomous, operator away. Do not touch RiskGate logic, the live-trading gate, or the adaptive limit-weakening invariant. Live trading stays off. Goal, add the missing Finnhub API key field to the Settings page alongside the existing keys, using the same pattern. Task 1, the discovery build reads FINNHUB_API_KEY from the keystore but Settings has no field to enter it. Add a Finnhub API key field next to the existing credential fields (OpenAI, Anthropic, Gemini, Alpaca), following the exact same masked-credential pattern: it writes through the same encrypted keystore path, shows dots when set, masks input, is never logged, and is never displayed in plaintext. It resolves through the same credential resolver the rest of the app uses, so saving it makes the discovery Finnhub client and the health check see it. Task 2, frontend render test that the Finnhub field appears with the others and masks and saves correctly, backend test that the saved key resolves through the resolver and reports configured to the health check, no key value ever logged or returned, typecheck and build green, bind stays loopback. Task 3, update the README credential list to include Finnhub, update PROGRESS.md with a dated session entry newest at top, complete this RETURN.md entry with the commit message, and commit and push to main.
+Changes: Task 1 added the Finnhub API key field to Settings. The gap was narrower than the prompt assumed and I checked before building: the BACKEND was already complete from the discovery build (finnhub_key was in the credential registry, in _REQUIRED_FIELDS, and already returned by list_status(), so GET /credentials was serving it). The bug was frontend-only: web/src/pages/SettingsPage.tsx maps credentials into a HARDCODED category allowlist (CATEGORIES) and no category claimed the "finnhub" group, so the page silently dropped a credential the API was returning. Fix: a new "Discovery data" category claiming the finnhub group. The existing CredField component is reused unchanged, so Finnhub gets the identical pattern to every other key: masked type=password input, dots when set, save through the same validated endpoint into the same encrypted Fernet keystore, never logged, never rendered in plaintext, resolving through the same shared resolver. Root-cause fix beyond the symptom: a hardcoded allowlist means ANY future credential is invisible until someone remembers to list it, which is exactly how this shipped, so an "Other credentials" catch-all now renders groups no category claims, implemented by APPENDING a category rather than adding a second render block so there stays one rendering path. Also added _check_finnhub to api_server/health.py, which had no Finnhub check at all, so "the health check sees it" was not true before this: it follows the Whale Alert pattern (no key reports not_configured and makes no network call, a resolved key makes one minimal quote call, a bad key fails by HTTP status without echoing the token). Task 2 added 9 frontend render tests and 6 backend tests. Task 3 updated the README credential list, PROGRESS.md, and this entry. NOT touched: RiskGate logic, the live-trading gate, the adaptive limit-weakening invariant, or any Level-1 value. Bind stays loopback. Live OFF.
+Safest-choice notes: (1) I verified the backend state before writing code rather than assuming the prompt's framing. "Settings has no field" was true, but "the discovery build reads FINNHUB_API_KEY from the keystore" was already fully wired, so the correct change was one category entry, not a new credential path. Building a parallel field would have duplicated a working registry entry. (2) The catch-all is a small addition beyond the literal ask, justified because the root cause is the allowlist, not the missing entry: fixing only Finnhub would leave the next credential to fail the same silent way. It adds no write path and reuses the same masked field. (3) "Discovery data" is its own category rather than being folded into "Whale data" or "LLM council": Finnhub is neither a whale feed nor a council provider, and mislabelling it would mislead. (4) The health check reports not_configured with NO key rather than failing, matching the existing Whale Alert and reserved-feed posture: discovery ships off, so a missing optional key is not a fault, and it makes no network call, which keeps the offline suite offline. (5) The health check's Finnhub call is one quote for AAPL, the cheapest endpoint, and the token stays a query param that is never logged or returned.
+Verification (2026-07-16):
+
+| Check | Result |
+| --- | --- |
+| Python pytest | 463 passed (up from 457, +6 new) |
+| Frontend vitest | 52 passed (up from 43, +9 new) |
+| C++ ctest | 20/20 passed (untouched by this prompt) |
+| Typecheck / production build | clean / green |
+| Field appears with the others | PASS: Finnhub renders alongside OpenAI, Anthropic, Gemini, Alpaca (it rendered NOWHERE before this fix) |
+| Input is masked | PASS: every secret credential renders type=password, Finnhub included |
+| Shows dots when set | PASS: masked `••••••••`, `● configured`, `source: in-app` |
+| Never displayed in plaintext | PASS: the plaintext never reaches the DOM; the payload has no value field at all |
+| Saves through the same keystore path | PASS: the shared saveCredential endpoint is called with ("finnhub_key", value) |
+| Encrypted at rest | PASS end to end: the plaintext is NOT present in the raw keystore sqlite file |
+| Resolves through the shared resolver | PASS end to end: get_credential("finnhub_key") and resolve_env("FINNHUB_API_KEY") both return it |
+| The discovery client sees it | PASS end to end: finnhub_source.resolve_key() returns it, is_live() True |
+| The health check sees it | PASS: health._key() resolves it; the check reports `working` / "one quote ok" and configured_count 1 |
+| Health reports not_configured with no key | PASS: reason "FINNHUB_API_KEY not set", and no network call is made |
+| No key value logged or returned | PASS: not in the POST response, not in any later GET, not in stdout/stderr; a bad key yields "HTTP 401" with no `token=` in the body |
+| Uncategorized credentials cannot vanish | PASS: an unknown group surfaces under "Other credentials"; the panel stays hidden when every credential has a category |
+| Bind stays loopback | PASS: no server config touched |
+| No network in tests | PASS: the REST client is vi.mock'ed; the health HTTP call is stubbed |
+Commit message: `Add Finnhub API key field to Settings, live trading untouched`
+
+---
+
 ## Prompt: Add whale activity as a candidate-surfacing signal in discovery Stage A, keep Level 4 whale evaluation intact
 
 Date: 2026-07-16

@@ -1091,10 +1091,17 @@ Credentials can be entered two ways, with a single runtime resolver
 
 1. **In-app** — the dashboard's **Accounts / Connections** tab lets you type and
    save keys/secrets per venue (Alpaca, Coinbase, IBKR) with
-   **separate paper and live fields**, and per data source (ClankApp — free,
-   default; SEC EDGAR — free, no key needed; Whale Alert — optional,
-   limited free tier; Finnhub — free tier, 60 calls/min, needed only if you
-   enable the discovery funnel). Secret inputs are masked (`type=password`).
+   **separate paper and live fields**, and per data source (SEC EDGAR, free, no
+   key needed; Whale Alert, optional, limited free tier; **Finnhub**, free tier,
+   60 calls/min, under **Discovery data**, needed only if you enable the
+   discovery funnel, which ships off). Secret inputs are masked
+   (`type=password`), and a saved value renders as dots, never plaintext.
+
+   Settings groups credentials into categories (LLM council, Paper venue, Live
+   venue, Crypto venue, Whale data, Discovery data). Any credential the backend
+   registry exposes that no category claims falls through to an **Other
+   credentials** panel rather than vanishing, so a newly registered key can never
+   be silently unreachable in the UI.
 2. **Environment / .env** — the existing `*_env` names, plus paper/live-specific
    variants (e.g. `ALPACA_LIVE_API_KEY`, falling back to `ALPACA_API_KEY`).
 

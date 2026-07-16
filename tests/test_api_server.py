@@ -334,6 +334,112 @@ def test_credential_test_endpoint(client):
     assert "ok" in r.json()
 
 
+# --- Finnhub credential (discovery pre-screen) ------------------------------
+
+def test_finnhub_key_is_offered_like_every_other_credential(client):
+    """The Settings page renders whatever /credentials returns, so the field can
+    only exist if the backend offers it."""
+    creds = {c["name"]: c for c in client.get("/credentials").json()["credentials"]}
+    f = creds["finnhub_key"]
+    assert f["group"] == "finnhub"
+    assert f["secret"] is True          # masked input, never plaintext
+    assert f["kind"] == "source"
+    assert "value" not in f             # status only, never a value field
+
+
+def test_finnhub_key_saves_masked_and_never_echoes(client, capsys):
+    fake_val = "unit-test-fake-finnhub-do-not-log-0001"
+    r = client.post("/credentials", json={"name": "finnhub_key", "value": fake_val})
+    body = r.json()
+    assert body["ok"] is True
+    assert body["status"]["configured"] is True
+    # Dots when set, never the value, on the write AND on every later read.
+    assert body["status"]["masked"] == MASK
+    assert fake_val not in r.text
+
+    got = client.get("/credentials").json()["credentials"]
+    entry = next(c for c in got if c["name"] == "finnhub_key")
+    assert entry["masked"] == MASK
+    assert entry["source"] == "in-app"
+    assert fake_val not in str(got)
+
+    # Never logged.
+    out = capsys.readouterr()
+    assert fake_val not in out.out
+    assert fake_val not in out.err
+
+
+def test_saved_finnhub_key_resolves_through_the_shared_resolver(env, client):
+    """Saving in Settings must make the discovery client and the health check see
+    it. All three read the one resolver, so this pins that they agree."""
+    fake_val = "unit-test-fake-finnhub-resolver-0002"
+    assert client.post("/credentials",
+                       json={"name": "finnhub_key",
+                             "value": fake_val}).json()["ok"] is True
+
+    from account_manager.credentials import get_credential, resolve_env
+    # The resolver, by credential name and by env name.
+    assert get_credential("finnhub_key") == fake_val
+    assert resolve_env("FINNHUB_API_KEY") == fake_val
+
+    # The discovery Finnhub client resolves the same value.
+    from discovery import finnhub_source
+    assert finnhub_source.resolve_key() == fake_val
+    assert finnhub_source.is_live() is True
+
+    # The health check resolves it through the same path.
+    from api_server import health
+    assert health._key("FINNHUB_API_KEY") == fake_val
+
+
+def test_finnhub_health_reports_not_configured_without_a_key(env, client):
+    """A missing optional key is not a fault, and it makes no network call."""
+    j = client.get("/health/integrations").json()
+    row = next(r for r in j["integrations"] if r["name"] == "finnhub")
+    assert row["state"] == "not_configured"
+    assert row["reason"] == "FINNHUB_API_KEY not set"
+
+
+def test_finnhub_health_reports_configured_once_the_key_is_saved(env, client,
+                                                                 monkeypatch):
+    """With a key saved in Settings the check counts as configured and makes one
+    minimal real call. The call itself is stubbed: no network in tests."""
+    fake_val = "unit-test-fake-finnhub-health-0003"
+    client.post("/credentials", json={"name": "finnhub_key", "value": fake_val})
+
+    from api_server import health
+    seen = {}
+
+    def fake_get(url, headers):
+        seen["url"] = url
+        return 200
+
+    monkeypatch.setattr(health, "_get", fake_get)
+    j = client.get("/health/integrations").json()
+    row = next(r for r in j["integrations"] if r["name"] == "finnhub")
+    assert row["state"] == "working"
+    assert row["reason"] == "one quote ok"
+    assert j["summary"]["configured_count"] == 1
+    # One minimal quote, nothing heavier.
+    assert "quote?symbol=AAPL" in seen["url"]
+
+
+def test_finnhub_health_never_returns_the_key(env, client, monkeypatch):
+    """The token rides in the query string, so the response must not carry it."""
+    fake_val = "unit-test-fake-finnhub-leak-0004"
+    client.post("/credentials", json={"name": "finnhub_key", "value": fake_val})
+
+    from api_server import health
+    monkeypatch.setattr(health, "_get", lambda url, headers: 401)
+    r = client.get("/health/integrations")
+    row = next(x for x in r.json()["integrations"] if x["name"] == "finnhub")
+    # A bad key fails honestly by status, without echoing the key.
+    assert row["state"] == "failing"
+    assert row["reason"] == "HTTP 401"
+    assert fake_val not in r.text
+    assert "token=" not in r.text
+
+
 # --- Kill switch: state read + halt request (control file only) -------------
 
 def test_kill_get_reports_engine_state(client):

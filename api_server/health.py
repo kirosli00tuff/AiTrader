@@ -165,6 +165,20 @@ def _check_whale_alert():
     return (WORKING, "one tx query ok") if status == 200 else (FAILING, f"HTTP {status}")
 
 
+def _check_finnhub():
+    # Finnhub feeds the discovery funnel's free Stage-A pre-screen. One minimal
+    # real call (a single quote) when a key resolves. No key reports
+    # not_configured, never failing: discovery ships off, so a missing optional
+    # key is not a fault. The token is only ever a query param, and neither it
+    # nor the URL is logged or returned.
+    key = _key("FINNHUB_API_KEY")
+    if not key:
+        return NOT_CONFIGURED, "FINNHUB_API_KEY not set"
+    status = _get(f"https://finnhub.io/api/v1/quote?symbol=AAPL&token={key}",
+                  {"Accept": "application/json"})
+    return (WORKING, "one quote ok") if status == 200 else (FAILING, f"HTTP {status}")
+
+
 _CHECKS = [
     ("openai", "OpenAI GPT-5.5", _check_openai),
     ("anthropic_opus", "Anthropic Claude Opus 4.8",
@@ -174,6 +188,7 @@ _CHECKS = [
     ("gemini", "Google Gemini 3.1 Pro", _check_gemini),
     ("alpaca_data", "Alpaca paper market data", _check_alpaca_data),
     ("alpaca_trading_auth", "Alpaca paper trading auth", _check_alpaca_trading),
+    ("finnhub", "Finnhub (discovery pre-screen)", _check_finnhub),
     ("sec_edgar", "SEC EDGAR 13F", _check_sec_edgar),
     ("ibkr_gateway", "IBKR gateway reachability", _check_ibkr),
     ("whale_alert", "Whale Alert (crypto trial)", _check_whale_alert),

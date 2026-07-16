@@ -68,6 +68,16 @@ New flags from the feed-work session (2026-07-05, `369b6a6`):
 
 ## Session Log
 
+### 2026-07-16 (Opus 4.8) — add the Finnhub API key field to Settings
+
+- Goal. The discovery build reads FINNHUB_API_KEY from the keystore, but Settings had no field to enter it. Add one alongside the existing keys using the same masked-credential pattern.
+- Root cause, narrower than expected. The backend was already complete from the discovery build: `finnhub_key` was in the credential registry, in `_REQUIRED_FIELDS`, and already returned by `list_status()`, so `GET /credentials` was serving it. The bug was frontend-only: `SettingsPage.tsx` maps credentials into a HARDCODED category allowlist (`CATEGORIES`), and no category claimed the `finnhub` group, so the page silently dropped a credential the API was returning.
+- Task 1, the field. Added a **Discovery data** category claiming the `finnhub` group. The existing `CredField` component is reused unchanged, so Finnhub gets the exact same pattern as every other key: masked `type=password` input, dots when set, save through the same validated endpoint and the same encrypted Fernet keystore, never logged, never rendered in plaintext. It already resolved through the shared resolver, so saving it makes the discovery client and the health check see it.
+- Root-cause fix, not just the symptom. A hardcoded allowlist means ANY future credential is invisible until someone remembers to list it, which is exactly how this shipped. Added an **Other credentials** catch-all: groups no category claims now render through the same single path instead of vanishing. Implemented by appending a category rather than a second render block, so there is one rendering path and an uncategorized key still saves normally.
+- Health check. Finnhub was absent from `api_server/health.py` entirely, so "the health check sees it" was not true. Added `_check_finnhub`, following the Whale Alert pattern: no key reports `not_configured` (a missing optional key is not a fault, and it makes no network call at all, keeping the suite offline), a resolved key makes one minimal real quote call, and a bad key fails honestly by HTTP status without echoing the token.
+- Tests + verify. Python pytest 463 passed (up from 457, +6). Frontend vitest 52 (up from 43, +9). C++ ctest 20/20. Typecheck clean, build green. VERIFIED end to end against the real code, not mocks: saved through the encrypted keystore, resolves by credential name AND by env name, masked to dots with `source: in-app`, plaintext absent from the status payload, seen by both `discovery.finnhub_source.resolve_key()` and `health._key()`, and encrypted at rest (the plaintext is not present in the keystore file). NOT touched: RiskGate, live-gate, adaptive invariant, or any Level-1 value. Bind stays loopback. Live OFF.
+
+
 ### 2026-07-16 (Opus 4.8) — whale activity as a candidate-surfacing signal in discovery Stage A, Level 4 evaluation intact
 
 - Goal. Whale data does TWO jobs: it surfaces candidates in the free Stage-A pre-screen, and it still informs the Stage-C verdict as the Level-4 advisory factor. Same data, two questions, deliberate by design. Everything stays behind the existing discovery flags, default off. No trading behavior changed.
