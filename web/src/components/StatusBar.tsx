@@ -1,8 +1,8 @@
 import { useState } from "react";
 import { api } from "../api/client";
 import { useApi } from "../api/useApi";
-import type { Account, EngineState, Health, IntegrationsHealth, KillState, Pnl, RunState } from "../api/types";
-import { money, pct, signClass } from "../api/format";
+import type { Account, DiscoveryState, EngineState, Health, IntegrationsHealth, KillState, Pnl, RunState } from "../api/types";
+import { money, pct, shortTs, signClass } from "../api/format";
 
 // Supervisor lifecycle -> dot color for the compact engine indicator.
 const ENG_DOT: Record<string, string> = {
@@ -22,6 +22,9 @@ export default function StatusBar({ activeView }: { activeView: string }) {
   const killApi = useApi<KillState>(() => api.kill(), 6000, []);
   const runApi = useApi<RunState>(() => api.runstate(), 8000, []);
   const engApi = useApi<EngineState>(() => api.engineState(), 3000, []);
+  // Discovery state. Polled slowly (30s): a funnel pass runs hourly at most, so
+  // a faster poll would buy nothing and only add DB reads.
+  const disc = useApi<DiscoveryState>(() => api.discoveryState(), 30000, []);
   const [arming, setArming] = useState(false);
   const [busy, setBusy] = useState(false);
   const [engArm, setEngArm] = useState(false);
@@ -44,6 +47,19 @@ export default function StatusBar({ activeView }: { activeView: string }) {
   const apisDot = configured === 0 ? "d" : sum?.all_ok ? "g" : "a";
   const apisLabel = configured === 0 ? "none" : sum?.all_ok ? "ok" : "issues";
   const tripped = kill || (killApi.data?.engine_kill_switch_tripped ?? false);
+
+  // Discovery strip. The most recent pass across both asset classes is what the
+  // operator wants at a glance ("is the funnel running"), so take the later of
+  // the two. Timestamps are ISO-8601 UTC and sort lexically.
+  const discoveryOn = disc.data?.enabled ?? false;
+  const passes = [disc.data?.last_pass?.crypto, disc.data?.last_pass?.equity]
+    .filter((t): t is string => !!t);
+  const lastPass = passes.length ? passes.sort().slice(-1)[0] : null;
+  const discoveryTitle = discoveryOn
+    ? `Discovery on. Watchlist ${disc.data?.watchlist_size ?? 0}/${
+        disc.data?.watchlist_max ?? 0}. Budget ${
+        disc.data?.budget.used_today ?? 0}/${disc.data?.budget.daily ?? 0} council calls today.`
+    : "Discovery is off (shipped default). The engine trades the fixed whitelist.";
 
   // Supervisor lifecycle, mirrored compactly. Distinct from the kill strip: this
   // is the ordinary Start/Stop, the kill switch below is the safety halt.
@@ -135,6 +151,20 @@ export default function StatusBar({ activeView }: { activeView: string }) {
       <div className="status-item">
         <span className={`dot ${apisDot}`} />
         APIs <b>{apisLabel}</b>
+      </div>
+      <div className="status-sep" />
+      {/* Discovery: off is the shipped default, so a grey dot here is correct
+          and expected, not a fault. The watchlist size and last-pass time are
+          what tell the operator the funnel is actually running once enabled. */}
+      <div className="status-item" title={discoveryTitle}>
+        <span className={`dot ${discoveryOn ? "g" : "d"}`} />
+        Discovery <b>{discoveryOn ? "on" : "off"}</b>
+        {discoveryOn && (
+          <span className="dim" style={{ fontSize: 11 }}>
+            {disc.data?.watchlist_size ?? 0} watched
+            {lastPass ? ` · ${shortTs(lastPass)}` : " · no pass yet"}
+          </span>
+        )}
       </div>
       <div className="statusbar-spacer" />
       <div className="status-item">

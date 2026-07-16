@@ -287,6 +287,105 @@ def council_used_today() -> int:
     return int(row["n"]) if row and row.get("n") is not None else 0
 
 
+def _discovery_cfg() -> dict:
+    return store.load_config().get("discovery", {}) or {}
+
+
+def discovery_enabled() -> bool:
+    """True when the discovery funnel is on. OFF by default (operator opt-in).
+
+    Config read only. The GUI uses this to render a clear DISABLED state rather
+    than an empty view that looks broken.
+    """
+    return bool(_discovery_cfg().get("discovery_enabled", False))
+
+
+def longterm_state() -> bool:
+    """True when the long-term sleeve STRATEGY is on. OFF by default.
+
+    Distinct from sleeves.research_satellite_enabled, which turns the SLEEVE on.
+    Both must hold for a long-term position to open.
+    """
+    return bool(_discovery_cfg().get("long_term_sleeve_enabled", False))
+
+
+def discovery_used_today() -> int:
+    """Discovery council calls spent today, across BOTH asset classes.
+
+    Counted from discovery_pass, so it is the funnel's own spend and stays
+    SEPARATE from the trading council budget (council_used_today above).
+    """
+    row = store.query_one(
+        "SELECT COALESCE(SUM(council_calls),0) AS n FROM discovery_pass "
+        "WHERE substr(ts,1,10) = ?", (_now()[:10],))
+    return int(row["n"]) if row and row.get("n") is not None else 0
+
+
+def discovery_state() -> dict:
+    """Discovery summary for the top strip and the sleeve panel.
+
+    Pure read (config + discovery tables). Never a key value, never a Level-1
+    write. Reports the flags, the last pass per asset class, the watchlist size,
+    the universe sizes, and today's spend against the SEPARATE discovery budget.
+    """
+    cfg = _discovery_cfg()
+
+    def _int(key, default):
+        try:
+            return int(cfg.get(key, default))
+        except (TypeError, ValueError):
+            return default
+
+    def _float(key, default):
+        try:
+            return float(cfg.get(key, default))
+        except (TypeError, ValueError):
+            return default
+
+    def _csv_len(key):
+        raw = cfg.get(key, "")
+        if isinstance(raw, list):
+            return len([s for s in raw if str(s).strip()])
+        return len([s for s in str(raw or "").split(",") if s.strip()])
+
+    last: dict[str, str | None] = {}
+    for ac in ("crypto", "equity"):
+        # Most recent by TIMESTAMP, matching store.discovery_latest.
+        row = store.query_one(
+            "SELECT ts FROM discovery_pass WHERE asset_class = ? "
+            "ORDER BY ts DESC, id DESC LIMIT 1", (ac,))
+        last[ac] = row["ts"] if row else None
+
+    wl = store.query_one(
+        "SELECT COUNT(*) AS n FROM watchlist WHERE status = 'active'")
+    watchlist_size = int(wl["n"]) if wl and wl.get("n") is not None else 0
+
+    budget = _int("discovery_daily_council_budget", 12)
+    used = discovery_used_today()
+    est = _float("discovery_est_cost_per_call_usd", 0.04)
+    return {
+        "enabled": discovery_enabled(),
+        "long_term_sleeve_enabled": longterm_state(),
+        "last_pass": last,
+        "watchlist_size": watchlist_size,
+        "watchlist_max": _int("watchlist_max_size", 40),
+        "universe": {"crypto_active_max": _int("crypto_active_max", 50),
+                     "crypto_universe": _csv_len("crypto_universe"),
+                     "equity_universe": _csv_len("equity_universe")},
+        "ceilings": {"max_finalists": _int("max_finalists", 12),
+                     "max_survivors": _int("max_survivors", 5),
+                     "max_council_calls_per_pass":
+                         _int("max_council_calls_per_pass", 5)},
+        "budget": {"daily": budget, "used_today": used,
+                   "remaining": max(0, budget - used),
+                   "est_cost_per_call": est,
+                   "est_spend_today": round(used * est, 4)},
+        # The react layer is not built. Say so here so the GUI can state it
+        # rather than implying discovery reads news live.
+        "react_layer_built": False,
+    }
+
+
 def _parse_metrics(row: dict | None) -> dict:
     if not row:
         return {}

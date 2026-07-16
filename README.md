@@ -790,8 +790,9 @@ green for gains, red for losses, clean cards and dense tables. It is additive.
 The Plotly Dash board above stays in place as a fallback, unchanged. Both read
 the same SQLite database.
 
-A left sidebar holds four sections. A top strip on every page shows engine
-state, active mode, portfolio value, daily PnL, and kill-switch status.
+A left sidebar holds the sections below. A top strip on every page shows engine
+state, active mode, portfolio value, daily PnL, kill-switch status, and
+discovery state (on or off, watchlist size, last pass time).
 
 The GUI displays every timestamp in the operator's local timezone (default
 America/Vancouver, PST or PDT by date, changeable in Settings); storage, the
@@ -817,9 +818,33 @@ engine, logs, and the events table stay UTC. This is a display-only preference.
   count, per-symbol regime override (test only), and a council budget dial.
   Level 1 risk limits render read-only here. Change them through config or the
   Dash L1 editor, never through this page.
+- **Discovery** the latest funnel pass per asset class, drawn as a funnel:
+  universe size, Stage A finalists, Stage B gate survivors, Stage C evaluated,
+  each bar labelled with what that stage costs (0 tokens, gate calls, council
+  calls). The cost this pass shows against the separate discovery budget, and
+  every dropped instrument is listed with its stage and reason. Read-only, so
+  the operator can confirm at a glance that the funnel spends intelligence only
+  at the bottom.
+- **Watchlist** the living candidate list both sleeves draw from: each
+  instrument, why it is on the list, when it was added, when a pass last
+  confirmed it, its sleeve target, and its status, plus a feed of recent adds
+  and prunes. A refused event from the not-yet-enabled react source shows as
+  REFUSED rather than being hidden.
+- **Long-term** the research_satellite sleeve, kept distinct from the quant
+  core. Each position renders its full thesis: direction, conviction, target,
+  horizon, invalidation condition, entry date, current PnL, and where the
+  position sits against its thesis. A research feed lists the recent theses the
+  council wrote. This is where the operator reads *why* each long-term position
+  is held.
 - **Settings** credential entry grouped by category (LLM council, paper venue,
   live venue, crypto venue, whale data), every field masked, plus the active
   council models and a per-group offline connection test.
+
+The three discovery views are **read-only and have no write path**: there is no
+POST on any discovery route, and no control on any of those pages. Discovery
+ships disabled, so each view renders a clear **disabled state** naming the exact
+config key to flip and what would run once enabled, rather than an empty page
+that reads as broken.
 
 A thin FastAPI backend in `api_server/` serves the app. It binds loopback only
 (127.0.0.1). Every GET is read-only on the operational tables. The control

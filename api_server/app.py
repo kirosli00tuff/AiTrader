@@ -109,6 +109,74 @@ def get_research_theses(limit: int = Query(100, le=500)):
     return {"theses": store.research_theses(limit)}
 
 
+# --- Discovery views (READ-ONLY) ---------------------------------------------
+# Every route below is a pure read over the mode=ro connection. None writes an
+# operational or Level-1 value, none enables live, and none returns a key value.
+# Discovery ships DISABLED, so they return empty with enabled=false until an
+# operator opts in, which the GUI renders as a clear disabled state rather than
+# an empty page that looks broken. An unknown asset_class degrades to "both",
+# matching store.valid_category rather than introducing a new error path.
+
+@app.get("/discovery/state")
+def get_discovery_state():
+    # Summary for the top strip and the sleeve panel: discovery on or off, last
+    # pass per asset class, watchlist size, universe sizes, and today's spend
+    # against the SEPARATE discovery budget.
+    return controls.discovery_state()
+
+
+@app.get("/discovery/latest")
+def get_discovery_latest(asset_class: str | None = Query(None)):
+    # The most recent funnel pass per asset class: per-stage counts plus every
+    # instrument dropped at each stage with its reason.
+    ac = asset_class if asset_class in ("crypto", "equity") else None
+    return {"passes": store.discovery_latest(ac),
+            "enabled": controls.discovery_enabled()}
+
+
+@app.get("/discovery/candidates")
+def get_discovery_candidates(limit: int = Query(50, le=200)):
+    # Current Stage-C survivors with their four-level verdicts and ADVISORY
+    # sizing. The engine's hard sleeve cap and the RiskGate rule any real order.
+    return {"candidates": store.discovery_candidates(limit),
+            "enabled": controls.discovery_enabled()}
+
+
+@app.get("/watchlist")
+def get_watchlist(limit: int = Query(100, le=500),
+                  events: int = Query(30, le=200)):
+    # The living candidate list both sleeves draw from: why each instrument is
+    # on it, its sleeve target, plus recent adds and prunes.
+    return {"watchlist": store.watchlist(limit),
+            "events": store.watchlist_events(events),
+            "enabled": controls.discovery_enabled()}
+
+
+@app.get("/longterm/positions")
+def get_longterm_positions():
+    # Open research_satellite positions with their persisted theses: entry date,
+    # conviction, target, horizon, invalidation condition, current PnL, and where
+    # each position sits against its thesis.
+    #
+    # Three distinct booleans, kept distinct because they answer different
+    # questions and collapsing them would mislead:
+    #   strategy_enabled  discovery.long_term_sleeve_enabled (the STRATEGY)
+    #   sleeve_config     sleeves.research_satellite_enabled (the SLEEVE, config)
+    #   sleeve_toggle     the operator's controls.json toggle for the sleeve
+    # A long-term position needs the strategy AND the sleeve. `enabled` is that
+    # conjunction, so the GUI has one honest answer to "is this running".
+    sleeves = controls.sleeve_state()
+    strategy = controls.longterm_state()
+    sleeve_config = bool(sleeves.get("research_satellite_config_enabled", False))
+    sleeve_toggle = bool(
+        sleeves.get("enabled", {}).get("research_satellite", False))
+    return {"positions": store.longterm_positions(),
+            "enabled": strategy and sleeve_config,
+            "strategy_enabled": strategy,
+            "sleeve_config_enabled": sleeve_config,
+            "sleeve_toggle_enabled": sleeve_toggle}
+
+
 class SleeveWrite(BaseModel):
     sleeve: str
     enabled: bool

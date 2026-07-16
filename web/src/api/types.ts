@@ -310,6 +310,120 @@ export interface TradeDetail {
 }
 
 // Core-satellite sleeves.
+// --- Discovery (read-only views) --------------------------------------------
+// Mirrors the api_server discovery endpoints. Every timestamp is ISO-8601 UTC as
+// stored; the GUI converts to the operator's local zone at render time via
+// shortTs/clockTs. Storage stays UTC.
+
+export interface DiscoveryDrop {
+  symbol: string;
+  stage: string;              // A | B | C
+  reason: string;
+  score: number | null;
+}
+
+export interface DiscoveryPass {
+  id: number;
+  ts: string;
+  asset_class: string;        // crypto | equity
+  universe_count: number;
+  finalists_count: number;    // Stage A output
+  survivors_count: number;    // Stage B output
+  evaluated_count: number;    // Stage C output
+  council_calls: number;      // the paid stage
+  gate_calls: number;         // the cheap stage
+  est_cost_usd: number;
+  budget_remaining: number;
+  status: string;
+  reason: string | null;
+  drops: DiscoveryDrop[];
+}
+
+export interface DiscoveryCandidate {
+  ts: string;
+  symbol: string;
+  verdict: string;            // buy | sell | avoid
+  direction: string;
+  conviction: number | null;
+  edge: number | null;
+  agreement: number | null;
+  size_pct: number | null;    // ADVISORY: the cap and the RiskGate still rule
+  horizon: string | null;
+  sleeve_target: string | null;
+  rationale: string | null;
+  asset_class: string;
+}
+
+export interface DiscoveryState {
+  enabled: boolean;
+  long_term_sleeve_enabled: boolean;
+  last_pass: { crypto: string | null; equity: string | null };
+  watchlist_size: number;
+  watchlist_max: number;
+  universe: {
+    crypto_active_max: number;
+    crypto_universe: number;
+    equity_universe: number;
+  };
+  ceilings: {
+    max_finalists: number;
+    max_survivors: number;
+    max_council_calls_per_pass: number;
+  };
+  budget: {
+    daily: number;
+    used_today: number;
+    remaining: number;
+    est_cost_per_call: number;
+    est_spend_today: number;
+  };
+  react_layer_built: boolean;
+}
+
+export interface WatchlistRow {
+  symbol: string;
+  asset_class: string | null;
+  added_ts: string;
+  updated_ts: string;
+  source: string;
+  reason: string | null;
+  sleeve_target: string | null;
+  score: number | null;
+  status: string;
+}
+
+export interface WatchlistEvent {
+  ts: string;
+  action: string;             // add | remove
+  symbol: string;
+  source: string;
+  reason: string | null;
+  applied: number;            // 0 => refused (e.g. a not-yet-enabled source)
+}
+
+export interface LongTermPosition {
+  venue: string;
+  symbol: string;
+  category: string | null;
+  side: string;
+  qty: number;
+  avg_price: number;
+  notional: number;
+  opened_ts: string;
+  unrealized_pnl: number;
+  thesis_ts: string | null;
+  direction: string | null;
+  conviction: number | null;
+  horizon: string | null;
+  rationale: string | null;
+  thesis_status: string | null;
+  target: number | null;
+  invalidation_price: number | null;
+  invalidation: string | null;
+  entry_price: number | null;
+  status_vs_thesis: string;
+}
+
 export interface SleeveState {
   targets: { quant_core: number; research_satellite: number };
   drift_band: number;

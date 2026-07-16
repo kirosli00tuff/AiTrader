@@ -67,6 +67,60 @@ INSERT INTO approval_state(id, live_enabled, manual_confirmation,
 
 INSERT INTO events(ts, kind, venue, symbol, severity, message) VALUES
   ('2026-07-06T02:00:00Z','trade','alpaca','BTC/USD','info','opened BTC/USD');
+
+-- Discovery: one crypto pass and one equity pass, with drops at every stage and
+-- Stage-C candidates. Written Python-side by the discovery package in reality.
+INSERT INTO discovery_pass(id, ts, asset_class, universe_count, finalists_count,
+    survivors_count, evaluated_count, council_calls, gate_calls, est_cost_usd,
+    budget_remaining, status, reason) VALUES
+  (1,'2026-07-06T02:00:00Z','crypto',50,12,5,2,2,12,0.08,10,'ok',''),
+  (2,'2026-07-06T01:00:00Z','crypto',50,10,4,1,1,10,0.04,11,'ok','stale pass'),
+  (3,'2026-07-06T02:05:00Z','equity',119,12,3,1,1,12,0.04,9,'ok','');
+
+INSERT INTO discovery_drop(pass_id, ts, symbol, stage, reason, score) VALUES
+  (1,'2026-07-06T02:00:00Z','DOGE/USD','A','below_min_score',0.04),
+  (1,'2026-07-06T02:00:00Z','XLM/USD','A','not_top_ranked',0.21),
+  (1,'2026-07-06T02:00:00Z','ADA/USD','B','gate: too quiet',0.33),
+  (1,'2026-07-06T02:00:00Z','DOT/USD','C','pass_council_ceiling',0.41),
+  (3,'2026-07-06T02:05:00Z','KO','A','below_min_score',0.02);
+
+INSERT INTO discovery_candidate(pass_id, ts, symbol, verdict, direction,
+    conviction, edge, agreement, size_pct, horizon, sleeve_target, rationale)
+    VALUES
+  (1,'2026-07-06T02:00:00Z','SOL/USD','buy','long',0.82,0.05,3,0.41,'days',
+   'quant_core','Council buy on SOL/USD: bias 0.60, agreement 3'),
+  (1,'2026-07-06T02:00:00Z','AVAX/USD','avoid','flat',0.30,0.0,1,0.0,'days',
+   'quant_core','Council hold on AVAX/USD: bias 0.02'),
+  (3,'2026-07-06T02:05:00Z','NVDA','buy','long',0.88,0.06,3,0.44,'months',
+   'research_satellite','Long-term long on NVDA. Quality 0.71, catalyst earnings');
+
+INSERT INTO watchlist(symbol, asset_class, added_ts, updated_ts, source, reason,
+    sleeve_target, score, status, removed_ts, removed_reason) VALUES
+  ('SOL/USD','crypto','2026-07-06T02:00:00Z','2026-07-06T02:00:00Z','discovery',
+   'discovery buy conviction 0.82','quant_core',0.82,'active',NULL,NULL),
+  ('NVDA','equity','2026-07-05T02:00:00Z','2026-07-06T02:05:00Z','discovery',
+   'discovery buy conviction 0.88','research_satellite',0.88,'active',NULL,NULL),
+  ('XRP/USD','crypto','2026-07-01T02:00:00Z','2026-07-01T02:00:00Z','prune',
+   'signal stale, no pass in 48h','quant_core',0.4,'removed',
+   '2026-07-06T02:00:00Z','signal stale, no pass in 48h');
+
+INSERT INTO watchlist_event(ts, action, symbol, source, reason, applied) VALUES
+  ('2026-07-06T02:00:00Z','add','SOL/USD','discovery','discovery buy 0.82',1),
+  ('2026-07-06T02:00:00Z','remove','XRP/USD','prune','signal stale',1),
+  ('2026-07-06T02:01:00Z','add','PEPE/USD','adaptive_react','breaking headline',0);
+
+-- A long-term satellite position with its persisted thesis.
+INSERT INTO positions(venue, symbol, market, category, side, qty, avg_price,
+    notional, opened_ts, unrealized_pnl, sleeve) VALUES
+  ('alpaca','NVDA','us_equity','equity','buy',10,180.0,1800.0,
+   '2026-07-06T02:05:00Z',150.0,'research_satellite');
+
+INSERT INTO research_thesis(ts, symbol, direction, conviction, horizon,
+    rationale, status, target, invalidation_price, invalidation, entry_price)
+    VALUES
+  ('2026-07-06T02:05:00Z','NVDA','long',0.88,'months',
+   'Long-term long on NVDA. Quality 0.71, catalyst earnings 2026-07-28.','open',
+   240.0,150.0,'close below 150.00 (thesis broken)',180.0);
 """
 
 
@@ -96,7 +150,8 @@ def env(tmp_path, monkeypatch):
                "APCA_API_KEY_ID", "APCA_API_SECRET_KEY", "ALPACA_API_KEY",
                "ALPACA_API_SECRET", "ALPACA_PAPER_API_KEY",
                "ALPACA_PAPER_API_SECRET", "WHALE_ALERT_API_KEY",
-               "UNUSUAL_WHALES_API_KEY", "SEC_EDGAR_ENABLED"):
+               "UNUSUAL_WHALES_API_KEY", "SEC_EDGAR_ENABLED",
+               "FINNHUB_API_KEY"):
         monkeypatch.delenv(_v, raising=False)
     kdir = tmp_path / "keystore"
     kdir.mkdir()
@@ -623,6 +678,237 @@ def test_health_integrations_writes_no_op_or_risk_value(env, client):
     client.get("/health/integrations")
     after = hashlib.sha256(open(env["db"], "rb").read()).hexdigest()
     assert before == after
+
+
+# --- Discovery views (read-only) ---------------------------------------------
+
+_DISCOVERY_ROUTES = ("/discovery/state", "/discovery/latest",
+                     "/discovery/candidates", "/watchlist",
+                     "/longterm/positions")
+
+
+def test_discovery_latest_reports_the_funnel_narrowing(env, client):
+    r = client.get("/discovery/latest")
+    assert r.status_code == 200
+    passes = {p["asset_class"]: p for p in r.json()["passes"]}
+    # One pass per asset class, the most recent only (id 2 is the stale crypto).
+    assert set(passes) == {"crypto", "equity"}
+    c = passes["crypto"]
+    assert c["ts"] == "2026-07-06T02:00:00Z"
+    # The narrowing, which is the whole point of the view.
+    assert (c["universe_count"], c["finalists_count"], c["survivors_count"],
+            c["evaluated_count"]) == (50, 12, 5, 2)
+    assert c["council_calls"] == 2 and c["gate_calls"] == 12
+    assert c["est_cost_usd"] == 0.08 and c["budget_remaining"] == 10
+
+
+def test_discovery_latest_carries_every_drop_with_stage_and_reason(env, client):
+    passes = {p["asset_class"]: p
+              for p in client.get("/discovery/latest").json()["passes"]}
+    drops = {d["symbol"]: d for d in passes["crypto"]["drops"]}
+    assert drops["DOGE/USD"]["stage"] == "A"
+    assert drops["DOGE/USD"]["reason"] == "below_min_score"
+    assert drops["XLM/USD"]["reason"] == "not_top_ranked"
+    assert drops["ADA/USD"]["stage"] == "B"
+    assert "too quiet" in drops["ADA/USD"]["reason"]
+    assert drops["DOT/USD"]["stage"] == "C"
+    assert drops["DOT/USD"]["reason"] == "pass_council_ceiling"
+    # A drop from another pass never leaks in.
+    assert "KO" not in drops
+
+
+def test_discovery_latest_filters_by_asset_class(env, client):
+    r = client.get("/discovery/latest?asset_class=equity")
+    passes = r.json()["passes"]
+    assert len(passes) == 1 and passes[0]["asset_class"] == "equity"
+    assert passes[0]["universe_count"] == 119
+    # An unknown class degrades to both, matching store.valid_category rather
+    # than erroring.
+    both = client.get("/discovery/latest?asset_class=nonsense").json()["passes"]
+    assert len(both) == 2
+
+
+def test_discovery_candidates_returns_verdicts_and_sizing(env, client):
+    r = client.get("/discovery/candidates")
+    assert r.status_code == 200
+    cands = {c["symbol"]: c for c in r.json()["candidates"]}
+    assert cands["NVDA"]["verdict"] == "buy"
+    assert cands["NVDA"]["conviction"] == 0.88
+    assert cands["NVDA"]["sleeve_target"] == "research_satellite"
+    assert cands["NVDA"]["horizon"] == "months"
+    assert cands["SOL/USD"]["sleeve_target"] == "quant_core"
+    assert cands["AVAX/USD"]["verdict"] == "avoid"
+    # Highest conviction first, so the operator reads the strongest first.
+    assert [c["symbol"] for c in r.json()["candidates"]][0] == "NVDA"
+    # Only the LATEST pass per class: the stale crypto pass contributes nothing.
+    assert all(c["asset_class"] in ("crypto", "equity")
+               for c in r.json()["candidates"])
+
+
+def test_watchlist_reports_why_each_instrument_is_on_it(env, client):
+    r = client.get("/watchlist")
+    assert r.status_code == 200
+    wl = {w["symbol"]: w for w in r.json()["watchlist"]}
+    # Only active entries: the pruned XRP/USD is not on the list.
+    assert set(wl) == {"SOL/USD", "NVDA"}
+    assert wl["NVDA"]["reason"] == "discovery buy conviction 0.88"
+    assert wl["NVDA"]["sleeve_target"] == "research_satellite"
+    assert wl["NVDA"]["added_ts"] == "2026-07-05T02:00:00Z"
+    assert wl["NVDA"]["updated_ts"] == "2026-07-06T02:05:00Z"
+    assert wl["SOL/USD"]["sleeve_target"] == "quant_core"
+    # Strongest first.
+    assert [w["symbol"] for w in r.json()["watchlist"]] == ["NVDA", "SOL/USD"]
+
+
+def test_watchlist_events_show_adds_prunes_and_refusals(env, client):
+    events = client.get("/watchlist").json()["events"]
+    by_symbol = {e["symbol"]: e for e in events}
+    assert by_symbol["SOL/USD"]["action"] == "add"
+    assert by_symbol["XRP/USD"]["action"] == "remove"
+    assert by_symbol["XRP/USD"]["reason"] == "signal stale"
+    # A REFUSED event from the not-yet-enabled react source stays visible, so a
+    # silently dropped event can never hide.
+    assert by_symbol["PEPE/USD"]["source"] == "adaptive_react"
+    assert by_symbol["PEPE/USD"]["applied"] == 0
+
+
+def test_longterm_positions_carry_the_full_thesis(env, client):
+    r = client.get("/longterm/positions")
+    assert r.status_code == 200
+    positions = r.json()["positions"]
+    # Only the research_satellite sleeve: the quant_core SPY position is absent.
+    assert [p["symbol"] for p in positions] == ["NVDA"]
+    p = positions[0]
+    assert p["direction"] == "long" and p["conviction"] == 0.88
+    assert p["horizon"] == "months"
+    assert p["target"] == 240.0
+    assert p["invalidation_price"] == 150.0
+    assert "thesis broken" in p["invalidation"]
+    assert p["opened_ts"] == "2026-07-06T02:05:00Z"   # entry date
+    assert p["unrealized_pnl"] == 150.0               # current PnL
+    assert p["thesis_status"] == "open"
+
+
+def test_longterm_status_against_thesis(env, client):
+    p = client.get("/longterm/positions").json()["positions"][0]
+    # Entry 180, +150 PnL on 10 qty -> mark 195. Below target 240, above
+    # invalidation 150, so the position is still on thesis.
+    assert p["status_vs_thesis"] == "on thesis"
+
+
+def test_longterm_status_reports_target_and_invalidation(env, client):
+    from api_server import store
+    base = {"direction": "long", "qty": 10.0, "avg_price": 180.0,
+            "target": 240.0, "invalidation_price": 150.0}
+    # Mark 245 (>= target 240).
+    assert store._thesis_status({**base, "unrealized_pnl": 650.0}) == \
+        "target reached"
+    # Mark 145 (<= invalidation 150).
+    assert store._thesis_status({**base, "unrealized_pnl": -350.0}) == \
+        "invalidated"
+    # A thesis-less position says so rather than guessing.
+    assert store._thesis_status({"qty": 1}) == "no thesis"
+
+
+def test_longterm_distinguishes_strategy_from_sleeve(env, client):
+    j = client.get("/longterm/positions").json()
+    # Three distinct booleans, because they answer different questions.
+    assert j["strategy_enabled"] is False        # long_term_sleeve_enabled
+    assert j["sleeve_config_enabled"] is False   # research_satellite_enabled
+    # `enabled` is the conjunction: a long-term position needs both.
+    assert j["enabled"] is False
+
+
+def test_discovery_state_summarizes_for_the_top_strip(env, client):
+    j = client.get("/discovery/state").json()
+    assert j["enabled"] is False                 # ships disabled
+    assert j["long_term_sleeve_enabled"] is False
+    assert j["watchlist_size"] == 2              # active only, pruned excluded
+    assert j["last_pass"]["crypto"] == "2026-07-06T02:00:00Z"
+    assert j["last_pass"]["equity"] == "2026-07-06T02:05:00Z"
+    # Universe sizes come from the real config, so the strip cannot drift.
+    assert j["universe"]["equity_universe"] >= 100
+    assert j["universe"]["crypto_active_max"] <= 50
+    assert j["ceilings"]["max_survivors"] <= j["ceilings"]["max_finalists"]
+    # The react layer is not built, and the payload says so.
+    assert j["react_layer_built"] is False
+
+
+def test_discovery_state_budget_is_separate_from_the_trading_budget(env, client):
+    j = client.get("/discovery/state").json()
+    # 2 + 1 + 1 council calls across the seeded passes... but only today's count.
+    # The seed dates are 2026-07-06, not today, so today's spend is 0.
+    assert j["budget"]["used_today"] == 0
+    assert j["budget"]["remaining"] == j["budget"]["daily"]
+    assert j["budget"]["est_spend_today"] == 0.0
+    # This is the DISCOVERY budget, counted from discovery_pass, not the
+    # trading council's model_outputs.
+    from api_server import controls
+    assert controls.discovery_used_today() == 0
+
+
+def test_discovery_views_are_empty_but_valid_when_the_tables_are_absent(
+        tmp_path, monkeypatch):
+    """A DB predating discovery must render an empty view, never a 500."""
+    db = tmp_path / "old.db"
+    conn = sqlite3.connect(str(db))
+    conn.executescript(
+        "CREATE TABLE positions(venue TEXT, symbol TEXT, market TEXT, "
+        "category TEXT, side TEXT, qty REAL, avg_price REAL, notional REAL, "
+        "opened_ts TEXT, unrealized_pnl REAL, sleeve TEXT);")
+    conn.commit()
+    conn.close()
+    monkeypatch.setenv("MAL_DB_PATH", str(db))
+    monkeypatch.setenv("MAL_CONTROL_DIR", str(tmp_path / "control"))
+    from api_server.app import app
+    c = TestClient(app)
+    for route in _DISCOVERY_ROUTES:
+        r = c.get(route)
+        assert r.status_code == 200, route
+    assert c.get("/discovery/latest").json()["passes"] == []
+    assert c.get("/watchlist").json()["watchlist"] == []
+    assert c.get("/discovery/state").json()["watchlist_size"] == 0
+
+
+def test_discovery_views_write_nothing(env, client):
+    """The structural claim: these are reads. The DB must be byte-identical."""
+    before = hashlib.sha256(open(env["db"], "rb").read()).hexdigest()
+    for route in _DISCOVERY_ROUTES:
+        assert client.get(route).status_code == 200
+    after = hashlib.sha256(open(env["db"], "rb").read()).hexdigest()
+    assert before == after
+
+
+def test_discovery_views_expose_no_write_route(env, client):
+    """No POST/PUT/PATCH/DELETE exists on any discovery path."""
+    paths = {r.path: r for r in client.app.routes if hasattr(r, "methods")}
+    for path, route in paths.items():
+        if any(path.startswith(p) for p in
+               ("/discovery", "/watchlist", "/longterm")):
+            assert route.methods <= {"GET", "HEAD"}, (path, route.methods)
+
+
+def test_discovery_views_never_expose_a_key_value(env, client, monkeypatch):
+    """No discovery response may carry a credential, even with keys resolvable."""
+    canary = "CANARY-GUI-KEY-MUST-NOT-APPEAR-2b3c4d"
+    for var in ("FINNHUB_API_KEY", "ANTHROPIC_API_KEY", "OPENAI_API_KEY",
+                "APCA_API_KEY_ID", "APCA_API_SECRET_KEY"):
+        monkeypatch.setenv(var, canary)
+    for route in _DISCOVERY_ROUTES:
+        body = client.get(route).text
+        assert canary not in body, route
+        assert "token=" not in body, route
+        assert "api_key" not in body.lower(), route
+
+
+def test_discovery_views_never_enable_live(env, client):
+    """A discovery view cannot change the live posture."""
+    before = client.get("/approval").json()
+    for route in _DISCOVERY_ROUTES:
+        client.get(route)
+    after = client.get("/approval").json()
+    assert before == after
+    assert after.get("live_enabled") in (0, False)
 
 
 def test_health_trade_auth_and_ibkr_never_order():

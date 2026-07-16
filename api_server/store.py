@@ -227,6 +227,128 @@ def research_theses(limit: int = 100) -> list[dict]:
         "FROM research_thesis ORDER BY id DESC LIMIT ?", (limit,))
 
 
+# --- Discovery (read-only) ---------------------------------------------------
+# The Python discovery package writes these tables; this module only reads them,
+# through the same mode=ro connection as everything else here. A DB predating
+# discovery has no such tables, and `query` returns [] rather than raising, so
+# these degrade to an empty view instead of a broken page.
+
+def discovery_latest(asset_class: str | None = None) -> list[dict]:
+    """The most recent funnel pass per asset class, with per-stage counts and
+    every instrument dropped at each stage with its reason. Read-only."""
+    classes = ([asset_class] if asset_class in ("crypto", "equity")
+               else ["crypto", "equity"])
+    out: list[dict] = []
+    for ac in classes:
+        # Most recent means most recent BY TIMESTAMP. Ordering by id would only
+        # agree while rows are inserted in time order, which is true today but
+        # is an assumption the view should not rest on. id breaks a tie.
+        row = query_one(
+            "SELECT id, ts, asset_class, universe_count, finalists_count, "
+            "survivors_count, evaluated_count, council_calls, gate_calls, "
+            "est_cost_usd, budget_remaining, status, reason FROM discovery_pass "
+            "WHERE asset_class = ? ORDER BY ts DESC, id DESC LIMIT 1", (ac,))
+        if not row:
+            continue
+        row["drops"] = query(
+            "SELECT symbol, stage, reason, score FROM discovery_drop "
+            "WHERE pass_id = ? ORDER BY stage, score DESC, symbol",
+            (row["id"],))
+        out.append(row)
+    return out
+
+
+def discovery_candidates(limit: int = 50) -> list[dict]:
+    """Stage-C survivors from the latest pass per asset class, with their
+    four-level verdicts and ADVISORY sizing. Read-only.
+
+    ``size_pct`` is a suggestion only: the engine's hard sleeve cap and the
+    RiskGate both still apply and can only reduce it.
+    """
+    limit = max(1, min(int(limit), 200))
+    # The latest pass per asset class, by TIMESTAMP (see discovery_latest).
+    ids = [p["id"] for p in discovery_latest(None)]
+    if not ids:
+        return []
+    placeholders = ",".join("?" for _ in ids)
+    return query(
+        f"SELECT c.ts, c.symbol, c.verdict, c.direction, c.conviction, c.edge, "
+        f"c.agreement, c.size_pct, c.horizon, c.sleeve_target, c.rationale, "
+        f"p.asset_class FROM discovery_candidate c "
+        f"JOIN discovery_pass p ON p.id = c.pass_id "
+        f"WHERE c.pass_id IN ({placeholders}) "
+        f"ORDER BY c.conviction DESC LIMIT ?", (*ids, limit))
+
+
+def watchlist(limit: int = 100) -> list[dict]:
+    """The current active dynamic watchlist: why each instrument is on it, when
+    it was added, its sleeve target, and its status. Read-only."""
+    limit = max(1, min(int(limit), 500))
+    return query(
+        "SELECT symbol, asset_class, added_ts, updated_ts, source, reason, "
+        "sleeve_target, score, status FROM watchlist WHERE status = 'active' "
+        "ORDER BY score DESC, updated_ts DESC, symbol LIMIT ?", (limit,))
+
+
+def watchlist_events(limit: int = 30) -> list[dict]:
+    """Recent adds and prunes, so the operator sees the list living and changing.
+    Includes REFUSED events (applied = 0), so an event from a not-yet-enabled
+    source is visible rather than silent."""
+    limit = max(1, min(int(limit), 200))
+    return query(
+        "SELECT ts, action, symbol, source, reason, applied FROM watchlist_event "
+        "ORDER BY id DESC LIMIT ?", (limit,))
+
+
+def _thesis_status(row: dict) -> str:
+    """Where the position sits against its thesis, from stored numbers only.
+
+    Reports what the DB says. It never decides an exit: the engine owns exits
+    through its native stop/target and the RiskGate.
+    """
+    if not row.get("direction"):
+        return "no thesis"
+    # unrealized_pnl plus entry gives the mark without needing a live quote.
+    try:
+        qty = float(row.get("qty") or 0)
+        entry = float(row.get("avg_price") or 0)
+        pnl = float(row.get("unrealized_pnl") or 0)
+        mark = entry + pnl / qty if qty else entry
+    except (TypeError, ValueError, ZeroDivisionError):
+        return "unknown"
+    target = row.get("target")
+    invalid = row.get("invalidation_price")
+    if target and mark >= float(target):
+        return "target reached"
+    if invalid and mark <= float(invalid):
+        return "invalidated"
+    return "on thesis"
+
+
+def longterm_positions() -> list[dict]:
+    """Open research_satellite positions joined to their persisted thesis.
+
+    Each row carries the position (entry date, current PnL) plus the thesis the
+    engine holds it on: direction, conviction, target, horizon, and the
+    invalidation condition. A position whose thesis predates the long-term
+    strategy has NULL target/invalidation, which the GUI shows as absent rather
+    than inventing a value.
+    """
+    rows = query(
+        "SELECT p.venue, p.symbol, p.category, p.side, p.qty, p.avg_price, "
+        "p.notional, p.opened_ts, p.unrealized_pnl, "
+        "t.ts AS thesis_ts, t.direction, t.conviction, t.horizon, t.rationale, "
+        "t.status AS thesis_status, t.target, t.invalidation_price, "
+        "t.invalidation, t.entry_price "
+        "FROM positions p LEFT JOIN research_thesis t "
+        "  ON t.symbol = p.symbol AND t.status = 'open' "
+        "WHERE COALESCE(p.sleeve,'quant_core') = 'research_satellite' "
+        "ORDER BY p.symbol")
+    for r in rows:
+        r["status_vs_thesis"] = _thesis_status(r)
+    return rows
+
+
 def orders(mode: str, limit: int = 50,
            category: str | None = None) -> list[dict]:
     mode = valid_mode(mode)

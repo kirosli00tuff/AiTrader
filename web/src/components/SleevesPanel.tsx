@@ -7,11 +7,14 @@ import { api } from "../api/client";
 import { useApi } from "../api/useApi";
 import { Panel, DataState } from "./ui";
 import { Toggle, ConfirmButton } from "./controls";
-import { money, pct } from "../api/format";
+import { money, pct, shortTs } from "../api/format";
 
 export function SleevesPanel() {
   const s = useApi(() => api.sleeves(), 5000);
   const r = useApi(() => api.researchTheses(50), 5000);
+  // Discovery feeds candidates to BOTH sleeves, so its state belongs next to the
+  // split. Polled slowly: a pass runs hourly at most.
+  const d = useApi(() => api.discoveryState(), 30000);
 
   return (
     <Panel title="Core-satellite sleeves">
@@ -48,6 +51,29 @@ export function SleevesPanel() {
               <div className="muted">
                 research_satellite is OFF in config (opt-in). The engine reads this
                 at startup; the toggle here records intent.
+              </div>
+            )}
+            <div className="muted small">
+              The satellite target is a CEILING, not a floor. It may sit under it;
+              the hard cap is what it can never exceed, whatever the conviction.
+            </div>
+            {d.data && (
+              <div className="muted small" data-testid="sleeve-discovery-line">
+                Discovery <strong>{d.data.enabled ? "on" : "off (opt-in)"}</strong>
+                {" · "}watchlist {d.data.watchlist_size}/{d.data.watchlist_max}
+                {d.data.enabled && (
+                  <>
+                    {" · "}last pass{" "}
+                    {d.data.last_pass.crypto || d.data.last_pass.equity
+                      ? shortTs(
+                          [d.data.last_pass.crypto, d.data.last_pass.equity]
+                            .filter((t): t is string => !!t).sort().slice(-1)[0])
+                      : "none yet"}
+                    {" · "}discovery budget {d.data.budget.used_today}/
+                    {d.data.budget.daily} calls today
+                  </>
+                )}
+                {" · "}both sleeves draw candidates from the watchlist
               </div>
             )}
           </div>

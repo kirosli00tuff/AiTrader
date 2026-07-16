@@ -5,6 +5,8 @@ import type {
   Credential, EngineState, Health, IntegrationsHealth, KillState, Mode, Order, Pnl, Position, SignalsResponse,
   Trade, Venue, DaySummary, ProviderCost, RunState, SkipRow, TradeDetail,
   SleeveState, ResearchThesis,
+  DiscoveryState, DiscoveryPass, DiscoveryCandidate, WatchlistRow,
+  WatchlistEvent, LongTermPosition,
 } from "./types";
 
 export const API_BASE = import.meta.env.VITE_API_BASE ?? "http://127.0.0.1:8000";
@@ -104,4 +106,26 @@ export const api = {
     post<ControlResult>("/controls/sleeve", { sleeve, enabled }),
   requestRebalance: () =>
     post<{ ok: boolean; rebalance_requested: boolean }>("/controls/rebalance", {}),
+
+  // --- Discovery (READ-ONLY) ------------------------------------------------
+  // Every call here is a GET. Discovery has no write path by design, so there is
+  // deliberately no setter alongside these.
+  discoveryState: () => get<DiscoveryState>("/discovery/state"),
+  discoveryLatest: (assetClass?: string) =>
+    get<{ passes: DiscoveryPass[]; enabled: boolean }>(
+      `/discovery/latest${assetClass ? `?asset_class=${assetClass}` : ""}`),
+  discoveryCandidates: (limit = 50) =>
+    get<{ candidates: DiscoveryCandidate[]; enabled: boolean }>(
+      `/discovery/candidates?limit=${limit}`),
+  watchlist: (limit = 100, events = 30) =>
+    get<{ watchlist: WatchlistRow[]; events: WatchlistEvent[]; enabled: boolean }>(
+      `/watchlist?limit=${limit}&events=${events}`),
+  longtermPositions: () =>
+    get<{
+      positions: LongTermPosition[];
+      enabled: boolean;
+      strategy_enabled: boolean;
+      sleeve_config_enabled: boolean;
+      sleeve_toggle_enabled: boolean;
+    }>("/longterm/positions"),
 };

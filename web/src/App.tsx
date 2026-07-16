@@ -6,6 +6,9 @@ import LiveSection from "./pages/LivePage";
 import LiveOverview from "./pages/LiveOverview";
 import CategoryView from "./pages/CategoryView";
 import ControlsPage from "./pages/ControlsPage";
+import DiscoveryPage from "./pages/DiscoveryPage";
+import WatchlistPage from "./pages/WatchlistPage";
+import LongTermPage from "./pages/LongTermPage";
 import HealthPage from "./pages/HealthPage";
 import OpsPage from "./pages/OpsPage";
 import SettingsPage from "./pages/SettingsPage";
@@ -26,6 +29,10 @@ export default function App() {
           <Route path="crypto" element={<CategoryView mode="live" category="crypto" />} />
         </Route>
         <Route path="controls" element={<ControlsPage />} />
+        {/* Discovery views: read-only. No control lives on these routes. */}
+        <Route path="discovery" element={<DiscoveryPage />} />
+        <Route path="watchlist" element={<WatchlistPage />} />
+        <Route path="longterm" element={<LongTermPage />} />
         <Route path="health" element={<HealthPage />} />
         <Route path="ops" element={<OpsPage />} />
         <Route path="settings" element={<SettingsPage />} />
