@@ -85,6 +85,12 @@ void Storage::init_schema(const std::string& schema_sql_path) {
     const char* migrations[] = {
         "ALTER TABLE trades ADD COLUMN sleeve TEXT DEFAULT 'quant_core'",
         "ALTER TABLE positions ADD COLUMN sleeve TEXT DEFAULT 'quant_core'",
+        // Long-term thesis fields (discovery.long_term_sleeve_enabled, OFF by
+        // default). NULL on a thesis from the original council-mapped path.
+        "ALTER TABLE research_thesis ADD COLUMN target REAL",
+        "ALTER TABLE research_thesis ADD COLUMN invalidation_price REAL",
+        "ALTER TABLE research_thesis ADD COLUMN invalidation TEXT",
+        "ALTER TABLE research_thesis ADD COLUMN entry_price REAL",
     };
     for (const char* m : migrations) {
         char* e = nullptr;
@@ -238,9 +244,12 @@ void Storage::upsert_position(const std::string& venue, const std::string& symbo
 long long Storage::insert_research_thesis(const ResearchThesisRow& t) {
     Stmt s(db_,
            "INSERT INTO research_thesis(ts,symbol,direction,conviction,horizon,"
-           "rationale,status) VALUES(?,?,?,?,?,?,?)");
+           "rationale,status,target,invalidation_price,invalidation,entry_price)"
+           " VALUES(?,?,?,?,?,?,?,?,?,?,?)");
     s.bind(1, t.ts).bind(2, t.symbol).bind(3, t.direction).bind(4, t.conviction)
-        .bind(5, t.horizon).bind(6, t.rationale).bind(7, t.status);
+        .bind(5, t.horizon).bind(6, t.rationale).bind(7, t.status)
+        .bind(8, t.target).bind(9, t.invalidation_price)
+        .bind(10, t.invalidation).bind(11, t.entry_price);
     s.step_done();
     return sqlite3_last_insert_rowid(db_);
 }
@@ -349,6 +358,31 @@ std::vector<BarRow> Storage::bars_in_range(const std::string& symbol,
         rows.push_back(std::move(b));
     }
     return rows;
+}
+
+std::vector<std::string> Storage::watchlist_symbols(const std::string& sleeve) {
+    // Tolerant read: a DB created before discovery has no watchlist table, and a
+    // missing table must degrade to "no watchlist", never to a throw. Discovery
+    // is an advisory layer and can never take the trading loop down.
+    std::vector<std::string> out;
+    const std::string sql =
+        sleeve.empty()
+            ? "SELECT symbol FROM watchlist WHERE status='active' ORDER BY symbol"
+            : "SELECT symbol FROM watchlist WHERE status='active' AND "
+              "sleeve_target=? ORDER BY symbol";
+    sqlite3_stmt* raw = nullptr;
+    if (sqlite3_prepare_v2(db_, sql.c_str(), -1, &raw, nullptr) != SQLITE_OK) {
+        if (raw) sqlite3_finalize(raw);
+        return out;
+    }
+    if (!sleeve.empty())
+        sqlite3_bind_text(raw, 1, sleeve.c_str(), -1, SQLITE_TRANSIENT);
+    while (sqlite3_step(raw) == SQLITE_ROW) {
+        const unsigned char* s = sqlite3_column_text(raw, 0);
+        if (s) out.emplace_back(reinterpret_cast<const char*>(s));
+    }
+    sqlite3_finalize(raw);
+    return out;
 }
 
 void Storage::upsert_regime(const std::string& symbol, const std::string& regime,

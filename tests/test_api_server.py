@@ -1182,11 +1182,12 @@ def test_sleeves_endpoint_reports_split_and_cap(env, client):
     r = client.get("/sleeves")
     assert r.status_code == 200
     d = r.json()
-    # Default 80/20 split, 5% band, hard cap 25% of equity.
-    assert d["targets"]["quant_core"] == 0.80
-    assert d["targets"]["research_satellite"] == 0.20
+    # Default 70/30 split, 5% band, hard cap 35% of equity. The 30 percent is a
+    # CEILING, not a floor: the cap is what the satellite can never exceed.
+    assert d["targets"]["quant_core"] == 0.70
+    assert d["targets"]["research_satellite"] == 0.30
     assert d["drift_band"] == 0.05
-    assert abs(d["hard_cap_pct"] - 0.25) < 1e-9
+    assert abs(d["hard_cap_pct"] - 0.35) < 1e-9
     assert "allocation" in d and "rebalance_due" in d
     # research_satellite ships OFF by default.
     assert d["research_satellite_config_enabled"] is False

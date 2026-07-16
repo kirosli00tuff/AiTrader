@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from discovery.settings import long_term_sleeve_enabled
 from llm_consensus import consensus
 from llm_consensus.config_access import research_conviction_threshold
 
@@ -20,11 +21,25 @@ def research_thesis(payload: dict, providers: list | None = None,
                     cfg_path: str | None = None) -> dict:
     """Produce a structured research thesis for one candidate instrument.
 
-    Reuses the council (gate-screened) and maps its consensus verdict to a
-    long-term thesis. Never raises: a council failure degrades to a flat,
-    zero-conviction thesis that the engine will not act on.
+    Dispatches on discovery.long_term_sleeve_enabled (default false):
+      * OFF (default) — the original council-mapped thesis below, unchanged.
+      * ON            — the quality-and-catalyst-plus-council long-term strategy
+                        (research_satellite.long_term), which additionally
+                        returns a target and an invalidation condition.
+
+    Both shapes carry direction / conviction / horizon / rationale, so the C++
+    satellite path consumes either without a change. Never raises: a council
+    failure degrades to a flat, zero-conviction thesis the engine will not act on.
     """
     symbol = str(payload.get("symbol", "?"))
+
+    if long_term_sleeve_enabled(cfg_path):
+        from research_satellite.long_term import long_term_thesis
+        thesis = long_term_thesis(payload, providers=providers, cfg_path=cfg_path)
+        thesis.setdefault("conviction_threshold",
+                          research_conviction_threshold(cfg_path))
+        return thesis
+
     # Frame the state for DEEP research: a longer horizon than the quick council.
     state: dict[str, Any] = dict(payload)
     state["mode"] = "deep_research"

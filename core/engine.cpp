@@ -45,6 +45,39 @@ Engine::Engine(config::Config cfg, EngineOptions opts)
 
     continuous_ = opts_.continuous;
 
+    // Dynamic watchlist -> traded universe. BOTH sleeves draw entry candidates
+    // from the watchlist, which they do by the watchlist's active symbols
+    // joining the native whitelist here, so every downstream path (bar
+    // aggregation, warm gate, strategy evaluation, sizing, the RiskGate) treats
+    // a discovered symbol exactly like a configured one. No path is special-cased.
+    //
+    // Gated on discovery_enabled, which is FALSE by default: with discovery off
+    // this block never runs, the whitelist is untouched, and the traded universe
+    // is exactly the configured one. The Python discovery package is the
+    // watchlist's writer; the engine only reads it, once, at construction.
+    // Refreshing mid-run is deliberately NOT done: the traded universe stays
+    // stable for the life of a run, so a pass cannot move symbols under an open
+    // position. A restart picks up the current list.
+    if (cfg_.discovery.discovery_enabled) {
+        auto extra = storage_->watchlist_symbols();
+        auto& wl = cfg_.strategy.whitelist;
+        int added = 0;
+        for (const auto& s : extra) {
+            if (std::find(wl.begin(), wl.end(), s) == wl.end()) {
+                wl.push_back(s);
+                ++added;
+            }
+        }
+        if (added > 0)
+            storage_->append_event(
+                {util::now_iso8601(), "discovery_watchlist", "", "", "info",
+                 "Watchlist added " + std::to_string(added) +
+                     " symbol(s) to the traded universe",
+                 util::to_json({}, {{"added", static_cast<double>(added)},
+                                    {"whitelist_size",
+                                     static_cast<double>(wl.size())}})});
+    }
+
     // Resolve the operator kill-request control file written by the API backend
     // (api_server/store.py). Contract: env MAL_CONTROL_DIR overrides, else the
     // configured system.control_dir (default ".control"); the file is
@@ -1680,10 +1713,23 @@ void Engine::maybe_run_research_pass(const market_data::MarketState& ms,
     double conviction = bridge::json_get_number(*resp, "conviction", 0.0);
     std::string horizon = bridge::json_get_string(*resp, "horizon", "");
     std::string rationale = bridge::json_get_string(*resp, "rationale", "");
+    // Long-term strategy fields. Present only when discovery.long_term_sleeve_enabled
+    // routes the thesis through the quality-and-catalyst path. Zero/empty
+    // otherwise, which is what the original council-mapped path produces.
+    double thesis_target = bridge::json_get_number(*resp, "target", 0.0);
+    double invalidation_px =
+        bridge::json_get_number(*resp, "invalidation_price", 0.0);
+    std::string invalidation = bridge::json_get_string(*resp, "invalidation", "");
 
     // Persist the thesis regardless (research feed), so the operator sees passes.
-    storage_->insert_research_thesis(
-        {ts, ms.symbol, dir, conviction, horizon, rationale, "open"});
+    storage::ResearchThesisRow thesis_row{ts,        ms.symbol, dir,
+                                          conviction, horizon,  rationale,
+                                          "open"};
+    thesis_row.target = thesis_target;
+    thesis_row.invalidation_price = invalidation_px;
+    thesis_row.invalidation = invalidation;
+    thesis_row.entry_price = ms.price;
+    storage_->insert_research_thesis(thesis_row);
     storage_->append_event(
         {ts, "research_pass", ms.venue, ms.symbol, "info",
          "Research thesis " + dir + " conviction " + std::to_string(conviction),
@@ -1749,10 +1795,27 @@ void Engine::maybe_run_research_pass(const market_data::MarketState& ms,
     ap.pos.category = o.category; ap.pos.factor = "research"; ap.pos.opened_ts = ts;
     ap.pos.direction = strategy::Direction::Long; ap.pos.entry_price = o.price;
     ap.pos.qty = o.qty;
-    ap.pos.stop_price = o.price - cfg_.strategy.crypto_atr_stop_mult *
-                                      (atr_v > 0 ? atr_v : o.price * 0.05);
-    ap.pos.target_price = o.price + cfg_.strategy.atr_target_mult *
-                                        (atr_v > 0 ? atr_v : o.price * 0.05) * 3.0;
+    double atr_stop = o.price - cfg_.strategy.crypto_atr_stop_mult *
+                                    (atr_v > 0 ? atr_v : o.price * 0.05);
+    double atr_target = o.price + cfg_.strategy.atr_target_mult *
+                                      (atr_v > 0 ? atr_v : o.price * 0.05) * 3.0;
+    // A long-term hold exits on THESIS INVALIDATION or TARGET, never on a
+    // short-term signal (time_stop_bars stays 0 below).
+    //
+    // SAFETY RULE: the thesis may only TIGHTEN the stop, never widen it. A
+    // conviction cannot buy itself more room to be wrong, so the invalidation
+    // level applies only when it sits closer to entry than the ATR stop. Same
+    // for the target: a thesis target applies only when it is nearer than the
+    // wide ATR target, so a model cannot stretch a position's runway. The
+    // RiskGate keeps its own limits unconditionally either way; these are
+    // NATIVE exits and no Level-1 value is involved.
+    ap.pos.stop_price = (invalidation_px > 0.0 && invalidation_px > atr_stop &&
+                         invalidation_px < o.price)
+                            ? invalidation_px
+                            : atr_stop;
+    ap.pos.target_price = (thesis_target > o.price && thesis_target < atr_target)
+                              ? thesis_target
+                              : atr_target;
     ap.pos.time_stop_bars = 0;  // long-term hold, no time stop
     ap.sleeve = "research_satellite";
     storage::TradeRow tr;

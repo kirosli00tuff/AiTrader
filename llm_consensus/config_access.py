@@ -35,6 +35,16 @@ def _cfg(cfg_path: str | None) -> dict:
     return _load(_config_path(cfg_path))
 
 
+def config_block(name: str, cfg_path: str | None = None) -> dict:
+    """One top-level config block by name, {} when absent.
+
+    Public so sibling packages (discovery, research_satellite) read the same
+    single source of truth through one loader instead of each rolling their own.
+    """
+    block = _cfg(cfg_path).get(name, {})
+    return block if isinstance(block, dict) else {}
+
+
 def llm_model_names(cfg_path: str | None = None) -> dict[str, str]:
     """Concrete model id per ensemble slot from the ``llm_models`` block."""
     names = _cfg(cfg_path).get("llm_models", {}) or {}

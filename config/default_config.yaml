@@ -296,8 +296,13 @@ dnn_schedule:
 sleeves:
   quant_core_enabled: true
   research_satellite_enabled: false        # OFF by default (operator opt-in)
-  quant_core_target_pct: 0.80
-  research_satellite_target_pct: 0.20
+  quant_core_target_pct: 0.70               # 70/30 split
+  research_satellite_target_pct: 0.30       # a CEILING, not a floor: the satellite
+                                            # may sit anywhere at or under this, and
+                                            # the hard cap (target + band) is what it
+                                            # can never exceed. It earns capital by
+                                            # demonstrated paper results, it is never
+                                            # entitled to its target.
   drift_band_pct: 0.05                      # absolute band around each target
   research_whitelist: "BTC/USD,ETH/USD,SPY,QQQ,AAPL,MSFT,NVDA"
   research_conviction_threshold: 0.70       # min council conviction to open a satellite position
@@ -307,6 +312,67 @@ sleeves:
   rebalance_on_drift: true
   rebalance_check_minutes: 360
   combined_monthly_spend_ceiling_usd: 100.0 # pauses BOTH sleeves when reached (0=off)
+
+# -----------------------------------------------------------------------------
+# Discovery engine — curated universe screened cheap-to-expensive.
+#
+# SHIPS DISABLED. discovery_enabled and long_term_sleeve_enabled are both false,
+# so the engine runs the fixed-whitelist two-sleeve system exactly as before.
+# Enabling either is a deliberate operator action.
+#
+#   Stage A  free pre-screen   whole universe -> max_finalists   0 LLM tokens
+#   Stage B  Haiku gate        finalists      -> max_survivors    fractions of a cent
+#   Stage C  four-level eval   survivors      -> verdicts         full council, a few
+#
+# The UNIVERSE is the OUTER EDGE of the funnel: only LIQUID names belong here.
+# Stage A ranks all of it for free, so a wide universe costs nothing, but an
+# illiquid name surviving to Stage C wastes a full council call on something the
+# strategies cannot trade well (both RSI-2 and momentum fail on thin books).
+# Edit the two lists below to change what the funnel may ever look at.
+#
+# NOT here: the real-time news-react adaptive layer. Discovery uses Finnhub's
+# PRE-COMPUTED sentiment as a cheap number only, never live LLM news reading.
+# That layer is the next build, deferred, and will ship gated. See CONTEXT.md.
+# -----------------------------------------------------------------------------
+discovery:
+  discovery_enabled: false                  # OFF by default (operator opt-in)
+  long_term_sleeve_enabled: false           # OFF by default (operator opt-in)
+
+  # Crypto: composition SHIFTS, so a daily refresh picks the active set by
+  # liquidity and volume from this broader curated list. The refresh ranks WITHIN
+  # the list, it never discovers a new coin on its own.
+  crypto_active_max: 50
+  crypto_universe: "BTC/USD,ETH/USD,SOL/USD,XRP/USD,ADA/USD,DOGE/USD,AVAX/USD,DOT/USD,LINK/USD,MATIC/USD,LTC/USD,BCH/USD,UNI/USD,ATOM/USD,XLM/USD,ETC/USD,FIL/USD,APT/USD,ARB/USD,OP/USD,NEAR/USD,ICP/USD,IMX/USD,INJ/USD,SUI/USD,SEI/USD,TIA/USD,RNDR/USD,GRT/USD,AAVE/USD,MKR/USD,ALGO/USD,SAND/USD,MANA/USD,AXS/USD,CRV/USD,COMP/USD,SNX/USD,LDO/USD,SHIB/USD,TRX/USD,TON/USD,HBAR/USD,VET/USD,THETA/USD,EGLD/USD,FTM/USD,RUNE/USD,ZEC/USD,DASH/USD,EOS/USD,XTZ/USD,CHZ/USD,BAT/USD,YFI/USD"
+
+  # Equities: a STABLE curated list. Large caps and liquid ETFs do not churn week
+  # to week, so this is edited by hand and stays put. 110 names.
+  equity_universe: "AAPL,MSFT,NVDA,GOOGL,AMZN,META,TSLA,AVGO,ORCL,CRM,ADBE,AMD,INTC,CSCO,QCOM,TXN,IBM,NOW,INTU,AMAT,MU,LRCX,ADI,KLAC,SNPS,CDNS,PANW,ANET,JPM,BAC,WFC,GS,MS,C,SCHW,AXP,BLK,SPGI,CB,PGR,USB,PNC,UNH,JNJ,LLY,ABBV,MRK,PFE,TMO,ABT,DHR,AMGN,GILD,CVS,BMY,ISRG,VRTX,REGN,WMT,COST,PG,KO,PEP,MCD,NKE,SBUX,TGT,LOW,HD,TJX,DIS,CMCSA,NFLX,CAT,DE,BA,HON,UNP,UPS,LMT,RTX,GE,MMM,ADP,XOM,CVX,COP,SLB,EOG,PSX,MPC,NEE,DUK,SO,PM,MO,CL,KMB,LIN,APD,SHW,FCX,AMT,PLD,T,VZ,TMUS,SPY,QQQ,IWM,DIA,XLF,XLE,XLK,XLV,SMH,GLD,TLT,HYG"
+
+  # Hard per-stage cost ceilings. The funnel narrows: survivors <= finalists, and
+  # council calls <= survivors. Config validation enforces both.
+  max_finalists: 12                         # Stage A output (the 10-15 band)
+  max_survivors: 5                          # Stage B output (the 3-6 band)
+  max_council_calls_per_pass: 5             # Stage C ceiling per pass
+  prescreen_min_score: 0.15                 # Stage A floor (below = too quiet)
+
+  # Daily discovery council budget. SEPARATE from and ADDITIVE to the trading
+  # council budget (council.council_daily_budget), so a discovery pass can never
+  # eat the quant loop's calls. Combined monthly estimate at full use:
+  # trading 40/day + discovery 12/day = 52 * $0.04 * 30 = ~$62/month worst case,
+  # under the $100 ceiling in sleeves.combined_monthly_spend_ceiling_usd, and far
+  # less in practice since the fast tier and Stage A drop most candidates free.
+  discovery_daily_council_budget: 12
+  discovery_est_cost_per_call_usd: 0.04
+
+  # Cadence. Crypto runs hourly around the clock (crypto never closes). Equities
+  # run at the US session open and hourly through US regular hours only.
+  crypto_interval_minutes: 60
+  equity_interval_minutes: 60
+
+  # Watchlist bounds. The universe is the wide end of the funnel, the watchlist
+  # the narrow end, so it stays capped and prunes what goes stale.
+  watchlist_max_size: 40
+  watchlist_stale_hours: 48
 
 # -----------------------------------------------------------------------------
 # RL advisory (Layer 3, DEFERRED). Ships toggled OFF. While rl_enabled is false

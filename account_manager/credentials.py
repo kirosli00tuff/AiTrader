@@ -99,6 +99,13 @@ def _build_registry() -> dict[str, CredentialSpec]:
         CredentialSpec("sec_api_key", "API key (optional override only)",
                        "sec_api", "SEC EDGAR (free, no key needed)", "source",
                        True, ("SEC_API_KEY",)),
+        # Finnhub feeds the discovery funnel's free pre-screen (quotes, company
+        # news, pre-computed news sentiment, fundamentals, analyst ratings,
+        # earnings calendar). Discovery ships disabled, so with no key the
+        # funnel never runs and the system is unchanged.
+        CredentialSpec("finnhub_key", "API key", "finnhub",
+                       "Finnhub (discovery pre-screen)", "source", True,
+                       ("FINNHUB_API_KEY",)),
     ]
     # LLM council provider keys (single credential each). Resolved by
     # llm_consensus.providers via resolve_env (in-app first, then env), so a key
@@ -126,6 +133,7 @@ _REQUIRED_FIELDS: dict[str, tuple[str, ...]] = {
     "ibkr": ("host", "port", "account"),
     "whale_alert": ("key",),
     "sec_api": ("key",),
+    "finnhub": ("key",),
     "openai": ("key",),
     "anthropic": ("key",),
     "gemini": ("key",),

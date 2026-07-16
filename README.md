@@ -20,6 +20,7 @@ source has a deterministic mock fallback.
 
 - [Architecture](#architecture)
 - [Safety model (the four layers)](#safety-model-the-four-layers)
+- [Discovery funnel + dynamic watchlist (ships DISABLED)](#discovery-funnel--dynamic-watchlist-ships-disabled)
 - [Repository layout](#repository-layout)
 - [Quick start (one command)](#quick-start-one-command)
 - [Run it 24/7 locally](#run-it-247-locally)
@@ -148,17 +149,21 @@ and none touches a Level-1 risk limit.
 
 The portfolio splits into two sleeves with distinct roles:
 
-- **`quant_core` (systematic core, ~80%).** Runs the RSI-2 + momentum stack
+- **`quant_core` (systematic core, 70%).** Runs the RSI-2 + momentum stack
   above. Frequent, selective, systematic.
-- **`research_satellite` (tactical satellite, ~20%).** Uses the LLM council for
+- **`research_satellite` (tactical satellite, 30%).** Uses the LLM council for
   **deep research** on individual instruments, taking **fewer, larger,
   longer-held** positions. Each pass produces a structured thesis (direction,
   conviction, horizon, rationale) persisted with the position. Ships **OFF by
   default** — the operator opts in, and it earns a wider allocation only through
   paper results (the same graduate-when-proven discipline as RL).
 
+**30% is a ceiling, not a floor.** The satellite may sit anywhere at or under it.
+It is never *entitled* to its target: widening it from 20% states intent for when
+the sleeve earns the allocation, it does not decide that it has.
+
 **The split is enforced mechanically.** The satellite can **never exceed its
-target allocation plus the drift band** (default 20% + 5% = a hard 25% cap in
+target allocation plus the drift band** (30% + 5% = a hard 35% cap in
 `core/sleeves.hpp`). A research conviction can never override the cap. When a
 sleeve drifts past the band, rules-based **rebalancing** trims the overweight
 sleeve back toward target through the normal **RiskGate-approved exit path**
@@ -176,6 +181,94 @@ The GUI Controls page shows a **sleeve allocation panel** (live split vs target,
 drift band, rebalance-due flag), per-sleeve **enable toggles**, a **rebalance-now**
 button, and the **research thesis feed** — so the higher-equity long-term
 decisions are transparent. Enable via `sleeves.research_satellite_enabled: true`.
+
+## Discovery funnel + dynamic watchlist (ships DISABLED)
+
+A fixed four-name whitelist can only find what is already on it. The discovery
+engine screens a **curated universe** down to a few vetted candidates every hour,
+**cheap to expensive**, so intelligence is spent only at the bottom:
+
+| Stage | What runs | Input → output | Cost |
+| --- | --- | --- | --- |
+| **A** | Free pre-screen: price, volume, volatility, momentum, gap, Finnhub **pre-computed** sentiment, native technical signal | whole universe → **12 finalists** | **0 LLM tokens** |
+| **B** | Cheap **Claude Haiku** base-check gate | finalists → **5 survivors** | fractions of a cent each |
+| **C** | Full **four-level** evaluation (council + DNN advisory + whale) producing a verdict (`buy`/`sell`/`avoid`), sizing, rationale | survivors → verdicts | full council, **a handful** |
+
+**Why this shape.** Cost, not analysis, is what stops you looking at 150
+instruments hourly. Ranking on free data costs nothing per name, so the universe
+can be wide while the bill stays flat. Config validation enforces that the funnel
+**narrows**: `max_survivors <= max_finalists` and
+`max_council_calls_per_pass <= max_survivors`.
+
+**The universe is the outer edge of the funnel, and liquid names only.** Both native
+strategy families fail on thin books, so an illiquid name reaching Stage C wastes
+a council call. Edit the two lists in the `discovery:` config block:
+
+- **Crypto (55 → active 50).** Composition shifts, so a **daily refresh** picks
+  the active set by **liquidity and volume** from the broader curated list. It
+  ranks *within* the list, it never discovers a coin on its own.
+- **Equities (119, stable).** Large caps and liquid ETFs do not churn, so the
+  list is hand-edited and stays put.
+
+**Hard cost ceilings.** `max_finalists` / `max_survivors` /
+`max_council_calls_per_pass`, plus a **daily discovery council budget** (12/day)
+that is **separate from and additive to** the trading budget, so discovery can
+never eat the quant loop's calls. Worst case combined: 52 calls/day × $0.04 × 30 ≈
+**$62/month**, under the existing $100 combined ceiling. Every stage's counts and
+**every dropped instrument with its stage and reason** persist to
+`discovery_pass` / `discovery_drop` / `discovery_candidate`.
+
+**Cadence.** Crypto **hourly, 24/7**. Equities at the **US session open and hourly
+through US regular hours** only. An equity pass after hours would rank a market
+nobody can trade.
+
+**Dynamic watchlist.** Stage-C survivors join a living candidate list
+(`watchlist`) that **both sleeves draw entry candidates from**; entries prune when
+a signal goes **stale** (no pass re-confirmed it in 48h) or a **thesis breaks**,
+and the list is capped at 40 on score. It is **event-sourced**: every mutation goes
+through one `apply_event` path with an explicit source, journalled to
+`watchlist_event`. Today only `discovery` and `prune` are accepted; the
+`adaptive_react` source is **reserved and refused** (`source_not_enabled`), the
+seam the deferred react layer will use without a rewrite.
+
+**Long-term sleeve strategy** (`research_satellite`, `long_term_sleeve_enabled`):
+**quality and catalyst, plus council.** A free Finnhub screen runs first. Quality
+(ROE, margin, revenue growth, sane P/E) says the business is worth owning for
+months, and a catalyst (earnings inside 21 days, a strong sentiment shift, or an
+analyst upgrade) says why now. **Both must hold**: quality alone is a watchlist
+entry, a catalyst alone is a gamble. Survivors get the full four levels in
+**long-horizon mode**, producing a thesis with **direction, conviction, target,
+horizon, and an invalidation condition**, persisted with the position. The four
+levels drive **both** sleeves. Only the horizon and prompt framing differ.
+Positions are held long-term (no time stop) and exit on **target or thesis
+invalidation**, never a short-term signal. A **thesis may only tighten a stop,
+never widen it**: target and invalidation are derived deterministically from the
+52-week range, so a model cannot hallucinate a level that buys itself more room to
+be wrong. The conviction threshold, the hard sleeve cap, and the RiskGate all
+still apply.
+
+**It all ships disabled.** `discovery.discovery_enabled: false` and
+`discovery.long_term_sleeve_enabled: false`. With the flags off the engine is
+exactly the fixed-whitelist two-sleeve system: it never fetches, never scores,
+never writes a discovery row, and never reads the watchlist. Verified: a
+12000-step run with the flags off produced the same 272 trades / 136 closed on the
+same 4 symbols, with zero discovery activity. The startup block prints discovery
+state, universe sizes, funnel ceilings, the split, and each flag. Enabling is a
+deliberate operator action, and needs a `FINNHUB_API_KEY` (keystore-first, never
+logged; without one discovery reports `unavailable` and does nothing).
+
+Run it from the existing maintenance scheduling, or directly:
+
+```bash
+python -m discovery.run --asset-class crypto     # one class, if due
+python -m discovery.run --force                  # ignore cadence (still flag-gated)
+```
+
+> **Not built here:** the real-time news-**interpretation-and-react** layer.
+> Discovery uses Finnhub's **pre-computed** sentiment as a cheap number only. No
+> live LLM news reading, no autonomous event-driven entry or exit. Every entry
+> routes through the full funnel and the RiskGate, never a raw headline. That
+> layer is the next build, deferred, and will ship gated. See `LIVE_READINESS.md`.
 
 ## Unattended week-long run (watchdog, backups, DNN challenger)
 
@@ -235,6 +328,8 @@ The default config stays conservative; the week config is an explicit opt-in fil
 | `tests/` | CTest C++ unit tests + pytest Python tests | C++/Py |
 | `llm_consensus/` | multi-LLM consensus advisory service | Python |
 | `ml_factor/` | NumPy DNN advisory factor + registry + trainer | Python |
+| `discovery/` | Finnhub client, curated universe, cheap-to-expensive funnel, dynamic watchlist (ships disabled) | Python |
+| `research_satellite/` | deep-research thesis + long-term quality-and-catalyst strategy (ships disabled) | Python |
 | `whale_signal/` | ClankApp / SEC-EDGAR-13F (+ optional Whale Alert) adapters + scoring | Python |
 | `python_bridge/` | JSON-over-HTTP RPC server + client | Python |
 | `ui/` | Plotly Dash control board | Python |
@@ -943,7 +1038,8 @@ Credentials can be entered two ways, with a single runtime resolver
    save keys/secrets per venue (Alpaca, Coinbase, IBKR) with
    **separate paper and live fields**, and per data source (ClankApp — free,
    default; SEC EDGAR — free, no key needed; Whale Alert — optional,
-   limited free tier). Secret inputs are masked (`type=password`).
+   limited free tier; Finnhub — free tier, 60 calls/min, needed only if you
+   enable the discovery funnel). Secret inputs are masked (`type=password`).
 2. **Environment / .env** — the existing `*_env` names, plus paper/live-specific
    variants (e.g. `ALPACA_LIVE_API_KEY`, falling back to `ALPACA_API_KEY`).
 
@@ -1002,19 +1098,33 @@ source .venv/bin/activate && pytest tests/ -q   # Python: whale, ml_factor, cons
 ```
 
 C++ tests cover the deterministic RiskGate scenarios, config validation
-invariants, and weight normalization/locking. Python tests cover whale scoring
+invariants, weight normalization/locking, the 70/30 sleeve split and its hard cap,
+and that discovery ships disabled. Python tests cover whale scoring
 (bias/flow/contradiction/delayed-downweighting/noisy-actor filtering), DNN IO
-round-trip + sizing cap + named fields, LLM consensus determinism/shape, and the
-credential resolver (encryption round-trip + in-app-overrides-env precedence).
+round-trip + sizing cap + named fields, LLM consensus determinism/shape, the
+credential resolver (encryption round-trip + in-app-overrides-env precedence), and
+the discovery funnel: that Stage A spends **zero** LLM tokens, that the gate runs
+only on finalists and the council only on survivors, that the per-stage ceilings
+and the separate daily budget cap spend, that the watchlist adds and prunes, and
+that with the flags off nothing runs at all. Every external feed is mocked; no
+test touches the network.
 
 ## Database schema
 
-`storage/schema.sql` defines 14 tables; `events` is an **append-only** audit log
-(never updated in place). Key tables: `trades`, `positions`, `signals`,
-`model_outputs`, `model_registry`, `param_history`, `weight_changes`,
+`storage/schema.sql` is the single source of truth; `events` is an **append-only**
+audit log (never updated in place). Key operational tables: `trades`, `positions`,
+`signals`, `model_outputs`, `model_registry`, `param_history`, `weight_changes`,
 `whale_activity`, `whale_signal_history`, `approval_state`, `venue_state`,
-`account_balances`, `blocked_trades`. SQLite is the single source of truth shared
-by the C++ writer and the Python/Dash readers.
+`account_balances`, `blocked_trades`, `bars`, `regime_state`, `research_thesis`,
+`sleeve_history`.
+
+The C++ engine is the **sole writer of the operational trading tables** (`trades`,
+`positions`, `events`). A few advisory tables are written Python-side by the
+service that owns them: `bars` (`market_data/alpaca_source.py` backfill),
+`model_registry` (`ml_factor/registry.py`), and the **discovery** tables
+(`discovery_pass`, `discovery_drop`, `discovery_candidate`, `watchlist`,
+`watchlist_event`). The engine only ever **reads** the watchlist, and only when
+discovery is enabled.
 
 ## TODOs (Coinbase / IBKR)
 

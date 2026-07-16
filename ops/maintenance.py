@@ -92,6 +92,29 @@ def append_weeklog(db: str | None = None, path: str | None = None) -> dict:
         return {"status": "error", "reason": type(e).__name__}
 
 
+def maybe_run_discovery(db: str | None = None,
+                        cfg_path: str | None = None) -> dict:
+    """Run any due discovery funnel pass (crypto hourly, equities in US hours).
+
+    A no-op returning {"status": "disabled"} while discovery.discovery_enabled is
+    false, which is the default, so adding this to maintenance changes nothing
+    until an operator opts in. Failure-isolated like the rest of maintenance:
+    discovery is an advisory layer and must never break the loop.
+
+    The cadence check lives inside discovery.run.due rather than here, so calling
+    this more often than the interval is a cheap no-op.
+    """
+    db = _db_path(db)
+    try:
+        from discovery import run as discovery_run
+    except Exception as e:  # noqa: BLE001 — optional deps missing in a minimal env
+        return {"status": "unavailable", "reason": type(e).__name__}
+    try:
+        return discovery_run.run_due(db_path=db, cfg_path=cfg_path)
+    except Exception as e:  # noqa: BLE001
+        return {"status": "error", "reason": type(e).__name__}
+
+
 def maybe_train_challenger(db: str | None = None,
                            symbols: list[str] | None = None) -> dict:
     """Attempt a real-data DNN challenger. Refuses cleanly below the sample
@@ -119,6 +142,8 @@ if __name__ == "__main__":
     ap.add_argument("--keep-days", type=int, default=30)
     ap.add_argument("--no-train", action="store_true")
     ap.add_argument("--no-weeklog", action="store_true")
+    ap.add_argument("--no-discovery", action="store_true")
+    ap.add_argument("--config", default=None)
     args = ap.parse_args()
     print("prune:", prune_events(args.db, args.keep_days))
     print("events/day:", events_per_day(args.db))
@@ -126,5 +151,9 @@ if __name__ == "__main__":
     # WEEKLOG.md, read-only over the DB. It is failure-isolated from the rest.
     if not args.no_weeklog:
         print("weeklog:", append_weeklog(args.db))
+    # Discovery runs on its own cadence (crypto hourly, equities in US hours) and
+    # no-ops when not due or while the flag is off (the default).
+    if not args.no_discovery:
+        print("discovery:", maybe_run_discovery(args.db, args.config))
     if not args.no_train:
         print("challenger:", maybe_train_challenger(args.db))

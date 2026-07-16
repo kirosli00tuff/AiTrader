@@ -1,0 +1,138 @@
+{
+  "_README": "SYNTHETIC FIXTURES — NOT recorded from a live Finnhub response.",
+  "_blocker": {
+    "why_synthetic": "No FINNHUB_API_KEY resolves in this environment (checked keystore-first via account_manager.credentials, then env). A real fixture could not be recorded.",
+    "host_reachable": true,
+    "probe": "GET https://finnhub.io/api/v1/quote?symbol=AAPL with no token returned HTTP 401 {\"error\":\"Please use an API key.\"}",
+    "conclusion": "The host is UP and the endpoint answers. The blocker is precisely a missing credential, not a dead host (contrast ClankApp, removed 2026-07-10 for a DNS-unreachable host).",
+    "recorded_ts": "2026-07-15",
+    "to_replace_with_real": "Save a Finnhub key in the GUI (Settings -> Finnhub) or export FINNHUB_API_KEY, then re-record against the live endpoints and re-point tests/test_finnhub_source.py at the recorded file.",
+    "risk_note": "These payloads follow the documented Finnhub schema (https://finnhub.io/docs/api) but are NOT verified against live responses. Per CONTEXT.md, an unverified parser shape in a money loop is a known risk. Discovery ships DISABLED, so nothing trades on these until a real key is added and the shapes are confirmed against live data."
+  },
+
+  "quote": {
+    "_endpoint": "GET /quote?symbol=AAPL",
+    "c": 231.44,
+    "d": 4.12,
+    "dp": 1.8129,
+    "h": 233.1,
+    "l": 227.8,
+    "o": 228.5,
+    "pc": 227.32,
+    "t": 1784131200
+  },
+
+  "quote_flat": {
+    "_endpoint": "GET /quote?symbol=KO — a deliberately quiet name, should score low in Stage A",
+    "c": 62.15,
+    "d": 0.03,
+    "dp": 0.0483,
+    "h": 62.25,
+    "l": 62.02,
+    "o": 62.1,
+    "pc": 62.12,
+    "t": 1784131200
+  },
+
+  "quote_no_price": {
+    "_endpoint": "GET /quote?symbol=DELISTED — Finnhub returns zeros for an unknown symbol",
+    "c": 0,
+    "d": null,
+    "dp": null,
+    "h": 0,
+    "l": 0,
+    "o": 0,
+    "pc": 0,
+    "t": 0
+  },
+
+  "news_sentiment": {
+    "_endpoint": "GET /news-sentiment?symbol=AAPL",
+    "buzz": {
+      "articlesInLastWeek": 42,
+      "buzz": 1.14,
+      "weeklyAverage": 36.8
+    },
+    "companyNewsScore": 0.82,
+    "sectorAverageBullishPercent": 0.62,
+    "sectorAverageNewsScore": 0.53,
+    "sentiment": {
+      "bearishPercent": 0.19,
+      "bullishPercent": 0.81
+    },
+    "symbol": "AAPL"
+  },
+
+  "basic_financials": {
+    "_endpoint": "GET /stock/metric?symbol=AAPL&metric=all",
+    "metric": {
+      "52WeekHigh": 260.1,
+      "52WeekLow": 164.08,
+      "beta": 1.24,
+      "netProfitMarginTTM": 26.31,
+      "peBasicExclExtraTTM": 34.6,
+      "revenueGrowthTTMYoy": 8.4,
+      "roeTTM": 147.25
+    },
+    "metricType": "all",
+    "symbol": "AAPL"
+  },
+
+  "basic_financials_poor": {
+    "_endpoint": "GET /stock/metric?symbol=WEAKCO&metric=all — should fail the quality floor",
+    "metric": {
+      "52WeekHigh": 12.4,
+      "52WeekLow": 3.1,
+      "netProfitMarginTTM": -14.2,
+      "peBasicExclExtraTTM": 0,
+      "revenueGrowthTTMYoy": -18.6,
+      "roeTTM": -9.4
+    },
+    "metricType": "all",
+    "symbol": "WEAKCO"
+  },
+
+  "recommendation_trends": [
+    {
+      "buy": 18,
+      "hold": 9,
+      "period": "2026-07-01",
+      "sell": 2,
+      "strongBuy": 14,
+      "strongSell": 0,
+      "symbol": "AAPL"
+    },
+    {
+      "buy": 17,
+      "hold": 11,
+      "period": "2026-06-01",
+      "sell": 2,
+      "strongBuy": 12,
+      "strongSell": 1,
+      "symbol": "AAPL"
+    }
+  ],
+
+  "earnings_calendar": {
+    "_endpoint": "GET /calendar/earnings?from=2026-07-15&to=2026-08-05&symbol=AAPL",
+    "earningsCalendar": [
+      {
+        "date": "2026-07-28",
+        "epsActual": null,
+        "epsEstimate": 1.64,
+        "hour": "amc",
+        "quarter": 3,
+        "revenueActual": null,
+        "revenueEstimate": 94210000000,
+        "symbol": "AAPL",
+        "year": 2026
+      }
+    ]
+  },
+
+  "rate_limited": {
+    "_endpoint": "any endpoint over 60 calls/minute",
+    "_status": 429,
+    "error": "API limit reached. Please try again later."
+  }
+}

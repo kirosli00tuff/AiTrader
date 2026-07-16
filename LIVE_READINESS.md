@@ -51,3 +51,48 @@ equities during US hours through Alpaca, crypto 24/7. The global machinery is
 dormant. The startup block and run-state banner show the current global session
 and which equity region is tradeable, so it is always clear that only US equities
 trade and rotation is disabled.
+
+## Real-time news-react adaptive layer (NOT BUILT, deferred, will ship gated)
+
+The layer that interprets breaking news with an LLM and reacts to it is the NEXT
+build. It is not in the codebase. Nothing in the discovery build reads a headline
+and acts on it.
+
+### What exists today, and what does not
+
+Discovery uses Finnhub's PRE-COMPUTED news sentiment score as a cheap NUMBER in
+the Stage A free pre-screen, one input among price, volume, volatility, momentum,
+and gap. That is the cheap half of the value: it answers "does this instrument
+have unusual news attention right now" for zero LLM cost, and it only ever moves
+an instrument's RANK in a screen.
+
+What does NOT exist:
+
+- No live LLM news interpretation. No model reads an article in this build.
+- No autonomous event-driven entry or exit. No path opens or closes a position in
+  response to an event.
+- No headline-triggered anything. Nothing enters on a raw headline.
+
+### Why it is deferred
+
+Reacting to news in real time is the highest-variance thing this system could do,
+and it is the one place where a model's mistake becomes an immediate trade. It
+needs its own gating, its own cost model, and its own evidence. Bolting it onto a
+discovery build would ship all of that untested.
+
+### The rule that holds when it does ship
+
+Every entry routes through the full funnel and the RiskGate. A news event may
+SURFACE a candidate. It may never place an order. The react layer ships disabled
+behind its own flag, the same graduation the RL advisory and the research
+satellite follow: build it, test it, leave it off, and let the operator turn it on
+deliberately.
+
+### The seam is already in place
+
+The dynamic watchlist is event-sourced. Every mutation goes through one
+`apply_event` path carrying an explicit source, journalled to `watchlist_event`.
+The source `adaptive_react` is RESERVED: an event from it parses, is journalled
+with `applied=0`, and is REFUSED with `source_not_enabled`. So the react layer
+adds a source and a producer, not a rewrite. `tests/test_discovery_watchlist.py`
+asserts that the reserved source stays refused.

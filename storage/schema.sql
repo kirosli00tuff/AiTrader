@@ -70,9 +70,104 @@ CREATE TABLE IF NOT EXISTS research_thesis (
     conviction REAL,                        -- council conviction [0,1]
     horizon    TEXT,                         -- e.g. weeks | months
     rationale  TEXT,
-    status     TEXT DEFAULT 'open'           -- open | invalidated | target | closed
+    status     TEXT DEFAULT 'open',          -- open | invalidated | target | closed
+    -- Long-term strategy fields (discovery.long_term_sleeve_enabled, default
+    -- OFF). NULL on a thesis written by the original council-mapped path, which
+    -- carries no target or invalidation. A long-term hold exits on target or
+    -- invalidation, never on a short-term signal, so both persist with the
+    -- position. An existing DB gains these via the ALTER path in storage.cpp.
+    target             REAL,                 -- price target
+    invalidation_price REAL,                 -- level at which the thesis is broken
+    invalidation       TEXT,                 -- readable invalidation condition
+    entry_price        REAL
 );
 CREATE INDEX IF NOT EXISTS idx_research_symbol ON research_thesis(symbol, status);
+
+-- Discovery funnel audit trail (discovery.discovery_enabled, default OFF). One
+-- row per pass per asset class, plus every instrument dropped at each stage with
+-- its reason, plus the Stage-C verdicts. These are DISCOVERY tables, not
+-- operational trading tables: the Python discovery package writes them, the same
+-- way market_data/alpaca_source.py writes `bars`. The C++ engine remains the
+-- sole writer of trades, positions, and events.
+CREATE TABLE IF NOT EXISTS discovery_pass (
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts               TEXT NOT NULL,
+    asset_class      TEXT NOT NULL,          -- crypto | equity
+    universe_count   INTEGER DEFAULT 0,
+    finalists_count  INTEGER DEFAULT 0,      -- Stage A survivors
+    survivors_count  INTEGER DEFAULT 0,      -- Stage B survivors
+    evaluated_count  INTEGER DEFAULT 0,      -- Stage C evaluated
+    council_calls    INTEGER DEFAULT 0,      -- full-council calls (the paid stage)
+    gate_calls       INTEGER DEFAULT 0,      -- cheap Haiku gate calls
+    est_cost_usd     REAL DEFAULT 0,
+    budget_remaining INTEGER DEFAULT 0,      -- of the daily discovery budget
+    status           TEXT DEFAULT 'ok',
+    reason           TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_discovery_pass_ts ON discovery_pass(asset_class, ts);
+
+CREATE TABLE IF NOT EXISTS discovery_drop (
+    id      INTEGER PRIMARY KEY AUTOINCREMENT,
+    pass_id INTEGER NOT NULL,
+    ts      TEXT NOT NULL,
+    symbol  TEXT NOT NULL,
+    stage   TEXT NOT NULL,                   -- A | B | C
+    reason  TEXT NOT NULL,
+    score   REAL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_discovery_drop_pass ON discovery_drop(pass_id);
+
+CREATE TABLE IF NOT EXISTS discovery_candidate (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    pass_id       INTEGER NOT NULL,
+    ts            TEXT NOT NULL,
+    symbol        TEXT NOT NULL,
+    verdict       TEXT,                      -- buy | sell | avoid
+    direction     TEXT,                      -- long | short | flat
+    conviction    REAL DEFAULT 0,
+    edge          REAL DEFAULT 0,
+    agreement     INTEGER DEFAULT 0,
+    size_pct      REAL DEFAULT 0,            -- ADVISORY sizing; the RiskGate rules
+    horizon       TEXT,
+    sleeve_target TEXT,                      -- quant_core | research_satellite
+    rationale     TEXT,
+    extra_json    TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_discovery_candidate_pass ON discovery_candidate(pass_id);
+
+-- The dynamic watchlist: the narrow end of the funnel. Discovery adds Stage-C
+-- survivors; entries prune when the signal goes stale or a thesis breaks. Both
+-- sleeves draw entry candidates from here. Event-sourced (see watchlist_event)
+-- so the deferred react layer can add and remove via events without a rewrite.
+CREATE TABLE IF NOT EXISTS watchlist (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    symbol         TEXT NOT NULL UNIQUE,
+    asset_class    TEXT,
+    added_ts       TEXT NOT NULL,
+    updated_ts     TEXT NOT NULL,            -- last confirmed by a pass (staleness)
+    source         TEXT NOT NULL,            -- discovery | prune
+    reason         TEXT,
+    sleeve_target  TEXT DEFAULT 'quant_core',
+    score          REAL DEFAULT 0,
+    status         TEXT DEFAULT 'active',    -- active | removed
+    removed_ts     TEXT,
+    removed_reason TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_watchlist_status ON watchlist(status, symbol);
+
+-- Every requested watchlist mutation, applied or refused. A refused event from a
+-- not-yet-enabled source (the reserved adaptive_react source) is journalled with
+-- applied=0 rather than being silent.
+CREATE TABLE IF NOT EXISTS watchlist_event (
+    id      INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts      TEXT NOT NULL,
+    action  TEXT NOT NULL,                   -- add | remove
+    symbol  TEXT NOT NULL,
+    source  TEXT NOT NULL,
+    reason  TEXT,
+    applied INTEGER DEFAULT 1
+);
+CREATE INDEX IF NOT EXISTS idx_watchlist_event_ts ON watchlist_event(ts);
 
 -- Per-sleeve accounting history for the GUI (a snapshot per sleeve over time).
 CREATE TABLE IF NOT EXISTS sleeve_history (

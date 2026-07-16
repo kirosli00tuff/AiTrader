@@ -303,7 +303,17 @@ int main(int argc, char** argv) {
                 << " bb " << st.bb_period << "/" << st.bb_std << "sd rsi "
                 << st.rsi_period << " [" << st.rsi_oversold << "-"
                 << st.rsi_overbought << "] vol_x " << st.vol_multiple << "\n"
-                << "  whitelist: " << wl << "  (bars " << st.bar_timeframe << ")\n"
+                << "  whitelist: " << wl << "  (bars " << st.bar_timeframe << ")"
+                // The banner prints the CONFIGURED whitelist. With discovery on,
+                // the engine also merges the active watchlist into the traded
+                // universe at construction (after this line prints), and logs
+                // the result as a discovery_watchlist event. Say so rather than
+                // let this read as the full traded universe.
+                << (cfg.discovery.discovery_enabled
+                        ? "  [+ active watchlist symbols, see discovery_watchlist "
+                          "event]"
+                        : "")
+                << "\n"
                 << "  whale:     tracking "
                 << (cfg.whale.whale_tracking_enabled ? "on" : "off")
                 << ", live feeds default OFF (free-first)\n"
@@ -333,6 +343,35 @@ int main(int argc, char** argv) {
                 << " calls/day, conviction>=" << cfg.sleeves.research_conviction_threshold
                 << ", combined ceiling $" << cfg.sleeves.combined_monthly_spend_ceiling_usd
                 << "/month (pauses both sleeves)\n"
+                << "  discovery: " << (cfg.discovery.discovery_enabled
+                                           ? "ENABLED"
+                                           : "DISABLED (opt-in)")
+                << ", long-term sleeve "
+                << (cfg.discovery.long_term_sleeve_enabled
+                        ? "ENABLED"
+                        : "DISABLED (opt-in)")
+                << "\n"
+                << "  universe:  crypto " << cfg.discovery.crypto_universe.size()
+                << " -> top " << cfg.discovery.crypto_active_max
+                << " by liquidity/volume (daily refresh), equity "
+                << cfg.discovery.equity_universe.size()
+                << " curated (stable)\n"
+                << "  funnel:    A free pre-screen -> "
+                << cfg.discovery.max_finalists
+                << " finalists (0 tokens) | B haiku gate -> "
+                << cfg.discovery.max_survivors
+                << " survivors | C four-level -> <= "
+                << cfg.discovery.max_council_calls_per_pass << " council calls\n"
+                << "  disc $:    budget "
+                << cfg.discovery.discovery_daily_council_budget
+                << " calls/day @ ~$"
+                << cfg.discovery.discovery_est_cost_per_call_usd
+                << "/call (SEPARATE from + additive to the trading budget); "
+                << "watchlist max " << cfg.discovery.watchlist_max_size
+                << ", stale " << cfg.discovery.watchlist_stale_hours << "h\n"
+                << "  react:     news-interpretation-and-react layer NOT BUILT "
+                << "(deferred, will ship gated; discovery uses precomputed "
+                << "sentiment only)\n"
                 << "  cost cuts: risk pre-check ON; equities market-hours-only "
                 << (cfg.engine.equities_market_hours_only ? "ON" : "off")
                 << " (no equity entry outside US RTH, exits exempt, crypto 24/7)\n"

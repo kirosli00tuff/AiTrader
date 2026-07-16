@@ -45,6 +45,14 @@ struct ResearchThesisRow {
     std::string horizon;                 // e.g. "weeks" | "months"
     std::string rationale;               // written thesis (never a key value)
     std::string status = "open";         // open | invalidated | target | closed
+    // Long-term strategy fields (discovery.long_term_sleeve_enabled, OFF by
+    // default). A long-term hold exits on target or invalidation, never on a
+    // short-term signal, so both persist with the position. Zero/empty on a
+    // thesis from the original council-mapped path, which carries neither.
+    double target = 0;                   // price target
+    double invalidation_price = 0;       // level at which the thesis is broken
+    std::string invalidation;            // readable invalidation condition
+    double entry_price = 0;
 };
 
 // A per-sleeve accounting snapshot for the GUI (equity/pnl/positions per sleeve).
@@ -151,6 +159,15 @@ public:
                                       const std::string& timeframe,
                                       const std::string& start_ts,
                                       const std::string& end_ts);
+
+    // Active dynamic-watchlist symbols, optionally for one sleeve (quant_core |
+    // research_satellite; empty means both). READ-ONLY: the Python discovery
+    // package is the writer of the watchlist, the same way it writes `bars`.
+    // The engine reads this only when discovery.discovery_enabled is true, so
+    // with discovery off (the default) it is never called and the traded
+    // universe stays exactly the configured whitelist. Returns empty when the
+    // table is absent (a DB predating discovery), so an old DB is never a crash.
+    std::vector<std::string> watchlist_symbols(const std::string& sleeve = "");
 
     // Persist the current regime + the regime-selected active factor for a symbol
     // (single row per symbol). active_factor is momentum | reversion | blend.

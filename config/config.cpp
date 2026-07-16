@@ -351,6 +351,30 @@ Config load_config(const std::string& path) {
         if (!rw.empty()) sl.research_whitelist = rw;
     }
 
+    // discovery funnel + dynamic watchlist (SHIPS DISABLED). Both flags default
+    // false, so with no discovery block (or with the shipped defaults) the engine
+    // behaves exactly as the fixed-whitelist two-sleeve system. Every value here
+    // is a cost or scheduling bound; none touches a Level-1 risk limit. The
+    // Python side mirrors these defaults in discovery/settings.py.
+    {
+        auto& dc = c.discovery;
+        dc.discovery_enabled = get_bool(root, "discovery.discovery_enabled", dc.discovery_enabled);
+        dc.long_term_sleeve_enabled = get_bool(root, "discovery.long_term_sleeve_enabled", dc.long_term_sleeve_enabled);
+        dc.crypto_universe = split_csv(get_str(root, "discovery.crypto_universe", ""));
+        dc.equity_universe = split_csv(get_str(root, "discovery.equity_universe", ""));
+        dc.crypto_active_max = get_int(root, "discovery.crypto_active_max", dc.crypto_active_max);
+        dc.max_finalists = get_int(root, "discovery.max_finalists", dc.max_finalists);
+        dc.max_survivors = get_int(root, "discovery.max_survivors", dc.max_survivors);
+        dc.max_council_calls_per_pass = get_int(root, "discovery.max_council_calls_per_pass", dc.max_council_calls_per_pass);
+        dc.discovery_daily_council_budget = get_int(root, "discovery.discovery_daily_council_budget", dc.discovery_daily_council_budget);
+        dc.discovery_est_cost_per_call_usd = get_double(root, "discovery.discovery_est_cost_per_call_usd", dc.discovery_est_cost_per_call_usd);
+        dc.crypto_interval_minutes = get_int(root, "discovery.crypto_interval_minutes", dc.crypto_interval_minutes);
+        dc.equity_interval_minutes = get_int(root, "discovery.equity_interval_minutes", dc.equity_interval_minutes);
+        dc.prescreen_min_score = get_double(root, "discovery.prescreen_min_score", dc.prescreen_min_score);
+        dc.watchlist_max_size = get_int(root, "discovery.watchlist_max_size", dc.watchlist_max_size);
+        dc.watchlist_stale_hours = get_int(root, "discovery.watchlist_stale_hours", dc.watchlist_stale_hours);
+    }
+
     // global-session equity rotation (SCAFFOLD, DISABLED). Config-driven regional
     // equity sessions. Only NY (Alpaca US equities) has a reachable venue today;
     // London and Asia are defined but venue_unavailable. Adding IBKR global
@@ -665,6 +689,42 @@ std::vector<std::string> validate_config(const Config& cfg) {
         problems.push_back("sleeves cost values must be >= 0");
     if (sl.research_whitelist.empty())
         problems.push_back("sleeves.research_whitelist must not be empty");
+
+    // Discovery. Every check is a COST or SCHEDULING bound, never a risk limit.
+    // The universe lists are allowed to be empty: with discovery disabled (the
+    // default) they are inert, and an empty universe simply means no pass runs.
+    // They are only required to be non-empty once discovery is switched on, so a
+    // half-configured opt-in fails loudly at load instead of silently doing
+    // nothing at 03:00.
+    const auto& dc = cfg.discovery;
+    pct("discovery.prescreen_min_score", dc.prescreen_min_score);
+    if (dc.crypto_active_max < 0)
+        problems.push_back("discovery.crypto_active_max must be >= 0");
+    if (dc.max_finalists < 0 || dc.max_survivors < 0 ||
+        dc.max_council_calls_per_pass < 0)
+        problems.push_back("discovery stage ceilings must be >= 0");
+    if (dc.max_survivors > dc.max_finalists)
+        problems.push_back("discovery.max_survivors must not exceed max_finalists "
+                           "(the funnel narrows, it never widens)");
+    if (dc.max_council_calls_per_pass > dc.max_survivors)
+        problems.push_back("discovery.max_council_calls_per_pass must not exceed "
+                           "max_survivors (only survivors reach the council)");
+    if (dc.discovery_daily_council_budget < 0)
+        problems.push_back("discovery.discovery_daily_council_budget must be >= 0");
+    if (dc.discovery_est_cost_per_call_usd < 0.0)
+        problems.push_back("discovery.discovery_est_cost_per_call_usd must be >= 0");
+    if (dc.crypto_interval_minutes < 0 || dc.equity_interval_minutes < 0)
+        problems.push_back("discovery cadence minutes must be >= 0");
+    if (dc.watchlist_max_size < 0 || dc.watchlist_stale_hours < 0)
+        problems.push_back("discovery watchlist bounds must be >= 0");
+    if (dc.discovery_enabled && dc.crypto_universe.empty() &&
+        dc.equity_universe.empty())
+        problems.push_back("discovery.discovery_enabled is true but both "
+                           "crypto_universe and equity_universe are empty");
+    if (dc.long_term_sleeve_enabled && !cfg.sleeves.research_satellite_enabled)
+        problems.push_back("discovery.long_term_sleeve_enabled requires "
+                           "sleeves.research_satellite_enabled (the long-term "
+                           "strategy has no sleeve to trade in otherwise)");
 
     return problems;
 }

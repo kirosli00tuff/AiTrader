@@ -307,8 +307,12 @@ struct CouncilConfig {
 struct SleeveConfig {
     bool quant_core_enabled = true;
     bool research_satellite_enabled = false;      // OFF by default (operator opt-in)
-    double quant_core_target_pct = 0.80;          // target share of equity
-    double research_satellite_target_pct = 0.20;
+    // 70/30. The 30 percent is a CEILING, not a floor: the satellite may sit
+    // anywhere at or under it, and the hard cap (target + band) is what it can
+    // never exceed. The satellite earns capital by demonstrated paper results,
+    // it is never entitled to its target.
+    double quant_core_target_pct = 0.70;          // target share of equity
+    double research_satellite_target_pct = 0.30;
     double drift_band_pct = 0.05;                 // absolute band around each target
     // Research decision path (deep-research council pass on a schedule).
     std::vector<std::string> research_whitelist{
@@ -325,6 +329,56 @@ struct SleeveConfig {
     // both sleeves, logged. 0.0 disables. Sized so a month stays near or under 100
     // dollars. This is a cost control that can only SKIP spend, never widen risk.
     double combined_monthly_spend_ceiling_usd = 100.0;
+};
+
+// Discovery engine. A curated universe is screened hourly by cheap signals into
+// a small candidate set: Stage A ranks the whole universe for free (Finnhub
+// quant data plus native technicals, NO LLM tokens), Stage B screens the
+// finalists with the cheap Haiku gate, Stage C runs the full four-level
+// framework on a handful of survivors. Survivors land on a dynamic watchlist
+// both sleeves draw candidates from.
+//
+// EVERYTHING HERE SHIPS DISABLED. discovery_enabled and long_term_sleeve_enabled
+// both default false, so the running paper config stays the fixed-whitelist
+// two-sleeve system until an operator deliberately opts in.
+//
+// The funnel itself runs Python-side (Finnhub, the Haiku gate, and the council
+// all live there) and owns the discovery-only tables, following the precedent of
+// market_data/alpaca_source.py owning `bars`. The C++ engine only READS the
+// watchlist, and only when discovery_enabled. Every value here is a cost or
+// scheduling bound: none of them touches a Level-1 risk limit.
+//
+// NOT here: the real-time news-interpretation-and-react adaptive layer. Discovery
+// uses Finnhub's PRE-COMPUTED sentiment as a cheap numeric signal only. The react
+// layer is deferred and will ship gated. See CONTEXT.md and LIVE_READINESS.md.
+struct DiscoveryConfig {
+    bool discovery_enabled = false;          // OFF by default (operator opt-in)
+    bool long_term_sleeve_enabled = false;   // OFF by default (operator opt-in)
+    // Universe: the OUTER EDGE of the funnel. Liquid names only. Crypto is
+    // refreshed daily by liquidity/volume from the broader list, equities are a
+    // stable curated list. Comma-separated (the minimal YAML parser has no
+    // sequence support), matching strategy.whitelist.
+    std::vector<std::string> crypto_universe;
+    std::vector<std::string> equity_universe;
+    int crypto_active_max = 50;              // active crypto after the refresh
+    // Hard per-stage cost ceilings.
+    int max_finalists = 12;                  // Stage A output (the 10-15 band)
+    int max_survivors = 5;                   // Stage B output (the 3-6 band)
+    int max_council_calls_per_pass = 5;      // Stage C ceiling per pass
+    // Daily discovery council budget, SEPARATE from and ADDITIVE to the trading
+    // council budget, so discovery can never eat the quant loop's calls. Sized
+    // with the trading budget so combined monthly spend stays near the target.
+    int discovery_daily_council_budget = 12;
+    double discovery_est_cost_per_call_usd = 0.04;
+    // Cadence. Crypto runs hourly around the clock. Equities run at the US
+    // session open and hourly through US regular hours only.
+    int crypto_interval_minutes = 60;
+    int equity_interval_minutes = 60;
+    double prescreen_min_score = 0.15;       // Stage A floor (below = too quiet)
+    // Watchlist bounds. The universe is the wide end, the watchlist the narrow
+    // end, so it stays capped and prunes what goes stale.
+    int watchlist_max_size = 40;
+    int watchlist_stale_hours = 48;
 };
 
 // Ensemble weights. Editable in UI, auto-normalized, lockable.
@@ -390,6 +444,7 @@ struct Config {
     SimulationConfig simulation;
     IbkrConfig ibkr;
     SleeveConfig sleeves;
+    DiscoveryConfig discovery;       // discovery funnel + watchlist (disabled)
     RegionalSessionConfig regional;  // global-session equity rotation (disabled)
     ModelWeights model_weights;
 
