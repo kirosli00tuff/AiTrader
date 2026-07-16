@@ -50,10 +50,12 @@ struct VenueConfig {
 struct EngineConfig {
     int loop_interval_seconds = 15;       // wall-clock seconds between ticks
     bool respect_market_hours = true;     // skip equity ticks when US RTH closed
-    // Council cost cut (Task 5): while true, US-equity symbols skip the Flash
-    // gate + council calls outside regular US trading hours. Crypto stays 24/7.
+    // While true, a US-equity symbol takes NO new entry outside regular US trading
+    // hours, fast tier and council tier both. Exits on an open equity position
+    // still run so a position is never trapped. Crypto stays 24/7, never gated.
     // Distinct from respect_market_hours (which gates whether equity TICKS run at
-    // all in continuous mode); this only suppresses the expensive council call.
+    // all in continuous mode); this gates the equity ENTRY decision. After-hours
+    // paper fills are thin-market artifacts that corrupt validation data.
     bool equities_market_hours_only = true;
     // native_conviction_feeds_gate: when true (default) the native rule_based
     // conviction feeds the combined confidence/edge the RiskGate reads (current

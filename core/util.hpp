@@ -28,6 +28,17 @@ long iso8601_to_epoch(const std::string& ts);
 // account for market holidays. Defaults to the current time.
 bool us_equity_market_open(std::time_t utc_now = std::time(nullptr));
 
+// True if a NEW equity entry must be refused because it is outside US regular
+// trading hours. Entry-only: exits bypass this and always run so an open position
+// is never trapped. Crypto is never blocked (returns false for any non-equity
+// category, at any hour). `enabled` is cfg.engine.equities_market_hours_only.
+// `now` is the SIMULATED epoch under clock_mode simulated and wall-clock
+// otherwise, so the decision honors the clock mode. Reused by the engine entry
+// path and the tests so the rule lives in one place.
+bool equity_entry_blocked_by_market_hours(bool enabled,
+                                          const std::string& category,
+                                          std::time_t now);
+
 // Build a flat JSON object from string->string and string->double maps.
 // Values are escaped. Intended for compact structured payloads in the event log
 // (not a general-purpose serializer).

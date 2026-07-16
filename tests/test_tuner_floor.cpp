@@ -70,6 +70,8 @@ int main() {
     // 3. Long synthetic run: native entries continue well past 100 closed trades.
     //    Without the floor the tuner starved rule_based and entries plateaued near
     //    30 as the gate confidence collapsed; with the floor they keep flowing.
+    //    Equities now only enter during US regular hours (crypto stays 24/7), so
+    //    the run spans more simulated days to accumulate the same evidence.
     {
         const std::string db = "/tmp/mal_test_floor_run.db";
         rm_db(db);
@@ -80,7 +82,7 @@ int main() {
         opts.feed_mode = "synthetic_regimes";
         opts.clock_mode = "simulated";
         core::Engine e(cfg, opts);
-        e.run(5000);  // ~17 simulated days
+        e.run(12000);  // ~40 simulated days
         long long closed = e.storage().count_closed_trades();
         maltest::check(closed > 100,
                        "synthetic run keeps generating native entries past 100 "

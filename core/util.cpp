@@ -92,6 +92,12 @@ bool us_equity_market_open(std::time_t utc_now) {
     return minutes >= kOpen && minutes < kClose;
 }
 
+bool equity_entry_blocked_by_market_hours(bool enabled,
+                                          const std::string& category,
+                                          std::time_t now) {
+    return enabled && category == "equity" && !us_equity_market_open(now);
+}
+
 std::string json_escape(const std::string& s) {
     std::string out;
     out.reserve(s.size() + 8);

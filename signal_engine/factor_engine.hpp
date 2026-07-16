@@ -95,8 +95,8 @@ bool is_council_factor(const std::string& factor);
 // alone (rule_based excluded), so a genuine technical setup drives direction and
 // sizing without also inflating the gate confidence/edge.
 //
-// council_ran: when false (a fast-tier entry, a spend-ceiling or market-hours
-// skip, or all providers disabled) the three LLM council slots hold only neutral
+// council_ran: when false (a fast-tier entry, a spend-ceiling skip, or all
+// providers disabled) the three LLM council slots hold only neutral
 // mocks the fast tier never consulted. Feeding those mocks into the blend drags a
 // genuine native conviction (0.7+) below the RiskGate min_confidence floor and
 // structurally blocks every fast-tier entry. When council_ran is false the gate

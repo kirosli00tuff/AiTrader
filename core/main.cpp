@@ -335,7 +335,7 @@ int main(int argc, char** argv) {
                 << "/month (pauses both sleeves)\n"
                 << "  cost cuts: risk pre-check ON; equities market-hours-only "
                 << (cfg.engine.equities_market_hours_only ? "ON" : "off")
-                << " (crypto 24/7)\n"
+                << " (no equity entry outside US RTH, exits exempt, crypto 24/7)\n"
                 << "  global:    equity rotation "
                 << (cfg.regional.global_equity_rotation_enabled
                         ? "ENABLED"

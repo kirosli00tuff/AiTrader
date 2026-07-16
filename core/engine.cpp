@@ -609,6 +609,33 @@ void Engine::handle_bar_close(const market_data::MarketState& ms,
         }
     }
 
+    // ---------- Market-hours entry gate (equity, entry only) ----------
+    // Outside US regular trading hours, an equity takes NO new entry, fast tier
+    // and council tier both. The exit path above already closed an open equity
+    // position, so this never traps a position. Crypto is unaffected, it trades
+    // 24/7. The check keys off the SIMULATED timestamp under clock_mode simulated
+    // and real wall-clock under clock_mode real, consistent with the venue and
+    // council rules. After-hours paper fills are thin-market artifacts that
+    // corrupt validation data, so the entry is refused HERE, before any sizing,
+    // RiskGate, or council work, and logged once as market_hours_entry. This
+    // reaches here only when a native entry signal exists (the signal check above
+    // returns first), so there is no per-iteration spam.
+    {
+        const std::time_t mh_time = simulated_clock_
+                                        ? static_cast<std::time_t>(now_epoch)
+                                        : std::time(nullptr);
+        if (util::equity_entry_blocked_by_market_hours(
+                cfg_.engine.equities_market_hours_only, ms.category, mh_time)) {
+            storage_->append_event(
+                {ts, "market_hours_entry", ms.venue, ms.symbol, "info",
+                 "Equity entry skipped: outside US regular trading hours",
+                 util::to_json({{"reason", "market_hours_entry"},
+                                {"symbol", ms.symbol}},
+                               {})});
+            return;
+        }
+    }
+
     // ---------- Council cost cuts (Task 5) — decided BEFORE any council call --
     // Sizing is a function of the native signal alone (independent of the
     // council), so the order + the cheap risk pre-check can run first.
@@ -649,19 +676,6 @@ void Engine::handle_bar_close(const market_data::MarketState& ms,
         }
     }
 
-    // Cut B — market-hours skip: US equities skip the base-check gate + council
-    // outside regular US trading hours (crypto stays 24/7). Only the expensive
-    // council call is suppressed; native factors + execution still run.
-    // Market-hours skip keys off the SIMULATED timestamp under clock_mode
-    // simulated, and real wall-clock under clock_mode real, so an offline
-    // simulated run gates equities by simulated bar time, not the wall clock.
-    const std::time_t mh_time = simulated_clock_
-                                    ? static_cast<std::time_t>(now_epoch)
-                                    : std::time(nullptr);
-    const bool market_hours_skip =
-        cfg_.engine.equities_market_hours_only && ms.category == "equity" &&
-        !util::us_equity_market_open(mh_time);
-
     // Council cost-control gate: decide whether the full council may run. The
     // runtime budget override (controls.json) adjusts the daily budget and the
     // per-symbol cooldown within their validated bounds; a -1 keeps the config.
@@ -680,14 +694,7 @@ void Engine::handle_bar_close(const market_data::MarketState& ms,
     // both known before the council. Swing defaults never fast-tier a real entry.
     const auto tier = signal_engine::decide_tier(rc, notional, equity_, sig.strength);
     bool council_allowed;
-    if (market_hours_skip) {
-        council_allowed = false;
-        storage_->append_event(
-            {ts, "market_hours", ms.venue, ms.symbol, "info",
-             "Council skipped: equities outside US regular trading hours",
-             util::to_json({{"reason", "market_hours"}, {"symbol", ms.symbol}},
-                           {})});
-    } else if (tier == signal_engine::Tier::Fast) {
+    if (tier == signal_engine::Tier::Fast) {
         // Fast tier: bounded native entry, no council spend. RiskGate still gates.
         council_allowed = false;
         storage_->append_event(

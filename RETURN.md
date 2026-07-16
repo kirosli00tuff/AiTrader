@@ -14,6 +14,32 @@ Commit message:
 
 ---
 
+## Prompt: Gate all equity entries on US market hours including fast tier, exits exempt, crypto unaffected
+
+Date: 2026-07-15
+Model: Opus 4.8
+Prompt summary: Autonomous, operator away. Do not touch RiskGate logic, the live-trading gate, or the adaptive limit-weakening invariant. Live off. Problem from live logs, at 23:40 UTC outside US regular hours the market-hours rule skipped the council for QQQ but a fast-tier native momentum entry executed anyway. The market-hours gate only gated council calls, not native entries. Equities must not take any entry outside US regular hours, fast tier included. After-hours paper fills are thin-market artifacts that corrupt validation data. Task 1, gate all equity entries on market hours, outside US regular hours equity symbols take no entries at all, fast tier and council tier both, extend the existing council-only market-hours rule to the full equity entry path, exits on open equity positions remain allowed so a position is never trapped, crypto unaffected 24/7, respect clock_mode. Task 2, log the skip cleanly, one concise event with reason market_hours_entry, no council-skip-then-executed-trade, no per-iteration spam. Task 3, C++ tests. Task 4, document and commit.
+Changes: Added a pure entry-gate helper util::equity_entry_blocked_by_market_hours(enabled, category, now) next to us_equity_market_open, so the market-hours entry decision is one named function reused by the engine and the tests. Enabled is cfg.engine.equities_market_hours_only, category gates equity only (crypto returns false at any hour), now is the simulated epoch under clock_mode simulated and wall-clock otherwise. Wired the gate into core/engine.cpp on_closed_bar in the ENTRY path, right after the venue-capability gate and before any sizing, RiskGate, or council work, so an equity outside US regular hours takes NO new entry (fast tier and council tier both) and logs one market_hours_entry event, then returns. The exit path runs earlier in on_closed_bar and never consults this gate, so an open equity position still closes outside hours and is never trapped. Removed the old Cut B council-only market-hours skip (it only suppressed the council; the entry now returns before it), so there is no council-skip-then-executed-trade. The gate fires only when a native entry signal exists (the signal check returns first), so there is no per-iteration spam. Updated the equities_market_hours_only doc comment to say it gates the equity ENTRY, and dropped the stale market-hours mention from the council_ran comment in factor_engine.hpp. NOT touched: RiskGate logic, the live-trading gate, the adaptive limit-weakening invariant. Live OFF, RL gated 0/500. Crypto stays 24/7, never hours-gated.
+
+Verification (2026-07-15, offline, no API spend):
+
+| Check | Result |
+| --- | --- |
+| C++ ctest | 20/20 passed (new market_hours_entry) |
+| Python pytest | 283 passed (unchanged, C++-only change) |
+| Off-hours equity entry blocked end-to-end | PASS: a 6000-step synthetic run drops equity entries from 107 (81 off-hours) with the gate OFF to 27 (0 off-hours) with the gate ON |
+| Fast tier included | PASS (the gate sits before the tier decision, so fast tier and council tier are both refused) |
+| Equity exit outside hours still executes | PASS: a crafted replay opens SPY in-hours @130.70 (not blocked) and its stop-loss exit executes off-hours @117.04 at 2026-01-07T21:30Z |
+| Crypto unaffected at any hour | PASS: crypto entries fire off-hours (28 of 39 in the same run), never hours-gated |
+| Clean skip log, no spam | PASS: 191 market_hours_entry events in the run, every one an equity at an off-hours timestamp, none crypto, one per off-hours equity signal (fires only when a signal exists) |
+| No council-skip-then-executed-trade | PASS: removed the old Cut B council-only market-hours skip; the entry now returns before it |
+| Simulated clock honored | PASS: the gate keys off the passed simulated bar time (helper unit test + engine wiring) |
+| tuner_floor test | Updated: synthetic run 5000 -> 12000 steps so the no-plateau assertion (>100 closed trades) still holds now that off-hours equity fills are correctly removed |
+Safest-choice note: the tuner_floor test regressed because the fix correctly removes ~81 off-hours equity fills per run. The test is not wrong, its >100-closed-trades threshold was calibrated to the old off-hours-inclusive behavior, so I lengthened its run rather than weaken the assertion, preserving its intent.
+Commit message: `Gate all equity entries on US market hours including fast tier, exits exempt, crypto unaffected, live trading untouched`
+
+---
+
 ## Prompt: Scaffold global-session equity rotation gated on venue capability, disabled pending IBKR global access
 
 Date: 2026-07-15

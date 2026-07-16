@@ -123,6 +123,17 @@ target_link_libraries(test_tuner_floor PRIVATE mal_core mal_market_data
 add_test(NAME tuner_floor COMMAND test_tuner_floor
          WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 
+# Market-hours entry gate: outside US regular hours an equity takes no entry (fast
+# tier and council tier both), exits on an open equity position still run, and
+# crypto is unaffected 24/7. Pure helper plus deterministic engine runs (a crafted
+# replay for the off-hours exit, a synthetic run for the no-off-hours-entry rule).
+add_executable(test_market_hours_entry test_market_hours_entry.cpp)
+target_link_libraries(test_market_hours_entry PRIVATE mal_core mal_market_data
+                      mal_signal_engine mal_learning mal_storage mal_risk
+                      mal_config mal_util ${MAL_SQLITE_LIB})
+add_test(NAME market_hours_entry COMMAND test_market_hours_entry
+         WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
 # Operator controls reader (Task 2): flat-key model toggles, clamped runtime
 # budget, regime pins, and the at-least-one-provider rule. Pure, header-only.
 add_executable(test_operator_controls test_operator_controls.cpp)
