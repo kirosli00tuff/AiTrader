@@ -181,7 +181,8 @@ int main(int argc, char** argv) {
             // strict-mode check (verify_real_layers_reachable) reports it.
             std::string st_models, st_gate, st_cdetail, st_ddetail, st_wdetail;
             bool st_bridge_up = false, st_council_real = false,
-                 st_dnn_real = false, st_whale_real = false, st_sec = false;
+                 st_dnn_real = false, st_whale_real = false, st_sec = false,
+                 st_whale_alert = false;
             if (opts.use_bridge) {
                 auto s = mal::bridge::http_post_json(
                     opts.bridge_host, opts.bridge_port, "/status", "{}",
@@ -197,6 +198,7 @@ int main(int argc, char** argv) {
                     st_dnn_real = mal::bridge::json_get_bool(*s, "dnn_real", false);
                     st_whale_real = mal::bridge::json_get_bool(*s, "whale_real", false);
                     st_sec = mal::bridge::json_get_bool(*s, "sec_edgar", false);
+                    st_whale_alert = mal::bridge::json_get_bool(*s, "whale_alert", false);
                 }
             }
             auto svc_state = [&](bool enabled, bool real, bool avail) -> std::string {
@@ -293,6 +295,8 @@ int main(int argc, char** argv) {
                 << svc_state(lt.whale, lt.whale_real, st_whale_real)
                 << ", SEC EDGAR "
                 << (st_sec ? "ON (active free feed)" : "off (env opt-in)")
+                << ", Whale Alert "
+                << (st_whale_alert ? "ON (crypto trial)" : "off (opt-in)")
                 << (st_wdetail.empty() ? "" : " — " + st_wdetail) << "\n"
                 << "  thresholds: adx_min " << st.adx_min << " ema " << st.ema_fast
                 << "/" << st.ema_slow << " atr_floor " << st.atr_vol_floor

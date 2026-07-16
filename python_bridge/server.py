@@ -100,13 +100,24 @@ def _bridge_status() -> dict:
     # whale: a real fetch happens only when the active SEC EDGAR feed is enabled.
     try:
         from whale_signal.adapters import (SEC_EDGAR_ENABLED_ENV,
-                                           WHALE_LIVE_ENABLED_ENV, _flag)
+                                           WHALE_ALERT_ENABLED_ENV,
+                                           WHALE_LIVE_ENABLED_ENV, _flag,
+                                           _resolve)
         sec = _flag(SEC_EDGAR_ENABLED_ENV)
+        # Whale Alert crypto trial: live only when enabled AND the key resolves.
+        wa_on = _flag(WHALE_ALERT_ENABLED_ENV)
+        wa_keyed = bool(_resolve("WHALE_ALERT_API_KEY"))
+        wa_live = wa_on and wa_keyed
         out["sec_edgar"] = sec
+        out["whale_alert"] = wa_live
         out["whale_live"] = _flag(WHALE_LIVE_ENABLED_ENV)
-        out["whale_real"] = sec
-        out["whale_detail"] = ("SEC EDGAR enabled (active whale feed)" if sec
-                               else "SEC_EDGAR_ENABLED off, whale would be offline mock")
+        out["whale_real"] = sec or wa_live
+        wa_note = ("Whale Alert trial ON (crypto)" if wa_live
+                   else "Whale Alert trial ON but no key" if wa_on
+                   else "Whale Alert trial off")
+        sec_note = ("SEC EDGAR enabled (active whale feed)" if sec
+                    else "SEC_EDGAR_ENABLED off")
+        out["whale_detail"] = f"{sec_note}, {wa_note}"
     except Exception as e:  # noqa: BLE001
         out["whale_real"] = False
         out["whale_detail"] = f"whale status error: {type(e).__name__}"

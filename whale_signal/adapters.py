@@ -51,6 +51,19 @@ def _requests():
 WHALE_LIVE_ENABLED_ENV = "WHALE_LIVE_ENABLED"
 SEC_EDGAR_ENABLED_ENV = "SEC_EDGAR_ENABLED"
 
+# Whale Alert is wired for a one-time TRIAL evaluation as a crypto whale feed. It
+# is opt-in behind WHALE_ALERT_ENABLED (exported from whale.whale_alert_enabled in
+# config, default OFF), so the system runs unchanged without it. The key is a
+# RESERVED credential resolved keystore-first via WHALE_ALERT_API_KEY, never
+# hardcoded, never logged.
+WHALE_ALERT_ENABLED_ENV = "WHALE_ALERT_ENABLED"
+
+# Whale Alert developer plan rate limit: 10 requests per minute. On HTTP 429 we
+# retry with bounded exponential backoff, honoring a Retry-After header when the
+# server sends one, then degrade cleanly to the deterministic mock.
+_RATE_LIMIT_MAX_RETRIES = 2
+_RATE_LIMIT_BASE_BACKOFF_S = 1.0
+
 
 def _flag(name: str, default: bool = False) -> bool:
     """Read a boolean opt-in flag from the environment (default OFF)."""
@@ -119,9 +132,15 @@ def _is_crypto(symbol: str) -> bool:
 class WhaleAlertAdapter:
     """Whale Alert API adapter (large on-chain crypto transfers).
 
-    RESERVED key-gated crypto feed, not in the active chain. Its free tier is
-    limited; the app works fine with NO Whale Alert key (SEC EDGAR is the sole
-    active source and the mock covers offline).
+    TRIAL evaluation crypto whale feed. Opt-in behind WHALE_ALERT_ENABLED (from
+    whale.whale_alert_enabled in config, default OFF) plus a resolved
+    WHALE_ALERT_API_KEY. When enabled and keyed it fetches recent large crypto
+    transfers from the documented transactions endpoint and feeds the SAME whale
+    scoring path SEC EDGAR uses, under the same 0.35 advisory cap. When the key is
+    absent it reports not live and the app runs unchanged. Any network error, an
+    exhausted 429 retry, a missing dependency, or a parse failure degrades to the
+    deterministic mock, so nothing ever raises. This is a one-time trial, not a
+    recurring free-tier scheme. The key is a RESERVED credential, never logged.
     """
 
     source = "whale_alert"
@@ -136,8 +155,11 @@ class WhaleAlertAdapter:
         return bool(self.key)
 
     def fetch(self, symbol: str) -> list[WhaleActivity]:
-        # Optional paid feed: live requires the opt-in flag AND a key.
-        if not (_flag(WHALE_LIVE_ENABLED_ENV) and self.is_live()):
+        # Crypto whale feed: non-crypto symbols never hit it.
+        if not _is_crypto(symbol):
+            return []
+        # Trial feed: live requires the opt-in flag AND a resolved key.
+        if not (_flag(WHALE_ALERT_ENABLED_ENV) and self.is_live()):
             return self._mock(symbol)
         try:
             return self._fetch_live(symbol)
@@ -154,17 +176,38 @@ class WhaleAlertAdapter:
             "limit": 50,
         }
         headers = {"User-Agent": _user_agent(), "Accept": "application/json"}
-        resp = requests.get(self.BASE_URL, params=params, headers=headers,
-                            timeout=_TIMEOUT)
-        if resp.status_code == 429:
+        # Respect the 10 req/min developer limit: on a 429 retry with bounded
+        # backoff (honoring Retry-After), then degrade to the mock. One request
+        # per fetch keeps the steady-state call rate well under the limit.
+        resp = None
+        for attempt in range(_RATE_LIMIT_MAX_RETRIES + 1):
+            resp = requests.get(self.BASE_URL, params=params, headers=headers,
+                                timeout=_TIMEOUT)
+            if getattr(resp, "status_code", None) != 429:
+                break
+            if attempt >= _RATE_LIMIT_MAX_RETRIES:
+                return self._mock(symbol)  # rate limit persisted: degrade cleanly
+            time.sleep(_retry_after_seconds(resp, attempt))
+        if resp is None or getattr(resp, "status_code", None) == 429:
             return self._mock(symbol)
         resp.raise_for_status()
-        payload = resp.json()
+        parsed = self._parse(resp.json(), symbol)
+        return parsed if parsed else self._mock(symbol)
+
+    def _parse(self, payload, symbol: str) -> list[WhaleActivity]:
+        """Parse a Whale Alert transactions payload into WhaleActivity rows (pure).
+
+        The uniform Whale Alert schema across chains: transactions[] each with
+        hash, blockchain, symbol, amount, amount_usd, from/to {owner, owner_type,
+        address}, and a unix timestamp. The transparent heuristic reads owner_type:
+        a transfer TO an exchange is an inflow (selling pressure), a transfer FROM
+        an exchange is an outflow (accumulation). Extracted so fixtures exercise
+        parsing with NO network call. Every row is delayed=False (near real time).
+        """
         rows = payload.get("transactions") if isinstance(payload, dict) else payload
         if not isinstance(rows, list):
-            return self._mock(symbol)
-        token = symbol.upper().replace("-", "").replace("USDT", "").replace(
-            "USDC", "").replace("USD", "")
+            return []
+        token = _token_of(symbol)
         out: list[WhaleActivity] = []
         for row in rows:
             if not isinstance(row, dict):
@@ -196,8 +239,6 @@ class WhaleAlertAdapter:
                 delayed=False,
                 ts=_ts_from_epoch(ts) if ts is not None else _now(),
             ))
-        if not out:
-            return self._mock(symbol)
         return out
 
     def _mock(self, symbol: str) -> list[WhaleActivity]:
@@ -434,6 +475,40 @@ def _num(*candidates):
     return None
 
 
+def _token_of(symbol: str) -> str:
+    """Base token of a trading symbol, for matching Whale Alert's `symbol` field.
+
+    BTC/USD -> BTC, ETH-USD -> ETH, USDT/USD -> USDT, BTCUSD -> BTC. A pair keeps
+    its base (the part before the separator); a bare symbol drops a trailing
+    stablecoin/USD quote.
+    """
+    s = symbol.upper()
+    for sep in ("/", "-"):
+        if sep in s:
+            return s.split(sep)[0]
+    for quote in ("USDT", "USDC", "USD"):
+        if s.endswith(quote) and s != quote:
+            return s[: -len(quote)]
+    return s
+
+
+def _retry_after_seconds(resp, attempt: int) -> float:
+    """Backoff for a 429: honor a numeric Retry-After header, else exponential.
+
+    Bounded and safe: a malformed or missing header falls back to
+    _RATE_LIMIT_BASE_BACKOFF_S * 2**attempt, capped so a retry never stalls the
+    loop. Never raises.
+    """
+    try:
+        headers = getattr(resp, "headers", {}) or {}
+        raw = headers.get("Retry-After") or headers.get("retry-after")
+        if raw is not None:
+            return max(0.0, min(float(raw), 5.0))
+    except (TypeError, ValueError):
+        pass
+    return min(_RATE_LIMIT_BASE_BACKOFF_S * (2 ** attempt), 5.0)
+
+
 # --- Reserved integrations (NOT in the active default chain) ----------------
 # SEC EDGAR is the sole ACTIVE whale source (see default_adapters below). The
 # following stay wired and importable but are OFF the default chain, following
@@ -460,5 +535,15 @@ def default_adapters() -> list:
     Two SEC EDGAR forms are active: quarterly 13F (institutional holdings, ~45
     day lag) and Form 4 (insider transactions, ~2 business day lag). Both are
     free, keyless, and DELAYED context, gated by SEC_EDGAR_ENABLED.
+
+    Whale Alert joins the chain ONLY for the opt-in crypto trial: when
+    WHALE_ALERT_ENABLED is on AND the key resolves. Enabled without a key, or
+    disabled, leaves the chain exactly as before (SEC EDGAR only), so the default
+    behavior is unchanged and no crypto whale mock is injected.
     """
-    return [Sec13FAdapter(), SecForm4Adapter()]
+    adapters = [Sec13FAdapter(), SecForm4Adapter()]
+    if _flag(WHALE_ALERT_ENABLED_ENV):
+        wa = WhaleAlertAdapter()
+        if wa.is_live():  # trial feed active only with a resolved key
+            adapters.append(wa)
+    return adapters

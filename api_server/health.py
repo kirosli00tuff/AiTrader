@@ -147,6 +147,24 @@ def _check_reserved(env: str, label: str):
     return NOT_CONFIGURED, f"{label} reserved, no adapter wired"
 
 
+def _check_whale_alert():
+    # Whale Alert crypto trial feed. Only when opt-in AND keyed do we make one
+    # real minimal call. Off or unkeyed reports not_configured (never failing).
+    # The key is only ever a query param and is never logged or returned.
+    from whale_signal.adapters import (WHALE_ALERT_ENABLED_ENV, _flag,
+                                       _user_agent)
+    if not _flag(WHALE_ALERT_ENABLED_ENV):
+        return NOT_CONFIGURED, "whale_alert_enabled is off"
+    key = _key("WHALE_ALERT_API_KEY")
+    if not key:
+        return NOT_CONFIGURED, "WHALE_ALERT_API_KEY not set"
+    start = int(time.time()) - 3600
+    url = ("https://api.whale-alert.io/v1/transactions"
+           f"?api_key={key}&min_value=500000&start={start}&limit=1")
+    status = _get(url, {"User-Agent": _user_agent(), "Accept": "application/json"})
+    return (WORKING, "one tx query ok") if status == 200 else (FAILING, f"HTTP {status}")
+
+
 _CHECKS = [
     ("openai", "OpenAI GPT-5.5", _check_openai),
     ("anthropic_opus", "Anthropic Claude Opus 4.8",
@@ -158,8 +176,7 @@ _CHECKS = [
     ("alpaca_trading_auth", "Alpaca paper trading auth", _check_alpaca_trading),
     ("sec_edgar", "SEC EDGAR 13F", _check_sec_edgar),
     ("ibkr_gateway", "IBKR gateway reachability", _check_ibkr),
-    ("whale_alert", "Whale Alert (reserved paid)",
-     lambda: _check_reserved("WHALE_ALERT_API_KEY", "Whale Alert")),
+    ("whale_alert", "Whale Alert (crypto trial)", _check_whale_alert),
     ("unusual_whales", "Unusual Whales Pro (reserved paid)",
      lambda: _check_reserved("UNUSUAL_WHALES_API_KEY", "Unusual Whales Pro")),
 ]

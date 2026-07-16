@@ -162,7 +162,9 @@ def whale_env() -> dict:
         return "true" if v else "false"
 
     return {"SEC_EDGAR_ENABLED": _b(cfg.get("sec_edgar_enabled")),
-            "WHALE_LIVE_ENABLED": _b(cfg.get("whale_live_enabled"))}
+            "WHALE_LIVE_ENABLED": _b(cfg.get("whale_live_enabled")),
+            # Whale Alert crypto trial feed, opt-in, default OFF.
+            "WHALE_ALERT_ENABLED": _b(cfg.get("whale_alert_enabled"))}
 
 
 def bridge_env() -> dict:

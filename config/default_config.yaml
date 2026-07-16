@@ -396,6 +396,14 @@ whale:
   # runtime without stopping the run.
   sec_edgar_enabled: true
   whale_live_enabled: true
+  # Whale Alert crypto whale feed, wired for a one-time TRIAL evaluation. Default
+  # OFF, so the system runs unchanged. When true AND WHALE_ALERT_API_KEY resolves,
+  # the Whale Alert adapter joins the whale chain for crypto and feeds the same
+  # advisory factor as SEC EDGAR, under the same 0.35 cap. Exported to the bridge
+  # env as WHALE_ALERT_ENABLED by scripts/start_paper_trading.sh. The key is a
+  # RESERVED credential, resolved keystore-first, never committed here. This is a
+  # deliberate one-time trial, not a recurring free-tier scheme.
+  whale_alert_enabled: false
   whale_signal_weight: 0.10
   whale_min_activity_score: 0.60
   whale_min_historical_usefulness: 0.55

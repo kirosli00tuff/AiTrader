@@ -867,7 +867,18 @@ Free-first by default — the app runs with **no paid keys**:
 |--------|---------|-------|
 | **ClankApp** (free crypto/on-chain) | `ClankAppAdapter` (**default**) | fully free (~10 calls/min, ~21 chains); `CLANKAPP_API_KEY` optional (email signup); mock fallback |
 | **SEC EDGAR 13F** (free) | `Sec13FAdapter` (**default**) | official `data.sec.gov` / `efts.sec.gov` REST — **no key**, just a descriptive `User-Agent`; **DELAYED**, equity-only, down-weighted; `SEC_API_KEY` optional override only |
-| Whale Alert API | `WhaleAlertAdapter` (optional) | crypto-only, ≥ $500k; limited free tier; needs `WHALE_ALERT_API_KEY`; **not** in the default chain |
+| Whale Alert API | `WhaleAlertAdapter` (**crypto trial**) | crypto-only, ≥ $500k; one-time **trial evaluation**, opt-in via `whale.whale_alert_enabled` + `WHALE_ALERT_API_KEY`; joins the whale chain for crypto and feeds the **same** advisory factor as SEC EDGAR under the **0.35 cap**; 429 retries with backoff then degrades to mock |
+
+**Whale Alert trial feed (crypto).** Off by default. It is wired as a one-time
+trial evaluation, not a recurring free-tier scheme. To enable it, set
+`whale.whale_alert_enabled: true` in `config/default_config.yaml` and provide
+`WHALE_ALERT_API_KEY` (keystore-first, never committed). `scripts/start_paper_trading.sh`
+exports the flag to the bridge as `WHALE_ALERT_ENABLED`. When enabled and keyed
+the adapter fetches recent large crypto transfers (developer plan, 10 req/min)
+and scores exchange inflow versus outflow into the whale factor. When the key is
+absent it reports not configured and the system runs unchanged (SEC EDGAR only).
+`GET /health/integrations` reports the trial feed working, failing, or not
+configured; the key is never logged.
 
 Live fetches use `requests` with a ~10 s timeout and descriptive User-Agent; any
 network error, HTTP 429 (rate limit), or parse failure falls back to a

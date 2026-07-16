@@ -14,6 +14,33 @@ Commit message:
 
 ---
 
+## Prompt: Add Whale Alert crypto whale adapter for trial evaluation, opt-in and capped at 0.35
+
+Date: 2026-07-15
+Model: Opus 4.8
+Prompt summary: Autonomous, operator away. Do not touch RiskGate logic, the live-trading gate, or the adaptive limit-weakening invariant. Live off. RL gated. Goal, wire a Whale Alert adapter as a crypto whale feed for a one-time trial evaluation. WHALE_ALERT_API_KEY is reserved. This adds the real adapter behind the existing whale layer, feeding the same advisory factor as SEC EDGAR, capped at 0.35. Task 1, Whale Alert adapter in whale_signal following the SEC EDGAR pattern, keystore-first key resolution, documented transactions endpoint, parse the uniform JSON schema, respect the 10 req/min developer rate limit with retry-and-backoff on 429. Task 2, feed parsed transactions into the existing whale scoring path with the transparent size-bucket plus exchange inflow versus outflow heuristic via owner_type, keep the 0.35 cap, two sources now (SEC EDGAR equities, Whale Alert crypto). Task 3, config flag whale_alert_enabled default false, live when true and the key resolves, not configured and unchanged fallback when the key is absent, print the feed state at startup. Task 4, record a real fixture from one live call if reachable else synthetic marked in a header comment, parser tests for schema, heuristic, 429 retry-then-degrade, the 0.35 cap, absent-key not configured, no real network in the suite. Task 5, add Whale Alert to GET /health/integrations, one real minimal call when enabled and keyed, not configured when absent, never log the key. Task 6, document and commit.
+Changes: Task 1 rebuilt WhaleAlertAdapter (whale_signal/adapters.py) on the SEC pattern. A pure _parse method parses the uniform Whale Alert transactions schema (hash, blockchain, symbol, amount, amount_usd, from/to owner + owner_type, unix timestamp) so fixtures test parsing with no network. The key resolves keystore-first via _resolve(WHALE_ALERT_API_KEY), never hardcoded, never logged. _fetch_live respects the 10 req/min developer limit: on HTTP 429 it retries with bounded exponential backoff honoring Retry-After (_retry_after_seconds), then degrades to the deterministic mock. A new _token_of helper matches the queried base token to the row symbol. Task 2 feeds parsed transactions into the SAME scoring path SEC EDGAR uses (score_whales): the transparent heuristic reads owner_type, a transfer TO an exchange is inflow (selling pressure), FROM an exchange is outflow (accumulation), size-bucketed by amount_usd. default_adapters now returns SEC 13F + Form 4, plus WhaleAlertAdapter ONLY when whale_alert_enabled AND the key resolves, so the whale factor combines both sources under the unchanged 0.35 cap. Task 3 added whale.whale_alert_enabled (default false) to config, exported to the bridge as WHALE_ALERT_ENABLED (stack.whale_env). Enabled without a key, or disabled, leaves the chain SEC-only (no crypto mock injected), so the system runs unchanged. The bridge /status (whale_alert bool + detail) and the C++ startup block print the Whale Alert feed state alongside SEC EDGAR. Task 4 recorded a REAL fixture (see below) and added tests/test_whale_alert.py (9 tests). Task 5 replaced the reserved Whale Alert health check with a real one (api_server/health.py _check_whale_alert): enabled + keyed makes one minimal transactions call reporting working or the HTTP failure with latency, off or unkeyed reports not_configured, the key is only ever a query param, never logged or returned. Task 6 documented in README (trial feed, how to enable, trial evaluation), CONTEXT.md (Whale Tracking Decisions), PROGRESS.md, and this entry. NOT touched: RiskGate logic, the live-trading gate, the adaptive limit-weakening invariant. Live OFF, RL gated 0/500. Crypto stays 24/7, whale is advisory only under the 0.35 cap.
+
+Fixture result (2026-07-15): the reserved WHALE_ALERT_API_KEY RESOLVED and the endpoint was reachable, so a REAL capture was recorded from one live call. GET https://api.whale-alert.io/v1/transactions (min_value 500000, last hour, limit 20) returned HTTP 200 with 20 transactions across btc, eth, usdc, usdt on multiple chains, including exchange inflows (to Binance) and outflows (from Binance). Trimmed to 6 representative transactions and saved to tests/fixtures/whale_alert_transactions_sample.json (real, not SYNTHETIC). Only the response body was saved, never the key or the request URL. The parser tests run against this fixture with no network.
+
+| Check | Result |
+| --- | --- |
+| Python pytest | 283 passed (up from 274, 9 new whale-alert tests) |
+| C++ ctest | 18/18 passed (startup line change only) |
+| Live fixture capture | REAL, HTTP 200, 20 txs, trimmed to 6 (no synthetic fallback) |
+| Parser reads the uniform schema | PASS (hash/blockchain/symbol/amount_usd/from-to owner_type/timestamp) |
+| Inflow vs outflow heuristic reads owner_type | PASS (to-exchange => inflow, from-exchange => outflow) |
+| 429 retries then degrades cleanly | PASS (bounded retries via injected fake requests, no raise, no real network) |
+| 0.35 advisory cap unchanged | PASS (sizing.whale_position_scale_cap == 0.35) |
+| Two sources combine under the cap | PASS (SEC equities + Whale Alert crypto score into one signal) |
+| Absent key reports not configured, no raise | PASS (health not_configured, default_adapters excludes it) |
+| Off by default, system unchanged | PASS (flag false => SEC-only chain, no crypto mock injected) |
+| Health check one real call when keyed | PASS (working, HTTP 200; not_configured when off) |
+| Key logged anywhere | NO (query param only, never logged or returned) |
+Commit message: `Add Whale Alert crypto whale adapter for trial evaluation, opt-in and capped at 0.35, live trading untouched`
+
+---
+
 ## Prompt: Log real confidence values on blocks, trace and fix fast-tier native confidence
 
 Date: 2026-07-15
@@ -720,3 +747,47 @@ $ git diff --cached --stat
 | Gemini 3.1 Pro | working | - | 1511.5 ms |
 | Alpaca paper market data | working | one quote ok | 248.8 ms |
 | Alpaca paper order-auth (validation-only) | working | paper account auth ok | 238.6 ms |
+
+### Run 2026-07-16T00:04:35Z
+
+| Integration | Result | Detail | Latency |
+| --- | --- | --- | --- |
+| OpenAI GPT-5.5 | working | - | 1747.3 ms |
+| Anthropic Opus 4.8 | working | - | 1499.0 ms |
+| Anthropic Haiku 4.5 (gate path) | working | - | 723.7 ms |
+| Gemini 3.1 Pro | failing | HTTPError: HTTP Error 429: Too Many Requests | 313.3 ms |
+| Alpaca paper market data | working | one quote ok | 252.9 ms |
+| Alpaca paper order-auth (validation-only) | working | paper account auth ok | 243.9 ms |
+
+### Run 2026-07-16T00:04:47Z
+
+| Integration | Result | Detail | Latency |
+| --- | --- | --- | --- |
+| OpenAI GPT-5.5 | working | - | 1249.5 ms |
+| Anthropic Opus 4.8 | working | - | 1503.1 ms |
+| Anthropic Haiku 4.5 (gate path) | working | - | 609.9 ms |
+| Gemini 3.1 Pro | working | - | 1211.6 ms |
+| Alpaca paper market data | working | one quote ok | 253.3 ms |
+| Alpaca paper order-auth (validation-only) | working | paper account auth ok | 251.4 ms |
+
+### Run 2026-07-16T00:13:35Z
+
+| Integration | Result | Detail | Latency |
+| --- | --- | --- | --- |
+| OpenAI GPT-5.5 | working | - | 1422.2 ms |
+| Anthropic Opus 4.8 | working | - | 1267.5 ms |
+| Anthropic Haiku 4.5 (gate path) | working | - | 570.8 ms |
+| Gemini 3.1 Pro | failing | HTTPError: HTTP Error 429: Too Many Requests | 212.1 ms |
+| Alpaca paper market data | working | one quote ok | 248.2 ms |
+| Alpaca paper order-auth (validation-only) | working | paper account auth ok | 242.5 ms |
+
+### Run 2026-07-16T00:14:11Z
+
+| Integration | Result | Detail | Latency |
+| --- | --- | --- | --- |
+| OpenAI GPT-5.5 | working | - | 778.8 ms |
+| Anthropic Opus 4.8 | working | - | 1209.0 ms |
+| Anthropic Haiku 4.5 (gate path) | working | - | 555.5 ms |
+| Gemini 3.1 Pro | failing | HTTPError: HTTP Error 429: Too Many Requests | 167.0 ms |
+| Alpaca paper market data | working | one quote ok | 238.2 ms |
+| Alpaca paper order-auth (validation-only) | working | paper account auth ok | 259.0 ms |
