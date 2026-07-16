@@ -251,13 +251,14 @@ export function DiscoveryControls() {
                   { stage_a_whale_weight: v }))} />
             </div>
 
-            {!d.data.react_layer_built && (
-              <p className="muted small">
-                The real-time news-react layer is not built. Discovery uses
-                pre-computed sentiment as a cheap number only. No entry is ever
-                taken on a raw headline.
-              </p>
-            )}
+            <p className="muted small">
+              Discovery uses pre-computed sentiment as a cheap number only. The
+              real-time news-react layer is{" "}
+              {d.data.react_layer_built ? "built and has its own toggles below"
+                                        : "not built"}
+              , and either way no entry is ever taken on a raw headline: an
+              event can refer a candidate into this funnel, never past it.
+            </p>
           </div>
         )}
       </DataState>

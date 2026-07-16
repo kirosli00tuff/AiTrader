@@ -137,6 +137,80 @@ class DiscoverySettingsWrite(BaseModel):
     stage_a_whale_weight: float | None = None
 
 
+class AdaptiveToggleWrite(BaseModel):
+    # The flag NAME is validated server-side against controls.ADAPTIVE_FLAGS, an
+    # allowlist of exactly three. There is no name that enables event-driven
+    # aggressive entry, because there is no such capability: an aggressive read
+    # always routes back through the discovery funnel and the RiskGate.
+    model_config = ConfigDict(extra="forbid")
+    flag: str
+    enabled: bool
+
+
+class AdaptiveSettingsWrite(BaseModel):
+    # Every field optional: the GUI sends only what changed. Values are clamped
+    # server-side into controls.ADAPTIVE_BOUNDS / ADAPTIVE_FLOAT_BOUNDS, never
+    # trusted as sent. extra="forbid": an unknown field is REFUSED rather than
+    # silently dropped, so a typo cannot look like it worked.
+    model_config = ConfigDict(extra="forbid")
+    poll_interval_seconds: int | None = None
+    max_symbols_per_poll: int | None = None
+    news_lookback_minutes: int | None = None
+    adaptive_daily_llm_budget: int | None = None
+    max_interpretations_per_poll: int | None = None
+    action_max_age_seconds: int | None = None
+    materiality_min_sentiment: float | None = None
+    action_min_severity: float | None = None
+    interpretation_min_relevance: float | None = None
+    defensive_trim_fraction: float | None = None
+
+
+@app.post("/controls/adaptive")
+def post_adaptive(body: AdaptiveToggleWrite):
+    # Adaptive layer enable, one flag at a time. Same validated control-file
+    # channel as every other toggle. Enabling is REFUSED on a missing
+    # prerequisite, and refused for a downstream half while the news feed is off.
+    # Never a Level-1 write, never live.
+    return controls.set_adaptive_flag(body.flag, body.enabled)
+
+
+@app.post("/controls/adaptive_settings")
+def post_adaptive_settings(body: AdaptiveSettingsWrite):
+    # Adaptive cost, cadence, and threshold tunables. Clamped server-side. Cost
+    # and thresholds only: no Level-1 value is reachable from here.
+    given = {k: v for k, v in body.model_dump().items() if v is not None}
+    return controls.set_adaptive_settings(given)
+
+
+@app.get("/adaptive/state")
+def get_adaptive_state():
+    # The three flags, last poll, today's seen/material/escalated counts, and
+    # spend against the SEPARATE adaptive budget. Read-only, never a key value.
+    return controls.adaptive_state()
+
+
+@app.get("/adaptive/events")
+def get_adaptive_events(limit: int = Query(100, ge=1, le=500)):
+    # The live event feed, including everything the free filter dropped. The
+    # drops are the point: they are what makes the cost argument checkable.
+    return {"events": store.adaptive_events(limit),
+            "enabled": controls.adaptive_state()["news_feed_enabled"]}
+
+
+@app.get("/adaptive/interpretations")
+def get_adaptive_interpretations(limit: int = Query(50, ge=1, le=200)):
+    # The escalated few: what a model said about each, and what came of it.
+    return {"interpretations": store.adaptive_interpretations(limit)}
+
+
+@app.get("/adaptive/actions")
+def get_adaptive_actions(limit: int = Query(50, ge=1, le=200)):
+    # Defensive actions queued for the engine, and what the engine did with them.
+    # Queued is not applied, so both are reported rather than just the request.
+    return {"actions": store.adaptive_actions(limit),
+            "engine_log": store.adaptive_engine_log(limit)}
+
+
 @app.post("/controls/discovery")
 def post_discovery(body: DiscoveryToggleWrite):
     # Discovery enable. Same validated control-file channel as the layer toggles.

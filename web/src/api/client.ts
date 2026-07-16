@@ -7,6 +7,8 @@ import type {
   SleeveState, ResearchThesis,
   DiscoveryState, DiscoveryPass, DiscoveryCandidate, WatchlistRow,
   WatchlistEvent, LongTermPosition, Prereqs,
+  AdaptiveState, AdaptiveEvent, AdaptiveInterpretation, AdaptiveAction,
+  AdaptiveEngineLogRow,
 } from "./types";
 
 export const API_BASE = import.meta.env.VITE_API_BASE ?? "http://127.0.0.1:8000";
@@ -121,6 +123,28 @@ export const api = {
     post<ControlResult>("/controls/longterm", { enabled }),
   setDiscoverySettings: (settings: Record<string, number>) =>
     post<ControlResult>("/controls/discovery_settings", settings),
+
+  // Adaptive real-time layer. One flag per call: the server validates the NAME
+  // against an allowlist of exactly three, so there is no name this client could
+  // send that enables event-driven aggressive entry.
+  adaptiveState: () => get<AdaptiveState>("/adaptive/state"),
+  setAdaptive: (flag: string, enabled: boolean) =>
+    post<ControlResult>("/controls/adaptive", { flag, enabled }),
+  setAdaptiveSettings: (settings: Record<string, number>) =>
+    post<ControlResult>("/controls/adaptive_settings", settings),
+  // The feed includes what the free filter DROPPED. That is deliberate: the
+  // drops are what make the cost claim checkable.
+  adaptiveEvents: (limit = 100) =>
+    get<{ events: AdaptiveEvent[]; enabled: boolean }>(
+      `/adaptive/events?limit=${limit}`),
+  adaptiveInterpretations: (limit = 50) =>
+    get<{ interpretations: AdaptiveInterpretation[] }>(
+      `/adaptive/interpretations?limit=${limit}`),
+  // Queued is not applied, so the engine's own log comes back alongside the
+  // requests rather than the GUI implying a request was carried out.
+  adaptiveActions: (limit = 50) =>
+    get<{ actions: AdaptiveAction[]; engine_log: AdaptiveEngineLogRow[] }>(
+      `/adaptive/actions?limit=${limit}`),
   discoveryLatest: (assetClass?: string) =>
     get<{ passes: DiscoveryPass[]; enabled: boolean }>(
       `/discovery/latest${assetClass ? `?asset_class=${assetClass}` : ""}`),

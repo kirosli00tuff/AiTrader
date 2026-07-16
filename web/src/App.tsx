@@ -8,6 +8,7 @@ import CategoryView from "./pages/CategoryView";
 import ControlsPage from "./pages/ControlsPage";
 import DiscoveryPage from "./pages/DiscoveryPage";
 import WatchlistPage from "./pages/WatchlistPage";
+import AdaptivePage from "./pages/AdaptivePage";
 import LongTermPage from "./pages/LongTermPage";
 import HealthPage from "./pages/HealthPage";
 import OpsPage from "./pages/OpsPage";
@@ -32,6 +33,9 @@ export default function App() {
         {/* Discovery views: read-only. No control lives on these routes. */}
         <Route path="discovery" element={<DiscoveryPage />} />
         <Route path="watchlist" element={<WatchlistPage />} />
+        {/* Adaptive layer: read-only. Its toggles live on Controls,
+            with the rest of the enable surface. */}
+        <Route path="adaptive" element={<AdaptivePage />} />
         <Route path="longterm" element={<LongTermPage />} />
         <Route path="health" element={<HealthPage />} />
         <Route path="ops" element={<OpsPage />} />

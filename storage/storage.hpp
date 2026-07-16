@@ -169,6 +169,35 @@ public:
     // table is absent (a DB predating discovery), so an old DB is never a crash.
     std::vector<std::string> watchlist_symbols(const std::string& sleeve = "");
 
+    // One queued defensive request from the adaptive real-time layer.
+    // `action` is a raw string here on purpose: this struct is the untrusted
+    // WIRE shape, straight off a row. core/adaptive_actions.hpp is what turns it
+    // into a typed DefensiveKind, and it refuses anything not defensive. Keeping
+    // the two apart means the parsing rule has exactly one home.
+    struct AdaptiveActionRow {
+        long long id = 0;
+        std::string ts;
+        std::string symbol;
+        std::string action;
+        std::string reason;
+        double severity = 0.0;
+        long long event_id = 0;
+    };
+
+    // Queued adaptive actions with id > after_id, oldest first. READ-ONLY: the
+    // Python adaptive package is the writer, exactly as it writes the watchlist.
+    // The engine reads this only when adaptive_react_defensive_enabled is true,
+    // so with the flag off (the default) it is never called. Returns empty when
+    // the table is absent (a DB predating the adaptive layer), so an old DB is
+    // never a crash.
+    std::vector<AdaptiveActionRow> adaptive_actions_after(long long after_id);
+
+    // The highest adaptive_action id present. The engine calls this ONCE at
+    // construction to set its watermark, so actions queued before the engine
+    // started are never replayed on a restart. Returns 0 when the table is
+    // absent or empty.
+    long long max_adaptive_action_id();
+
     // Persist the current regime + the regime-selected active factor for a symbol
     // (single row per symbol). active_factor is momentum | reversion | blend.
     void upsert_regime(const std::string& symbol, const std::string& regime,

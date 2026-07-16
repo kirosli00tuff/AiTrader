@@ -21,6 +21,7 @@ source has a deterministic mock fallback.
 - [Architecture](#architecture)
 - [Safety model (the four layers)](#safety-model-the-four-layers)
 - [Discovery funnel + dynamic watchlist (ships DISABLED)](#discovery-funnel--dynamic-watchlist-ships-disabled)
+- [Adaptive real-time layer (ships DISABLED)](#adaptive-real-time-layer-ships-disabled)
 - [Repository layout](#repository-layout)
 - [Quick start (one command)](#quick-start-one-command)
 - [Run it 24/7 locally](#run-it-247-locally)
@@ -310,11 +311,83 @@ python -m discovery.run --asset-class crypto     # one class, if due
 python -m discovery.run --force                  # ignore cadence (still flag-gated)
 ```
 
-> **Not built here:** the real-time news-**interpretation-and-react** layer.
-> Discovery uses Finnhub's **pre-computed** sentiment as a cheap number only. No
-> live LLM news reading, no autonomous event-driven entry or exit. Every entry
-> routes through the full funnel and the RiskGate, never a raw headline. That
-> layer is the next build, deferred, and will ship gated. See `LIVE_READINESS.md`.
+> **Not this layer:** discovery uses Finnhub's **pre-computed** sentiment as a
+> cheap number only, one input among price, volume, volatility, momentum, and gap.
+> It moves an instrument's **rank in a screen** and reads no articles. Live event
+> reading is the separate adaptive layer below, which ships disabled and can
+> **refer** a candidate into this funnel but never past it.
+
+## Adaptive real-time layer (ships DISABLED)
+
+Reads live events, and is **allowed to be careful**. Three flags, all default
+false. With them false: no poll runs, no client is constructed, no key is read, no
+socket opens, no token is spent, and the engine consumes nothing. Verified: a
+12000-step flags-off run is behaviorally identical to the pre-adaptive baseline
+(272 trades, 136 closed, zero adaptive rows).
+
+### The asymmetry (the whole point)
+
+**A live event can make the engine more cautious. It can never make it more
+aggressive.**
+
+| Read | What it may do |
+| --- | --- |
+| **Defensive** (trim, exit, flag for review) | Acts directly, through the **same native exit path** the engine already uses. Never a bypass, never a new order path. |
+| **Aggressive** (open, increase) | **No event path exists.** It becomes a watchlist **referral**: the symbol is offered to the discovery funnel, and Stage A, Stage B, the four levels, and the RiskGate all still have to agree before anything is bought. |
+
+There is **no flag for event-driven entry**, because there is no code path to
+enable. A misread headline costs a screening slot and a fraction of a cent. It
+cannot cost a position. That is enforced three times, independently, in two
+languages:
+
+- `adaptive/actions.py`: `DefensiveAction` **refuses to construct** for a
+  non-defensive action, and the queue writer accepts only that type. Not "should
+  not be queued": *cannot be built*.
+- `discovery/watchlist.py`: an adaptive add lands as `referred`, never `active`.
+  The status is derived from the **source**, not requested, so no caller can
+  promote a symbol onto the traded universe.
+- `core/adaptive_actions.hpp`: `DefensiveKind` has three enumerators and none is
+  aggressive. Parsing is an **allowlist**; the engine's consumer never calls the
+  entry path.
+
+### The chain (cheapest stage first)
+
+| Stage | Cost | What it does |
+| --- | --- | --- |
+| **Poll** | free | Finnhub, once a minute, held names first, then watchlist, then general market news. Reuses the discovery client, so one rate limiter, not two. |
+| **Filter** | **free, no LLM** | Keywords, sentiment magnitude, event type. Drops the vast majority. Everything dropped is still **stored**, so the cost claim stays checkable. |
+| **Interpret** | **the only paid stage** | One cheap Haiku read per escalated event: relevance, direction, severity, suggested action. Never on the raw feed. |
+| **Route** | free | `adaptive/actions.py` decides the most it may cause. |
+| **Apply** | free | A referral, a prune, or a queued defensive action. |
+
+Budget: **20 reads/day at about $0.02 (about $0.40/day)**, **separate from and
+additive to** both the discovery budget and the trading council budget, so this
+layer can never eat either one's calls. A per-poll cap means one news storm cannot
+spend the day.
+
+### The three flags
+
+```yaml
+adaptive_realtime:
+  adaptive_news_feed_enabled: false          # observe. The MASTER flag.
+  adaptive_watchlist_shaping_enabled: false  # safe half: refer + prune
+  adaptive_react_defensive_enabled: false    # react half: trim / exit / flag
+```
+
+The feed is the master: the other two are downstream of a poll, so with the feed
+off they can do nothing whatever they are set to. Enable them from **Controls**
+(each arms and states what it starts) and watch the **Adaptive** page, which shows
+the event feed with the dropped rows dimmed and labelled, the interpretations, and
+what the engine actually did with each queued action. Graduation criteria are in
+`LIVE_READINESS.md`.
+
+> **Naming:** `adaptive_realtime:` is *not* the `adaptive:` block, which is the
+> **learning tuner** (weights from closed-trade PnL). They share a word and
+> nothing else.
+
+```bash
+python -m adaptive.run --once     # one poll (does nothing unless the flag is on)
+```
 
 ## Unattended week-long run (watchdog, backups, DNN challenger)
 

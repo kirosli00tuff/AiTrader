@@ -284,13 +284,83 @@ def discovery_candidates(limit: int = 50) -> list[dict]:
 
 
 def watchlist(limit: int = 100) -> list[dict]:
-    """The current active dynamic watchlist: why each instrument is on it, when
-    it was added, its sleeve target, and its status. Read-only."""
+    """The current dynamic watchlist: why each instrument is on it, when it was
+    added, its sleeve target, and its status. Read-only.
+
+    Includes REFERRED entries alongside active ones, tagged by status. A referral
+    is a name the adaptive layer offered to the funnel: it is genuinely on the
+    watchlist, it is genuinely NOT tradeable, and the engine ignores it until a
+    discovery pass promotes it. Hiding referrals would make the adaptive layer's
+    main visible effect invisible on the page named after the list; showing them
+    untagged would imply they trade. So: shown, and labelled.
+
+    Active first, since that is the list that can actually take a position.
+    """
     limit = max(1, min(int(limit), 500))
     return query(
         "SELECT symbol, asset_class, added_ts, updated_ts, source, reason, "
-        "sleeve_target, score, status FROM watchlist WHERE status = 'active' "
-        "ORDER BY score DESC, updated_ts DESC, symbol LIMIT ?", (limit,))
+        "sleeve_target, score, status FROM watchlist "
+        "WHERE status IN ('active', 'referred') "
+        "ORDER BY CASE status WHEN 'active' THEN 0 ELSE 1 END, "
+        "score DESC, updated_ts DESC, symbol LIMIT ?", (limit,))
+
+
+def adaptive_events(limit: int = 100) -> list[dict]:
+    """The live event feed, newest first, INCLUDING everything dropped for free.
+
+    The dropped rows are the point, not noise: this layer's whole cost argument
+    is that a free filter throws away the vast majority, and that claim is only
+    checkable if what was thrown away is visible.
+    """
+    limit = max(1, min(int(limit), 500))
+    return query(
+        "SELECT id, ts, published_ts, symbol, headline, source, category, "
+        "sentiment, event_type, held, material, material_reason, escalated "
+        "FROM adaptive_event ORDER BY ts DESC, id DESC LIMIT ?", (limit,))
+
+
+def adaptive_interpretations(limit: int = 50) -> list[dict]:
+    """The escalated few: what a model actually said, and what came of it.
+
+    Joined to the event so the operator reads the headline next to the verdict
+    rather than an event id.
+    """
+    limit = max(1, min(int(limit), 200))
+    return query(
+        "SELECT i.id, i.event_id, i.ts, i.symbol, i.relevance, i.direction, "
+        "i.severity, i.action, i.action_class, i.rationale, i.model, "
+        "i.est_cost_usd, i.outcome, i.outcome_reason, e.headline "
+        "FROM adaptive_interpretation i "
+        "LEFT JOIN adaptive_event e ON e.id = i.event_id "
+        "ORDER BY i.ts DESC, i.id DESC LIMIT ?", (limit,))
+
+
+def adaptive_actions(limit: int = 50) -> list[dict]:
+    """Defensive actions QUEUED for the engine. Only ever trim, exit, or flag."""
+    limit = max(1, min(int(limit), 200))
+    return query(
+        "SELECT id, ts, event_id, symbol, action, reason, severity, source "
+        "FROM adaptive_action ORDER BY ts DESC, id DESC LIMIT ?", (limit,))
+
+
+def adaptive_engine_log(limit: int = 50) -> list[dict]:
+    """What the ENGINE did with those actions, from its own event log.
+
+    Queued is not applied: the engine still has to be running, still checks the
+    flag, still re-checks the defensive allowlist, and still checks the action's
+    age. Reading the outcome from the engine's own log, rather than trusting the
+    request row, is what makes that difference visible.
+    """
+    limit = max(1, min(int(limit), 200))
+    # The engine's event columns are `kind` and `payload_json`. Aliased to the
+    # `type`/`payload` the GUI reads, so the naming lives in one place instead of
+    # leaking the engine's column names into the frontend types.
+    return query(
+        "SELECT ts, kind AS type, symbol, severity, message, "
+        "payload_json AS payload FROM events "
+        "WHERE kind IN ('adaptive_defensive', 'adaptive_action_refused', "
+        "'adaptive_action_noop', 'adaptive_flag_for_review') "
+        "ORDER BY ts DESC, id DESC LIMIT ?", (limit,))
 
 
 def watchlist_events(limit: int = 30) -> list[dict]:

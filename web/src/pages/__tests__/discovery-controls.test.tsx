@@ -53,7 +53,7 @@ const STATE = {
   },
   prerequisites: OK_PREREQS,
   longterm_prerequisites: OK_PREREQS,
-  react_layer_built: false,
+  react_layer_built: true,
 };
 
 const mockState = vi.fn();
@@ -246,9 +246,13 @@ describe("state visibility", () => {
     expect(s.textContent).toContain("watchlist 3/40");
   });
 
-  it("states the react layer is not built", async () => {
+  it("states the react layer's relationship to the funnel", async () => {
+    // Was "not built". The layer is now built and ships disabled behind its own
+    // three flags; the headline claim below is the part that had to stay true.
     view(<DiscoveryControls />);
-    expect(await screen.findByText(/news-react layer is not built/))
+    expect(await screen.findByText(/built and has its own toggles below/))
+      .toBeInTheDocument();
+    expect(screen.getByText(/no entry is ever taken on a raw headline/))
       .toBeInTheDocument();
   });
 });

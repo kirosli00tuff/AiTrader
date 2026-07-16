@@ -6,6 +6,7 @@ import { DataState, Panel } from "../components/ui";
 import { ConfirmButton, Slider, Toggle, SourceToggle } from "../components/controls";
 import { SleevesPanel } from "../components/SleevesPanel";
 import { DiscoveryControls } from "../components/DiscoveryControls";
+import { AdaptiveControls } from "../components/AdaptiveControls";
 
 const FACTOR_LABEL: Record<string, string> = {
   rule_based: "Native rule-based", llm_primary: "GPT-5.5", llm_secondary: "Claude Opus 4.8",
@@ -83,6 +84,7 @@ export default function ControlsPage() {
       {msg && <div className="callout" style={{ marginBottom: 14 }}>{msg}</div>}
       <SleevesPanel />
       <DiscoveryControls />
+      <AdaptiveControls />
 
       <DataState loading={c.loading && !d} error={c.error}>
         {d && (

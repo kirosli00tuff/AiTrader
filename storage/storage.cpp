@@ -385,6 +385,63 @@ std::vector<std::string> Storage::watchlist_symbols(const std::string& sleeve) {
     return out;
 }
 
+std::vector<Storage::AdaptiveActionRow> Storage::adaptive_actions_after(
+    long long after_id) {
+    // Tolerant read, same posture as watchlist_symbols: a DB created before the
+    // adaptive layer has no adaptive_action table, and a missing table must
+    // degrade to "no actions", never to a throw. This layer is advisory and can
+    // never take the trading loop down.
+    //
+    // Oldest first, so a burst of actions applies in the order the events
+    // actually happened.
+    std::vector<AdaptiveActionRow> out;
+    const std::string sql =
+        "SELECT id, ts, symbol, action, reason, severity, event_id "
+        "FROM adaptive_action WHERE id > ? ORDER BY id ASC";
+    sqlite3_stmt* raw = nullptr;
+    if (sqlite3_prepare_v2(db_, sql.c_str(), -1, &raw, nullptr) != SQLITE_OK) {
+        if (raw) sqlite3_finalize(raw);
+        return out;
+    }
+    sqlite3_bind_int64(raw, 1, after_id);
+    while (sqlite3_step(raw) == SQLITE_ROW) {
+        AdaptiveActionRow r;
+        r.id = sqlite3_column_int64(raw, 0);
+        auto text = [&](int col) -> std::string {
+            const unsigned char* s = sqlite3_column_text(raw, col);
+            return s ? reinterpret_cast<const char*>(s) : "";
+        };
+        r.ts = text(1);
+        r.symbol = text(2);
+        r.action = text(3);
+        r.reason = text(4);
+        r.severity = sqlite3_column_double(raw, 5);
+        r.event_id = sqlite3_column_int64(raw, 6);
+        out.push_back(std::move(r));
+    }
+    sqlite3_finalize(raw);
+    return out;
+}
+
+long long Storage::max_adaptive_action_id() {
+    // The restart watermark. Reading the CURRENT max at construction is what
+    // makes "an action queued while the engine was down is never replayed" true:
+    // the engine starts life already past everything that exists, so only
+    // actions queued after it came up are ever seen. A missing table gives 0,
+    // which means "start from the beginning of an empty table", not "replay
+    // history".
+    long long out = 0;
+    sqlite3_stmt* raw = nullptr;
+    const char* sql = "SELECT COALESCE(MAX(id), 0) FROM adaptive_action";
+    if (sqlite3_prepare_v2(db_, sql, -1, &raw, nullptr) != SQLITE_OK) {
+        if (raw) sqlite3_finalize(raw);
+        return 0;
+    }
+    if (sqlite3_step(raw) == SQLITE_ROW) out = sqlite3_column_int64(raw, 0);
+    sqlite3_finalize(raw);
+    return out;
+}
+
 void Storage::upsert_regime(const std::string& symbol, const std::string& regime,
                             double adx, double rvol,
                             const std::string& active_factor,

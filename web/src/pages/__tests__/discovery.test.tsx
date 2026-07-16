@@ -28,7 +28,7 @@ const STATE_OFF = {
   ceilings: { max_finalists: 12, max_survivors: 5, max_council_calls_per_pass: 5 },
   budget: { daily: 12, used_today: 0, remaining: 12, est_cost_per_call: 0.04,
             est_spend_today: 0 },
-  react_layer_built: false,
+  react_layer_built: true,
 };
 
 const STATE_ON = {
@@ -148,12 +148,21 @@ describe("discovery views, disabled state", () => {
     expect(within(box).getByText(/12 discovery council calls\/day/)).toBeTruthy();
   });
 
-  it("states the react layer is not built", async () => {
+  it("states the react layer's relationship to the funnel", async () => {
+    // The react layer GRADUATED from "not built" to "built, ships disabled"
+    // (2026-07-16). The claim that had to survive that change is the one about
+    // headlines: it is the asymmetry, and it is still true. Discovery reads a
+    // pre-computed NUMBER; the react layer can refer a candidate INTO this
+    // funnel but never past it.
     view(<DiscoveryPage />);
     const box = await screen.findByTestId("discovery-disabled");
-    expect(within(box).getByText(/news-react layer is not built/)).toBeTruthy();
     expect(
-      within(box).getByText(/No entry is ever taken on a raw headline/)).toBeTruthy();
+      within(box).getByText(/built and ships separately disabled/)).toBeTruthy();
+    expect(
+      within(box).getByText(/no entry is ever taken on a raw headline/)).toBeTruthy();
+    expect(
+      within(box).getByText(/refer a candidate into this funnel, never past it/))
+      .toBeTruthy();
   });
 
   it("renders an empty funnel without a pass, and no error", async () => {

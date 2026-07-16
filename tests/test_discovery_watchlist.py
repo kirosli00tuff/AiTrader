@@ -174,10 +174,31 @@ def test_an_unknown_source_is_refused(tmp_path):
     assert r["reason"] == "unknown_source"
 
 
-def test_only_discovery_and_prune_are_enabled_today():
+def test_adaptive_react_is_gated_not_unconditional():
+    """The react layer GRADUATED from reserved to gated (2026-07-16).
+
+    It used to sit in RESERVED_SOURCES and be refused unconditionally. It is now
+    a real source, but a GATED one: accepted only while the operator's
+    adaptive_watchlist_shaping_enabled flag is on, which ships false. The
+    invariant that matters did not change, and is re-asserted here and in
+    tests/test_adaptive_shaping.py: under the shipped config an adaptive_react
+    event is still refused with source_not_enabled.
+
+    It is deliberately NOT in ACTIVE_SOURCES: that tuple is the unconditional
+    allowlist, and a source that can move the watchlist on a headline must never
+    be unconditional.
+    """
     assert watchlist.ACTIVE_SOURCES == ("discovery", "prune")
-    assert "adaptive_react" in watchlist.RESERVED_SOURCES
+    assert "adaptive_react" in watchlist.GATED_SOURCES
     assert "adaptive_react" not in watchlist.ACTIVE_SOURCES
+    assert "adaptive_react" not in watchlist.RESERVED_SOURCES
+    # `manual` stays reserved: no producer, refused, still a seam.
+    assert "manual" in watchlist.RESERVED_SOURCES
+    # An adaptive add can only ever be a REFERRAL, never a live entry. This is
+    # what makes "aggressive entry always goes through the funnel" structural:
+    # the status is derived from the source, so no caller can request `active`.
+    assert watchlist._entry_status_for("adaptive_react") == "referred"
+    assert watchlist._entry_status_for("discovery") == "active"
 
 
 def test_invalid_events_are_refused(tmp_path):

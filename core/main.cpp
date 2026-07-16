@@ -369,9 +369,36 @@ int main(int argc, char** argv) {
                 << "/call (SEPARATE from + additive to the trading budget); "
                 << "watchlist max " << cfg.discovery.watchlist_max_size
                 << ", stale " << cfg.discovery.watchlist_stale_hours << "h\n"
-                << "  react:     news-interpretation-and-react layer NOT BUILT "
-                << "(deferred, will ship gated; discovery uses precomputed "
-                << "sentiment only)\n"
+                // Adaptive real-time layer. Three independent flags, all off by
+                // default. The line about aggressive entry prints
+                // unconditionally and on purpose: the operator should be able to
+                // read the guarantee off the startup block without opening a doc.
+                << "  adaptive:  news feed "
+                << (cfg.adaptive_realtime.adaptive_news_feed_enabled
+                        ? "ENABLED"
+                        : "DISABLED (opt-in)")
+                << ", watchlist shaping "
+                << (cfg.adaptive_realtime.adaptive_watchlist_shaping_enabled
+                        ? "ENABLED"
+                        : "DISABLED (opt-in)")
+                << ", defensive react "
+                << (cfg.adaptive_realtime.adaptive_react_defensive_enabled
+                        ? "ENABLED"
+                        : "DISABLED (opt-in)")
+                << "\n"
+                << "  adapt $:   poll "
+                << cfg.adaptive_realtime.poll_interval_seconds
+                << "s (free tier), budget "
+                << cfg.adaptive_realtime.adaptive_daily_llm_budget
+                << " reads/day @ ~$"
+                << cfg.adaptive_realtime.adaptive_est_cost_per_call_usd
+                << "/read (SEPARATE from + additive to the discovery AND trading "
+                << "budgets); the free filter drops the rest\n"
+                << "  react:     a live event may TRIM, EXIT, or FLAG only. "
+                << "Aggressive entry has no event path: it always routes through "
+                << "the discovery funnel + RiskGate. Stale actions (>"
+                << cfg.adaptive_realtime.action_max_age_seconds
+                << "s) refused\n"
                 << "  cost cuts: risk pre-check ON; equities market-hours-only "
                 << (cfg.engine.equities_market_hours_only ? "ON" : "off")
                 << " (no equity entry outside US RTH, exits exempt, crypto 24/7)\n"

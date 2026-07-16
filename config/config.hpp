@@ -391,6 +391,58 @@ struct DiscoveryConfig {
     int watchlist_stale_hours = 48;
 };
 
+// Adaptive REAL-TIME layer: reads live news, and is allowed to be careful.
+// SHIPS DISABLED, all three flags false. Mirrored in adaptive/settings.py.
+//
+// NOT the same thing as AdaptiveConfig above. That one is the LEARNING tuner
+// (config block `adaptive:`) that tunes factor weights from closed-trade PnL.
+// This one (block `adaptive_realtime:`) reads headlines. They share a word and
+// nothing else; the block names are kept distinct so neither can silently pick
+// up the other's keys.
+//
+// THE ASYMMETRY. There are exactly three flags, and none of them enables
+// event-driven aggressive entry, because no such code path exists. A live event
+// may make the engine more cautious (trim, exit, flag for review) directly. To
+// make it more aggressive, the event's symbol goes back through the discovery
+// funnel: Stage A, Stage B, the four levels, then the RiskGate. The engine reads
+// only defensive actions from the queue (core/adaptive_actions.hpp), and the
+// adaptive path never reaches handle_bar_close's ENTRY branch.
+struct AdaptiveRealtimeConfig {
+    // The OBSERVE half's master flag. Off => no poll, no client, no spend.
+    bool adaptive_news_feed_enabled = false;
+    // The SAFE half: add funnel referrals, prune the watchlist. Independent.
+    bool adaptive_watchlist_shaping_enabled = false;
+    // The REACT half: the only flag that lets an event change a POSITION, and it
+    // can only ever shrink or freeze one.
+    bool adaptive_react_defensive_enabled = false;
+
+    // Feed. Once a minute keeps the layer inside the Finnhub free tier.
+    int poll_interval_seconds = 60;
+    int max_symbols_per_poll = 30;
+    int news_lookback_minutes = 15;
+    bool general_news_enabled = true;
+
+    // Free materiality filter (no LLM). The keyword list lives on the Python
+    // side only: the engine never filters events, it only consumes actions.
+    double materiality_min_sentiment = 0.55;
+
+    // Interpretation budget: SEPARATE from and ADDITIVE to both the discovery
+    // budget and the trading council budget, so this layer can never eat either.
+    int adaptive_daily_llm_budget = 20;
+    double adaptive_est_cost_per_call_usd = 0.02;
+    int max_interpretations_per_poll = 3;
+    double interpretation_min_relevance = 0.40;
+
+    // Action bounds, enforced ENGINE-SIDE as well as Python-side.
+    double action_min_severity = 0.60;
+    // A queued action older than this is refused. Stale news must not move a
+    // position: if the engine was down, the right answer on resume is to drop
+    // the action, not to act on an hours-old headline.
+    int action_max_age_seconds = 300;
+    // What fraction of a position a `trim` closes.
+    double defensive_trim_fraction = 0.50;
+};
+
 // Ensemble weights. Editable in UI, auto-normalized, lockable.
 struct ModelWeights {
     double llm_primary_weight = 0.27;
@@ -455,6 +507,7 @@ struct Config {
     IbkrConfig ibkr;
     SleeveConfig sleeves;
     DiscoveryConfig discovery;       // discovery funnel + watchlist (disabled)
+    AdaptiveRealtimeConfig adaptive_realtime;  // news react layer (disabled)
     RegionalSessionConfig regional;  // global-session equity rotation (disabled)
     ModelWeights model_weights;
 

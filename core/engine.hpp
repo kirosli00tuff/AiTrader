@@ -14,6 +14,7 @@
 #include <vector>
 
 #include "account_manager/account_manager.hpp"
+#include "core/adaptive_actions.hpp"
 #include "core/feed_clock.hpp"
 #include "core/layer_toggles.hpp"
 #include "core/operator_controls.hpp"
@@ -170,6 +171,32 @@ private:
                           const std::string& key, const std::string& ts);
     // Whether the symbol at `key` is warm enough to evaluate a native entry.
     bool symbol_is_warm(const std::string& key) const;
+    // Consume queued DEFENSIVE actions from the adaptive real-time layer, at the
+    // top of each loop iteration. Gated on
+    // adaptive_realtime.adaptive_react_defensive_enabled, which is FALSE by
+    // default: with the flag off this reads nothing and does nothing.
+    //
+    // This function is the whole of the engine's exposure to live news, and note
+    // what it cannot do. It consumes core::DefensiveAction values, a type with no
+    // representation for opening or increasing a position, so there is no
+    // instruction it could receive that would make the engine more aggressive. It
+    // reaches only the exit accounting, never handle_bar_close's ENTRY branch. A
+    // symbol the adaptive layer wants BOUGHT lands on the watchlist as
+    // `referred` and must clear the discovery funnel and the RiskGate like
+    // anything else.
+    //
+    // Three independent refusals apply to every row: the flag, the defensive
+    // allowlist (core/adaptive_actions.hpp), and the action's age.
+    void consume_adaptive_actions(const std::string& ts, long now_epoch);
+    // Apply one defensive action through the SAME native exit accounting the
+    // engine already uses. Never a bypass, and never a new order path. Returns
+    // false (with a logged reason) when there is nothing to act on. Exits
+    // deliberately do not consult the RiskGate: the gate's job is to refuse
+    // risk-INCREASING orders, and a gate that could refuse an exit would trap a
+    // position. The exit path in handle_bar_close has always worked this way.
+    bool apply_defensive_action(const core::DefensiveAction& a,
+                                const std::string& ts);
+
     // Consume the remaining controls.json overrides each iteration (Task 2):
     // council model toggles, runtime budget, and per-symbol regime pins. Logs
     // each change with old and new. Advisory/cost only, never a safety bypass.
@@ -253,6 +280,12 @@ private:
     int trades_today_ = 0;              // native entries today (max_trades_per_day)
     std::string trades_today_day_;      // UTC day bucket for the counter above
     long closed_trade_count_ = 0;       // closed native trades (min-sample gate)
+
+    // Highest adaptive_action id this engine has already seen. Seeded at
+    // construction with the CURRENT max, so actions queued while the engine was
+    // down are never replayed on a restart: an old headline must not move a
+    // position in a market that has since repriced. Only ever moves forward.
+    long long adaptive_action_watermark_ = 0;
 
     // Continuous-mode state.
     bool continuous_ = false;          // gate equity by market hours when true

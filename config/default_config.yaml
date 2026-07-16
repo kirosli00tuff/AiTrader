@@ -390,6 +390,67 @@ discovery:
   watchlist_stale_hours: 48
 
 # -----------------------------------------------------------------------------
+# Adaptive REAL-TIME layer (reads live news). SHIPS DISABLED, all three flags
+# false. With them false: no poll runs, no Finnhub client is built, no key is
+# read, no socket opens, no token is spent, and the engine consumes no action.
+# Behavior is exactly as if this block did not exist.
+#
+# NOT the `adaptive:` block above. That one is the LEARNING tuner, which tunes
+# factor weights from closed-trade PnL. This one reads headlines. They share a
+# word and nothing else.
+#
+# THE ASYMMETRY, which is the reason this layer is allowed to exist at all:
+# a live event can make the engine MORE CAUTIOUS directly (trim, exit, flag for
+# review) and can NEVER make it more aggressive directly. There are exactly three
+# flags below and none of them enables event-driven entry, because there is no
+# such code path to enable. A bullish read becomes a watchlist REFERRAL: the
+# symbol is offered to the discovery funnel, and Stage A, Stage B, the four
+# levels, and the RiskGate all still have to agree before anything is bought. A
+# misread headline costs a screening slot and a fraction of a cent, never a
+# position. See CONTEXT.md and LIVE_READINESS.md.
+#
+# Cost: the feed is free (Finnhub free tier). The ONLY paid stage is one cheap
+# Haiku read per ESCALATED event, and an event only escalates after a free
+# no-LLM filter (keywords, sentiment magnitude, event type) keeps it. Worst case
+# is adaptive_daily_llm_budget * adaptive_est_cost_per_call_usd = 20 * $0.02 =
+# $0.40/day, a budget SEPARATE from and ADDITIVE to both the discovery budget and
+# the trading council budget, so this layer can never eat either one's calls.
+# -----------------------------------------------------------------------------
+adaptive_realtime:
+  # The OBSERVE half's master flag. The other two are downstream of a poll, so
+  # with this false they cannot do anything whatever they are set to.
+  adaptive_news_feed_enabled: false         # OFF by default (operator opt-in)
+  # The SAFE half: add funnel referrals, prune the watchlist. Changes what the
+  # system LOOKS AT, never what it holds. Enableable on its own.
+  adaptive_watchlist_shaping_enabled: false # OFF by default (operator opt-in)
+  # The REACT half: the only flag that lets an event change a POSITION, and it
+  # can only ever shrink or freeze one.
+  adaptive_react_defensive_enabled: false   # OFF by default (operator opt-in)
+
+  # Feed. Once a minute sits far inside the Finnhub free tier (60 calls/min).
+  poll_interval_seconds: 60
+  max_symbols_per_poll: 30                  # hard bound on the call rate
+  news_lookback_minutes: 15                 # wider than the interval: a missed
+                                            # poll must not lose events
+  general_news_enabled: true                # macro events that name no symbol
+
+  # Free materiality filter (NO LLM). Deliberately generous: a false positive
+  # costs one cheap call, a false negative misses an event outright.
+  materiality_min_sentiment: 0.55
+
+  # Interpretation: the only paid stage.
+  adaptive_daily_llm_budget: 20             # hard ceiling, separate + additive
+  adaptive_est_cost_per_call_usd: 0.02
+  max_interpretations_per_poll: 3           # one news storm cannot spend the day
+  interpretation_model: claude-haiku-4-5
+  interpretation_min_relevance: 0.40
+
+  # Action bounds. Enforced engine-side as well as Python-side.
+  action_min_severity: 0.60                 # below this an event causes nothing
+  action_max_age_seconds: 300               # stale news must not move a position
+  defensive_trim_fraction: 0.50             # what a `trim` closes
+
+# -----------------------------------------------------------------------------
 # RL advisory (Layer 3, DEFERRED). Ships toggled OFF. While rl_enabled is false
 # the engine never scores an RL factor and it stays out of the ensemble entirely.
 # The PPO trainer (rl_advisory/) refuses to run until at least rl_min_real_fills

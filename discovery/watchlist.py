@@ -6,12 +6,32 @@ or when a thesis breaks. It is deliberately small: the universe is the outer edg
 of the funnel, the watchlist is the narrow end.
 
 EVENT-SOURCED ON PURPOSE. Every mutation goes through ``apply_event`` with an
-explicit source, and each one is journalled to ``watchlist_event``. That is the
-bridge to the deferred real-time react layer: when that layer ships it emits the
-same add/remove events from a new source and needs no rewrite here. Today only
-``discovery`` and ``prune`` are accepted sources. Every other source is REFUSED
-(``source_not_enabled``), so the structure exists without the behavior and the
-react layer stays off until it is deliberately built and gated. See CONTEXT.md.
+explicit source, and each one is journalled to ``watchlist_event``. That was the
+bridge the deferred react layer was promised, and the react layer has now taken
+it: ``adaptive_react`` adds a producer, not a rewrite.
+
+THREE STATUSES, and the third one carries the safety argument.
+
+  active    tradeable. The engine merges these into its whitelist, so the native
+            strategy may evaluate them. Only ``discovery`` can create one, and it
+            only does so for a Stage-C survivor.
+  referred  NOT tradeable. Invisible to the engine. A candidate the adaptive
+            layer noticed and offered to the funnel. It becomes active only if a
+            later discovery pass ranks it through Stage A, gates it through Stage
+            B, and evaluates it through the four levels.
+  removed   soft-deleted, kept for history.
+
+That split is what makes "aggressive entry always goes through the funnel" true
+rather than aspirational. The adaptive layer CANNOT create an active entry: the
+status is derived from the SOURCE (see ``_entry_status_for``), never requested by
+the caller, so there is no argument a react-layer bug could pass to promote a
+symbol straight onto the traded universe. A misread headline buys a screening
+slot at most.
+
+Sources are gated, not hardcoded: ``adaptive_react`` is accepted only while
+``adaptive_watchlist_shaping_enabled`` is on, which ships FALSE. The flag is read
+here rather than accepted as a parameter, so no caller can pass an override that
+unlocks the source. See CONTEXT.md.
 
 Writer note: this module owns the discovery tables, following the precedent of
 market_data/alpaca_source.py writing ``bars`` and ml_factor/registry.py writing
@@ -25,14 +45,61 @@ import sqlite3
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
-# Sources allowed to mutate the watchlist TODAY. The reserved names are the
-# forward-compatibility seam: they parse, they are refused, and enabling them is
-# a deliberate later build, never an accident.
+# Sources always allowed to mutate the watchlist.
 ACTIVE_SOURCES = ("discovery", "prune")
-RESERVED_SOURCES = ("adaptive_react", "manual")
+
+# Sources allowed only while their own flag is on. Unlike ACTIVE_SOURCES, these
+# are checked against live settings on every event, so turning the flag off stops
+# them at once rather than at the next restart.
+GATED_SOURCES = ("adaptive_react",)
+
+# Still reserved: parses, journalled, refused. The seam for a later build.
+RESERVED_SOURCES = ("manual",)
+
+# Sources whose adds are REFERRALS, never promotions. A referral is not
+# tradeable; only a discovery pass can make an entry active. Deriving this from
+# the source (not from a parameter) is what makes the rule unbypassable.
+REFERRAL_SOURCES = ("adaptive_react",)
 
 VALID_ACTIONS = ("add", "remove")
 VALID_SLEEVES = ("quant_core", "research_satellite")
+
+STATUS_ACTIVE = "active"
+STATUS_REFERRED = "referred"
+STATUS_REMOVED = "removed"
+
+
+def _shaping_enabled() -> bool:
+    """Whether the adaptive layer may shape the watchlist right now.
+
+    Imported lazily to keep discovery independent of the adaptive package at
+    import time (adaptive imports discovery for its Finnhub client, so a
+    module-level import here would be circular). Any failure reads as DISABLED:
+    if we cannot prove the operator turned it on, it is off.
+    """
+    try:
+        from adaptive import settings as adaptive_settings
+        return adaptive_settings.watchlist_shaping_enabled()
+    except Exception:  # noqa: BLE001 - unprovable means off
+        return False
+
+
+def _source_allowed(source: str) -> bool:
+    """Whether `source` may mutate the watchlist. The single authority.
+
+    Takes no override parameter on purpose. A caller cannot pass an allowlist
+    that unlocks a gated source; only the operator's flag can.
+    """
+    if source in ACTIVE_SOURCES:
+        return True
+    if source in GATED_SOURCES:
+        return _shaping_enabled()
+    return False
+
+
+def _entry_status_for(source: str) -> str:
+    """The status an ADD from `source` creates. Derived, never requested."""
+    return STATUS_REFERRED if source in REFERRAL_SOURCES else STATUS_ACTIVE
 
 SCHEMA_DDL = (
     """
@@ -114,19 +181,43 @@ def apply_event(conn: sqlite3.Connection, ev: WatchlistEvent) -> dict:
     if not ev.symbol:
         _journal(conn, ev, ts, False)
         return {"applied": False, "reason": "no_symbol"}
-    if ev.source not in ACTIVE_SOURCES:
-        # The seam for the deferred react layer: parsed, journalled, refused.
+    if not _source_allowed(ev.source):
+        # Refused, but still parsed and still journalled, so a refusal is
+        # visible in the audit trail rather than silent.
         _journal(conn, ev, ts, False)
-        reason = ("source_not_enabled" if ev.source in RESERVED_SOURCES
+        reason = ("source_not_enabled"
+                  if ev.source in RESERVED_SOURCES + GATED_SOURCES
                   else "unknown_source")
         return {"applied": False, "reason": reason}
 
     if ev.action == "add":
         sleeve = (ev.sleeve_target if ev.sleeve_target in VALID_SLEEVES
                   else "quant_core")
+        status = _entry_status_for(ev.source)
+
+        if status == STATUS_REFERRED:
+            # A REFERRAL. Insert as not-tradeable if the symbol is new, and if it
+            # already exists do NOT touch its status, source, or sleeve. Two
+            # reasons: referring a symbol discovery already promoted must not
+            # demote it back out of the traded universe, and a referral must
+            # never be able to overwrite what the funnel concluded. It refreshes
+            # the timestamp and the reason so the entry stays visibly alive.
+            conn.execute(
+                "INSERT INTO watchlist(symbol,asset_class,added_ts,updated_ts,"
+                "source,reason,sleeve_target,score,status,removed_ts,"
+                "removed_reason) VALUES(?,?,?,?,?,?,?,?,?,NULL,NULL) "
+                "ON CONFLICT(symbol) DO UPDATE SET "
+                "updated_ts=excluded.updated_ts, reason=excluded.reason",
+                (ev.symbol, ev.asset_class, ts, ts, ev.source, ev.reason,
+                 sleeve, float(ev.score or 0.0), STATUS_REFERRED))
+            _journal(conn, ev, ts, True)
+            return {"applied": True, "reason": "referred"}
+
         # Re-adding an existing symbol REFRESHES it (updated_ts, reason, score),
         # which is exactly what keeps a live candidate from being pruned as
         # stale. added_ts is preserved, so "when did this first appear" survives.
+        # A discovery add also PROMOTES a referred entry to active: that is the
+        # funnel confirming a candidate the adaptive layer only offered.
         conn.execute(
             "INSERT INTO watchlist(symbol,asset_class,added_ts,updated_ts,source,"
             "reason,sleeve_target,score,status,removed_ts,removed_reason) "
@@ -142,11 +233,14 @@ def apply_event(conn: sqlite3.Connection, ev: WatchlistEvent) -> dict:
         return {"applied": True, "reason": "added"}
 
     # remove: soft delete. The row stays so the operator can see what left and
-    # why, and so a re-add restores it rather than losing its history.
+    # why, and so a re-add restores it rather than losing its history. Removing
+    # covers referred entries too: dropping a candidate nobody promoted is the
+    # cheapest possible action and must not need a promotion first.
     cur = conn.execute(
         "UPDATE watchlist SET status='removed', removed_ts=?, removed_reason=?, "
-        "updated_ts=? WHERE symbol=? AND status='active'",
-        (ts, ev.reason or "removed", ts, ev.symbol))
+        "updated_ts=? WHERE symbol=? AND status IN (?,?)",
+        (ts, ev.reason or "removed", ts, ev.symbol, STATUS_ACTIVE,
+         STATUS_REFERRED))
     applied = cur.rowcount > 0
     _journal(conn, ev, ts, applied)
     return {"applied": applied,
@@ -156,11 +250,55 @@ def apply_event(conn: sqlite3.Connection, ev: WatchlistEvent) -> dict:
 def add_from_discovery(conn: sqlite3.Connection, symbol: str, *, reason: str,
                        sleeve_target: str = "quant_core", score: float = 0.0,
                        asset_class: str = "", ts: str | None = None) -> dict:
-    """Add a Stage-C survivor. The only add path enabled today."""
+    """Add a Stage-C survivor. The only path that makes an entry TRADEABLE.
+
+    A survivor reached here by clearing Stage A, Stage B, and the four levels, so
+    this is the funnel's confirmation. It also PROMOTES a symbol the adaptive
+    layer merely referred: the referral asked the funnel to look, and this is the
+    funnel having looked and agreed.
+    """
     return apply_event(conn, WatchlistEvent(
         action="add", symbol=symbol, source="discovery", reason=reason,
         sleeve_target=sleeve_target, score=score, asset_class=asset_class,
         ts=ts or _utcnow_iso()))
+
+
+def refer_from_adaptive(conn: sqlite3.Connection, symbol: str, *, reason: str,
+                        asset_class: str = "",
+                        ts: str | None = None) -> dict:
+    """Offer a symbol to the funnel. NOT an add to the traded universe.
+
+    This is the strongest thing a live event can do toward BUYING something, and
+    it is deliberately weak: the entry lands as ``referred``, the engine never
+    sees it, and it becomes tradeable only if a later discovery pass ranks it,
+    gates it, and evaluates it. Refused entirely unless the shaping flag is on.
+    """
+    return apply_event(conn, WatchlistEvent(
+        action="add", symbol=symbol, source="adaptive_react", reason=reason,
+        asset_class=asset_class, ts=ts or _utcnow_iso()))
+
+
+def remove_from_adaptive(conn: sqlite3.Connection, symbol: str, *,
+                         reason: str, ts: str | None = None) -> dict:
+    """Prune one entry on a live event. A safe action: it can only ever shrink
+    what the engine looks at, never grow it, and it closes no position."""
+    return apply_event(conn, WatchlistEvent(
+        action="remove", symbol=symbol, source="adaptive_react", reason=reason,
+        ts=ts or _utcnow_iso()))
+
+
+def referred_symbols(conn: sqlite3.Connection) -> list[str]:
+    """Symbols the adaptive layer offered but the funnel has not confirmed.
+
+    discovery/run.py folds these into the next pass's Stage-A input, which is
+    what closes the loop: a referral is a request to be screened, and this is
+    where the screening picks it up. They are NOT tradeable while they sit here.
+    """
+    ensure_schema(conn)
+    rows = conn.execute(
+        "SELECT symbol FROM watchlist WHERE status=? ORDER BY symbol",
+        (STATUS_REFERRED,)).fetchall()
+    return [r[0] for r in rows if r and r[0]]
 
 
 def active(conn: sqlite3.Connection) -> list[dict]:
@@ -202,14 +340,21 @@ def recent_events(conn: sqlite3.Connection, limit: int = 50) -> list[dict]:
 
 def stale_symbols(conn: sqlite3.Connection, stale_hours: int,
                   now: datetime | None = None) -> list[str]:
-    """Active symbols no pass re-confirmed within ``stale_hours``. Pure read."""
+    """Live symbols no pass re-confirmed within ``stale_hours``. Pure read.
+
+    Covers REFERRED entries as well as active ones. A referral the funnel never
+    confirms (a symbol outside the configured universe, say) would otherwise sit
+    in the table forever: nothing promotes it, so nothing refreshes it, so a
+    staleness rule that only looked at active entries would never collect it.
+    Referrals expire the same way candidates do.
+    """
     ensure_schema(conn)
     now = now or datetime.now(timezone.utc)
     cutoff = (now - timedelta(hours=max(0, stale_hours))).strftime(
         "%Y-%m-%dT%H:%M:%SZ")
     rows = conn.execute(
-        "SELECT symbol FROM watchlist WHERE status='active' AND updated_ts < ? "
-        "ORDER BY symbol", (cutoff,)).fetchall()
+        "SELECT symbol FROM watchlist WHERE status IN (?,?) AND updated_ts < ? "
+        "ORDER BY symbol", (STATUS_ACTIVE, STATUS_REFERRED, cutoff)).fetchall()
     return [r[0] for r in rows]
 
 

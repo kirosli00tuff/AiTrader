@@ -938,8 +938,11 @@ def test_discovery_state_summarizes_for_the_top_strip(env, client):
     assert j["universe"]["equity_universe"] >= 100
     assert j["universe"]["crypto_active_max"] <= 50
     assert j["ceilings"]["max_survivors"] <= j["ceilings"]["max_finalists"]
-    # The react layer is not built, and the payload says so.
-    assert j["react_layer_built"] is False
+    # The react layer IS built now (2026-07-16) and the payload says so. It
+    # ships disabled behind its own three flags, which is a separate question
+    # from whether it exists: /adaptive/state reports those, and
+    # test_adaptive_ships_disabled asserts all three are false.
+    assert j["react_layer_built"] is True
 
 
 def test_discovery_state_budget_is_separate_from_the_trading_budget(env, client):
@@ -1149,6 +1152,272 @@ def test_no_discovery_control_writes_a_level1_value(env, client, monkeypatch):
     assert "risk" not in saved
     assert not any("loss" in k or "confidence" in k
                    for k in saved.get("discovery", {}))
+
+
+# --- Adaptive real-time layer ----------------------------------------------
+
+def _adaptive_ready(monkeypatch):
+    """Both prerequisites resolving. Neither key is real: resolve_key is stubbed,
+    so nothing here can reach a network."""
+    _finnhub_present(monkeypatch)
+    from llm_consensus import providers
+    monkeypatch.setattr(providers, "_resolve_key",
+                        lambda *a, **k: "fake-resolves")
+
+
+def _enable_feed(client, monkeypatch):
+    _adaptive_ready(monkeypatch)
+    return client.post("/controls/adaptive",
+                       json={"flag": "adaptive_news_feed_enabled",
+                             "enabled": True}).json()
+
+
+def test_adaptive_ships_disabled(env, client):
+    j = client.get("/adaptive/state").json()
+    assert j["news_feed_enabled"] is False
+    assert j["watchlist_shaping_enabled"] is False
+    assert j["react_defensive_enabled"] is False
+    # The guarantee is REPORTED, not asserted in a hardcoded GUI string that
+    # could drift from the code.
+    assert j["aggressive_entry_path_exists"] is False
+
+
+def test_adaptive_enable_is_refused_without_prerequisites(env, client):
+    r = client.post("/controls/adaptive",
+                    json={"flag": "adaptive_news_feed_enabled",
+                          "enabled": True}).json()
+    assert r["ok"] is False
+    assert "missing prerequisite" in r["error"]
+    assert any("Finnhub" in c["label"] for c in r["prerequisites"]["checks"])
+
+
+def test_adaptive_flag_lands_in_the_control_file(env, client, monkeypatch):
+    r = _enable_feed(client, monkeypatch)
+    assert r["ok"] is True
+    saved = json.load(open(os.path.join(env["control"], "controls.json")))
+    assert saved["adaptive_realtime"]["adaptive_news_feed_enabled"] is True
+    # And the layer's own settings reader sees it, which is what the poller uses.
+    from adaptive import settings
+    assert settings.news_feed_enabled() is True
+
+
+def test_a_downstream_half_needs_the_feed_first(env, client, monkeypatch):
+    """A toggle that cannot do anything must refuse, not silently sit on."""
+    _adaptive_ready(monkeypatch)
+    r = client.post("/controls/adaptive",
+                    json={"flag": "adaptive_react_defensive_enabled",
+                          "enabled": True}).json()
+    assert r["ok"] is False
+    assert "news feed must be on first" in r["error"]
+
+
+def test_turning_the_feed_off_turns_its_downstream_halves_off(env, client,
+                                                              monkeypatch):
+    """Otherwise they sit set-but-inert and surprise the operator on a restart."""
+    _enable_feed(client, monkeypatch)
+    client.post("/controls/adaptive",
+                json={"flag": "adaptive_react_defensive_enabled",
+                      "enabled": True})
+    assert client.get("/adaptive/state").json()["react_defensive_enabled"]
+
+    client.post("/controls/adaptive",
+                json={"flag": "adaptive_news_feed_enabled", "enabled": False})
+    j = client.get("/adaptive/state").json()
+    assert j["news_feed_enabled"] is False
+    assert j["react_defensive_enabled"] is False, "downstream follows the feed"
+
+
+def test_disabling_adaptive_is_never_blocked(env, client):
+    """No prerequisites, no ceremony: turning a spender OFF must always work,
+    even with every dependency broken."""
+    r = client.post("/controls/adaptive",
+                    json={"flag": "adaptive_news_feed_enabled",
+                          "enabled": False}).json()
+    assert r["ok"] is True
+
+
+def test_there_is_no_flag_that_enables_aggressive_entry(env, client,
+                                                        monkeypatch):
+    """The flag name is an ALLOWLIST of exactly three. There is no name that
+    turns on event-driven entry, because that capability does not exist."""
+    _adaptive_ready(monkeypatch)
+    for bogus in ("adaptive_react_aggressive_enabled", "adaptive_entry_enabled",
+                  "allow_open", "adaptive_react_defensive_enabled_"):
+        r = client.post("/controls/adaptive",
+                        json={"flag": bogus, "enabled": True}).json()
+        assert r["ok"] is False
+        assert "unknown adaptive flag" in r["error"]
+
+
+def test_adaptive_settings_are_clamped_and_reported(env, client):
+    r = client.post("/controls/adaptive_settings",
+                    json={"adaptive_daily_llm_budget": 9999,
+                          "poll_interval_seconds": 1}).json()
+    assert r["ok"] is True
+    assert r["adaptive_realtime"]["adaptive_daily_llm_budget"] == 200
+    assert r["adaptive_realtime"]["poll_interval_seconds"] == 15
+    # Never silently show a different number than the operator typed.
+    assert r["clamped"]["adaptive_daily_llm_budget"] == 200
+    assert r["clamped"]["poll_interval_seconds"] == 15
+
+
+def test_an_action_can_never_be_made_un_expirable(env, client):
+    """action_max_age_seconds is what stops stale news moving a position, so 0
+    (never expires) is clamped away rather than honored."""
+    r = client.post("/controls/adaptive_settings",
+                    json={"action_max_age_seconds": 0}).json()
+    assert r["adaptive_realtime"]["action_max_age_seconds"] == 30
+
+
+def test_a_trim_must_actually_trim(env, client):
+    r = client.post("/controls/adaptive_settings",
+                    json={"defensive_trim_fraction": 0.0}).json()
+    assert r["adaptive_realtime"]["defensive_trim_fraction"] == 0.01
+
+
+def test_an_unknown_adaptive_setting_is_refused_loudly(env, client):
+    r = client.post("/controls/adaptive_settings",
+                    json={"adaptive_daily_llm_budgett": 5})
+    assert r.status_code == 422, "a typo must not look like it worked"
+
+
+def test_no_adaptive_control_writes_a_level1_value(env, client, monkeypatch):
+    """The structural rule: cost, cadence, and thresholds only, never a risk
+    limit."""
+    _adaptive_ready(monkeypatch)
+    before = client.get("/risk").json()["level1"]
+    _enable_feed(client, monkeypatch)
+    client.post("/controls/adaptive",
+                json={"flag": "adaptive_react_defensive_enabled",
+                      "enabled": True})
+    client.post("/controls/adaptive_settings",
+                json={"adaptive_daily_llm_budget": 100,
+                      "action_min_severity": 0.1})
+    assert client.get("/risk").json()["level1"] == before
+    saved = json.load(open(os.path.join(env["control"], "controls.json")))
+    assert "risk" not in saved
+    assert not any("loss" in k or "confidence" in k
+                   for k in saved.get("adaptive_realtime", {}))
+
+
+def test_adaptive_controls_never_enable_live(env, client, monkeypatch):
+    _adaptive_ready(monkeypatch)
+    before = client.get("/approval").json()
+    _enable_feed(client, monkeypatch)
+    client.post("/controls/adaptive",
+                json={"flag": "adaptive_react_defensive_enabled",
+                      "enabled": True})
+    assert client.get("/approval").json() == before
+
+
+def test_adaptive_prerequisites_never_return_a_key_value(env, client,
+                                                         monkeypatch):
+    from discovery import finnhub_source
+    canary = "CANARY-ADAPTIVE-KEY-MUST-NOT-APPEAR-0001"
+    monkeypatch.setattr(finnhub_source, "resolve_key", lambda: canary)
+    body = client.get("/adaptive/state").text
+    assert canary not in body
+    assert "token=" not in body
+
+
+def test_adaptive_views_are_calm_and_empty_when_nothing_has_run(env, client):
+    assert client.get("/adaptive/events").json() == {"events": [],
+                                                     "enabled": False}
+    assert client.get("/adaptive/interpretations").json() == {
+        "interpretations": []}
+    assert client.get("/adaptive/actions").json() == {"actions": [],
+                                                      "engine_log": []}
+
+
+def test_the_event_feed_shows_what_was_dropped_for_free(env, client):
+    """The drops are the cost argument. Hiding them makes it unfalsifiable."""
+    db = sqlite3.connect(env["db"])
+    db.executescript("""
+      INSERT INTO adaptive_event(ts,symbol,headline,source,category,sentiment,
+        dedupe_key,held,material,material_reason,escalated) VALUES
+        ('2026-07-16T09:30:00Z','SPY','Shares drift in quiet trade','Reuters',
+         'company',0.02,'finnhub:1',0,0,'no_trigger',0),
+        ('2026-07-16T09:31:00Z','SPY','Trading halted amid fraud probe','Reuters',
+         'company',-0.8,'finnhub:2',1,1,'keyword:fraud',1);
+    """)
+    db.commit()
+    events = client.get("/adaptive/events").json()["events"]
+    assert len(events) == 2
+    assert events[0]["headline"].startswith("Trading halted")  # newest first
+    assert events[0]["escalated"] == 1
+    assert events[1]["material"] == 0
+    assert events[1]["material_reason"] == "no_trigger"
+
+
+def test_the_state_counts_todays_free_drops(env, client):
+    from api_server.controls import _now
+    day = _now()[:10]
+    db = sqlite3.connect(env["db"])
+    rows = ",".join(
+        f"('{day}T09:{i:02d}:00Z','SPY','h','R','company',0,'finnhub:{i}',0,"
+        f"{1 if i == 0 else 0},'r',{1 if i == 0 else 0})" for i in range(5))
+    db.executescript(
+        "INSERT INTO adaptive_event(ts,symbol,headline,source,category,"
+        "sentiment,dedupe_key,held,material,material_reason,escalated) VALUES "
+        + rows + ";")
+    db.commit()
+    j = client.get("/adaptive/state").json()["today"]
+    assert j["events_seen"] == 5
+    assert j["events_escalated"] == 1
+    assert j["events_dropped_free"] == 4
+
+
+def test_the_engine_log_reads_real_engine_events(env, client):
+    """Queued is not applied, so the page reads the ENGINE's own log.
+
+    This test exists because the first version of the query named columns that do
+    not exist (`type`/`payload` rather than `kind`/`payload_json`). The read is
+    tolerant by design, so it returned [] rather than raising: the panel would
+    have sat empty forever while looking perfectly healthy. Seeding a real row
+    and demanding it back is the only way that bug shows up.
+    """
+    db = sqlite3.connect(env["db"])
+    db.executescript("""
+      INSERT INTO events(ts, kind, venue, symbol, severity, message, payload_json)
+      VALUES
+        ('2026-07-16T09:31:05Z','adaptive_defensive','alpaca','SPY','warn',
+         'Adaptive exit SPY qty=5.000000 pnl=-12.500000: trading halted','{}'),
+        ('2026-07-16T09:32:00Z','adaptive_action_refused','','TSLA','warn',
+         'Refused non-defensive adaptive action ''open'' for TSLA','{}');
+    """)
+    db.commit()
+    log = client.get("/adaptive/actions").json()["engine_log"]
+    assert len(log) == 2, "the engine log must actually come back"
+    assert log[0]["type"] == "adaptive_action_refused"  # newest first
+    assert "Refused non-defensive" in log[0]["message"]
+    assert log[1]["type"] == "adaptive_defensive"
+    assert "Adaptive exit SPY" in log[1]["message"]
+
+
+def test_a_referred_watchlist_entry_is_visible_but_labelled(env, client):
+    """The operator must be able to see that a name was OFFERED to the funnel
+    without it looking like a name that trades."""
+    db = sqlite3.connect(env["db"])
+    db.executescript("""
+      INSERT INTO watchlist(symbol,asset_class,added_ts,updated_ts,source,
+        reason,sleeve_target,score,status) VALUES
+        ('AAPL','equity','2026-07-16T09:00:00Z','2026-07-16T09:00:00Z',
+         'discovery','survived stage C','quant_core',0.8,'active'),
+        ('TSLA','equity','2026-07-16T09:30:00Z','2026-07-16T09:30:00Z',
+         'adaptive_react','adaptive: takeover rumor','quant_core',0.0,
+         'referred');
+    """)
+    db.commit()
+    rows = client.get("/watchlist").json()["watchlist"]
+    by_symbol = {r["symbol"]: r for r in rows}
+    assert by_symbol["TSLA"]["status"] == "referred"
+    assert by_symbol["TSLA"]["source"] == "adaptive_react"
+    assert by_symbol["AAPL"]["status"] == "active"
+    # Active first, as a group: that is the list that can actually take a
+    # position. Asserted as a partition rather than a fixed first row, so the
+    # test does not silently depend on the seed's scores.
+    statuses = [r["status"] for r in rows]
+    assert statuses == sorted(statuses, key=lambda s: s != "active")
 
 
 def test_discovery_controls_never_enable_live(env, client, monkeypatch):

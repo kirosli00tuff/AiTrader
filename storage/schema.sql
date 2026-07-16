@@ -176,6 +176,93 @@ CREATE TABLE IF NOT EXISTS watchlist_event (
 );
 CREATE INDEX IF NOT EXISTS idx_watchlist_event_ts ON watchlist_event(ts);
 
+-- Adaptive real-time layer (SHIPS DISABLED). Written by the Python adaptive
+-- package (adaptive/store.py), which mirrors these definitions exactly; both
+-- sides use CREATE TABLE IF NOT EXISTS, so whichever runs first wins and the
+-- other is a no-op. The engine only READS adaptive_action, and only when
+-- adaptive_realtime.adaptive_react_defensive_enabled is true.
+--
+-- One poll of the live event feed: what was asked, and what it cost.
+CREATE TABLE IF NOT EXISTS adaptive_poll (
+    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts                TEXT NOT NULL,
+    symbols_polled    INTEGER DEFAULT 0,
+    events_seen       INTEGER DEFAULT 0,
+    events_new        INTEGER DEFAULT 0,
+    events_material   INTEGER DEFAULT 0,
+    events_escalated  INTEGER DEFAULT 0,
+    llm_calls         INTEGER DEFAULT 0,
+    actions_queued    INTEGER DEFAULT 0,
+    referrals         INTEGER DEFAULT 0,
+    est_cost_usd      REAL DEFAULT 0,
+    budget_remaining  INTEGER DEFAULT 0,
+    status            TEXT DEFAULT 'ok',
+    reason            TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_adaptive_poll_ts ON adaptive_poll(ts);
+
+-- Every event SEEN, including the vast majority dropped for free by the no-LLM
+-- materiality filter. Storing the drops is the point: the claim that the filter
+-- keeps this layer cheap is only checkable if the dropped events are counted.
+-- dedupe_key is UNIQUE because the poll lookback is wider than the poll
+-- interval, so the same headline arrives repeatedly by design.
+CREATE TABLE IF NOT EXISTS adaptive_event (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts              TEXT NOT NULL,
+    published_ts    TEXT,
+    symbol          TEXT,
+    headline        TEXT,
+    summary         TEXT,
+    source          TEXT,
+    url             TEXT,
+    category        TEXT,                     -- company | general
+    sentiment       REAL DEFAULT 0,
+    event_type      TEXT,
+    dedupe_key      TEXT UNIQUE,
+    held            INTEGER DEFAULT 0,
+    material        INTEGER DEFAULT 0,
+    material_reason TEXT,
+    escalated       INTEGER DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_adaptive_event_ts ON adaptive_event(ts);
+CREATE INDEX IF NOT EXISTS idx_adaptive_event_sym ON adaptive_event(symbol, ts);
+
+-- The only PAID stage: one structured read per escalated event.
+CREATE TABLE IF NOT EXISTS adaptive_interpretation (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    event_id       INTEGER NOT NULL,
+    ts             TEXT NOT NULL,
+    symbol         TEXT,
+    relevance      REAL DEFAULT 0,
+    direction      TEXT,                      -- bullish | bearish | neutral
+    severity       REAL DEFAULT 0,
+    action         TEXT,                      -- what the model suggested
+    action_class   TEXT,                      -- defensive | shaping | aggressive
+    rationale      TEXT,
+    model          TEXT,
+    est_cost_usd   REAL DEFAULT 0,
+    outcome        TEXT,                      -- queued | referred | pruned | dropped
+    outcome_reason TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_adaptive_interp_ts ON adaptive_interpretation(ts);
+
+-- The queue the engine reads. DEFENSIVE ACTIONS ONLY (trim | exit |
+-- flag_for_review). An aggressive suggestion never lands here: it becomes a
+-- watchlist referral and goes back through the discovery funnel and the
+-- RiskGate. Python cannot write a non-defensive row (adaptive/actions.py) and
+-- the engine will not read one (core/adaptive_actions.hpp).
+CREATE TABLE IF NOT EXISTS adaptive_action (
+    id       INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts       TEXT NOT NULL,
+    event_id INTEGER DEFAULT 0,
+    symbol   TEXT NOT NULL,
+    action   TEXT NOT NULL,                   -- trim | exit | flag_for_review
+    reason   TEXT,
+    severity REAL DEFAULT 0,
+    source   TEXT NOT NULL                    -- adaptive_react
+);
+CREATE INDEX IF NOT EXISTS idx_adaptive_action_ts ON adaptive_action(ts);
+
 -- Per-sleeve accounting history for the GUI (a snapshot per sleeve over time).
 CREATE TABLE IF NOT EXISTS sleeve_history (
     id             INTEGER PRIMARY KEY AUTOINCREMENT,

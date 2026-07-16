@@ -8,6 +8,7 @@ const LINKS = [
   // the operator reads what the funnel found, not where anything is changed.
   { to: "/discovery", label: "Discovery", ico: "▽" },
   { to: "/watchlist", label: "Watchlist", ico: "☰" },
+  { to: "/adaptive", label: "Adaptive", ico: "◈" },
   { to: "/longterm", label: "Long-term", ico: "◇" },
   { to: "/health", label: "Health", ico: "✚" },
   { to: "/ops", label: "Ops", ico: "◧" },

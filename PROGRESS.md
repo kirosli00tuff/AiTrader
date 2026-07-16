@@ -20,6 +20,8 @@ The C++ safety spine builds clean and runs the offline paper loop (`ctest` 7/7).
 - Kill-request wiring: engine consumes the GUI/API halt-request control file each iteration and trips the same latching kill switch (archived to avoid re-trip, manual resume required), ctest-covered
 - React GUI (rebuilt Alpaca-style): Paper/Live Overview/Stocks/Crypto subpages (server-side category filter) + a Controls page (weights, layer/model toggles, champion/challenger, RL enable gate, regime override, budget) on validated api_server endpoints, Level 1 read-only, bound 127.0.0.1, 36 backend + 7 frontend tests. Dash UI unchanged (fallback)
 
+**Adaptive real-time layer (2026-07-16, ships DISABLED). The core vision framework is now fully built.** A Finnhub poller (once a minute, held names first, then watchlist, then general market news, reusing the discovery client so there is one rate limiter rather than two) feeds a FREE no-LLM materiality filter (keywords, sentiment magnitude, event type). The vast majority is dropped for nothing and still stored, so the cost claim stays checkable. Only an escalated event reaches the one paid stage: a single cheap Haiku read returning relevance, direction, severity, and a suggested action, on a 20 read/day budget (about $0.40/day) SEPARATE from and ADDITIVE to both the discovery and trading budgets, with a per-poll cap so one news storm cannot spend the day. THE ASYMMETRY IS THE POINT: a live event may make the engine more cautious directly (trim, exit, flag for review, applied through the same native exit path the engine already uses, never a bypass) and can NEVER make it more aggressive directly. An aggressive read becomes a watchlist REFERRAL, and Stage A, Stage B, the four levels, and the RiskGate all still have to agree before anything is bought. There is no flag for event-driven entry because there is no code path to enable, enforced three times independently in two languages (`adaptive/actions.py` DefensiveAction refuses to CONSTRUCT for a non-defensive action and the queue writer takes only that type; `discovery/watchlist.py` lands an adaptive add as `referred`, status derived from source; `core/adaptive_actions.hpp` DefensiveKind has three enumerators, none aggressive, parse is an allowlist, and the consumer never calls the entry path). Three flags, all default FALSE (`adaptive_news_feed_enabled` the master, `adaptive_watchlist_shaping_enabled`, `adaptive_react_defensive_enabled`), in a NEW `adaptive_realtime:` block kept distinct from the `adaptive:` learning tuner. Verified: with the flags off a 12000-step run is behaviorally identical to the pre-adaptive baseline (272 trades / 136 closed, BTC/USD + ETH/USD + SPY, zero adaptive rows, zero API calls, proven against a client that raises on any attribute access). GUI: an Adaptive page (event feed with dropped rows dimmed and labelled, interpretations, defensive actions beside what the engine actually did) plus three armed toggles in Controls. See LIVE_READINESS.md for the graduation criteria.
+
 **Discovery engine + long-term sleeve (2026-07-16, ships DISABLED).** A curated universe (55 crypto refreshed daily to the active 50 by liquidity, 119 stable curated equities) is screened hourly cheap-to-expensive: Stage A free pre-screen (Finnhub quant data + pre-computed sentiment + native technicals, ZERO LLM tokens) to 12 finalists, Stage B Haiku gate to 5 survivors, Stage C the full four-level framework to a handful of verdicts. Hard per-stage ceilings plus a daily discovery council budget separate from and additive to the trading budget (worst case ~$62/month combined, under the $100 ceiling). Survivors join an event-sourced dynamic watchlist both sleeves draw from. Sleeves moved to 70/30 (30 is a CEILING, mechanism unchanged, hard cap now 35%). The research_satellite gains a long-term quality-and-catalyst-plus-council strategy producing a thesis with target and invalidation, reusing the existing satellite path. `discovery_enabled` and `long_term_sleeve_enabled` both default FALSE, verified: with the flags off a 12000-step run is byte-identical in behavior (272 trades / 136 closed, same 4 symbols, zero discovery activity). The real-time news-REACT layer is NOT built, deferred, and will ship gated (see LIVE_READINESS.md).
 
 ## In Progress
@@ -36,8 +38,36 @@ The C++ safety spine builds clean and runs the offline paper loop (`ctest` 7/7).
 
 ## Next Up
 
-1. **Paper-loop stability.** Run the offline paper loop continuously and confirm it stays stable over time — no drift, no leaks, tuner behaving sanely once ≥30 closed trades accumulate, DB growing cleanly. This is the gate before any new capability.
-2. **Engine consumption of controls.json is DONE (2026-07-13).** The engine consumes every operator override: layer enable toggles, per-level source, kill request, feed/clock, model toggles, regime pins, and budget. Promote/rollback execute through the registry at the audited endpoint; RL enable stays gated. Next: run the warmed paper week and confirm fills accumulate past the old plateau with the tuner floor.
+**THE CORE VISION FRAMEWORK IS NOW FULLY BUILT (2026-07-16).** Every layer the
+project set out to build exists in the codebase: the deterministic safety spine
+and the RiskGate, the native strategy layer with a regime detector, the adaptive
+tuner learning from real closed-trade PnL, the LLM council with its Haiku
+base-check gate, the dnn_advisory and rl_advisory factors, whale signals, the
+two-sleeve core-satellite split, the long-term research strategy, the discovery
+funnel with its dynamic watchlist, and now the real-time adaptive layer with both
+its observe-and-shape and react halves.
+
+**No major capability remains to be invented.** What is left is a different kind
+of work, and it is deliberately not more building:
+
+1. **Validation.** Run the loop and prove it stays stable: no drift, no leaks, a
+   sane tuner past its 30-trade gate, a DB growing cleanly. This has been the
+   gate before new capability all along, and now nothing is queued behind it.
+2. **Data-gated graduation.** Several layers are built but shipped off and cannot
+   honestly be turned on until the evidence exists. Each has an explicit,
+   non-negotiable gate: `rl_advisory` needs 500 real fills (no synthetic path);
+   `dnn_advisory` still serves a synthetic-trained champion until enough real
+   labelled samples exist; discovery, the long-term sleeve, and the three adaptive
+   flags each need their prerequisites and an operator decision. The gates are the
+   plan. Waiting for them is the work.
+3. **The deliberate live decision.** `try_enable_live` is still never called, by
+   design. Live trading remains off behind the four-block approval gate, and
+   turning it on is a human decision made against evidence, not a milestone to
+   reach.
+
+The temptation from here is to keep adding layers. The honest next move is to run
+what exists, let the data accumulate, and let each gate open on its own terms.
+See LIVE_READINESS.md for the per-capability criteria.
 
 ## Known Issues and Caveats
 

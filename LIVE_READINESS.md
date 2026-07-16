@@ -52,47 +52,99 @@ dormant. The startup block and run-state banner show the current global session
 and which equity region is tradeable, so it is always clear that only US equities
 trade and rotation is disabled.
 
-## Real-time news-react adaptive layer (NOT BUILT, deferred, will ship gated)
+## Real-time news-react adaptive layer (BUILT 2026-07-16, SHIPS DISABLED)
 
-The layer that interprets breaking news with an LLM and reacts to it is the NEXT
-build. It is not in the codebase. Nothing in the discovery build reads a headline
-and acts on it.
+The layer that reads live events and reacts to them is built. It ships behind
+three flags, all default false. With them false the engine behaves exactly as it
+did before: no poll runs, no client is constructed, no key is read, no socket
+opens, no token is spent, and no action reaches the engine. Verified: a
+12000-step run with the flags off is behaviorally identical to the pre-adaptive
+baseline (272 trades, 136 closed, same symbols, zero adaptive rows).
 
-### What exists today, and what does not
+Discovery still uses Finnhub's PRE-COMPUTED sentiment as a cheap NUMBER in its
+Stage A pre-screen. That is unchanged and unrelated: it moves an instrument's
+RANK in a screen and costs no tokens.
 
-Discovery uses Finnhub's PRE-COMPUTED news sentiment score as a cheap NUMBER in
-the Stage A free pre-screen, one input among price, volume, volatility, momentum,
-and gap. That is the cheap half of the value: it answers "does this instrument
-have unusual news attention right now" for zero LLM cost, and it only ever moves
-an instrument's RANK in a screen.
+This section is about what must be true before the react layer is turned ON.
 
-What does NOT exist:
+### The asymmetry is the reason this layer is allowed to exist
 
-- No live LLM news interpretation. No model reads an article in this build.
-- No autonomous event-driven entry or exit. No path opens or closes a position in
-  response to an event.
-- No headline-triggered anything. Nothing enters on a raw headline.
+A live event can make the engine MORE CAUTIOUS directly. It can never make the
+engine MORE AGGRESSIVE directly.
 
-### Why it is deferred
+- DEFENSIVE (trim, exit, flag for review) may act directly, through the same
+  native exit path the engine already uses. Not a bypass, and not a new order
+  path.
+- AGGRESSIVE (open, increase) has NO event path at all. A bullish read becomes a
+  watchlist REFERRAL: the symbol is offered to the discovery funnel, and Stage A,
+  Stage B, the four levels, and the RiskGate all still have to agree before
+  anything is bought.
 
-Reacting to news in real time is the highest-variance thing this system could do,
-and it is the one place where a model's mistake becomes an immediate trade. It
-needs its own gating, its own cost model, and its own evidence. Bolting it onto a
-discovery build would ship all of that untested.
+There is no flag for event-driven entry, because there is no code path to enable.
+That is enforced in three independent places, in two languages:
 
-### The rule that holds when it does ship
+| Where | What it refuses |
+| --- | --- |
+| `adaptive/actions.py` | `DefensiveAction` REFUSES TO CONSTRUCT for a non-defensive action. The queue writer accepts only that type, so no value exists that could queue an entry. |
+| `discovery/watchlist.py` | An adaptive add lands as `referred`, never `active`. The status is derived from the SOURCE, not requested, so no caller can promote a symbol onto the traded universe. |
+| `core/adaptive_actions.hpp` | `DefensiveKind` has three enumerators and none is aggressive. `parse_defensive_kind` is an allowlist returning nullopt for everything else. The engine's consumer never calls the entry path. |
 
-Every entry routes through the full funnel and the RiskGate. A news event may
-SURFACE a candidate. It may never place an order. The react layer ships disabled
-behind its own flag, the same graduation the RL advisory and the research
-satellite follow: build it, test it, leave it off, and let the operator turn it on
-deliberately.
+A misread headline costs a screening slot and a fraction of a cent. It cannot
+cost a position. `tests/test_adaptive_actions.py` and
+`tests/test_adaptive_react.cpp` assert this from both sides, including with every
+flag on and severity 1.0.
 
-### The seam is already in place
+### What must be true before enabling it
 
-The dynamic watchlist is event-sourced. Every mutation goes through one
-`apply_event` path carrying an explicit source, journalled to `watchlist_event`.
-The source `adaptive_react` is RESERVED: an event from it parses, is journalled
-with `applied=0`, and is REFUSED with `source_not_enabled`. So the react layer
-adds a source and a producer, not a rewrite. `tests/test_discovery_watchlist.py`
-asserts that the reserved source stays refused.
+The three flags graduate independently, cheapest and safest first. Each is a
+separate deliberate decision, and the order is not arbitrary: the feed is the
+master, and the two halves below it are inert without it.
+
+**1. `adaptive_news_feed_enabled` (observe).** Needs a Finnhub key (feed) and an
+Anthropic key (event reads). Turning this on alone is the safe way to evaluate
+the layer: it spends the adaptive budget and changes NOTHING else. No position
+moves, no watchlist entry changes. Run it here first and read the Adaptive page.
+
+Before going further, confirm from that page:
+
+- The free filter is actually dropping the vast majority. If `events_dropped_free`
+  is not overwhelmingly the largest number on the page, the thresholds are wrong
+  and the layer is not affordable. Tune `materiality_min_sentiment` first.
+- Spend is inside the budget and matches expectation (worst case 20 reads/day at
+  about $0.02 = about $0.40/day, SEPARATE from and additive to the discovery and
+  trading budgets).
+- The interpretations read sensibly. Look specifically at what the model does with
+  ambiguous headlines, and at anything it classed `aggressive`: those are the
+  reads that would have been trades in a naive design.
+
+**2. `adaptive_watchlist_shaping_enabled` (shape).** Requires the feed. Lets a
+read refer a candidate to the funnel and prune the watchlist. Still opens no
+position: a referral is not tradeable and only a funnel pass can promote it.
+Before enabling, confirm the discovery funnel is itself enabled and healthy,
+otherwise referrals accumulate with nothing to screen them (they expire on
+`watchlist_stale_hours`).
+
+**3. `adaptive_react_defensive_enabled` (react).** Requires the feed. This is the
+only flag that lets a live event change a position. Before enabling:
+
+- Watch the layer in observe mode long enough to see real events on names you
+  actually hold, and check what it WOULD have done. An interpretation logged
+  `defensive` with this flag off is a dry run you get for free.
+- Satisfy yourself the severity floor is right (`action_min_severity`, default
+  0.60). Too low and routine bad news trims positions; too high and a real halt
+  is ignored.
+- Understand the trim size (`defensive_trim_fraction`, default 0.50) and the
+  staleness window (`action_max_age_seconds`, default 300). An action older than
+  the window is refused, so news that arrived while the engine was down never
+  moves a position on resume.
+
+### What is deliberately still not built
+
+- No aggressive event path, ever. Not deferred: refused as a design.
+- No per-article sentiment. Finnhub's free tier gives an aggregate per symbol,
+  cached hard, so the sentiment trigger is a coarse magnitude and nothing more.
+- No cross-event reasoning. Each event is read alone. Two related headlines are
+  two independent reads, not a narrative.
+- The engine consumes actions on its LOOP iteration rather than on a bar close, so
+  a defensive exit does not wait for a bar. It is still bounded by the loop
+  interval: this is not a low-latency reaction and must not be relied on as one.

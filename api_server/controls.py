@@ -89,6 +89,36 @@ DISCOVERY_BOUNDS: dict[str, tuple[int, int]] = {
 # cannot exceed half the score.
 WHALE_WEIGHT_MIN, WHALE_WEIGHT_MAX = 0.0, 1.0
 
+# Adaptive real-time layer. Cost, cadence, and staleness bounds only. Nothing
+# here can weaken a Level-1 limit, and there is deliberately NO bound for an
+# aggressive-entry setting, because there is no such setting: an aggressive read
+# always routes back through the discovery funnel and the RiskGate.
+ADAPTIVE_FLAGS = ("adaptive_news_feed_enabled",
+                  "adaptive_watchlist_shaping_enabled",
+                  "adaptive_react_defensive_enabled")
+
+ADAPTIVE_BOUNDS: dict[str, tuple[int, int]] = {
+    # A 15s floor keeps the free tier safe even at the max symbol count.
+    "poll_interval_seconds": (15, 3600),
+    "max_symbols_per_poll": (1, 60),
+    "news_lookback_minutes": (1, 240),
+    "adaptive_daily_llm_budget": (0, 200),
+    "max_interpretations_per_poll": (0, 20),
+    # Never 0: an action that can never go stale is the one thing this field
+    # exists to prevent. The C++ validator refuses 0 too.
+    "action_max_age_seconds": (30, 3600),
+}
+
+# Floats, clamped to 0..1. severity, sentiment, and relevance are all scores.
+ADAPTIVE_FLOAT_BOUNDS: dict[str, tuple[float, float]] = {
+    "materiality_min_sentiment": (0.0, 1.0),
+    "action_min_severity": (0.0, 1.0),
+    "interpretation_min_relevance": (0.0, 1.0),
+    # A trim must actually trim: 0 would be a silent no-op that still logged as
+    # applied, so the floor is deliberately above zero.
+    "defensive_trim_fraction": (0.01, 1.0),
+}
+
 # Ensemble factors for the weight sliders (rl_advisory is shown read-only at 0
 # on the page; it is excluded here so normalization stays over the live six).
 WEIGHT_FACTORS = ("rule_based", "llm_primary", "llm_secondary", "llm_tertiary",
@@ -170,9 +200,63 @@ def _defaults() -> dict:
         # SHIPPED value, which is disabled. The operator's toggle overrides it at
         # runtime, the same way feed/clock override their launch value.
         "discovery": _discovery_defaults(cfg),
+        # Adaptive real-time layer: same posture as discovery. Seeded from
+        # config, which ships all three flags false, so a missing control file
+        # means OFF rather than an accident.
+        "adaptive_realtime": _adaptive_defaults(cfg),
         "pending_promote": None,
         "pending_rollback": None,
     }
+
+
+def _adaptive_defaults(cfg: dict) -> dict:
+    a = cfg.get("adaptive_realtime", {}) or {}
+
+    def _i(key: str, fallback: int) -> int:
+        lo, hi = ADAPTIVE_BOUNDS[key]
+        return _clamp_int(a.get(key, fallback), lo, hi)
+
+    def _f(key: str, fallback: float) -> float:
+        lo, hi = ADAPTIVE_FLOAT_BOUNDS[key]
+        return _clamp_float(a.get(key, fallback), lo, hi)
+
+    return {
+        # All three FALSE from config. Turning any on is a deliberate operator
+        # action, never the result of a missing or broken file.
+        "adaptive_news_feed_enabled":
+            bool(a.get("adaptive_news_feed_enabled", False)),
+        "adaptive_watchlist_shaping_enabled":
+            bool(a.get("adaptive_watchlist_shaping_enabled", False)),
+        "adaptive_react_defensive_enabled":
+            bool(a.get("adaptive_react_defensive_enabled", False)),
+        "poll_interval_seconds": _i("poll_interval_seconds", 60),
+        "max_symbols_per_poll": _i("max_symbols_per_poll", 30),
+        "news_lookback_minutes": _i("news_lookback_minutes", 15),
+        "adaptive_daily_llm_budget": _i("adaptive_daily_llm_budget", 20),
+        "max_interpretations_per_poll": _i("max_interpretations_per_poll", 3),
+        "action_max_age_seconds": _i("action_max_age_seconds", 300),
+        "materiality_min_sentiment": _f("materiality_min_sentiment", 0.55),
+        "action_min_severity": _f("action_min_severity", 0.60),
+        "interpretation_min_relevance": _f("interpretation_min_relevance", 0.40),
+        "defensive_trim_fraction": _f("defensive_trim_fraction", 0.50),
+        "adaptive_est_cost_per_call_usd":
+            _clamp_float(a.get("adaptive_est_cost_per_call_usd", 0.02), 0.0, 1.0),
+    }
+
+
+def _adaptive_downstream_off(d: dict) -> dict:
+    """With the news feed off, the two downstream halves are off too.
+
+    They are both fed by the poll, so with no poll they can do nothing anyway.
+    Forcing them false here means the GUI never shows "shaping ON" next to "feed
+    OFF", which would be true-but-useless and read as a bug. It also matches what
+    the C++ validator refuses at load.
+    """
+    out = dict(d)
+    if not out["adaptive_news_feed_enabled"]:
+        out["adaptive_watchlist_shaping_enabled"] = False
+        out["adaptive_react_defensive_enabled"] = False
+    return out
 
 
 def _discovery_defaults(cfg: dict) -> dict:
@@ -265,6 +349,21 @@ def read_controls() -> dict:
             d["stage_a_whale_weight"] = _clamp_float(
                 sd["stage_a_whale_weight"], WHALE_WEIGHT_MIN, WHALE_WEIGHT_MAX)
         state["discovery"] = _narrowing(d)
+    if isinstance(saved.get("adaptive_realtime"), dict):
+        sa = saved["adaptive_realtime"]
+        a = state["adaptive_realtime"]
+        for k in ADAPTIVE_FLAGS:
+            if k in sa:
+                a[k] = bool(sa[k])
+        for k, (lo, hi) in ADAPTIVE_BOUNDS.items():
+            if k in sa:
+                a[k] = _clamp_int(sa[k], lo, hi)
+        for k, (flo, fhi) in ADAPTIVE_FLOAT_BOUNDS.items():
+            if k in sa:
+                a[k] = _clamp_float(sa[k], flo, fhi)
+        # Re-applied on every READ, not just on write, so a hand-edited control
+        # file cannot leave shaping or react on with the feed off.
+        state["adaptive_realtime"] = _adaptive_downstream_off(a)
     if isinstance(saved.get("layer_sources"), dict):
         for layer in SOURCE_LAYERS:
             v = saved["layer_sources"].get(layer)
@@ -540,6 +639,184 @@ def set_discovery_settings(settings: dict) -> dict:
     return {"ok": True, "discovery": d, "clamped": clamped}
 
 
+def adaptive_prerequisites() -> dict:
+    """What must be true before the adaptive layer can be enabled.
+
+    Same posture as the discovery checks: the key must RESOLVE (not "work" —
+    proving that needs a real round trip, which Health does on demand). The
+    Anthropic key is checked because the interpretation stage is the only paid
+    stage, and without it every read falls back to the inert mock, which would
+    make an enabled layer look alive while reading nothing.
+    """
+    checks = []
+    try:
+        from discovery.finnhub_source import resolve_key as finnhub_key
+        has_finnhub = bool(finnhub_key())
+    except Exception:  # noqa: BLE001
+        has_finnhub = False
+    checks.append({
+        "key": "finnhub_key", "ok": has_finnhub, "label": "Finnhub API key",
+        "detail": "resolving" if has_finnhub else
+                  "not configured. Save one in Settings under Discovery data."})
+
+    try:
+        from llm_consensus.providers import _resolve_key
+        has_anthropic = bool(_resolve_key("ANTHROPIC_API_KEY"))
+    except Exception:  # noqa: BLE001
+        has_anthropic = False
+    checks.append({
+        "key": "anthropic_key", "ok": has_anthropic,
+        "label": "Anthropic API key (event interpretation)",
+        "detail": "resolving" if has_anthropic else
+                  "not configured. Without it every event read is an inert mock. "
+                  "Save one in Settings."})
+
+    return {"ok": all(c["ok"] for c in checks), "checks": checks}
+
+
+def set_adaptive_flag(flag: str, enabled: bool) -> dict:
+    """Turn one adaptive flag on or off.
+
+    Enabling is REFUSED on a missing prerequisite, and refused for a downstream
+    half while the news feed is off (it would be a toggle that does nothing).
+    Disabling is ALWAYS allowed: turning a spender off must never be blocked by a
+    broken dependency.
+
+    Note what this function cannot do. There are exactly three flags and it
+    refuses any other name, so there is no flag argument that enables
+    event-driven entry. That capability does not exist to be switched on.
+    """
+    if flag not in ADAPTIVE_FLAGS:
+        return {"ok": False, "error": f"unknown adaptive flag: {flag}"}
+    enabled = bool(enabled)
+    st = read_controls()
+    a = st["adaptive_realtime"]
+
+    if enabled:
+        pre = adaptive_prerequisites()
+        if not pre["ok"]:
+            missing = [c["label"] for c in pre["checks"] if not c["ok"]]
+            return {"ok": False,
+                    "error": f"missing prerequisite: {', '.join(missing)}",
+                    "prerequisites": pre}
+        if (flag != "adaptive_news_feed_enabled"
+                and not a["adaptive_news_feed_enabled"]):
+            return {"ok": False,
+                    "error": "the news feed must be on first: shaping and "
+                             "defensive actions both react to polled events"}
+
+    old = a[flag]
+    a[flag] = enabled
+    # Turning the feed OFF turns its downstream halves off with it, rather than
+    # leaving them set-but-inert to surprise the operator on a later restart.
+    st["adaptive_realtime"] = _adaptive_downstream_off(a)
+    _write_controls(st)
+    _audit(f"adaptive_realtime.{flag}", old, enabled)
+    return {"ok": True, "adaptive_realtime": st["adaptive_realtime"]}
+
+
+def set_adaptive_settings(settings: dict) -> dict:
+    """Adjust the adaptive cost, cadence, and threshold tunables.
+
+    Every value is clamped server-side. Reports what was clamped rather than
+    silently showing a number the operator did not type. An unknown field is
+    REFUSED outright, so a typo cannot look like it worked.
+    """
+    if not isinstance(settings, dict) or not settings:
+        return {"ok": False, "error": "no settings given"}
+    known = set(ADAPTIVE_BOUNDS) | set(ADAPTIVE_FLOAT_BOUNDS)
+    unknown = [k for k in settings if k not in known]
+    if unknown:
+        return {"ok": False, "error": f"unknown setting: {', '.join(unknown)}"}
+
+    st = read_controls()
+    old = dict(st["adaptive_realtime"])
+    a = dict(old)
+    for k, v in settings.items():
+        if k in ADAPTIVE_BOUNDS:
+            lo, hi = ADAPTIVE_BOUNDS[k]
+            a[k] = _clamp_int(v, lo, hi)
+        else:
+            flo, fhi = ADAPTIVE_FLOAT_BOUNDS[k]
+            a[k] = _clamp_float(v, flo, fhi)
+    st["adaptive_realtime"] = a
+    _write_controls(st)
+    _audit("adaptive_realtime.settings",
+           {k: old[k] for k in settings if k in old},
+           {k: a[k] for k in settings if k in a})
+    clamped = {k: a[k] for k, v in settings.items() if a.get(k) != v}
+    return {"ok": True, "adaptive_realtime": a, "clamped": clamped}
+
+
+def adaptive_used_today() -> int:
+    """Adaptive interpretation calls spent today.
+
+    Counted from adaptive_interpretation, so it is this layer's own spend and
+    stays SEPARATE from both the discovery budget and the trading council
+    budget.
+    """
+    row = store.query_one(
+        "SELECT COUNT(*) AS n FROM adaptive_interpretation "
+        "WHERE substr(ts,1,10) = ?", (_now()[:10],))
+    return int(row["n"]) if row and row.get("n") is not None else 0
+
+
+def adaptive_state() -> dict:
+    """Adaptive layer summary for Controls and the Adaptive page.
+
+    Pure read (config + control file + adaptive tables). Never a key value,
+    never a Level-1 write.
+    """
+    a = read_controls()["adaptive_realtime"]
+    used = adaptive_used_today()
+    budget = a["adaptive_daily_llm_budget"]
+    cost = a["adaptive_est_cost_per_call_usd"]
+
+    last = store.query_one(
+        "SELECT ts, symbols_polled, events_seen, events_material, "
+        "events_escalated, llm_calls, actions_queued, referrals, status "
+        "FROM adaptive_poll ORDER BY ts DESC, id DESC LIMIT 1")
+    today = store.query_one(
+        "SELECT COUNT(*) AS seen, COALESCE(SUM(material),0) AS material, "
+        "COALESCE(SUM(escalated),0) AS escalated FROM adaptive_event "
+        "WHERE substr(ts,1,10) = ?", (_now()[:10],)) or {}
+    seen = int(today.get("seen") or 0)
+    escalated = int(today.get("escalated") or 0)
+
+    return {
+        "news_feed_enabled": a["adaptive_news_feed_enabled"],
+        "watchlist_shaping_enabled": a["adaptive_watchlist_shaping_enabled"],
+        "react_defensive_enabled": a["adaptive_react_defensive_enabled"],
+        "last_poll": last["ts"] if last else None,
+        "last_poll_status": last["status"] if last else None,
+        "today": {
+            "events_seen": seen,
+            "events_material": int(today.get("material") or 0),
+            "events_escalated": escalated,
+            # The cost argument, as a number the operator can read off the page.
+            "events_dropped_free": seen - escalated,
+            "actions_queued": int(last["actions_queued"]) if last else 0,
+            "referrals": int(last["referrals"]) if last else 0,
+        },
+        "budget": {
+            "daily": budget,
+            "used_today": used,
+            "remaining": max(0, budget - used),
+            "est_cost_per_call": cost,
+            "est_spend_today": round(used * cost, 4),
+            "est_max_daily": round(budget * cost, 4),
+        },
+        "settings": {k: a[k] for k in
+                     list(ADAPTIVE_BOUNDS) + list(ADAPTIVE_FLOAT_BOUNDS)},
+        "bounds": {**{k: list(v) for k, v in ADAPTIVE_BOUNDS.items()},
+                   **{k: list(v) for k, v in ADAPTIVE_FLOAT_BOUNDS.items()}},
+        "prerequisites": adaptive_prerequisites(),
+        # Reported so the GUI can state the guarantee rather than assert it in a
+        # hardcoded string that could drift from the code.
+        "aggressive_entry_path_exists": False,
+    }
+
+
 def discovery_used_today() -> int:
     """Discovery council calls spent today, across BOTH asset classes.
 
@@ -624,9 +901,13 @@ def discovery_state() -> dict:
                    "stage_a_whale_weight": [WHALE_WEIGHT_MIN, WHALE_WEIGHT_MAX]},
         "prerequisites": discovery_prerequisites(),
         "longterm_prerequisites": longterm_prerequisites(),
-        # The react layer is not built. Say so here so the GUI can state it
-        # rather than implying discovery reads news live.
-        "react_layer_built": False,
+        # The react layer IS now built (2026-07-16), and ships disabled behind
+        # its own three flags. Reported so the discovery views state the true
+        # relationship rather than the old "not built" claim: discovery still
+        # uses pre-computed sentiment as a cheap NUMBER, and the react layer,
+        # when enabled, can refer a candidate INTO this funnel but can never take
+        # an entry on a headline.
+        "react_layer_built": True,
     }
 
 

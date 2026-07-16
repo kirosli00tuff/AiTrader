@@ -32,6 +32,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from datetime import datetime, timezone
 
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _ROOT not in sys.path:
@@ -61,13 +62,25 @@ RATE_LIMIT_BACKOFF_CAP_S = 5.0
 
 # Per-endpoint cache TTL in seconds. A quote goes stale fast; fundamentals and
 # analyst ratings barely move intraday, so they are cached hard.
+#
+# ORDER MATTERS. _ttl_for prefix-matches, so a shorter key that prefixes a longer
+# one must come AFTER it: "news-sentiment" is listed before "news", otherwise
+# every sentiment read would silently inherit the 60s live-news TTL and re-fetch
+# an aggregate that only moves daily.
+#
+# The two live-news TTLs are 60s because the adaptive layer polls once a minute,
+# and a news cache longer than the poll interval would hand it stale headlines and
+# make a live feed look broken while quietly seeing nothing. Nothing else calls
+# company-news or news, and news-sentiment keeps its hard 15m cache, so the short
+# TTL adds no call anywhere else.
 CACHE_TTL_SECONDS: dict[str, float] = {
     "quote": 30.0,
-    "company-news": 900.0,
     "news-sentiment": 900.0,
+    "company-news": 60.0,
     "stock/metric": 21600.0,          # 6h: fundamentals move on earnings, not ticks
     "stock/recommendation": 21600.0,  # 6h: analyst ratings change slowly
     "calendar/earnings": 3600.0,
+    "news": 60.0,                     # general market news; keep last (prefix)
 }
 _DEFAULT_TTL = 300.0
 
@@ -298,6 +311,14 @@ class FinnhubClient:
         r = self._get("company-news", {"symbol": symbol, "from": frm, "to": to})
         return r if isinstance(r, list) else None
 
+    def general_news(self, category: str = "general") -> list | None:
+        """Market-wide news, not tied to one instrument. List of article dicts,
+        same shape as company_news. Used by the adaptive layer so a macro event
+        (a rate decision, an index-wide halt) is seen even when it names no
+        symbol on the watchlist."""
+        r = self._get("news", {"category": category})
+        return r if isinstance(r, list) else None
+
     def news_sentiment(self, symbol: str) -> dict | None:
         """Finnhub's PRE-COMPUTED news sentiment. A cheap numeric signal, NOT
         live LLM news interpretation (that layer is deferred, see CONTEXT.md).
@@ -391,6 +412,51 @@ def parse_news_sentiment(payload: dict | None) -> dict:
         "buzz": _f(buzz, "buzz"),
         "articles_last_week": _f(buzz, "articlesInLastWeek"),
     }
+
+
+def parse_company_news(payload: list | None) -> list[dict]:
+    """Normalize a news list to the adaptive layer's event shape.
+
+    Finnhub article keys: id, datetime (epoch seconds), headline, summary,
+    source, url, related (comma-separated symbols), category.
+
+    An article with no id cannot be deduped, and an un-dedupable article would be
+    re-read and re-charged on every overlapping poll, so it is DROPPED rather
+    than passed through. Losing an occasional malformed article is cheaper than
+    paying for the same headline sixty times an hour.
+    """
+    if not isinstance(payload, list):
+        return []
+    out: list[dict] = []
+    for item in payload:
+        if not isinstance(item, dict):
+            continue
+        raw_id = item.get("id")
+        if raw_id in (None, "", 0):
+            continue
+        headline = str(item.get("headline") or "").strip()
+        if not headline:
+            continue
+        epoch = item.get("datetime")
+        published = ""
+        try:
+            if epoch:
+                published = datetime.fromtimestamp(
+                    float(epoch), tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        except (TypeError, ValueError, OSError):
+            published = ""
+        related = str(item.get("related") or "").strip()
+        out.append({
+            "dedupe_key": f"finnhub:{raw_id}",
+            "published_ts": published,
+            "headline": headline,
+            "summary": str(item.get("summary") or "").strip(),
+            "source": str(item.get("source") or "").strip(),
+            "url": str(item.get("url") or "").strip(),
+            "category": str(item.get("category") or "").strip(),
+            "related": related,
+        })
+    return out
 
 
 def parse_recommendations(payload: list | None) -> dict:

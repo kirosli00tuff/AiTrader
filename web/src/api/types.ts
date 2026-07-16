@@ -467,3 +467,101 @@ export interface ResearchThesis {
   rationale: string | null;
   status: string;
 }
+
+// --- Adaptive real-time layer ----------------------------------------------
+// Ships disabled behind three flags. Note what is absent from AdaptiveState:
+// there is no aggressive-entry flag, because there is no such code path. An
+// aggressive read becomes a watchlist referral and goes back through the
+// discovery funnel and the RiskGate. `aggressive_entry_path_exists` is reported
+// by the server so the GUI states that guarantee from data rather than from a
+// hardcoded string that could drift away from the truth.
+
+export interface PrereqCheckRow {
+  key: string;
+  ok: boolean;
+  label: string;
+  detail: string;
+}
+
+export interface AdaptiveState {
+  news_feed_enabled: boolean;
+  watchlist_shaping_enabled: boolean;
+  react_defensive_enabled: boolean;
+  last_poll: string | null;
+  last_poll_status: string | null;
+  today: {
+    events_seen: number;
+    events_material: number;
+    events_escalated: number;
+    events_dropped_free: number;
+    actions_queued: number;
+    referrals: number;
+  };
+  budget: {
+    daily: number;
+    used_today: number;
+    remaining: number;
+    est_cost_per_call: number;
+    est_spend_today: number;
+    est_max_daily: number;
+  };
+  settings: Record<string, number>;
+  bounds: Record<string, [number, number]>;
+  prerequisites: { ok: boolean; checks: PrereqCheckRow[] };
+  aggressive_entry_path_exists: false;
+}
+
+// SQLite has no boolean: held / material / escalated arrive as 0 or 1.
+export interface AdaptiveEvent {
+  id: number;
+  ts: string;
+  published_ts: string | null;
+  symbol: string | null;
+  headline: string;
+  source: string | null;
+  category: string | null;
+  sentiment: number;
+  event_type: string | null;
+  held: number;
+  material: number;
+  material_reason: string | null;
+  escalated: number;
+}
+
+export interface AdaptiveInterpretation {
+  id: number;
+  event_id: number;
+  ts: string;
+  symbol: string | null;
+  relevance: number;
+  direction: string | null;
+  severity: number;
+  action: string | null;
+  action_class: string | null;
+  rationale: string | null;
+  model: string | null;
+  est_cost_usd: number;
+  outcome: string | null;
+  outcome_reason: string | null;
+  headline: string | null;
+}
+
+export interface AdaptiveAction {
+  id: number;
+  ts: string;
+  event_id: number;
+  symbol: string;
+  action: string;
+  reason: string | null;
+  severity: number;
+  source: string;
+}
+
+export interface AdaptiveEngineLogRow {
+  ts: string;
+  type: string;
+  symbol: string | null;
+  severity: string | null;
+  message: string;
+  payload: string | null;
+}

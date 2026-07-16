@@ -376,6 +376,30 @@ Config load_config(const std::string& path) {
         dc.watchlist_stale_hours = get_int(root, "discovery.watchlist_stale_hours", dc.watchlist_stale_hours);
     }
 
+    // adaptive REAL-TIME layer (SHIPS DISABLED). All three flags default false,
+    // so with no adaptive_realtime block the engine polls nothing, consumes no
+    // action, and behaves exactly as it does today. Distinct from the `adaptive:`
+    // block above, which is the LEARNING tuner. The Python side mirrors these
+    // defaults in adaptive/settings.py.
+    {
+        auto& ar = c.adaptive_realtime;
+        ar.adaptive_news_feed_enabled = get_bool(root, "adaptive_realtime.adaptive_news_feed_enabled", ar.adaptive_news_feed_enabled);
+        ar.adaptive_watchlist_shaping_enabled = get_bool(root, "adaptive_realtime.adaptive_watchlist_shaping_enabled", ar.adaptive_watchlist_shaping_enabled);
+        ar.adaptive_react_defensive_enabled = get_bool(root, "adaptive_realtime.adaptive_react_defensive_enabled", ar.adaptive_react_defensive_enabled);
+        ar.poll_interval_seconds = get_int(root, "adaptive_realtime.poll_interval_seconds", ar.poll_interval_seconds);
+        ar.max_symbols_per_poll = get_int(root, "adaptive_realtime.max_symbols_per_poll", ar.max_symbols_per_poll);
+        ar.news_lookback_minutes = get_int(root, "adaptive_realtime.news_lookback_minutes", ar.news_lookback_minutes);
+        ar.general_news_enabled = get_bool(root, "adaptive_realtime.general_news_enabled", ar.general_news_enabled);
+        ar.materiality_min_sentiment = get_double(root, "adaptive_realtime.materiality_min_sentiment", ar.materiality_min_sentiment);
+        ar.adaptive_daily_llm_budget = get_int(root, "adaptive_realtime.adaptive_daily_llm_budget", ar.adaptive_daily_llm_budget);
+        ar.adaptive_est_cost_per_call_usd = get_double(root, "adaptive_realtime.adaptive_est_cost_per_call_usd", ar.adaptive_est_cost_per_call_usd);
+        ar.max_interpretations_per_poll = get_int(root, "adaptive_realtime.max_interpretations_per_poll", ar.max_interpretations_per_poll);
+        ar.interpretation_min_relevance = get_double(root, "adaptive_realtime.interpretation_min_relevance", ar.interpretation_min_relevance);
+        ar.action_min_severity = get_double(root, "adaptive_realtime.action_min_severity", ar.action_min_severity);
+        ar.action_max_age_seconds = get_int(root, "adaptive_realtime.action_max_age_seconds", ar.action_max_age_seconds);
+        ar.defensive_trim_fraction = get_double(root, "adaptive_realtime.defensive_trim_fraction", ar.defensive_trim_fraction);
+    }
+
     // global-session equity rotation (SCAFFOLD, DISABLED). Config-driven regional
     // equity sessions. Only NY (Alpaca US equities) has a reachable venue today;
     // London and Asia are defined but venue_unavailable. Adding IBKR global
@@ -730,6 +754,57 @@ std::vector<std::string> validate_config(const Config& cfg) {
         problems.push_back("discovery.long_term_sleeve_enabled requires "
                            "sleeves.research_satellite_enabled (the long-term "
                            "strategy has no sleeve to trade in otherwise)");
+
+    // Adaptive real-time layer. Same posture as discovery: every check here is a
+    // COST, SCHEDULING, or STALENESS bound, and none touches a Level-1 risk
+    // limit. Note what is deliberately ABSENT: there is no aggressive-entry flag
+    // to validate, because there is no such path to configure.
+    const auto& ar = cfg.adaptive_realtime;
+    pct("adaptive_realtime.materiality_min_sentiment",
+        ar.materiality_min_sentiment);
+    pct("adaptive_realtime.action_min_severity", ar.action_min_severity);
+    pct("adaptive_realtime.interpretation_min_relevance",
+        ar.interpretation_min_relevance);
+    // A trim closes a FRACTION of a position. 0 would make `trim` a silent
+    // no-op that still looked applied in the log, and >1 is not a trim, it is an
+    // over-close. Both are refused rather than clamped: a defensive action must
+    // do exactly what its name says.
+    if (ar.defensive_trim_fraction <= 0.0 || ar.defensive_trim_fraction > 1.0)
+        problems.push_back("adaptive_realtime.defensive_trim_fraction must be "
+                           "within (0,1] (a trim closes part of a position)");
+    if (ar.poll_interval_seconds < 0)
+        problems.push_back("adaptive_realtime.poll_interval_seconds must be >= 0");
+    if (ar.max_symbols_per_poll < 0)
+        problems.push_back("adaptive_realtime.max_symbols_per_poll must be >= 0");
+    if (ar.news_lookback_minutes < 0)
+        problems.push_back("adaptive_realtime.news_lookback_minutes must be >= 0");
+    if (ar.adaptive_daily_llm_budget < 0)
+        problems.push_back("adaptive_realtime.adaptive_daily_llm_budget must be "
+                           ">= 0");
+    if (ar.adaptive_est_cost_per_call_usd < 0.0)
+        problems.push_back("adaptive_realtime.adaptive_est_cost_per_call_usd "
+                           "must be >= 0");
+    if (ar.max_interpretations_per_poll < 0)
+        problems.push_back("adaptive_realtime.max_interpretations_per_poll must "
+                           "be >= 0");
+    // A zero or negative max age would mean "never expires", the exact opposite
+    // of what the field is for: an unbounded age lets an hours-old headline move
+    // a position after a restart.
+    if (ar.action_max_age_seconds <= 0)
+        problems.push_back("adaptive_realtime.action_max_age_seconds must be > 0 "
+                           "(a queued action must always be able to go stale)");
+    // A half-configured opt-in fails loudly at load rather than silently doing
+    // nothing at 03:00. Both downstream halves are fed by the poll, so enabling
+    // either without the feed is a configuration that cannot do anything.
+    if (ar.adaptive_watchlist_shaping_enabled && !ar.adaptive_news_feed_enabled)
+        problems.push_back("adaptive_realtime.adaptive_watchlist_shaping_enabled "
+                           "requires adaptive_news_feed_enabled (shaping reacts "
+                           "to events, and no events are polled without it)");
+    if (ar.adaptive_react_defensive_enabled && !ar.adaptive_news_feed_enabled)
+        problems.push_back("adaptive_realtime.adaptive_react_defensive_enabled "
+                           "requires adaptive_news_feed_enabled (a defensive "
+                           "action comes from an event, and no events are "
+                           "polled without it)");
 
     return problems;
 }

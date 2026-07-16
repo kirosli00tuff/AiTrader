@@ -78,6 +78,14 @@ Engine::Engine(config::Config cfg, EngineOptions opts)
                                      static_cast<double>(wl.size())}})});
     }
 
+    // Adaptive react layer: start life PAST every action already queued, so a
+    // defensive action that piled up while the engine was down is never replayed
+    // into a market that has since repriced. Only actions queued after this
+    // moment are ever seen. Read unconditionally (it is one cheap query and
+    // returns 0 on a DB with no adaptive tables) so that enabling the flag at
+    // runtime cannot pick up a backlog either.
+    adaptive_action_watermark_ = storage_->max_adaptive_action_id();
+
     // Resolve the operator kill-request control file written by the API backend
     // (api_server/store.py). Contract: env MAL_CONTROL_DIR overrides, else the
     // configured system.control_dir (default ".control"); the file is
@@ -943,6 +951,174 @@ void Engine::consume_layer_toggles() {
     prev_layer_toggles_ = layer_toggles_;
 }
 
+void Engine::consume_adaptive_actions(const std::string& ts, long now_epoch) {
+    // Refusal 1: the flag. FALSE by default, so with the shipped config this
+    // returns before touching the DB and the engine never learns the adaptive
+    // tables exist.
+    if (!cfg_.adaptive_realtime.adaptive_react_defensive_enabled) return;
+
+    const auto rows = storage_->adaptive_actions_after(adaptive_action_watermark_);
+    for (const auto& row : rows) {
+        // Advance the watermark FIRST, before any decision about the row. An
+        // action is attempted exactly once: if applying it refuses, or the symbol
+        // is not held, it must not be retried on the next iteration. A defensive
+        // action that silently retried forever would fire the moment its symbol
+        // was next bought, which is the opposite of what the event asked for.
+        adaptive_action_watermark_ = std::max(adaptive_action_watermark_, row.id);
+
+        // Refusal 2: the defensive allowlist. This is where an "open" or
+        // "increase" row dies, whether it arrived from a future Python version,
+        // a hand-edited DB, or a bug. No branch below could act on one:
+        // parse_defensive_kind has no value it could return for it.
+        const auto kind = core::parse_defensive_kind(row.action);
+        if (!kind) {
+            storage_->append_event(
+                {ts, "adaptive_action_refused", "", row.symbol, "warn",
+                 "Refused non-defensive adaptive action '" + row.action +
+                     "' for " + row.symbol +
+                     ". Aggressive actions route through the discovery funnel "
+                     "and the RiskGate, never this queue.",
+                 util::to_json({{"action", row.action},
+                                {"symbol", row.symbol},
+                                {"reason", "not_defensive"}},
+                               {{"action_id", static_cast<double>(row.id)}})});
+            continue;
+        }
+
+        // Refusal 3: age. Stale news must not move a position.
+        if (core::action_is_stale(
+                row.ts, now_epoch,
+                cfg_.adaptive_realtime.action_max_age_seconds)) {
+            storage_->append_event(
+                {ts, "adaptive_action_refused", "", row.symbol, "info",
+                 "Refused stale adaptive action '" + row.action + "' for " +
+                     row.symbol + " (queued " + row.ts + ")",
+                 util::to_json({{"action", row.action},
+                                {"symbol", row.symbol},
+                                {"queued_ts", row.ts},
+                                {"reason", "stale"}},
+                               {{"action_id", static_cast<double>(row.id)}})});
+            continue;
+        }
+
+        core::DefensiveAction a;
+        a.id = row.id;
+        a.ts = row.ts;
+        a.symbol = row.symbol;
+        a.reason = row.reason;
+        a.kind = *kind;
+        a.severity = row.severity;
+        a.event_id = row.event_id;
+        apply_defensive_action(a, ts);
+    }
+}
+
+bool Engine::apply_defensive_action(const core::DefensiveAction& a,
+                                    const std::string& ts) {
+    const char* kind_name = core::defensive_kind_to_string(a.kind);
+
+    // FlagForReview touches nothing. It is the loudest response available to an
+    // uncertain read that still cannot cost anything: it records that a human
+    // should look, and leaves the book exactly as it was.
+    if (!core::kind_touches_position(a.kind)) {
+        storage_->append_event(
+            {ts, "adaptive_flag_for_review", "", a.symbol, "warn",
+             "Adaptive layer flagged " + a.symbol + " for review: " + a.reason,
+             util::to_json({{"symbol", a.symbol}, {"reason", a.reason}},
+                           {{"severity", a.severity}})});
+        return true;
+    }
+
+    // Find the open position. The symbol arrives without a venue (the adaptive
+    // layer reads news, not venues), so match on the symbol half of the key.
+    auto it = open_positions_.end();
+    for (auto p = open_positions_.begin(); p != open_positions_.end(); ++p) {
+        if (p->second.pos.symbol == a.symbol) { it = p; break; }
+    }
+    if (it == open_positions_.end()) {
+        // Nothing held. This is the COMMON case and it is not an error: news
+        // arrives about watchlist names constantly. Note what does NOT happen
+        // here: there is no else-branch that opens one.
+        storage_->append_event(
+            {ts, "adaptive_action_noop", "", a.symbol, "info",
+             "Adaptive " + std::string(kind_name) + " for " + a.symbol +
+                 ": no open position, nothing to do",
+             util::to_json({{"symbol", a.symbol}, {"action", kind_name}})});
+        return false;
+    }
+
+    auto& ap = it->second;
+    // Exit at the last known bar close, else the entry price. The same rule the
+    // sleeve rebalance trim uses.
+    double px = ap.pos.entry_price;
+    auto hb = bar_history_.find(ap.pos.venue + "|" + ap.pos.symbol);
+    if (hb != bar_history_.end() && !hb->second.empty())
+        px = hb->second.back().close;
+
+    const double frac =
+        a.kind == core::DefensiveKind::Exit
+            ? 1.0
+            : std::max(0.0, std::min(
+                  1.0, cfg_.adaptive_realtime.defensive_trim_fraction));
+    const double qty = ap.pos.qty * frac;
+    if (qty <= 0.0) return false;
+
+    const double notional = px * qty;
+    const double fee = notional * 0.0001;
+    // Realized PnL on the CLOSED PORTION only. realized_pnl works off the whole
+    // position, so scale it by the fraction actually closed rather than booking
+    // the full position's PnL on a partial trim.
+    const double pnl = strategy::realized_pnl(ap.pos, px) * frac - fee;
+    const bool win = pnl >= 0;
+    const std::string side =
+        ap.pos.direction == strategy::Direction::Long ? "sell" : "buy";
+
+    equity_ += pnl;
+    peak_equity_ = std::max(peak_equity_, equity_);
+    pstate_.realized_pnl_today_total += pnl;
+    pstate_.realized_pnl_today_per_venue[ap.pos.venue] += pnl;
+
+    storage::TradeRow tr;
+    tr.ts = ts; tr.venue = ap.pos.venue; tr.symbol = ap.pos.symbol;
+    tr.market = ap.pos.market; tr.category = ap.pos.category; tr.side = side;
+    tr.qty = qty; tr.price = px; tr.notional = notional; tr.fee = fee;
+    tr.mode = "paper"; tr.pnl = pnl; tr.outcome = win ? "win" : "loss";
+    tr.sleeve = ap.sleeve;
+    storage_->insert_trade(tr);
+
+    const double remaining_qty = ap.pos.qty - qty;
+    storage_->upsert_position(ap.pos.venue, ap.pos.symbol, ap.pos.market,
+                              ap.pos.category, side, remaining_qty, px, 0.0, ts,
+                              ap.sleeve);
+    storage_->append_event(
+        {ts, "adaptive_defensive", ap.pos.venue, ap.pos.symbol, "warn",
+         "Adaptive " + std::string(kind_name) + " " + ap.pos.symbol +
+             " qty=" + std::to_string(qty) + " pnl=" + std::to_string(pnl) +
+             ": " + a.reason,
+         util::to_json({{"action", kind_name},
+                        {"symbol", ap.pos.symbol},
+                        {"reason", a.reason}},
+                       {{"qty", qty},
+                        {"remaining_qty", remaining_qty},
+                        {"price", px},
+                        {"pnl", pnl},
+                        {"severity", a.severity},
+                        {"action_id", static_cast<double>(a.id)}})});
+
+    if (remaining_qty <= 0.0) {
+        if (ap.sleeve == "research_satellite")
+            storage_->update_research_thesis_status(ap.pos.symbol, "closed", ts);
+        open_positions_.erase(it);
+        ++closed_trade_count_;
+        ++trade_count_;
+    } else {
+        // A trim leaves the position OPEN with less size. Its stop and target are
+        // untouched: the event said "hold less of this", not "change the thesis".
+        ap.pos.qty = remaining_qty;
+    }
+    return true;
+}
+
 void Engine::consume_operator_controls() {
     // Read the remaining operator controls (model toggles, budget, regime pins)
     // from controls.json each iteration. Missing/malformed keeps the safe current
@@ -1515,6 +1691,14 @@ void Engine::run_forever(const volatile std::sig_atomic_t* stop_flag) {
     bool replay_idle_logged = false;
     while (!(stop_flag && *stop_flag)) {
         consume_feed_clock();
+        // Defensive actions from the adaptive real-time layer, if the operator
+        // enabled it. A no-op returning immediately while the flag is false,
+        // which is the default. Placed here, beside the other control-file
+        // consumers, so an exit request is honored on the next iteration rather
+        // than waiting for the symbol's next closed bar: a position that needs
+        // out on news should not wait five minutes for a bar to close.
+        consume_adaptive_actions(util::now_iso8601(),
+                                 static_cast<long>(std::time(nullptr)));
         const bool bar_mode =
             feed_mode_ == "synthetic_regimes" || feed_mode_ == "replay";
         if (bar_mode) {
