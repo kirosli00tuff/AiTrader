@@ -12,7 +12,12 @@ are already stored.
 """
 from __future__ import annotations
 
+import json
+import os
+
 from llm_consensus.config_access import config_block
+
+_REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 # Defaults mirror config/config.hpp DiscoveryConfig exactly. Change one, change
 # both: tests/test_discovery_funnel.py asserts the two stay in parity.
@@ -34,8 +39,48 @@ _DEFAULTS: dict[str, object] = {
 }
 
 
+def _control_dir() -> str:
+    """Where the operator control files live. Mirrors the engine and the API:
+    env MAL_CONTROL_DIR, else config system.control_dir, else .control."""
+    env = os.environ.get("MAL_CONTROL_DIR")
+    if env:
+        return env
+    sys_cfg = config_block("system", None)
+    return sys_cfg.get("control_dir") or os.path.join(_REPO_ROOT, ".control")
+
+
+def _controls() -> dict:
+    """The discovery block of controls.json, {} when absent or malformed.
+
+    The operator's runtime toggle. Read fresh every call, NOT cached: the funnel
+    runner is a separate process from the GUI, so a cached value would keep
+    running after the operator turned it off. Read defensively, exactly like the
+    C++ layer-toggle reader: a missing or broken file means "no override", which
+    falls back to config, which ships disabled.
+    """
+    try:
+        with open(os.path.join(_control_dir(), "controls.json")) as fh:
+            d = json.load(fh).get("discovery")
+        return d if isinstance(d, dict) else {}
+    except Exception:  # noqa: BLE001 — a control file is never load-bearing
+        return {}
+
+
 def _block(cfg_path: str | None) -> dict:
-    return config_block("discovery", cfg_path)
+    """Config, with the operator's control file layered over it.
+
+    Precedence: controls.json wins when it carries a key, else config. That is
+    the same precedence feed_mode and clock_mode use, so a missing control file
+    never turns anything on: config ships both discovery flags false.
+
+    An explicit cfg_path means a caller is pinning a config (the tests), so the
+    control file is ignored. Otherwise a developer's local controls.json would
+    leak into a test that thought it had set everything.
+    """
+    cfg = config_block("discovery", cfg_path)
+    if cfg_path is not None:
+        return cfg
+    return {**cfg, **_controls()}
 
 
 def _num(key: str, cfg_path: str | None):

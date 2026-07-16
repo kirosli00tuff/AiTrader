@@ -67,6 +67,28 @@ REGIMES = ("trending", "range_bound", "neutral")
 BUDGET_MIN, BUDGET_MAX = 1, 500
 COOLDOWN_MIN, COOLDOWN_MAX = 0, 1440
 
+# Discovery tunables the operator adjusts without editing config. Every bound is
+# a COST or CADENCE bound. None of them is a Level-1 risk value, and none can
+# weaken one: the RiskGate judges every resulting order exactly as before.
+# (min, max) per field.
+DISCOVERY_BOUNDS: dict[str, tuple[int, int]] = {
+    # 0 means discovery makes no council call at all: Stage A and the cheap gate
+    # still run, so the operator can watch the funnel for free.
+    "discovery_daily_council_budget": (0, 100),
+    "max_finalists": (1, 50),
+    "max_survivors": (1, 20),
+    "max_council_calls_per_pass": (0, 20),
+    # A pass more often than every 15 minutes would re-rank data that has not
+    # moved and burn the Finnhub rate limit for nothing.
+    "crypto_interval_minutes": (15, 1440),
+    "equity_interval_minutes": (15, 1440),
+}
+# The whale surfacing weight is a float, so it is bounded separately. 0 disables
+# surfacing and restores the exact pre-whale ranking. 1.0 is the ceiling: even
+# there the fixed components still carry 1.0 of the normalized total, so whale
+# cannot exceed half the score.
+WHALE_WEIGHT_MIN, WHALE_WEIGHT_MAX = 0.0, 1.0
+
 # Ensemble factors for the weight sliders (rl_advisory is shown read-only at 0
 # on the page; it is excluded here so normalization stays over the live six).
 WEIGHT_FACTORS = ("rule_based", "llm_primary", "llm_secondary", "llm_tertiary",
@@ -107,6 +129,13 @@ def _clamp_int(v, lo: int, hi: int) -> int:
 
 # --- defaults from config ----------------------------------------------------
 
+def _clamp_float(v, lo: float, hi: float) -> float:
+    try:
+        return max(lo, min(hi, float(v)))
+    except (TypeError, ValueError):
+        return lo
+
+
 def _defaults() -> dict:
     cfg = store.load_config()
     council = cfg.get("council", {}) or {}
@@ -137,9 +166,53 @@ def _defaults() -> dict:
                            COOLDOWN_MIN, COOLDOWN_MAX),
         },
         "regime_pins": {},
+        # Discovery: seeded from config, so a missing control file means the
+        # SHIPPED value, which is disabled. The operator's toggle overrides it at
+        # runtime, the same way feed/clock override their launch value.
+        "discovery": _discovery_defaults(cfg),
         "pending_promote": None,
         "pending_rollback": None,
     }
+
+
+def _discovery_defaults(cfg: dict) -> dict:
+    d = cfg.get("discovery", {}) or {}
+
+    def _i(key: str, fallback: int) -> int:
+        lo, hi = DISCOVERY_BOUNDS[key]
+        return _clamp_int(d.get(key, fallback), lo, hi)
+
+    return {
+        # Both flags default FALSE from config: turning either on is a
+        # deliberate operator action, never an accident of a missing file.
+        "discovery_enabled": bool(d.get("discovery_enabled", False)),
+        "long_term_sleeve_enabled": bool(d.get("long_term_sleeve_enabled", False)),
+        "discovery_daily_council_budget":
+            _i("discovery_daily_council_budget", 12),
+        "max_finalists": _i("max_finalists", 12),
+        "max_survivors": _i("max_survivors", 5),
+        "max_council_calls_per_pass": _i("max_council_calls_per_pass", 5),
+        "crypto_interval_minutes": _i("crypto_interval_minutes", 60),
+        "equity_interval_minutes": _i("equity_interval_minutes", 60),
+        "stage_a_whale_weight": _clamp_float(d.get("stage_a_whale_weight", 0.15),
+                                             WHALE_WEIGHT_MIN, WHALE_WEIGHT_MAX),
+    }
+
+
+def _narrowing(d: dict) -> dict:
+    """Enforce that the funnel NARROWS, whatever the operator asked for.
+
+    survivors <= finalists and council calls <= survivors. The C++ config
+    validator refuses a config that violates this, so the runtime control path
+    must refuse it too, or the GUI would be a way around a rule the config
+    enforces. Clamping rather than rejecting keeps a well-meant adjustment usable
+    and reports that it was clamped.
+    """
+    out = dict(d)
+    out["max_survivors"] = min(out["max_survivors"], out["max_finalists"])
+    out["max_council_calls_per_pass"] = min(out["max_council_calls_per_pass"],
+                                            out["max_survivors"])
+    return out
 
 
 def read_controls() -> dict:
@@ -177,6 +250,21 @@ def read_controls() -> dict:
     state.setdefault("rebalance_requested", False)
     if "rebalance_requested" in saved:
         state["rebalance_requested"] = bool(saved["rebalance_requested"])
+    # Discovery: re-clamp every field on read, so a hand-edited control file can
+    # never widen a bound or break the narrowing rule.
+    if isinstance(saved.get("discovery"), dict):
+        sd = saved["discovery"]
+        d = state["discovery"]
+        for k in ("discovery_enabled", "long_term_sleeve_enabled"):
+            if k in sd:
+                d[k] = bool(sd[k])
+        for k, (lo, hi) in DISCOVERY_BOUNDS.items():
+            if k in sd:
+                d[k] = _clamp_int(sd[k], lo, hi)
+        if "stage_a_whale_weight" in sd:
+            d["stage_a_whale_weight"] = _clamp_float(
+                sd["stage_a_whale_weight"], WHALE_WEIGHT_MIN, WHALE_WEIGHT_MAX)
+        state["discovery"] = _narrowing(d)
     if isinstance(saved.get("layer_sources"), dict):
         for layer in SOURCE_LAYERS:
             v = saved["layer_sources"].get(layer)
@@ -294,10 +382,11 @@ def _discovery_cfg() -> dict:
 def discovery_enabled() -> bool:
     """True when the discovery funnel is on. OFF by default (operator opt-in).
 
-    Config read only. The GUI uses this to render a clear DISABLED state rather
-    than an empty view that looks broken.
+    Reads the EFFECTIVE value: the operator's controls.json toggle when present,
+    else the shipped config. Same precedence as feed/clock, so a missing control
+    file falls back to config, which ships disabled.
     """
-    return bool(_discovery_cfg().get("discovery_enabled", False))
+    return bool(read_controls()["discovery"]["discovery_enabled"])
 
 
 def longterm_state() -> bool:
@@ -306,7 +395,149 @@ def longterm_state() -> bool:
     Distinct from sleeves.research_satellite_enabled, which turns the SLEEVE on.
     Both must hold for a long-term position to open.
     """
-    return bool(_discovery_cfg().get("long_term_sleeve_enabled", False))
+    return bool(read_controls()["discovery"]["long_term_sleeve_enabled"])
+
+
+# --- Prerequisites ----------------------------------------------------------
+# Enabling a subsystem into a state where it cannot work is worse than leaving it
+# off: it looks on, spends nothing, and the operator learns nothing. So each
+# enable is gated on the things it actually needs, and a refusal says what is
+# missing rather than failing quietly.
+
+def discovery_prerequisites() -> dict:
+    """What discovery needs before it can run. Never returns a key value.
+
+    Two hard requirements:
+      * a Finnhub key that RESOLVES. Stage A is the free pre-screen and it is the
+        whole funnel's input. With no key every pass reports unavailable and
+        nothing is ever screened.
+      * the bridge up. Stage C runs the council on survivors through it. Without
+        it a pass ranks and gates, then can evaluate nothing.
+    """
+    try:
+        from discovery.finnhub_source import is_live as finnhub_live
+        finnhub_ok = bool(finnhub_live())
+    except Exception:  # noqa: BLE001
+        finnhub_ok = False
+    bridge = store.bridge_health()
+    bridge_ok = bool(bridge.get("reachable"))
+
+    checks = [
+        {"key": "finnhub_key", "ok": finnhub_ok,
+         "label": "Finnhub API key",
+         "detail": ("resolving" if finnhub_ok else
+                    "not configured. Save one in Settings under Discovery data. "
+                    "Stage A is the free pre-screen and the funnel's only input, "
+                    "so without it every pass reports unavailable.")},
+        {"key": "bridge", "ok": bridge_ok,
+         "label": "Python bridge",
+         "detail": ("reachable" if bridge_ok else
+                    "down. Stage C runs the council on survivors through the "
+                    "bridge. Start the engine stack, or a pass will rank and "
+                    "gate but evaluate nothing.")},
+    ]
+    return {"ok": all(c["ok"] for c in checks), "checks": checks}
+
+
+def longterm_prerequisites() -> dict:
+    """What the long-term sleeve needs. Never returns a key value.
+
+    The long-term strategy is quality-and-catalyst PLUS council, so it needs the
+    Finnhub screen AND the four-level framework reachable through the bridge. It
+    also needs a sleeve to trade in: the strategy without
+    sleeves.research_satellite_enabled has nowhere to put a position, which the
+    config validator already refuses, so the GUI refuses it too.
+    """
+    base = discovery_prerequisites()
+    sleeve_on = bool(read_controls()["sleeves"]["research_satellite"])
+    cfg_on = bool((store.load_config().get("sleeves", {}) or {})
+                  .get("research_satellite_enabled", False))
+    checks = list(base["checks"])
+    checks.append({
+        "key": "research_satellite", "ok": sleeve_on and cfg_on,
+        "label": "research_satellite sleeve",
+        "detail": ("enabled" if (sleeve_on and cfg_on) else
+                   "off. The long-term strategy has no sleeve to trade in. "
+                   "Enable the sleeve first: config "
+                   "sleeves.research_satellite_enabled plus the sleeve toggle."),
+    })
+    return {"ok": all(c["ok"] for c in checks), "checks": checks}
+
+
+# --- Setters (validated, audited, control-file only) ------------------------
+
+def set_discovery(enabled: bool) -> dict:
+    """Turn the discovery funnel on or off.
+
+    Enabling is REFUSED when a prerequisite is missing, so the operator never
+    enables into a state that cannot work. Disabling is always allowed: turning a
+    spender off must never be blocked by a broken dependency.
+    """
+    enabled = bool(enabled)
+    if enabled:
+        pre = discovery_prerequisites()
+        if not pre["ok"]:
+            missing = [c["label"] for c in pre["checks"] if not c["ok"]]
+            return {"ok": False,
+                    "error": f"missing prerequisite: {', '.join(missing)}",
+                    "prerequisites": pre}
+    st = read_controls()
+    old = st["discovery"]["discovery_enabled"]
+    st["discovery"]["discovery_enabled"] = enabled
+    _write_controls(st)
+    _audit("discovery.discovery_enabled", old, enabled)
+    return {"ok": True, "discovery_enabled": enabled}
+
+
+def set_long_term(enabled: bool) -> dict:
+    """Turn the long-term sleeve strategy on or off. Same posture as above."""
+    enabled = bool(enabled)
+    if enabled:
+        pre = longterm_prerequisites()
+        if not pre["ok"]:
+            missing = [c["label"] for c in pre["checks"] if not c["ok"]]
+            return {"ok": False,
+                    "error": f"missing prerequisite: {', '.join(missing)}",
+                    "prerequisites": pre}
+    st = read_controls()
+    old = st["discovery"]["long_term_sleeve_enabled"]
+    st["discovery"]["long_term_sleeve_enabled"] = enabled
+    _write_controls(st)
+    _audit("discovery.long_term_sleeve_enabled", old, enabled)
+    return {"ok": True, "long_term_sleeve_enabled": enabled}
+
+
+def set_discovery_settings(settings: dict) -> dict:
+    """Adjust the discovery cost and cadence tunables.
+
+    Every value is clamped server-side into DISCOVERY_BOUNDS, then the narrowing
+    rule is re-applied, so the GUI can never produce a funnel that widens or a
+    bound the config validator would refuse. Reports what was clamped rather than
+    silently accepting a value it did not honor.
+    """
+    if not isinstance(settings, dict) or not settings:
+        return {"ok": False, "error": "no settings given"}
+    unknown = [k for k in settings
+               if k not in DISCOVERY_BOUNDS and k != "stage_a_whale_weight"]
+    if unknown:
+        return {"ok": False, "error": f"unknown setting: {', '.join(unknown)}"}
+
+    st = read_controls()
+    old = dict(st["discovery"])
+    d = dict(old)
+    for k, v in settings.items():
+        if k == "stage_a_whale_weight":
+            d[k] = _clamp_float(v, WHALE_WEIGHT_MIN, WHALE_WEIGHT_MAX)
+        else:
+            lo, hi = DISCOVERY_BOUNDS[k]
+            d[k] = _clamp_int(v, lo, hi)
+    d = _narrowing(d)
+    st["discovery"] = d
+    _write_controls(st)
+    _audit("discovery.settings", {k: old[k] for k in settings if k in old},
+           {k: d[k] for k in settings if k in d})
+    clamped = {k: d[k] for k, v in settings.items() if d.get(k) != v}
+    return {"ok": True, "discovery": d, "clamped": clamped}
 
 
 def discovery_used_today() -> int:
@@ -322,13 +553,16 @@ def discovery_used_today() -> int:
 
 
 def discovery_state() -> dict:
-    """Discovery summary for the top strip and the sleeve panel.
+    """Discovery summary for the top strip, the sleeve panel, and Controls.
 
-    Pure read (config + discovery tables). Never a key value, never a Level-1
-    write. Reports the flags, the last pass per asset class, the watchlist size,
-    the universe sizes, and today's spend against the SEPARATE discovery budget.
+    Pure read (config + control file + discovery tables). Never a key value,
+    never a Level-1 write. Reports the EFFECTIVE flags and tunables (the
+    operator's control file over the shipped config), the last pass per asset
+    class, the watchlist size, the universe sizes, today's spend against the
+    SEPARATE discovery budget, the server-side bounds, and the prerequisites.
     """
     cfg = _discovery_cfg()
+    eff = read_controls()["discovery"]
 
     def _int(key, default):
         try:
@@ -360,26 +594,36 @@ def discovery_state() -> dict:
         "SELECT COUNT(*) AS n FROM watchlist WHERE status = 'active'")
     watchlist_size = int(wl["n"]) if wl and wl.get("n") is not None else 0
 
-    budget = _int("discovery_daily_council_budget", 12)
+    # The EFFECTIVE budget and ceilings: the operator's control file wins.
+    budget = int(eff["discovery_daily_council_budget"])
     used = discovery_used_today()
     est = _float("discovery_est_cost_per_call_usd", 0.04)
     return {
-        "enabled": discovery_enabled(),
-        "long_term_sleeve_enabled": longterm_state(),
+        "enabled": bool(eff["discovery_enabled"]),
+        "long_term_sleeve_enabled": bool(eff["long_term_sleeve_enabled"]),
         "last_pass": last,
         "watchlist_size": watchlist_size,
         "watchlist_max": _int("watchlist_max_size", 40),
         "universe": {"crypto_active_max": _int("crypto_active_max", 50),
                      "crypto_universe": _csv_len("crypto_universe"),
                      "equity_universe": _csv_len("equity_universe")},
-        "ceilings": {"max_finalists": _int("max_finalists", 12),
-                     "max_survivors": _int("max_survivors", 5),
+        "ceilings": {"max_finalists": int(eff["max_finalists"]),
+                     "max_survivors": int(eff["max_survivors"]),
                      "max_council_calls_per_pass":
-                         _int("max_council_calls_per_pass", 5)},
+                         int(eff["max_council_calls_per_pass"])},
+        "cadence": {"crypto_interval_minutes": int(eff["crypto_interval_minutes"]),
+                    "equity_interval_minutes": int(eff["equity_interval_minutes"])},
+        "stage_a_whale_weight": float(eff["stage_a_whale_weight"]),
         "budget": {"daily": budget, "used_today": used,
                    "remaining": max(0, budget - used),
                    "est_cost_per_call": est,
                    "est_spend_today": round(used * est, 4)},
+        # Server-side bounds, so the GUI renders the same limits it is clamped to
+        # rather than hardcoding a second copy that could drift.
+        "bounds": {**{k: list(v) for k, v in DISCOVERY_BOUNDS.items()},
+                   "stage_a_whale_weight": [WHALE_WEIGHT_MIN, WHALE_WEIGHT_MAX]},
+        "prerequisites": discovery_prerequisites(),
+        "longterm_prerequisites": longterm_prerequisites(),
         # The react layer is not built. Say so here so the GUI can state it
         # rather than implying discovery reads news live.
         "react_layer_built": False,

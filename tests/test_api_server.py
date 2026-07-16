@@ -996,6 +996,192 @@ def test_discovery_latest_reports_the_whale_surfaced_count(env, client):
     assert passes["crypto"]["whale_surfaced_count"] == 0
 
 
+# --- Discovery enable toggles + tunables (validated control endpoint) -------
+
+def _bridge_up(monkeypatch):
+    from api_server import store
+    monkeypatch.setattr(store, "bridge_health",
+                        lambda: {"reachable": True, "url": "x", "status": "ok"})
+
+
+def _finnhub_present(monkeypatch):
+    from discovery import finnhub_source
+    monkeypatch.setattr(finnhub_source, "resolve_key", lambda: "fake-resolves")
+
+
+def test_discovery_enable_is_refused_without_prerequisites(env, client):
+    """Never enable into a state that cannot work."""
+    r = client.post("/controls/discovery", json={"enabled": True}).json()
+    assert r["ok"] is False
+    assert "missing prerequisite" in r["error"]
+    # It says WHAT is missing, rather than failing opaquely.
+    assert any(not c["ok"] for c in r["prerequisites"]["checks"])
+    # And it did not turn on.
+    assert client.get("/discovery/state").json()["enabled"] is False
+
+
+def test_missing_finnhub_key_blocks_discovery_enable_with_a_clear_reason(
+        env, client, monkeypatch):
+    _bridge_up(monkeypatch)          # bridge fine
+    from discovery import finnhub_source
+    monkeypatch.setattr(finnhub_source, "resolve_key", lambda: None)  # no key
+
+    r = client.post("/controls/discovery", json={"enabled": True}).json()
+    assert r["ok"] is False
+    assert "Finnhub API key" in r["error"]
+    check = next(c for c in r["prerequisites"]["checks"]
+                 if c["key"] == "finnhub_key")
+    assert check["ok"] is False
+    assert "Settings" in check["detail"]      # tells the operator where to go
+
+
+def test_discovery_enable_writes_the_control_file_and_audits(env, client,
+                                                             monkeypatch):
+    _bridge_up(monkeypatch)
+    _finnhub_present(monkeypatch)
+    r = client.post("/controls/discovery", json={"enabled": True}).json()
+    assert r == {"ok": True, "discovery_enabled": True}
+
+    # It lands in controls.json, the same channel the layer toggles use. No new
+    # write path, and no operational table touched.
+    saved = json.load(open(os.path.join(env["control"], "controls.json")))
+    assert saved["discovery"]["discovery_enabled"] is True
+
+    # The engine's own reader sees it through the same file.
+    from discovery import settings
+    monkeypatch.setenv("MAL_CONTROL_DIR", env["control"])
+    assert settings.discovery_enabled() is True
+
+    # Audited with old and new, into the append-only events log.
+    con = sqlite3.connect(env["db"])
+    rows = con.execute(
+        "SELECT message, payload_json FROM events WHERE kind='control_change'"
+    ).fetchall()
+    con.close()
+    assert any("discovery.discovery_enabled" in r[0] for r in rows)
+    assert any('"old": false' in (r[1] or "") and '"new": true' in (r[1] or "")
+               for r in rows)
+
+
+def test_discovery_disable_is_never_blocked_by_a_prerequisite(env, client,
+                                                              monkeypatch):
+    """Turning a spender OFF must not depend on a broken dependency."""
+    _bridge_up(monkeypatch)
+    _finnhub_present(monkeypatch)
+    assert client.post("/controls/discovery",
+                       json={"enabled": True}).json()["ok"] is True
+    # Bridge goes down. Disable must still work.
+    from api_server import store
+    monkeypatch.setattr(store, "bridge_health",
+                        lambda: {"reachable": False, "url": "x", "status": None})
+    r = client.post("/controls/discovery", json={"enabled": False}).json()
+    assert r == {"ok": True, "discovery_enabled": False}
+
+
+def test_longterm_enable_needs_a_sleeve_to_trade_in(env, client, monkeypatch):
+    _bridge_up(monkeypatch)
+    _finnhub_present(monkeypatch)
+    r = client.post("/controls/longterm", json={"enabled": True}).json()
+    assert r["ok"] is False
+    check = next(c for c in r["prerequisites"]["checks"]
+                 if c["key"] == "research_satellite")
+    assert check["ok"] is False
+    assert "no sleeve to trade in" in check["detail"]
+
+
+def test_discovery_settings_clamp_out_of_bounds_values(env, client):
+    r = client.post("/controls/discovery_settings",
+                    json={"discovery_daily_council_budget": 9999,
+                          "crypto_interval_minutes": 1}).json()
+    assert r["ok"] is True
+    # Clamped to the server bounds, never trusted as sent.
+    assert r["discovery"]["discovery_daily_council_budget"] == 100
+    assert r["discovery"]["crypto_interval_minutes"] == 15
+    # And it SAYS it clamped rather than silently showing a different number.
+    assert r["clamped"]["discovery_daily_council_budget"] == 100
+
+
+def test_discovery_settings_force_the_funnel_to_narrow(env, client):
+    """The GUI must not be a way around a rule the config validator enforces."""
+    r = client.post("/controls/discovery_settings",
+                    json={"max_finalists": 4, "max_survivors": 20,
+                          "max_council_calls_per_pass": 20}).json()
+    d = r["discovery"]
+    assert d["max_survivors"] <= d["max_finalists"]
+    assert d["max_council_calls_per_pass"] <= d["max_survivors"]
+
+
+def test_discovery_settings_reject_an_unknown_key(env, client):
+    r = client.post("/controls/discovery_settings",
+                    json={"max_finalists": 6}).json()
+    assert r["ok"] is True
+    # An unknown field is refused by the schema, so a typo cannot silently do
+    # nothing or reach something it should not.
+    bad = client.post("/controls/discovery_settings",
+                      json={"max_daily_loss_total_pct": 0.9})
+    assert bad.status_code == 422
+
+
+def test_discovery_settings_flow_to_the_runner(env, client, monkeypatch):
+    client.post("/controls/discovery_settings",
+                json={"stage_a_whale_weight": 0.42, "max_finalists": 7})
+    from discovery import settings
+    monkeypatch.setenv("MAL_CONTROL_DIR", env["control"])
+    # The control file is what the funnel actually reads.
+    assert settings.stage_a_whale_weight() == 0.42
+    assert settings.max_finalists() == 7
+    # An untouched key still falls back to config.
+    assert settings.crypto_active_max() == 50
+
+
+def test_no_discovery_control_writes_a_level1_value(env, client, monkeypatch):
+    """The structural rule: cost and cadence only, never a risk limit."""
+    _bridge_up(monkeypatch)
+    _finnhub_present(monkeypatch)
+    before = client.get("/risk").json()["level1"]
+    client.post("/controls/discovery", json={"enabled": True})
+    client.post("/controls/longterm", json={"enabled": True})
+    client.post("/controls/discovery_settings",
+                json={"discovery_daily_council_budget": 50})
+    assert client.get("/risk").json()["level1"] == before
+    # The control file carries no risk key at all.
+    saved = json.load(open(os.path.join(env["control"], "controls.json")))
+    assert "risk" not in saved
+    assert not any("loss" in k or "confidence" in k
+                   for k in saved.get("discovery", {}))
+
+
+def test_discovery_controls_never_enable_live(env, client, monkeypatch):
+    _bridge_up(monkeypatch)
+    _finnhub_present(monkeypatch)
+    before = client.get("/approval").json()
+    client.post("/controls/discovery", json={"enabled": True})
+    client.post("/controls/longterm", json={"enabled": True})
+    assert client.get("/approval").json() == before
+
+
+def test_prerequisites_endpoint_never_returns_a_key_value(env, client,
+                                                          monkeypatch):
+    canary = "CANARY-PREREQ-KEY-MUST-NOT-APPEAR-3k2j"
+    monkeypatch.setenv("FINNHUB_API_KEY", canary)
+    r = client.get("/discovery/prerequisites")
+    assert r.status_code == 200
+    # It reports whether a key RESOLVES, never what it is.
+    assert canary not in r.text
+    assert "token=" not in r.text
+
+
+def test_discovery_state_reports_effective_values_and_bounds(env, client):
+    j = client.get("/discovery/state").json()
+    # Bounds come from the server, so the GUI cannot drift from what it is
+    # clamped to.
+    assert j["bounds"]["max_finalists"] == [1, 50]
+    assert j["bounds"]["stage_a_whale_weight"] == [0.0, 1.0]
+    assert "prerequisites" in j and "longterm_prerequisites" in j
+    assert j["cadence"]["crypto_interval_minutes"] == 60
+    assert j["stage_a_whale_weight"] == 0.15
+
+
 def test_discovery_views_write_nothing(env, client):
     """The structural claim: these are reads. The DB must be byte-identical."""
     before = hashlib.sha256(open(env["db"], "rb").read()).hexdigest()

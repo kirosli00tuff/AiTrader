@@ -377,6 +377,8 @@ export interface DiscoveryState {
     max_survivors: number;
     max_council_calls_per_pass: number;
   };
+  cadence: { crypto_interval_minutes: number; equity_interval_minutes: number };
+  stage_a_whale_weight: number;
   budget: {
     daily: number;
     used_today: number;
@@ -384,8 +386,22 @@ export interface DiscoveryState {
     est_cost_per_call: number;
     est_spend_today: number;
   };
+  // Server-side bounds, so the GUI renders the same limits it is clamped to
+  // rather than keeping a second copy that could drift.
+  bounds: Record<string, [number, number]>;
+  prerequisites: Prereqs;
+  longterm_prerequisites: Prereqs;
   react_layer_built: boolean;
 }
+
+export interface PrereqCheck {
+  key: string;
+  ok: boolean;
+  label: string;
+  detail: string;
+}
+
+export interface Prereqs { ok: boolean; checks: PrereqCheck[]; }
 
 export interface WatchlistRow {
   symbol: string;

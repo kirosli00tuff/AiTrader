@@ -15,7 +15,7 @@ import os
 
 from fastapi import FastAPI, Query, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 from api_server import store
 from api_server import controls
@@ -116,6 +116,60 @@ def get_research_theses(limit: int = Query(100, le=500)):
 # operator opts in, which the GUI renders as a clear disabled state rather than
 # an empty page that looks broken. An unknown asset_class degrades to "both",
 # matching store.valid_category rather than introducing a new error path.
+
+class DiscoveryToggleWrite(BaseModel):
+    enabled: bool
+
+
+class DiscoverySettingsWrite(BaseModel):
+    # Every field optional: the GUI sends only what changed. Values are clamped
+    # server-side into controls.DISCOVERY_BOUNDS, never trusted as sent.
+    # extra="forbid": an unknown field is REFUSED rather than silently dropped,
+    # so a typo cannot look like it worked, and no caller can probe for a field
+    # that is deliberately not exposed here.
+    model_config = ConfigDict(extra="forbid")
+    discovery_daily_council_budget: int | None = None
+    max_finalists: int | None = None
+    max_survivors: int | None = None
+    max_council_calls_per_pass: int | None = None
+    crypto_interval_minutes: int | None = None
+    equity_interval_minutes: int | None = None
+    stage_a_whale_weight: float | None = None
+
+
+@app.post("/controls/discovery")
+def post_discovery(body: DiscoveryToggleWrite):
+    # Discovery enable. Same validated control-file channel as the layer toggles.
+    # Enabling is REFUSED when a prerequisite is missing, so the operator never
+    # enables into a state that cannot work. Never a Level-1 write, never live.
+    return controls.set_discovery(body.enabled)
+
+
+@app.post("/controls/longterm")
+def post_longterm(body: DiscoveryToggleWrite):
+    # Long-term sleeve strategy enable. Same posture, plus it needs a sleeve to
+    # trade in (sleeves.research_satellite_enabled).
+    return controls.set_long_term(body.enabled)
+
+
+@app.post("/controls/discovery_settings")
+def post_discovery_settings(body: DiscoverySettingsWrite):
+    # Discovery cost and cadence tunables. Clamped server-side, then the
+    # narrowing rule is re-applied (survivors <= finalists, council <=
+    # survivors), so the GUI can never build a funnel the config validator would
+    # refuse. Cost and cadence only: no Level-1 value is reachable from here.
+    given = {k: v for k, v in body.model_dump().items() if v is not None}
+    return controls.set_discovery_settings(given)
+
+
+@app.get("/discovery/prerequisites")
+def get_discovery_prerequisites():
+    # What discovery and the long-term sleeve each need before they can be
+    # enabled. Read-only, and never returns a key value: it reports whether a key
+    # RESOLVES, never what it is.
+    return {"discovery": controls.discovery_prerequisites(),
+            "longterm": controls.longterm_prerequisites()}
+
 
 @app.get("/discovery/state")
 def get_discovery_state():

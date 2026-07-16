@@ -275,6 +275,34 @@ state, universe sizes, funnel ceilings, the split, and each flag. Enabling is a
 deliberate operator action, and needs a `FINNHUB_API_KEY` (keystore-first, never
 logged; without one discovery reports `unavailable` and does nothing).
 
+**Enabling it from the GUI.** Controls has a **Discovery + long-term sleeve**
+panel with two enable toggles. Each one **arms before it fires**: the confirm
+states plainly what turning it on starts (discovery begins hourly funnel passes
+making Finnhub and council calls within the discovery budget; the long-term
+sleeve begins evaluating and holding research positions within the 35% hard cap).
+Disabling is immediate, because turning a spender **off** should never need a
+ceremony.
+
+**Prerequisites are checked before enabling**, so you never enable into a state
+that cannot work. Discovery needs a **Finnhub key that resolves** (Stage A is the
+funnel's only input) and the **bridge up** (Stage C runs the council on survivors
+through it). The long-term sleeve additionally needs the **research_satellite
+sleeve** enabled, since the strategy otherwise has nowhere to put a position. A
+missing prerequisite blocks the toggle and says exactly what to fix.
+
+The same panel exposes the tunables: the **discovery daily budget**, the
+**per-stage counts** (finalists, survivors, council calls per pass), the
+**cadence**, and the **whale surfacing weight**. Every value is clamped
+server-side into bounds the API itself publishes, and the funnel is always forced
+to narrow (survivors at most finalists, council calls at most survivors), so the
+GUI can never build a funnel the config validator would refuse. **Level 1 risk
+limits are not reachable from this panel and stay read-only**, as everywhere else.
+
+Toggles and settings write through the **same validated control-endpoint channel
+as the existing layer toggles** (`controls.json`), and the funnel runner reads
+that file, so a change takes effect on the next due pass without a restart. A
+missing control file falls back to config, which ships disabled.
+
 Run it from the existing maintenance scheduling, or directly:
 
 ```bash

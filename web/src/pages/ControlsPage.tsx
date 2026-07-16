@@ -5,6 +5,7 @@ import type { ControlResult, ControlsState, RegistryEntry } from "../api/types";
 import { DataState, Panel } from "../components/ui";
 import { ConfirmButton, Slider, Toggle, SourceToggle } from "../components/controls";
 import { SleevesPanel } from "../components/SleevesPanel";
+import { DiscoveryControls } from "../components/DiscoveryControls";
 
 const FACTOR_LABEL: Record<string, string> = {
   rule_based: "Native rule-based", llm_primary: "GPT-5.5", llm_secondary: "Claude Opus 4.8",
@@ -81,6 +82,7 @@ export default function ControlsPage() {
       </p>
       {msg && <div className="callout" style={{ marginBottom: 14 }}>{msg}</div>}
       <SleevesPanel />
+      <DiscoveryControls />
 
       <DataState loading={c.loading && !d} error={c.error}>
         {d && (

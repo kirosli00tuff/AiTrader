@@ -6,7 +6,7 @@ import type {
   Trade, Venue, DaySummary, ProviderCost, RunState, SkipRow, TradeDetail,
   SleeveState, ResearchThesis,
   DiscoveryState, DiscoveryPass, DiscoveryCandidate, WatchlistRow,
-  WatchlistEvent, LongTermPosition,
+  WatchlistEvent, LongTermPosition, Prereqs,
 } from "./types";
 
 export const API_BASE = import.meta.env.VITE_API_BASE ?? "http://127.0.0.1:8000";
@@ -107,10 +107,20 @@ export const api = {
   requestRebalance: () =>
     post<{ ok: boolean; rebalance_requested: boolean }>("/controls/rebalance", {}),
 
-  // --- Discovery (READ-ONLY) ------------------------------------------------
-  // Every call here is a GET. Discovery has no write path by design, so there is
-  // deliberately no setter alongside these.
+  // --- Discovery ------------------------------------------------------------
+  // The VIEWS below are read-only GETs. The enable toggles and tunables go
+  // through the same validated control-endpoint channel as the layer toggles:
+  // the server clamps, refuses, and audits, and the client is never trusted.
+  // Nothing here can reach a Level-1 value or enable live.
   discoveryState: () => get<DiscoveryState>("/discovery/state"),
+  discoveryPrereqs: () =>
+    get<{ discovery: Prereqs; longterm: Prereqs }>("/discovery/prerequisites"),
+  setDiscovery: (enabled: boolean) =>
+    post<ControlResult>("/controls/discovery", { enabled }),
+  setLongTerm: (enabled: boolean) =>
+    post<ControlResult>("/controls/longterm", { enabled }),
+  setDiscoverySettings: (settings: Record<string, number>) =>
+    post<ControlResult>("/controls/discovery_settings", settings),
   discoveryLatest: (assetClass?: string) =>
     get<{ passes: DiscoveryPass[]; enabled: boolean }>(
       `/discovery/latest${assetClass ? `?asset_class=${assetClass}` : ""}`),
