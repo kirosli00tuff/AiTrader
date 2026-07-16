@@ -38,7 +38,10 @@ add_test(NAME adaptive_react COMMAND test_adaptive_react
 # Adaptive defensive actions through a REAL engine: the GUI toggle in
 # controls.json actually reaches the consumer, an aggressive row hand-written
 # into the queue is refused on read, a stale action is refused, and an action is
-# attempted exactly once. Covers apply_defensive_action, which realizes PnL.
+# attempted exactly once. Covers THE MONEY PATH: a trim against a real open
+# position, asserting it halves the position, books the closed portion only, and
+# realizes pnl as (price - entry) * closed_qty - fee. Mutation-checked: breaking
+# either the qty or the pnl scaling fails this suite.
 add_executable(test_adaptive_engine test_adaptive_engine.cpp)
 target_link_libraries(test_adaptive_engine PRIVATE mal_core mal_market_data
                       mal_signal_engine mal_storage mal_risk mal_config mal_util)

@@ -89,6 +89,79 @@ int count_of(const std::vector<std::string>& v, const std::string& want) {
     return n;
 }
 
+// One currently-open position, or {"", 0}. The trim/exit branch only runs
+// against a real open position, so the test has to find one rather than assume.
+struct OpenPos {
+    std::string symbol;
+    double qty = 0.0;
+    double avg_price = 0.0;
+};
+
+OpenPos first_open(const std::string& db) {
+    OpenPos p;
+    sqlite3* h = nullptr;
+    if (sqlite3_open(db.c_str(), &h) != SQLITE_OK) return p;
+    sqlite3_stmt* st = nullptr;
+    if (sqlite3_prepare_v2(h,
+            "SELECT symbol, qty, avg_price FROM positions WHERE qty > 0 "
+            "ORDER BY symbol LIMIT 1", -1, &st, nullptr) == SQLITE_OK &&
+        sqlite3_step(st) == SQLITE_ROW) {
+        const unsigned char* s = sqlite3_column_text(st, 0);
+        if (s) p.symbol = reinterpret_cast<const char*>(s);
+        p.qty = sqlite3_column_double(st, 1);
+        p.avg_price = sqlite3_column_double(st, 2);
+    }
+    sqlite3_finalize(st);
+    sqlite3_close(h);
+    return p;
+}
+
+double qty_of(const std::string& db, const std::string& symbol) {
+    double q = -1.0;
+    sqlite3* h = nullptr;
+    if (sqlite3_open(db.c_str(), &h) != SQLITE_OK) return q;
+    sqlite3_stmt* st = nullptr;
+    if (sqlite3_prepare_v2(h, "SELECT qty FROM positions WHERE symbol = ?", -1,
+                           &st, nullptr) == SQLITE_OK) {
+        sqlite3_bind_text(st, 1, symbol.c_str(), -1, SQLITE_TRANSIENT);
+        if (sqlite3_step(st) == SQLITE_ROW) q = sqlite3_column_double(st, 0);
+    }
+    sqlite3_finalize(st);
+    sqlite3_close(h);
+    return q;
+}
+
+// The most recent trade row for a symbol. A trim must book the CLOSED PORTION
+// only, so the test needs qty, price, fee, AND pnl to check the identity rather
+// than just the size.
+struct TradeRow {
+    double qty = -1.0, price = 0.0, fee = 0.0, pnl = 0.0;
+    std::string side;
+};
+
+TradeRow last_trade(const std::string& db, const std::string& symbol) {
+    TradeRow t;
+    sqlite3* h = nullptr;
+    if (sqlite3_open(db.c_str(), &h) != SQLITE_OK) return t;
+    sqlite3_stmt* st = nullptr;
+    if (sqlite3_prepare_v2(h,
+            "SELECT qty, price, fee, pnl, side FROM trades WHERE symbol = ? "
+            "ORDER BY id DESC LIMIT 1", -1, &st, nullptr) == SQLITE_OK) {
+        sqlite3_bind_text(st, 1, symbol.c_str(), -1, SQLITE_TRANSIENT);
+        if (sqlite3_step(st) == SQLITE_ROW) {
+            t.qty = sqlite3_column_double(st, 0);
+            t.price = sqlite3_column_double(st, 1);
+            t.fee = sqlite3_column_double(st, 2);
+            t.pnl = sqlite3_column_double(st, 3);
+            const unsigned char* s = sqlite3_column_text(st, 4);
+            if (s) t.side = reinterpret_cast<const char*>(s);
+        }
+    }
+    sqlite3_finalize(st);
+    sqlite3_close(h);
+    return t;
+}
+
 std::string now_iso() {
     std::time_t t = std::time(nullptr);
     char buf[32];
@@ -154,6 +227,69 @@ int main() {
                        "both aggressive rows and the stale row are refused");
         maltest::check(count_of(ev, "adaptive_defensive") == 0,
                        "no aggressive row ever produced a position change");
+        rm_db(db);
+    }
+
+    // --- THE MONEY PATH: a trim against a REAL open position ----------------
+    // This is the branch that actually moves money, and it had no coverage at
+    // all until now: every other case here returns before touching a position
+    // (flag_for_review exits early, aggressive and stale rows are refused, an
+    // unknown symbol is a no-op). So the frac/qty/pnl/remaining_qty arithmetic
+    // had never once executed in a test. It is the most dangerous code in the
+    // layer and it was the least exercised.
+    {
+        const std::string db = "/tmp/mal_adaptive_engine_trim.db";
+        rm_db(db);
+        write_controls(dir, true, true);
+        OpenPos pos;
+        {
+            core::Engine e(cfg, synth_opts(db));
+            // Run until the synthetic feed actually opens a native position.
+            // consume_adaptive_actions runs at the TOP of each iteration, before
+            // the bar steps, so queueing after this loop and running one more
+            // iteration applies the trim before any bar could close the position
+            // out from under it. Deterministic, not a race.
+            for (int i = 0; i < 400 && pos.symbol.empty(); ++i) {
+                e.run(5);
+                pos = first_open(db);
+            }
+            maltest::check(!pos.symbol.empty(),
+                           "the synthetic feed opened a position to trim");
+            if (pos.symbol.empty()) return maltest::report("adaptive_engine");
+
+            queue_action(db, now_iso(), pos.symbol, "trim");
+            e.run(1);
+
+            const double after = qty_of(db, pos.symbol);
+            // defensive_trim_fraction defaults to 0.50.
+            maltest::check_near(after, pos.qty * 0.5, 1e-9,
+                                "a trim HALVES the open position");
+            maltest::check(after > 0.0,
+                           "a trim leaves the position OPEN, it is not an exit");
+            const TradeRow tr = last_trade(db, pos.symbol);
+            maltest::check_near(tr.qty, pos.qty * 0.5, 1e-9,
+                                "the trade books the CLOSED PORTION, not the "
+                                "whole position");
+            maltest::check(tr.side == "sell",
+                           "trimming a long books a sell");
+            // THE PNL IDENTITY. realized_pnl works off the WHOLE position, so a
+            // trim must scale it by frac; booking the full position's pnl on a
+            // half close is the mistake this asserts against, and asserting qty
+            // alone would not catch it.
+            const double expected = (tr.price - pos.avg_price) * tr.qty - tr.fee;
+            maltest::check_near(tr.pnl, expected, 1e-6,
+                                "pnl is realized on the CLOSED PORTION only "
+                                "(price - entry) * closed_qty - fee");
+            maltest::check(count_of(adaptive_events(db), "adaptive_defensive") == 1,
+                           "the trim is logged as an adaptive_defensive action");
+
+            // ...and a follow-up exit closes the remainder, so a trimmed
+            // position is left in a coherent state rather than a stuck one.
+            queue_action(db, now_iso(), pos.symbol, "exit");
+            e.run(1);
+            maltest::check_near(qty_of(db, pos.symbol), 0.0, 1e-9,
+                               "an exit after a trim closes the remainder");
+        }
         rm_db(db);
     }
 

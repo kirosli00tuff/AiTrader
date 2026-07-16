@@ -34,6 +34,12 @@ Verification (2026-07-16):
 | An aggressive row hand-written into the queue | PASS: refused on read by a REAL engine, 0 position changes |
 | A stale action through a real engine | PASS: refused |
 | An action is attempted exactly once | PASS: 20 iterations, 1 noop, no retry storm |
+| **THE MONEY PATH (added after the fix pass)** | **PASS: the trim/exit arithmetic had STILL never executed in any test. Every earlier case returned before touching a position (flag_for_review exits early, aggressive/stale refused, unknown symbol no-ops), so `adaptive_defensive` was only ever asserted to equal ZERO. Now driven against a real open position.** |
+| A trim halves a real open position | PASS: 0.012 -> 0.006, position stays OPEN |
+| The trade books the CLOSED PORTION | PASS: 0.006, not the full 0.012; side=sell |
+| pnl is realized on the closed portion only | PASS: 0.190036 == (price - entry) * closed_qty - fee |
+| An exit after a trim closes the remainder | PASS: qty -> 0, no stuck position |
+| Mutation-checked (the test actually bites) | PASS: dropping `* frac` from the pnl alone fails it (0.385092 vs 0.190036); dropping it from qty fails 3 assertions. Restored: green. |
 | A general-market event read as `exit` | PASS: dropped as no_symbol_for_defensive, the poller survives |
 | A poisoned route costs one event, not the process | PASS: status stays ok |
 | The held discount lowers the bar at every threshold | PASS: 0.9, 0.55, 0.16, 0.15, 0.10, 0.01 all non-inverted |
