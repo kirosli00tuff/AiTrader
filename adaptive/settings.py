@@ -36,7 +36,7 @@ _DEFAULTS: dict[str, object] = {
     "adaptive_react_defensive_enabled": False,
     # Feed (Task 1)
     "poll_interval_seconds": 60,
-    "max_symbols_per_poll": 30,
+    "max_symbols_per_poll": 25,
     "news_lookback_minutes": 15,
     "general_news_enabled": True,
     # Materiality (Task 2). The free filter. Tuned so the vast majority of a
@@ -150,14 +150,26 @@ def any_enabled(cfg_path: str | None = None) -> bool:
 # --- Feed -------------------------------------------------------------------
 
 def poll_interval_seconds(cfg_path: str | None = None) -> int:
-    """How often the poller wakes. Once a minute by default, which keeps the
-    layer inside the Finnhub free tier with room to spare."""
+    """How often the poller wakes. Once a minute by default.
+
+    A poll costs up to 2 * max_symbols_per_poll + 1 Finnhub calls when the
+    sentiment cache is cold, so the free tier's 60/min is what bounds the symbol
+    count, not this interval. See max_symbols_per_poll.
+    """
     return int(_num("poll_interval_seconds", cfg_path))
 
 
 def max_symbols_per_poll(cfg_path: str | None = None) -> int:
     """Hard ceiling on symbols queried per poll. Bounds the call rate no matter
-    how large the watchlist grows."""
+    how large the watchlist grows.
+
+    THE ARITHMETIC MATTERS. Each symbol costs a company_news call AND (on a cold
+    sentiment cache) a news_sentiment call, plus one general_news call for the
+    poll: 2N + 1. Against the free tier's 60 calls/minute that caps N at 29. The
+    default 25 leaves 51 calls, i.e. real headroom. The API clamps this to 29 for
+    the same reason. Raising it past that does not fail loudly; it makes the
+    poller stall on its own rate limiter.
+    """
     return int(_num("max_symbols_per_poll", cfg_path))
 
 

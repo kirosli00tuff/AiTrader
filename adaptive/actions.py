@@ -210,6 +210,13 @@ def route(*, symbol: str, action: str, severity: float, reason: str,
     # Defensive.
     if not defensive_enabled:
         return RouteResult(cls, dropped_reason="defensive_disabled")
+    if not symbol:
+        # A general-market event names no instrument, so there is nothing to trim
+        # or exit: you cannot sell "the market". Without this branch,
+        # DefensiveAction's constructor raises ValueError and takes the whole
+        # poller down, which is exactly how a macro headline ("SEC probe into
+        # fraud at major bank") read as `exit` would have crashed it.
+        return RouteResult(cls, dropped_reason="no_symbol_for_defensive")
     return RouteResult(cls, defensive=DefensiveAction(
         symbol=symbol, action=action, reason=reason,
         severity=float(severity), event_id=event_id,

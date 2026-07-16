@@ -37,7 +37,7 @@ const BAD_PREREQS = {
 
 const SETTINGS = {
   poll_interval_seconds: 60,
-  max_symbols_per_poll: 30,
+  max_symbols_per_poll: 25,
   news_lookback_minutes: 15,
   adaptive_daily_llm_budget: 20,
   max_interpretations_per_poll: 3,
@@ -50,7 +50,7 @@ const SETTINGS = {
 
 const BOUNDS: Record<string, [number, number]> = {
   poll_interval_seconds: [15, 3600],
-  max_symbols_per_poll: [1, 60],
+  max_symbols_per_poll: [1, 29],
   news_lookback_minutes: [1, 240],
   adaptive_daily_llm_budget: [0, 200],
   max_interpretations_per_poll: [0, 20],
@@ -69,7 +69,8 @@ const STATE = {
   last_poll_status: null as string | null,
   today: {
     events_seen: 0, events_material: 0, events_escalated: 0,
-    events_dropped_free: 0, actions_queued: 0, referrals: 0,
+    events_dropped_free: 0, events_unread_budget: 0,
+    actions_queued: 0, referrals: 0,
   },
   budget: {
     daily: 20, used_today: 0, remaining: 20, est_cost_per_call: 0.02,

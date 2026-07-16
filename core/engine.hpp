@@ -15,6 +15,7 @@
 
 #include "account_manager/account_manager.hpp"
 #include "core/adaptive_actions.hpp"
+#include "core/adaptive_controls.hpp"
 #include "core/feed_clock.hpp"
 #include "core/layer_toggles.hpp"
 #include "core/operator_controls.hpp"
@@ -188,6 +189,11 @@ private:
     // Three independent refusals apply to every row: the flag, the defensive
     // allowlist (core/adaptive_actions.hpp), and the action's age.
     void consume_adaptive_actions(const std::string& ts, long now_epoch);
+    // Re-read the adaptive runtime settings from controls.json. Called once
+    // per loop iteration, exactly like the layer toggles: the poller is a
+    // separate process, so a cached value would keep the engine consuming
+    // actions after the operator turned the react half off.
+    AdaptiveRuntime adaptive_runtime() const;
     // Apply one defensive action through the SAME native exit accounting the
     // engine already uses. Never a bypass, and never a new order path. Returns
     // false (with a logged reason) when there is nothing to act on. Exits
@@ -195,7 +201,13 @@ private:
     // risk-INCREASING orders, and a gate that could refuse an exit would trap a
     // position. The exit path in handle_bar_close has always worked this way.
     bool apply_defensive_action(const core::DefensiveAction& a,
+                                const AdaptiveRuntime& rt,
                                 const std::string& ts);
+    // Trip the latching kill switch if today's realized loss has breached the
+    // Level-1 daily limit. Called from EVERY path that realizes PnL, so a
+    // defensive exit cannot cross the limit unnoticed until some later native
+    // exit happens to look. Reads the limit, never changes it.
+    void check_daily_loss_breach(const std::string& ts);
 
     // Consume the remaining controls.json overrides each iteration (Task 2):
     // council model toggles, runtime budget, and per-symbol regime pins. Logs

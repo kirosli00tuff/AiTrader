@@ -22,6 +22,7 @@
 
 #include "config/config.hpp"
 #include "core/engine.hpp"
+#include "core/adaptive_controls.hpp"
 #include "core/layer_toggles.hpp"
 
 namespace {
@@ -175,6 +176,11 @@ int main(int argc, char** argv) {
                                                   : cfg.system.control_dir);
             const auto lt =
                 mal::core::read_layer_toggles(ctl_dir + "/controls.json");
+            // The adaptive layer's RUNTIME state, from the same control file the
+            // engine consumes each iteration. Read here so the banner reports
+            // what is actually running rather than what config launched with.
+            const auto adaptive_rt = mal::core::read_adaptive_controls(
+                ctl_dir + "/controls.json", cfg.adaptive_realtime);
             // Query the bridge for the true real-vs-mock availability of each
             // advisory service, so the proof block shows the actual state, not
             // just the configured intent. Non-fatal: if the bridge is down the
@@ -373,18 +379,23 @@ int main(int argc, char** argv) {
                 // default. The line about aggressive entry prints
                 // unconditionally and on purpose: the operator should be able to
                 // read the guarantee off the startup block without opening a doc.
+                // RUNTIME state, not the config state. The operator turns
+                // these on in the GUI, which writes controls.json, so a banner
+                // reading cfg here would print DISABLED while the layer was
+                // actually running: the same config-versus-controls trap that
+                // made the toggle itself cosmetic.
                 << "  adaptive:  news feed "
-                << (cfg.adaptive_realtime.adaptive_news_feed_enabled
-                        ? "ENABLED"
-                        : "DISABLED (opt-in)")
+                << (adaptive_rt.news_feed_enabled ? "ENABLED"
+                                                  : "DISABLED (opt-in)")
                 << ", watchlist shaping "
-                << (cfg.adaptive_realtime.adaptive_watchlist_shaping_enabled
+                << (adaptive_rt.watchlist_shaping_enabled
                         ? "ENABLED"
                         : "DISABLED (opt-in)")
                 << ", defensive react "
-                << (cfg.adaptive_realtime.adaptive_react_defensive_enabled
-                        ? "ENABLED"
-                        : "DISABLED (opt-in)")
+                << (adaptive_rt.react_defensive_enabled ? "ENABLED"
+                                                        : "DISABLED (opt-in)")
+                << (adaptive_rt == mal::core::AdaptiveRuntime{}
+                        ? "" : "  [controls.json]")
                 << "\n"
                 << "  adapt $:   poll "
                 << cfg.adaptive_realtime.poll_interval_seconds
@@ -397,7 +408,7 @@ int main(int argc, char** argv) {
                 << "  react:     a live event may TRIM, EXIT, or FLAG only. "
                 << "Aggressive entry has no event path: it always routes through "
                 << "the discovery funnel + RiskGate. Stale actions (>"
-                << cfg.adaptive_realtime.action_max_age_seconds
+                << adaptive_rt.action_max_age_seconds
                 << "s) refused\n"
                 << "  cost cuts: risk pre-check ON; equities market-hours-only "
                 << (cfg.engine.equities_market_hours_only ? "ON" : "off")

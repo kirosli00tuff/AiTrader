@@ -109,7 +109,12 @@ Before going further, confirm from that page:
 
 - The free filter is actually dropping the vast majority. If `events_dropped_free`
   is not overwhelmingly the largest number on the page, the thresholds are wrong
-  and the layer is not affordable. Tune `materiality_min_sentiment` first.
+  and the layer is not affordable. Tune `materiality_min_sentiment` first. Read
+  `events_unread_budget` next to it: that is material events the budget could not
+  afford, a different problem with a different fix (raise the budget or tighten
+  the filter). The two are reported apart on purpose, because folding budget
+  skips into "dropped free" would flatter the filter exactly on the busy days
+  when it is performing worst.
 - Spend is inside the budget and matches expectation (worst case 20 reads/day at
   about $0.02 = about $0.40/day, SEPARATE from and additive to the discovery and
   trading budgets).

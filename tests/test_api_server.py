@@ -1249,6 +1249,16 @@ def test_there_is_no_flag_that_enables_aggressive_entry(env, client,
         assert "unknown adaptive flag" in r["error"]
 
 
+def test_the_symbol_cap_cannot_exceed_the_free_tier(env, client):
+    """A poll costs 2N+1 Finnhub calls on a cold sentiment cache against a 60/min
+    limit, so N must stay <= 29. The old ceiling of 60 allowed 121 calls, which
+    does not fail loudly: it stalls the poller on its own rate limiter."""
+    r = client.post("/controls/adaptive_settings",
+                    json={"max_symbols_per_poll": 60}).json()
+    assert r["adaptive_realtime"]["max_symbols_per_poll"] == 29
+    assert 2 * 29 + 1 <= 60
+
+
 def test_adaptive_settings_are_clamped_and_reported(env, client):
     r = client.post("/controls/adaptive_settings",
                     json={"adaptive_daily_llm_budget": 9999,
@@ -1364,7 +1374,55 @@ def test_the_state_counts_todays_free_drops(env, client):
     j = client.get("/adaptive/state").json()["today"]
     assert j["events_seen"] == 5
     assert j["events_escalated"] == 1
+    # dropped_free measures what the FREE FILTER threw away (seen - material),
+    # not seen - escalated. A material event the budget could not afford also
+    # cost nothing, but it was not dropped by the filter, and counting it here
+    # would flatter the filter exactly when it performs worst.
     assert j["events_dropped_free"] == 4
+    assert j["events_unread_budget"] == 0
+
+
+def test_dropped_free_does_not_take_credit_for_budget_skips(env, client):
+    """Regression: dropped_free was seen - escalated, so a material event the
+    budget could not read counted as a filter drop. LIVE_READINESS tells the
+    operator to gate enabling the layer on this number, so it has to measure the
+    thing it names."""
+    from api_server.controls import _now
+    day = _now()[:10]
+    db = sqlite3.connect(env["db"])
+    # 4 events: 3 material (only 1 of them read), 1 the filter dropped.
+    rows = [("09:00", 1, 1), ("09:01", 1, 0), ("09:02", 1, 0), ("09:03", 0, 0)]
+    db.executescript(
+        "INSERT INTO adaptive_event(ts,symbol,headline,source,category,"
+        "sentiment,dedupe_key,held,material,material_reason,escalated) VALUES "
+        + ",".join(
+            f"('{day}T{t}:00Z','SPY','h','R','company',0,'finnhub:{i}',0,"
+            f"{m},'r',{e})" for i, (t, m, e) in enumerate(rows)) + ";")
+    db.commit()
+    j = client.get("/adaptive/state").json()["today"]
+    assert j["events_seen"] == 4
+    assert j["events_material"] == 3
+    assert j["events_dropped_free"] == 1, "only the filter's drop counts"
+    assert j["events_unread_budget"] == 2, "budget skips are reported apart"
+
+
+def test_todays_actions_aggregate_over_todays_polls(env, client):
+    """Regression: actions_queued/referrals were read off the single most recent
+    adaptive_poll row, so with a 60s cadence they reverted to 0 within a minute
+    of a real action and the operator saw '0 actions today' right after the
+    layer trimmed a position."""
+    from api_server.controls import _now
+    day = _now()[:10]
+    db = sqlite3.connect(env["db"])
+    db.executescript(
+        "INSERT INTO adaptive_poll(ts,actions_queued,referrals) VALUES "
+        f"('{day}T09:00:00Z',1,2),"
+        f"('{day}T09:01:00Z',2,1),"
+        f"('{day}T09:02:00Z',0,0);")   # the LAST poll did nothing
+    db.commit()
+    j = client.get("/adaptive/state").json()["today"]
+    assert j["actions_queued"] == 3, "summed over today, not read off the last poll"
+    assert j["referrals"] == 3
 
 
 def test_the_engine_log_reads_real_engine_events(env, client):

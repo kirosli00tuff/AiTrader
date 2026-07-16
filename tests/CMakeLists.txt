@@ -29,8 +29,20 @@ add_test(NAME sleeves COMMAND test_sleeves WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
 # Also covers action staleness (old news must not move a position) and that all
 # three flags ship false in both the struct and the shipped config file.
 add_executable(test_adaptive_react test_adaptive_react.cpp)
-target_link_libraries(test_adaptive_react PRIVATE mal_config mal_util)
+# mal_bridge: adaptive_controls.hpp reads controls.json through the shared
+# flat JSON reader (bridge::json_get_bool / json_get_number).
+target_link_libraries(test_adaptive_react PRIVATE mal_config mal_util mal_bridge)
 add_test(NAME adaptive_react COMMAND test_adaptive_react
+         WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+# Adaptive defensive actions through a REAL engine: the GUI toggle in
+# controls.json actually reaches the consumer, an aggressive row hand-written
+# into the queue is refused on read, a stale action is refused, and an action is
+# attempted exactly once. Covers apply_defensive_action, which realizes PnL.
+add_executable(test_adaptive_engine test_adaptive_engine.cpp)
+target_link_libraries(test_adaptive_engine PRIVATE mal_core mal_market_data
+                      mal_signal_engine mal_storage mal_risk mal_config mal_util)
+add_test(NAME adaptive_engine COMMAND test_adaptive_engine
          WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 
 # Global-session equity rotation scaffold: config-driven regional sessions, the

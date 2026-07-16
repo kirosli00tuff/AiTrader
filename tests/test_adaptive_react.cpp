@@ -5,10 +5,13 @@
 // tests for its half (tests/test_adaptive_actions.py). This is the second,
 // independent half, in a different language, reading from the other side of the
 // database. Both would have to be wrong for the guarantee to fail.
+#include <cstdio>
+#include <fstream>
 #include <string>
 
 #include "config/config.hpp"
 #include "core/adaptive_actions.hpp"
+#include "core/adaptive_controls.hpp"
 #include "core/util.hpp"
 #include "test_util.hpp"
 
@@ -110,8 +113,9 @@ int main() {
     // same numbers only stay in step if something checks.
     maltest::check(cfg.adaptive_realtime.poll_interval_seconds == 60,
                    "default parity: poll_interval_seconds 60");
-    maltest::check(cfg.adaptive_realtime.max_symbols_per_poll == 30,
-                   "default parity: max_symbols_per_poll 30");
+    maltest::check(cfg.adaptive_realtime.max_symbols_per_poll == 25,
+                   "default parity: max_symbols_per_poll 25 (2N+1 calls "
+                   "per poll must fit the 60/min free tier)");
     maltest::check(cfg.adaptive_realtime.max_interpretations_per_poll == 3,
                    "default parity: max_interpretations_per_poll 3");
     maltest::check(cfg.adaptive_realtime.action_min_severity == 0.60,
@@ -171,6 +175,76 @@ int main() {
         maltest::check(probe.adaptive.rule_based_weight_floor ==
                            cfg.adaptive.rule_based_weight_floor,
                        "enabling the news layer does not touch the tuner's floor");
+    }
+
+    // --- The GUI toggle must actually reach the engine ---------------------
+    // Regression: the engine read cfg_.adaptive_realtime.* directly, so the
+    // operator could enable the react half in the GUI, watch the poller queue
+    // defensive actions, and have the engine ignore every one of them forever.
+    // The flags live in controls.json at runtime, exactly like the layer toggles.
+    {
+        const std::string missing = "/tmp/mal_no_such_adaptive_controls_XYZ.json";
+        auto off = read_adaptive_controls(missing, cfg.adaptive_realtime);
+        maltest::check(!off.news_feed_enabled && !off.watchlist_shaping_enabled &&
+                           !off.react_defensive_enabled,
+                       "a missing controls.json falls back to config: all OFF");
+        maltest::check(off.action_max_age_seconds == 300 &&
+                           off.defensive_trim_fraction == 0.50,
+                       "a missing controls.json keeps the config bounds");
+
+        const std::string bad = "/tmp/mal_bad_adaptive_controls.json";
+        { std::ofstream o(bad); o << "not json at all {{{"; }
+        auto b = read_adaptive_controls(bad, cfg.adaptive_realtime);
+        maltest::check(!b.news_feed_enabled && !b.react_defensive_enabled,
+                       "a malformed controls.json reads as OFF (inverted from "
+                       "layer_toggles: a broken file must never START a spender)");
+        std::remove(bad.c_str());
+
+        const std::string on = "/tmp/mal_adaptive_controls_on.json";
+        { std::ofstream o(on);
+          o << R"({"adaptive_realtime": {"adaptive_news_feed_enabled": true, )"
+               R"("adaptive_watchlist_shaping_enabled": true, )"
+               R"("adaptive_react_defensive_enabled": true, )"
+               R"("action_max_age_seconds": 120, )"
+               R"("defensive_trim_fraction": 0.25}})"; }
+        auto rt = read_adaptive_controls(on, cfg.adaptive_realtime);
+        maltest::check(rt.react_defensive_enabled,
+                       "the GUI toggle REACHES the engine (the whole point: "
+                       "config says false, the control file says true)");
+        maltest::check(rt.news_feed_enabled && rt.watchlist_shaping_enabled,
+                       "all three flags read from the control file");
+        maltest::check(rt.action_max_age_seconds == 120,
+                       "a GUI-set action max age reaches the engine");
+        maltest::check(rt.defensive_trim_fraction == 0.25,
+                       "a GUI-set trim fraction reaches the engine");
+        std::remove(on.c_str());
+
+        // The feed is the MASTER, enforced on READ so a hand-edited file cannot
+        // leave the engine consuming actions from a feed that is not running.
+        const std::string orphan = "/tmp/mal_adaptive_controls_orphan.json";
+        { std::ofstream o(orphan);
+          o << R"({"adaptive_realtime": {"adaptive_news_feed_enabled": false, )"
+               R"("adaptive_react_defensive_enabled": true}})"; }
+        auto orp = read_adaptive_controls(orphan, cfg.adaptive_realtime);
+        maltest::check(!orp.react_defensive_enabled,
+                       "react is forced off when the feed is off");
+        std::remove(orphan.c_str());
+
+        // A hand-edited file must not widen a bound the config validator would
+        // refuse. Both of these are safety values, so they fall back to CONFIG.
+        const std::string evil = "/tmp/mal_adaptive_controls_evil.json";
+        { std::ofstream o(evil);
+          o << R"({"adaptive_realtime": {"adaptive_news_feed_enabled": true, )"
+               R"("adaptive_react_defensive_enabled": true, )"
+               R"("action_max_age_seconds": 0, )"
+               R"("defensive_trim_fraction": 5.0}})"; }
+        auto evl = read_adaptive_controls(evil, cfg.adaptive_realtime);
+        maltest::check(evl.action_max_age_seconds == 300,
+                       "a hand-edited 'never expires' age falls back to config "
+                       "(an action must always be able to go stale)");
+        maltest::check(evl.defensive_trim_fraction == 0.50,
+                       "a hand-edited over-close trim falls back to config");
+        std::remove(evil.c_str());
     }
 
     return maltest::report("adaptive_react");

@@ -38,6 +38,13 @@ HIGH_IMPACT_TYPES = frozenset({
 # reading the news about what you already own is the cheap direction to err.
 HELD_SENTIMENT_DISCOUNT = 0.15
 
+# The lowest a discounted threshold may fall. It must stay strictly ABOVE zero:
+# an unknown sentiment reads as exactly 0.0 (news_feed._sentiment_for returns 0.0
+# for "we do not know", which is a different claim from "neutral"), so a
+# threshold of 0.0 would escalate every event on a held name including the ones
+# we know nothing about, and pay for every one of them.
+_MIN_EFFECTIVE_THRESHOLD = 0.01
+
 
 @dataclass(frozen=True)
 class MaterialityVerdict:
@@ -74,8 +81,19 @@ def assess(event: dict, *, keywords: list[str],
     symbol = (event.get("symbol") or "").strip()
     held = bool(event.get("held"))
     sentiment = abs(float(event.get("sentiment", 0.0) or 0.0))
-    threshold = max(0.0, float(min_sentiment) -
-                    (HELD_SENTIMENT_DISCOUNT if held else 0.0))
+
+    # min_sentiment <= 0 means the operator DISABLED the sentiment trigger. That
+    # is a separate question from how far the held discount lowers the bar, and
+    # conflating the two used to invert the rule: subtracting the discount drove
+    # a low threshold to 0.0, a `threshold > 0.0` guard then skipped the trigger,
+    # and a HELD name ended up with an unreachable bar while an unheld one still
+    # fired. The exact opposite of the intent above. Decide "is the trigger on"
+    # from min_sentiment alone, then apply the discount to a floor above zero.
+    sentiment_trigger_on = float(min_sentiment) > 0.0
+    threshold = float(min_sentiment)
+    if held:
+        threshold = max(_MIN_EFFECTIVE_THRESHOLD,
+                        threshold - HELD_SENTIMENT_DISCOUNT)
 
     etype = (event.get("event_type") or "").strip().lower()
     if etype in HIGH_IMPACT_TYPES:
@@ -85,7 +103,7 @@ def assess(event: dict, *, keywords: list[str],
     if hits:
         return MaterialityVerdict(True, f"keyword:{hits[0]}", 0.9)
 
-    if threshold > 0.0 and sentiment >= threshold:
+    if sentiment_trigger_on and sentiment >= threshold:
         return MaterialityVerdict(
             True, f"sentiment:{sentiment:.2f}>={threshold:.2f}", sentiment)
 

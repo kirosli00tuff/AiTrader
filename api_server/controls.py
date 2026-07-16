@@ -100,7 +100,11 @@ ADAPTIVE_FLAGS = ("adaptive_news_feed_enabled",
 ADAPTIVE_BOUNDS: dict[str, tuple[int, int]] = {
     # A 15s floor keeps the free tier safe even at the max symbol count.
     "poll_interval_seconds": (15, 3600),
-    "max_symbols_per_poll": (1, 60),
+    # A poll costs 2N+1 calls (company_news + news_sentiment per symbol,
+    # plus one general_news) whenever the sentiment cache is cold. The
+    # free tier is 60/min, so N must stay <= 29 or the poll stalls on the
+    # rate limiter. The old ceiling of 60 allowed 121 calls per poll.
+    "max_symbols_per_poll": (1, 29),
     "news_lookback_minutes": (1, 240),
     "adaptive_daily_llm_budget": (0, 200),
     "max_interpretations_per_poll": (0, 20),
@@ -772,6 +776,7 @@ def adaptive_state() -> dict:
     budget = a["adaptive_daily_llm_budget"]
     cost = a["adaptive_est_cost_per_call_usd"]
 
+    day = _now()[:10]
     last = store.query_one(
         "SELECT ts, symbols_polled, events_seen, events_material, "
         "events_escalated, llm_calls, actions_queued, referrals, status "
@@ -779,9 +784,18 @@ def adaptive_state() -> dict:
     today = store.query_one(
         "SELECT COUNT(*) AS seen, COALESCE(SUM(material),0) AS material, "
         "COALESCE(SUM(escalated),0) AS escalated FROM adaptive_event "
-        "WHERE substr(ts,1,10) = ?", (_now()[:10],)) or {}
+        "WHERE substr(ts,1,10) = ?", (day,)) or {}
     seen = int(today.get("seen") or 0)
+    material = int(today.get("material") or 0)
     escalated = int(today.get("escalated") or 0)
+    # Aggregated over TODAY'S polls, not read off the last one. These used to
+    # come from the single most recent adaptive_poll row, so with a 60s cadence
+    # they reverted to 0 within a minute of a real action and the operator saw
+    # "0 actions today" right after the layer trimmed a position.
+    acted = store.query_one(
+        "SELECT COALESCE(SUM(actions_queued),0) AS queued, "
+        "COALESCE(SUM(referrals),0) AS referrals FROM adaptive_poll "
+        "WHERE substr(ts,1,10) = ?", (day,)) or {}
 
     return {
         "news_feed_enabled": a["adaptive_news_feed_enabled"],
@@ -791,12 +805,21 @@ def adaptive_state() -> dict:
         "last_poll_status": last["status"] if last else None,
         "today": {
             "events_seen": seen,
-            "events_material": int(today.get("material") or 0),
+            "events_material": material,
             "events_escalated": escalated,
-            # The cost argument, as a number the operator can read off the page.
-            "events_dropped_free": seen - escalated,
-            "actions_queued": int(last["actions_queued"]) if last else 0,
-            "referrals": int(last["referrals"]) if last else 0,
+            # The cost argument: what the FREE FILTER threw away. Measured as
+            # seen - material, NOT seen - escalated. A material event the budget
+            # could not afford to read also cost nothing, but it was not dropped
+            # by the filter, and counting it here would flatter the filter
+            # exactly when it is performing worst (a busy day that exhausts the
+            # budget early). LIVE_READINESS tells the operator to gate enabling
+            # the layer on this number, so it has to measure the thing it names.
+            "events_dropped_free": seen - material,
+            # Material but unread: the budget or the per-poll cap ran out. Free,
+            # but a different failure to reason about, so it is reported apart.
+            "events_unread_budget": material - escalated,
+            "actions_queued": int(acted.get("queued") or 0),
+            "referrals": int(acted.get("referrals") or 0),
         },
         "budget": {
             "daily": budget,

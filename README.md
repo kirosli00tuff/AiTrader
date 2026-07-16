@@ -354,7 +354,7 @@ languages:
 
 | Stage | Cost | What it does |
 | --- | --- | --- |
-| **Poll** | free | Finnhub, once a minute, held names first, then watchlist, then general market news. Reuses the discovery client, so one rate limiter, not two. |
+| **Poll** | free | Finnhub, once a minute, held names first, then watchlist, then general market news. Reuses the discovery client, so one rate limiter, not two. A poll costs `2N+1` calls on a cold sentiment cache, so `max_symbols_per_poll` is capped at 29 against the 60/min free tier (default 25). |
 | **Filter** | **free, no LLM** | Keywords, sentiment magnitude, event type. Drops the vast majority. Everything dropped is still **stored**, so the cost claim stays checkable. |
 | **Interpret** | **the only paid stage** | One cheap Haiku read per escalated event: relevance, direction, severity, suggested action. Never on the raw feed. |
 | **Route** | free | `adaptive/actions.py` decides the most it may cause. |

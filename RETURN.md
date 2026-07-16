@@ -14,6 +14,42 @@ Commit message:
 
 ---
 
+## Prompt: Self-review the adaptive layer and fix every finding
+
+Date: 2026-07-16
+Model: Opus 4.8
+Prompt summary: /code-review xhigh over the adaptive-layer commit d21788b, then "yes, please fix all of them". 12 findings reported, all addressed.
+Changes: THE BIG ONE (finding 1): the C++ engine read `cfg_.adaptive_realtime.*` from CONFIG only, never controls.json, so the GUI react toggle was COSMETIC. The operator flips it, the API writes controls.json, the Python poller honors it and queues defensive actions, and the engine goes on reading config's false and never consumes them, forever. This is the EXACT defect fixed for discovery one prompt earlier ("the flags were CONFIG-only, so a GUI toggle would have been cosmetic"): fixed there for the Python funnel, reproduced here on the C++ side. New `core/adaptive_controls.hpp` (read_adaptive_controls) mirrors the established core/layer_toggles.hpp pattern, seeds from config, lets controls.json override, re-validates every value, and forces the downstream halves off when the feed is off. Its default posture is deliberately INVERTED from layer_toggles: a missing or malformed file there means all layers ON (a broken file must not blind the ensemble), here it means OFF (a broken file must never START a spender). Finding 2: a general-market event (symbol="") read as `exit` hit DefensiveAction's constructor, raised ValueError, and killed the poller, despite the module promising it never raises; general_news_enabled is on by default, so "SEC probe into fraud at major bank" was a live crash. route() now drops it (`no_symbol_for_defensive`: you cannot sell "the market") and the loop is guarded so the promise does not rest on every future branch remembering it. Finding 3: consume_adaptive_actions was called only from run_forever, so apply_defensive_action (which realizes PnL and mutates positions) had ZERO coverage and the 12000-step probe never ran it: the "behavior unchanged" evidence could not have caught a regression in the code it was reassuring about. The finite run() now consumes in all three branches, and a new ctest (tests/test_adaptive_engine.cpp) drives a REAL engine against a real DB. Finding 4: the held-position discount INVERTED below 0.15 (subtracting the discount drove the threshold to 0.0, and a `threshold > 0.0` guard then skipped the trigger), so held names got an unreachable bar while unheld ones still fired, exactly backwards from the documented safety argument. Finding 5: apply_defensive_action realized PnL without the daily-loss kill-switch check the native exit path performs; extracted check_daily_loss_breach, and both paths now call it. Finding 6 (CORRECTED, the original report overstated it): the DNN dataset is built from BARS, not trades, so there is no training-set pollution; the real defect is GATE inflation, and count_closed_trades gates the RL 500-fill activation (a CLAUDE.md hard rule). Fixed the clean half: an adaptive exit no longer increments closed_trade_count_, the tuner's min-sample gate, because it carries no factor attribution and must not open that gate on trades that taught the tuner nothing. Finding 7: today.actions_queued/referrals were read off the single most recent poll, so with a 60s cadence they showed 0 within a minute of a real action; now summed over today. Finding 8: 2N+1 calls per poll against a 60/min free tier meant 61 calls at the default 30 symbols, and the bound allowed 121; default now 25, bound 29, and three now-false "inside the free tier with room to spare" docstrings corrected. Finding 9: material events cut by the per-poll cap were deduped away PERMANENTLY, not deferred; added store.pending_material plus a bounded backlog pass. Findings 10-12: removed the dead counts_today, stopped an empty dedupe_key from swallowing every later keyless event (NULL repeats under UNIQUE, "" does not), and made events_dropped_free measure what the FILTER dropped (seen - material) with budget skips reported separately as events_unread_budget, since LIVE_READINESS tells the operator to gate on that number. Also fixed unprompted: the startup banner read config, so it printed DISABLED while the layer was actually running. NOT touched: RiskGate logic, the live-trading gate, the adaptive limit-weakening invariant, or any Level-1 value.
+Safest-choice notes: (1) The C++ runtime reader falls back to the CONFIG value, never a guess, when a hand-edited controls.json carries an out-of-range action_max_age_seconds or defensive_trim_fraction. Both are safety values: a non-positive max age means "never expires", the exact thing the field exists to prevent. (2) The held discount now floors at 0.01 rather than 0.0, because an unknown sentiment reads as exactly 0.0 (news_feed._sentiment_for returns 0.0 for "we do not know", a different claim from "neutral"), and a 0.0 threshold would escalate and pay for every event on a held name including the ones carrying no sentiment at all. (3) Finding 6 is only half-fixed, deliberately: excluding adaptive exits from the Python-side count_closed_trades needs a discriminator column on the operational trades table, and the sleeve rebalance trim has the SAME pre-existing problem. Widening an operational schema to fix a pre-existing bug was out of scope for a review-fix pass; the C++ tuner gate (the clean half) is fixed and the rest is logged in Known Issues. (4) The backlog is bounded at 60 minutes, so the cap DEFERS an event rather than discarding it without ever resurrecting stale news: an event nobody could afford to read an hour ago would produce an action the engine's own staleness check would refuse anyway.
+Verification (2026-07-16):
+
+| Check | Result |
+| --- | --- |
+| Python pytest | 579 passed (up from 568, +11 regression tests) |
+| C++ ctest | 22/22 passed (up from 21, +1 new engine suite) |
+| Frontend vitest | 91 passed |
+| Typecheck / production build | clean / green |
+| **Flags off = behavior STILL unchanged** | **PASS: 272 trades / 136 closed / 3 symbols, zero adaptive rows, zero engine events** |
+| **The GUI toggle now reaches the engine** | **PASS (test_adaptive_engine): config says false, controls.json says true, the engine consumes. Fails against the old code.** |
+| An aggressive row hand-written into the queue | PASS: refused on read by a REAL engine, 0 position changes |
+| A stale action through a real engine | PASS: refused |
+| An action is attempted exactly once | PASS: 20 iterations, 1 noop, no retry storm |
+| A general-market event read as `exit` | PASS: dropped as no_symbol_for_defensive, the poller survives |
+| A poisoned route costs one event, not the process | PASS: status stays ok |
+| The held discount lowers the bar at every threshold | PASS: 0.9, 0.55, 0.16, 0.15, 0.10, 0.01 all non-inverted |
+| Unknown sentiment never escalates a held name | PASS |
+| The per-poll cap DEFERS rather than discards | PASS: 5 material, 2 read, then 2, then 1; all drained |
+| The backlog never resurrects stale news | PASS: an hour-old unread event is not re-read |
+| A keyless event is not swallowed as a duplicate | PASS |
+| dropped_free does not take credit for budget skips | PASS: 1 filter drop, 2 budget skips, reported apart |
+| Today's actions aggregate over today's polls | PASS: 3, not the last poll's 0 |
+| The symbol cap cannot exceed the free tier | PASS: 60 clamps to 29; 2*29+1 <= 60 |
+| A malformed controls.json reads as OFF (C++) | PASS |
+| RiskGate / live gate / Level-1 untouched | PASS: risk/, learning/, execution/, signal_engine/, account_manager/ all 0 changed files |
+Commit message: `Fix twelve self-review findings in the adaptive layer, the engine now reads its flags from controls.json so the GUI toggle is real, live trading untouched`
+
+---
+
 ## Prompt: Build the complete adaptive real-time layer, disabled by default
 
 Date: 2026-07-16

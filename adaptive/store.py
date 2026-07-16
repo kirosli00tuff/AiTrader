@@ -128,6 +128,13 @@ def record_event(conn: sqlite3.Connection, ev: dict) -> int | None:
     poll interval so a slow or missed poll loses nothing, which means overlapping
     windows are NORMAL and the same headline arrives repeatedly. Without the
     unique key, one headline would be re-escalated and re-charged every minute.
+
+    A missing key is stored as NULL, never as "". SQLite's UNIQUE lets NULLs
+    repeat but treats "" as a real value that collides with itself, so an empty
+    key would make the first keyless event insert and silently swallow every one
+    after it as a "duplicate". Today parse_company_news drops articles with no
+    id, so this is unreachable from the feed, but record_event is a general
+    writer and must not have that trap in it.
     """
     ensure_schema(conn)
     cur = conn.execute(
@@ -139,7 +146,7 @@ def record_event(conn: sqlite3.Connection, ev: dict) -> int | None:
          ev.get("symbol", ""), ev.get("headline", ""), ev.get("summary", ""),
          ev.get("source", ""), ev.get("url", ""), ev.get("category", ""),
          float(ev.get("sentiment", 0.0) or 0.0), ev.get("event_type", ""),
-         ev.get("dedupe_key", ""), 1 if ev.get("held") else 0,
+         ev.get("dedupe_key") or None, 1 if ev.get("held") else 0,
          1 if ev.get("material") else 0, ev.get("material_reason", ""),
          1 if ev.get("escalated") else 0))
     if cur.rowcount == 0:
@@ -149,6 +156,35 @@ def record_event(conn: sqlite3.Connection, ev: dict) -> int | None:
 
 def mark_escalated(conn: sqlite3.Connection, event_id: int) -> None:
     conn.execute("UPDATE adaptive_event SET escalated=1 WHERE id=?", (event_id,))
+
+
+def pending_material(conn: sqlite3.Connection, *, newer_than: str,
+                     limit: int = 50) -> list[dict]:
+    """Material events a previous poll stored but never read. Held names first.
+
+    THE BACKLOG. An event is stored the moment it is seen, so when the per-poll
+    cap or the daily budget cuts the interpretation loop short, the leftovers sit
+    here with material=1 and escalated=0. The next poll re-fetches the same
+    articles (the lookback overlaps by design), record_event dedupes them, and
+    the runner skips them as "already seen". Without this query those events are
+    discarded permanently rather than deferred, which is exactly what the cap
+    should NOT mean: a halt on a held name arriving as the fourth material event
+    of a busy minute would simply never be read.
+
+    ``newer_than`` bounds it, so the backlog can never resurrect stale news: an
+    event nobody could afford to read an hour ago is not worth acting on now.
+    """
+    ensure_schema(conn)
+    rows = conn.execute(
+        "SELECT id,ts,symbol,headline,summary,source,category,sentiment,"
+        "event_type,held,material_reason FROM adaptive_event "
+        "WHERE material=1 AND escalated=0 AND ts >= ? "
+        "ORDER BY held DESC, ts DESC, id DESC LIMIT ?",
+        (newer_than, int(limit))).fetchall()
+    return [{"id": r[0], "ts": r[1], "symbol": r[2], "headline": r[3],
+             "summary": r[4], "source": r[5], "category": r[6],
+             "sentiment": r[7], "event_type": r[8], "held": bool(r[9]),
+             "material": True, "material_reason": r[10]} for r in rows]
 
 
 def recent_events(conn: sqlite3.Connection, limit: int = 100) -> list[dict]:
@@ -291,19 +327,3 @@ def last_poll(conn: sqlite3.Connection) -> dict | None:
             "actions_queued": row[7], "referrals": row[8],
             "est_cost_usd": row[9], "budget_remaining": row[10],
             "status": row[11], "reason": row[12]}
-
-
-def counts_today(conn: sqlite3.Connection, ts: str | None = None) -> dict:
-    """Today's totals for the GUI: how much was seen, how little was paid for."""
-    ensure_schema(conn)
-    day = _today(ts)
-    row = conn.execute(
-        "SELECT COUNT(*), SUM(material), SUM(escalated) FROM adaptive_event "
-        "WHERE substr(ts,1,10)=?", (day,)).fetchone()
-    seen = int(row[0] or 0) if row else 0
-    material = int(row[1] or 0) if row else 0
-    escalated = int(row[2] or 0) if row else 0
-    return {"events_seen": seen, "events_material": material,
-            "events_escalated": escalated,
-            "events_dropped_free": seen - escalated,
-            "llm_calls": llm_calls_today(conn, ts)}

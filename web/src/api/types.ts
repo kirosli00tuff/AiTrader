@@ -493,7 +493,12 @@ export interface AdaptiveState {
     events_seen: number;
     events_material: number;
     events_escalated: number;
+    // What the FREE FILTER threw away (seen - material). Distinct from
+    // events_unread_budget: a material event the budget could not afford also
+    // cost nothing, but it was not dropped by the filter, and folding the two
+    // together would flatter the filter exactly when it performs worst.
     events_dropped_free: number;
+    events_unread_budget: number;
     actions_queued: number;
     referrals: number;
   };

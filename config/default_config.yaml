@@ -429,7 +429,7 @@ adaptive_realtime:
 
   # Feed. Once a minute sits far inside the Finnhub free tier (60 calls/min).
   poll_interval_seconds: 60
-  max_symbols_per_poll: 30                  # hard bound on the call rate
+  max_symbols_per_poll: 25                  # 2N+1 calls/poll; free tier is 60/min
   news_lookback_minutes: 15                 # wider than the interval: a missed
                                             # poll must not lose events
   general_news_enabled: true                # macro events that name no symbol

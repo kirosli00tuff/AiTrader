@@ -147,6 +147,12 @@ export default function AdaptivePage() {
                 {" · "}{state.data.today.events_seen} events seen
                 {" · "}<b>{state.data.today.events_dropped_free} dropped free</b>
                 {" · "}{state.data.today.events_escalated} read by a model
+                {state.data.today.events_unread_budget > 0 && (
+                  <span className="warn">
+                    {" · "}{state.data.today.events_unread_budget} material but
+                    unread (budget)
+                  </span>
+                )}
                 {" · "}budget {state.data.budget.used_today}/
                 {state.data.budget.daily} (
                 {money(state.data.budget.est_spend_today)} est)

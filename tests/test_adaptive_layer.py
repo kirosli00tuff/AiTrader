@@ -556,7 +556,9 @@ def test_python_defaults_mirror_the_cpp_struct():
     Two sources of truth only stay in step if something checks both."""
     d = settings._DEFAULTS
     assert d["poll_interval_seconds"] == 60
-    assert d["max_symbols_per_poll"] == 30
+    # 25, not 30: a poll costs 2N+1 Finnhub calls on a cold sentiment cache
+    # and the free tier is 60/min, so 30 symbols meant 61 calls and a stall.
+    assert d["max_symbols_per_poll"] == 25
     assert d["adaptive_daily_llm_budget"] == 20
     assert d["max_interpretations_per_poll"] == 3
     assert d["action_min_severity"] == 0.60
@@ -573,3 +575,134 @@ def test_the_control_file_overrides_config_but_never_upward_by_default(
     assert settings.news_feed_enabled() is True
     assert settings.watchlist_shaping_enabled() is False, "untouched: config off"
     assert settings.poll_interval_seconds() == 60, "untouched: config default"
+
+
+# --- Regressions from the 2026-07-16 self-review ----------------------------
+# Each of these fails against the code as originally shipped.
+
+def test_a_general_market_event_never_crashes_the_poller(conn, control_dir):
+    """A macro headline names no instrument, so there is nothing to exit.
+
+    Originally route() handed symbol="" to DefensiveAction, whose constructor
+    raises, and the unguarded loop let that ValueError escape run_once and kill
+    the poller. general_news_enabled is on by default, so a headline like 'SEC
+    probe into fraud at major bank' read as `exit` was a live crash.
+    """
+    control_dir(adaptive_news_feed_enabled=True,
+                adaptive_react_defensive_enabled=True, action_min_severity=0.1)
+    general = {"id": 1, "datetime": int((NOW - timedelta(minutes=1)).timestamp()),
+               "headline": "SEC probe into fraud at major bank", "summary": "",
+               "source": "Reuters", "url": "https://example.test/x",
+               "related": "", "category": "general"}
+    interp = ScriptedInterpreter(action="exit", severity=1.0, relevance=1.0)
+    stats = run.run_once(conn, client=FakeClient([general]), interpreter=interp,
+                         now=NOW)          # must not raise
+    assert stats["status"] == "ok"
+    assert store.recent_actions(conn) == [], "you cannot exit 'the market'"
+    assert store.recent_interpretations(conn)[0]["outcome_reason"] == (
+        "no_symbol_for_defensive")
+
+
+def test_a_routing_failure_costs_one_event_not_the_process(conn, control_dir):
+    """The 'never raises' promise must not depend on every future branch of
+    route() remembering it."""
+    control_dir(adaptive_news_feed_enabled=True,
+                adaptive_react_defensive_enabled=True, action_min_severity=0.1)
+    _hold(conn)
+
+    class Exploding(ScriptedInterpreter):
+        def interpret(self, event):
+            i = super().interpret(event)
+            object.__setattr__(i, "severity", float("nan"))  # poison the route
+            return i
+
+    stats = run.run_once(conn, client=FakeClient(
+        [_article(1, headline="Trading halted amid fraud probe")]),
+        interpreter=Exploding(action="exit"), now=NOW)
+    assert stats["status"] == "ok", "one bad event must not kill the poll"
+
+
+def test_the_held_discount_lowers_the_bar_at_every_threshold():
+    """It used to INVERT below 0.15: subtracting the discount drove the
+    threshold to 0.0, a `threshold > 0.0` guard then skipped the trigger, and a
+    held name ended up unreachable while an unheld one still fired."""
+    ev = {"symbol": "SPY", "headline": "x", "sentiment": 0.9}
+    for mins in (0.9, 0.55, 0.16, 0.15, 0.10, 0.01):
+        held = materiality.assess({**ev, "held": True}, keywords=[],
+                                  min_sentiment=mins).material
+        unheld = materiality.assess({**ev, "held": False}, keywords=[],
+                                    min_sentiment=mins).material
+        assert held or not unheld, (
+            f"at min_sentiment={mins} a HELD name has a higher bar than an "
+            f"unheld one (held={held}, unheld={unheld})")
+
+
+def test_an_unknown_sentiment_never_escalates_a_held_name():
+    """0.0 means 'we do not know' (news_feed._sentiment_for), not 'neutral'. A
+    discounted threshold that reached 0.0 would escalate, and pay for, every
+    event on a held name including the ones carrying no sentiment at all."""
+    v = materiality.assess({"symbol": "SPY", "headline": "x", "sentiment": 0.0,
+                            "held": True}, keywords=[], min_sentiment=0.15)
+    assert v.dropped
+
+
+def test_a_zero_threshold_disables_the_sentiment_trigger_entirely():
+    for held in (True, False):
+        v = materiality.assess({"symbol": "SPY", "headline": "x",
+                                "sentiment": 0.99, "held": held},
+                               keywords=[], min_sentiment=0.0)
+        assert v.dropped, "min_sentiment 0 means the trigger is OFF"
+
+
+def test_the_per_poll_cap_defers_an_event_it_does_not_discard_it(conn,
+                                                                 control_dir):
+    """The cap used to drop events PERMANENTLY: the leftovers were stored, the
+    next poll re-fetched the same articles, record_event deduped them, and they
+    were skipped as 'already seen' forever. A halt arriving as the 4th material
+    event of a busy minute was simply never read."""
+    control_dir(adaptive_news_feed_enabled=True, adaptive_daily_llm_budget=100,
+                max_interpretations_per_poll=2)
+    _hold(conn)
+    articles = [_article(i, headline="Trading halted amid fraud probe")
+                for i in range(1, 6)]
+    interp = ScriptedInterpreter(action="none")
+
+    first = run.run_once(conn, client=FakeClient(articles), interpreter=interp,
+                         now=NOW)
+    assert first["events_material"] == 5
+    assert interp.calls == 2, "the cap binds"
+
+    # The next poll picks up the backlog rather than starting from nothing new.
+    run.run_once(conn, client=FakeClient(articles), interpreter=interp,
+                 now=NOW + timedelta(minutes=1))
+    assert interp.calls == 4, "the deferred events are read, not discarded"
+    run.run_once(conn, client=FakeClient(articles), interpreter=interp,
+                 now=NOW + timedelta(minutes=2))
+    assert interp.calls == 5, "and the last one drains"
+
+
+def test_the_backlog_never_resurrects_stale_news(conn, control_dir):
+    """A material event nobody could afford to read an hour ago is not worth
+    acting on now, and the engine would refuse an action built from it anyway."""
+    control_dir(adaptive_news_feed_enabled=True, max_interpretations_per_poll=0)
+    _hold(conn)
+    run.run_once(conn, client=FakeClient(
+        [_article(1, headline="Trading halted amid fraud probe")]),
+        interpreter=ScriptedInterpreter(), now=NOW)
+
+    late = ScriptedInterpreter(action="none")
+    run.run_once(conn, client=FakeClient([]), interpreter=late,
+                 now=NOW + timedelta(minutes=run.PENDING_MAX_AGE_MINUTES + 5))
+    assert late.calls == 0, "an hour-old unread event is not resurrected"
+
+
+def test_an_event_with_no_dedupe_key_is_not_swallowed_as_a_duplicate(conn):
+    """An empty key collides with itself under UNIQUE (NULL does not), so the
+    first keyless event used to insert and silently swallow every one after."""
+    first = store.record_event(conn, {"ts": TS, "symbol": "SPY",
+                                      "headline": "one"})
+    second = store.record_event(conn, {"ts": TS, "symbol": "SPY",
+                                       "headline": "two"})
+    assert first is not None
+    assert second is not None, "a second keyless event must not read as a dupe"
+    assert len(store.recent_events(conn)) == 2

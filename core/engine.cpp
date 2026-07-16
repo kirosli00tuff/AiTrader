@@ -589,16 +589,7 @@ void Engine::handle_bar_close(const market_data::MarketState& ms,
         ++closed_trade_count_;
         ++trade_count_;
 
-        double daily_loss = -pstate_.realized_pnl_today_total;
-        if (daily_loss >= cfg_.risk.max_daily_loss_total_pct * equity_) {
-            if (kill_switch_.trip("daily loss breach")) {
-                for (const auto& [name, _] : accounts_->venues())
-                    accounts_->trip_kill_switch(name);
-                storage_->append_event({ts, "kill_switch", "", "", "critical",
-                                        "KILL SWITCH TRIPPED: daily loss breach",
-                                        "{}"});
-            }
-        }
+        check_daily_loss_breach(ts);
         open_positions_.erase(it);
         return;
     }
@@ -951,11 +942,35 @@ void Engine::consume_layer_toggles() {
     prev_layer_toggles_ = layer_toggles_;
 }
 
+AdaptiveRuntime Engine::adaptive_runtime() const {
+    // Config seeds it, controls.json overrides it, and it is re-read every
+    // iteration rather than cached: the poller is a separate process, so a
+    // cached value would keep the engine consuming actions after the operator
+    // turned the react half off.
+    return read_adaptive_controls(controls_path_, cfg_.adaptive_realtime);
+}
+
+void Engine::check_daily_loss_breach(const std::string& ts) {
+    // Every path that realizes PnL must ask this. A defensive exit that crosses
+    // the Level-1 daily loss limit has to trip the switch itself: waiting for
+    // some later native exit to notice could mean hours, or never.
+    const double daily_loss = -pstate_.realized_pnl_today_total;
+    if (daily_loss < cfg_.risk.max_daily_loss_total_pct * equity_) return;
+    if (!kill_switch_.trip("daily loss breach")) return;
+    for (const auto& [name, _] : accounts_->venues())
+        accounts_->trip_kill_switch(name);
+    storage_->append_event({ts, "kill_switch", "", "", "critical",
+                            "KILL SWITCH TRIPPED: daily loss breach", "{}"});
+}
+
 void Engine::consume_adaptive_actions(const std::string& ts, long now_epoch) {
-    // Refusal 1: the flag. FALSE by default, so with the shipped config this
-    // returns before touching the DB and the engine never learns the adaptive
-    // tables exist.
-    if (!cfg_.adaptive_realtime.adaptive_react_defensive_enabled) return;
+    // Refusal 1: the flag, read from controls.json (config seeds it, and config
+    // ships false). Reading the RUNTIME value rather than cfg_ is what makes the
+    // GUI toggle real: reading cfg_ here meant the operator could enable the
+    // react half, watch the poller queue actions, and have the engine ignore
+    // every one of them forever.
+    const AdaptiveRuntime rt = adaptive_runtime();
+    if (!rt.react_defensive_enabled) return;
 
     const auto rows = storage_->adaptive_actions_after(adaptive_action_watermark_);
     for (const auto& row : rows) {
@@ -986,9 +1001,8 @@ void Engine::consume_adaptive_actions(const std::string& ts, long now_epoch) {
         }
 
         // Refusal 3: age. Stale news must not move a position.
-        if (core::action_is_stale(
-                row.ts, now_epoch,
-                cfg_.adaptive_realtime.action_max_age_seconds)) {
+        if (core::action_is_stale(row.ts, now_epoch,
+                                  rt.action_max_age_seconds)) {
             storage_->append_event(
                 {ts, "adaptive_action_refused", "", row.symbol, "info",
                  "Refused stale adaptive action '" + row.action + "' for " +
@@ -1009,11 +1023,12 @@ void Engine::consume_adaptive_actions(const std::string& ts, long now_epoch) {
         a.kind = *kind;
         a.severity = row.severity;
         a.event_id = row.event_id;
-        apply_defensive_action(a, ts);
+        apply_defensive_action(a, rt, ts);
     }
 }
 
 bool Engine::apply_defensive_action(const core::DefensiveAction& a,
+                                    const AdaptiveRuntime& rt,
                                     const std::string& ts) {
     const char* kind_name = core::defensive_kind_to_string(a.kind);
 
@@ -1055,11 +1070,12 @@ bool Engine::apply_defensive_action(const core::DefensiveAction& a,
     if (hb != bar_history_.end() && !hb->second.empty())
         px = hb->second.back().close;
 
-    const double frac =
-        a.kind == core::DefensiveKind::Exit
-            ? 1.0
-            : std::max(0.0, std::min(
-                  1.0, cfg_.adaptive_realtime.defensive_trim_fraction));
+    // read_adaptive_controls already validated this into (0,1]; clamping again
+    // costs nothing and keeps this function correct on its own terms.
+    const double frac = a.kind == core::DefensiveKind::Exit
+                            ? 1.0
+                            : std::max(0.0, std::min(1.0,
+                                                     rt.defensive_trim_fraction));
     const double qty = ap.pos.qty * frac;
     if (qty <= 0.0) return false;
 
@@ -1105,12 +1121,20 @@ bool Engine::apply_defensive_action(const core::DefensiveAction& a,
                         {"severity", a.severity},
                         {"action_id", static_cast<double>(a.id)}})});
 
+    check_daily_loss_breach(ts);
+
     if (remaining_qty <= 0.0) {
         if (ap.sleeve == "research_satellite")
             storage_->update_research_thesis_status(ap.pos.symbol, "closed", ts);
         open_positions_.erase(it);
-        ++closed_trade_count_;
         ++trade_count_;
+        // NOT closed_trade_count_. That counter is the adaptive TUNER's
+        // min-sample gate, and this exit carries no factor attribution: no
+        // factor predicted it, and the loop above deliberately skips the
+        // factor_perf_ update because attributing a news exit to the factors
+        // would actively corrupt the learning signal. Counting it toward "enough
+        // evidence to retune weights" would open that gate on trades that taught
+        // the tuner nothing.
     } else {
         // A trim leaves the position OPEN with less size. Its stop and target are
         // untouched: the event said "hold less of this", not "change the thesis".
@@ -1640,18 +1664,29 @@ void Engine::verify_real_layers_reachable() {
 
 void Engine::run(int iterations) {
     verify_real_layers_reachable();  // strict mode: no silent mock on real path
+    // Defensive actions from the adaptive layer are consumed on the finite path
+    // too, not just in run_forever. Leaving them out of run() meant the entire
+    // apply path (which realizes PnL and mutates positions) was unreachable from
+    // every test and from the offline probe, so a regression there could not have
+    // been caught. A no-op while the react flag is off, which is the default.
+    const auto consume = [&] {
+        consume_adaptive_actions(util::now_iso8601(),
+                                 static_cast<long>(std::time(nullptr)));
+    };
     if (feed_mode_ == "replay") {
         // Replay every stored bar in the window, in order, then stop cleanly.
         int i = 0;
-        while (step_bar_mode() > 0) maybe_adapt(i++);
+        while (step_bar_mode() > 0) { consume(); maybe_adapt(i++); }
     } else if (feed_mode_ == "synthetic_regimes") {
         // `iterations` = number of bar steps (each closes one bar per symbol).
         for (int i = 0; i < iterations; ++i) {
+            consume();
             step_bar_mode();
             maybe_adapt(i);
         }
     } else {
         for (int i = 0; i < iterations; ++i) {
+            consume();
             run_iteration();
             maybe_adapt(i);
         }

@@ -418,7 +418,9 @@ struct AdaptiveRealtimeConfig {
 
     // Feed. Once a minute keeps the layer inside the Finnhub free tier.
     int poll_interval_seconds = 60;
-    int max_symbols_per_poll = 30;
+    // 2N+1 Finnhub calls per poll on a cold sentiment cache, against a
+    // 60/min free tier: N must stay <= 29. 25 leaves real headroom.
+    int max_symbols_per_poll = 25;
     int news_lookback_minutes = 15;
     bool general_news_enabled = true;
 

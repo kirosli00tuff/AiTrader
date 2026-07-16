@@ -41,6 +41,13 @@ from .shaping import apply_route
 
 log = logging.getLogger("adaptive.run")
 
+# How far back the backlog reaches for material events a previous poll could not
+# afford to read. Bounded so the cap DEFERS an event rather than discarding it,
+# without ever resurrecting stale news: an event nobody could read an hour ago is
+# not worth acting on now, and a defensive action built from it would be refused
+# by the engine's own staleness check anyway.
+PENDING_MAX_AGE_MINUTES = 60
+
 
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
@@ -132,6 +139,18 @@ def run_once(conn: sqlite3.Connection, *, client=None, interpreter=None,
             stats["events_material"] += 1
             scored.append((ev, event_id))
 
+    # The BACKLOG. Material events a previous poll stored but could not afford to
+    # read are picked up here. Without this the per-poll cap and the budget do not
+    # defer an event, they discard it permanently: the next poll re-fetches the
+    # same article, record_event dedupes it, and it is skipped as "already seen"
+    # forever. Appended after this poll's new events, then the whole set is sorted
+    # held-first, so a fresh event and a deferred one compete on the same rule.
+    seen_ids = {eid for _, eid in scored}
+    backlog_cutoff = _iso(now - timedelta(minutes=PENDING_MAX_AGE_MINUTES))
+    for ev in store.pending_material(conn, newer_than=backlog_cutoff):
+        if ev["id"] not in seen_ids:
+            scored.append((ev, ev["id"]))
+
     # Held names first, so a binding per-poll ceiling spends its calls on
     # positions we own rather than on candidates we merely watch.
     scored.sort(key=lambda p: (not p[0].get("held"), p[0].get("symbol") or ""))
@@ -173,15 +192,26 @@ def run_once(conn: sqlite3.Connection, *, client=None, interpreter=None,
                 outcome_reason="below_min_relevance", ts=ts)
             continue
 
-        result = route(symbol=ev.get("symbol", ""), action=interp.action,
-                       severity=interp.severity, reason=interp.rationale,
-                       min_severity=min_severity,
-                       defensive_enabled=defensive_on,
-                       shaping_enabled=shaping_on, event_id=event_id, ts=ts)
-        applied = apply_route(conn, result)
+        # Guarded because this layer is ADVISORY and must not be able to take the
+        # poller down. route() validates its own inputs, but the promise at the
+        # top of this module ("never raises") should not depend on every future
+        # branch of route() and apply_route() remembering it. A failure here
+        # costs one event, not the process.
+        try:
+            result = route(symbol=ev.get("symbol", ""), action=interp.action,
+                           severity=interp.severity, reason=interp.rationale,
+                           min_severity=min_severity,
+                           defensive_enabled=defensive_on,
+                           shaping_enabled=shaping_on, event_id=event_id, ts=ts)
+            applied = apply_route(conn, result)
+            action_class = result.action_class
+        except Exception as e:  # noqa: BLE001
+            log.warning("adaptive: routing event %s failed: %s", event_id, e)
+            applied = {"outcome": "dropped", "reason": f"route error: {e}"[:200]}
+            action_class = ""
+
         store.record_interpretation(
-            conn, event_id, {**interp.to_dict(),
-                             "action_class": result.action_class},
+            conn, event_id, {**interp.to_dict(), "action_class": action_class},
             model=interp.model, cost=cost_per, outcome=applied["outcome"],
             outcome_reason=applied["reason"], ts=ts)
         if applied["outcome"] == "queued":
