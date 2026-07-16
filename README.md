@@ -686,6 +686,10 @@ the same SQLite database.
 A left sidebar holds four sections. A top strip on every page shows engine
 state, active mode, portfolio value, daily PnL, and kill-switch status.
 
+The GUI displays every timestamp in the operator's local timezone (default
+America/Vancouver, PST or PDT by date, changeable in Settings); storage, the
+engine, logs, and the events table stay UTC. This is a display-only preference.
+
 - **Paper** is the default operating view for the Alpaca paper loop, with three
   subpages:
   - **Overview** an equity hero, stat cards (total P/L, win rate, closed

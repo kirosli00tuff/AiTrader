@@ -3,6 +3,8 @@ import { api } from "../api/client";
 import { useApi } from "../api/useApi";
 import type { Council, Credential, Venue } from "../api/types";
 import { DataState, Empty, Panel } from "../components/ui";
+import { DISPLAY_TZ_OPTIONS, setDisplayTimeZone, useDisplayTimeZone } from "../api/tz";
+import { clockTs } from "../api/format";
 
 interface Category { title: string; groups: string[]; note: string; testMode?: string; }
 
@@ -86,6 +88,7 @@ export default function SettingsPage() {
   };
 
   const models = councilApi.data?.models ?? {};
+  const displayTz = useDisplayTimeZone();
 
   return (
     <div>
@@ -94,6 +97,28 @@ export default function SettingsPage() {
         Credentials are encrypted at rest in a local keystore and never written
         to YAML or logs. Resolution order: in-app saved value first, then env.
       </p>
+
+      <Panel title="Display timezone" style={{ marginBottom: 14 }}>
+        <p className="muted" style={{ fontSize: 12, marginTop: 0 }}>
+          The GUI shows all times in this timezone. Storage, the engine, and the
+          event log stay UTC. Display preference only, saved in this browser.
+        </p>
+        <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+          <select
+            className="input"
+            value={displayTz}
+            onChange={(e) => setDisplayTimeZone(e.target.value)}
+            aria-label="Display timezone"
+          >
+            {DISPLAY_TZ_OPTIONS.map((o) => (
+              <option key={o.zone} value={o.zone}>{o.label}</option>
+            ))}
+          </select>
+          <span className="dim" style={{ fontSize: 12 }}>
+            now: {clockTs(new Date().toISOString(), displayTz)}
+          </span>
+        </div>
+      </Panel>
 
       <Panel title="Active council models" style={{ marginBottom: 14 }}>
         {Object.keys(models).length ? (

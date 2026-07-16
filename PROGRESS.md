@@ -66,6 +66,14 @@ New flags from the feed-work session (2026-07-05, `369b6a6`):
 
 ## Session Log
 
+### 2026-07-15 (Opus 4.8) — display GUI timestamps in the operator local timezone, storage stays UTC
+
+- Goal. The React GUI now shows every timestamp in the operator's local timezone (default America/Vancouver, PST or PDT by date) instead of raw UTC. Display-only: storage, the engine, logs, and the events table stay ISO-8601 UTC.
+- Shared utility. Added web/src/api/tz.ts, a small display-timezone store (default America/Vancouver, persisted in localStorage, a useSyncExternalStore hook, DST handled by the IANA zone name not a fixed offset). The existing shared formatters web/src/api/format.ts (clockTs, shortTs) now render in that zone with a short label like "7:45 PM PDT", reading the zone from the store so no component hardcodes it. Every wall-clock display in the app already flows through these two formatters (activity feed, trade tables and detail, skip feed, positions), so routing them covers the app.
+- Reactivity + selector. Layout subscribes to the zone so a change re-renders every page live. Settings gained a display-timezone selector (defaults to America/Vancouver, persists the choice, writes no operational value, shows a live "now" preview).
+- Safest-choice notes. HealthPage has no checked_at field (only latency_ms, a duration, not a wall-clock) and EquityChart uses an index-based x-axis with no absolute time labels, so neither renders a timezone-relevant timestamp. There was no existing localStorage settings store, so this display-only preference persists in localStorage, which never reaches the engine, YAML, or the DB.
+- Tests + verify. Frontend vitest 17 passed (6 new: a known UTC converts to Vancouver PDT in summer and PST in winter, shortTs carries the date and zone label, the default zone is America/Vancouver, a subscribed component renders the converted time and re-renders when the zone changes to UTC, an invalid zone is ignored). Typecheck clean (tsc --noEmit), production build green (tsc -b + vite build, 74 modules). The diff touches only the frontend (web/) and this doc. No backend, engine, or DB change. NOT touched: RiskGate logic, the live-trading gate, the adaptive limit-weakening invariant, timestamp STORAGE (stays UTC). Live OFF, RL gated 0/500.
+
 ### 2026-07-15 (Opus 4.8) — gate all equity entries on US market hours, fast tier included, exits exempt, crypto unaffected
 
 - The bug (from live logs). At 23:40 UTC, outside US regular hours, the market-hours rule skipped the council for QQQ but a fast-tier native momentum entry executed anyway. The market-hours gate only gated the council call, not the native entry, so after-hours equity fills slipped through. After-hours paper fills are thin-market artifacts that corrupt validation data.

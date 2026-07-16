@@ -14,6 +14,31 @@ Commit message:
 
 ---
 
+## Prompt: Display timestamps in operator local timezone in the GUI, storage stays UTC
+
+Date: 2026-07-15
+Model: Opus 4.8
+Prompt summary: Autonomous, operator away. Do not touch RiskGate logic, the live-trading gate, or the adaptive limit-weakening invariant. Live off. Do not change how timestamps are stored, the database stays ISO-8601 UTC. Goal, the GUI displays all timestamps in the operator's local timezone, America/Vancouver, PST or PDT as appropriate, instead of raw UTC. Display-only change, storage, the engine, logs, and the events table stay UTC. Task 1, a shared timestamp formatting utility in the React frontend that converts UTC to the display timezone, default America/Vancouver, read from a config value or a settings option so it is not hardcoded in components, handle DST by IANA zone name not a fixed offset, format consistently date and time with a short zone label like 7:45 PM PDT. Task 2, route every timestamp the GUI renders through the shared utility. Task 3, optional display-timezone selector in Settings defaulting to America/Vancouver, persist in the existing settings pattern, display preference only, writes no operational value. Task 4, frontend tests for PST and PDT conversion, component render, selector change, typecheck and build green, diff touches only the frontend and settings persistence. Task 5, document and commit.
+Changes: Task 1 added web/src/api/tz.ts, a shared display-timezone store: default America/Vancouver, persisted in localStorage, a useSyncExternalStore hook (useDisplayTimeZone), a curated IANA option list, and validation that rejects a bad zone. DST is handled by the IANA zone name, not a fixed offset. The existing shared formatters in web/src/api/format.ts (clockTs, shortTs) now render in the display zone with a short label like "7:45 PM PDT", reading the zone from the store with an optional explicit-zone override for tests, so no component hardcodes a zone. Task 2, every wall-clock timestamp the GUI renders already flows through clockTs/shortTs (activity feed, trade tables and trade detail, skip feed, positions), so they all convert now; Layout subscribes to the zone so a change re-renders every page live. Task 3 added a display-timezone selector to the Settings page (defaults to America/Vancouver, persists the choice, writes no operational value, shows a live "now" preview). Task 4, tests plus typecheck plus build. Task 5, README one line, PROGRESS entry, this entry. NOT touched: RiskGate logic, the live-trading gate, the adaptive limit-weakening invariant, and timestamp STORAGE (the DB, engine, and logs stay ISO-8601 UTC). Live OFF, RL gated 0/500.
+Verification (2026-07-15):
+
+| Check | Result |
+| --- | --- |
+| Frontend vitest | 17 passed (6 new tz tests, 11 existing) |
+| PST conversion | PASS: 2026-01-16T03:45:00Z renders "7:45 PM PST" in America/Vancouver |
+| PDT conversion | PASS: 2026-07-16T02:45:00Z renders "7:45 PM PDT" in America/Vancouver |
+| Component renders converted time | PASS: a subscribed component shows the Vancouver-local time |
+| Selector changes the zone | PASS: setDisplayTimeZone("UTC") re-renders the component to "2:45 AM UTC" |
+| Default zone | PASS: America/Vancouver when nothing is stored |
+| Invalid zone ignored | PASS: keeps the current zone |
+| Typecheck | PASS (tsc --noEmit) |
+| Production build | PASS (tsc -b + vite build, 74 modules) |
+| Diff scope | Frontend only (web/) plus README/PROGRESS/RETURN; no backend, engine, or DB change |
+| Storage stays UTC | PASS (no change to how timestamps are stored) |
+Commit message: `Display timestamps in operator local timezone in the GUI, storage stays UTC, display-only change`
+
+---
+
 ## Prompt: Gate all equity entries on US market hours including fast tier, exits exempt, crypto unaffected
 
 Date: 2026-07-15
