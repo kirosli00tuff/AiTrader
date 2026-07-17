@@ -422,20 +422,159 @@ def test_finnhub_health_reports_configured_once_the_key_is_saved(env, client,
     assert j["summary"]["configured_count"] == 1
     # One minimal quote, nothing heavier.
     assert "quote?symbol=AAPL" in seen["url"]
+    # Round-trip latency is reported, so a working-but-slow key is visible.
+    assert row["latency_ms"] is not None and row["latency_ms"] >= 0.0
+
+
+# --- Finnhub health: failure classification ---------------------------------
+# Finnhub is the one check whose token rides in the URL rather than a header, so
+# these pin the two properties that follow from that: a transient 429 must not
+# read as a broken key, and no failure path may return the token.
+
+def _finnhub_env(client, monkeypatch):
+    """Save a key, silence the backoff sleep, and report what was slept."""
+    from api_server import health
+    fake_val = "unit-test-fake-finnhub-classify-0004"
+    client.post("/credentials", json={"name": "finnhub_key", "value": fake_val})
+    sleeps: list[float] = []
+    monkeypatch.setattr(health.time, "sleep", lambda s: sleeps.append(s))
+    return health, fake_val, sleeps
+
+
+def _http_error(code, headers=None):
+    import urllib.error
+    return urllib.error.HTTPError(
+        "https://finnhub.io/api/v1/quote?symbol=AAPL&token=REDACTED",
+        code, "err", headers or {}, None)
+
+
+def _raise(exc):
+    def _fn(url, headers):
+        raise exc
+    return _fn
+
+
+def _finnhub_row(client):
+    return next(r for r in client.get("/health/integrations").json()["integrations"]
+                if r["name"] == "finnhub")
+
+
+def test_finnhub_health_retries_a_429_then_reports_cleanly(env, client,
+                                                           monkeypatch):
+    """A transient rate limit is busy, not broken. This check shares the 60/min
+    free tier with a discovery pass, so a 429 must retry with the existing
+    backoff and report working when the retry succeeds."""
+    health, _val, sleeps = _finnhub_env(client, monkeypatch)
+    calls = []
+
+    def fake_get(url, headers):
+        calls.append(url)
+        if len(calls) < 3:
+            raise _http_error(429, {"Retry-After": "1"})
+        return 200
+
+    monkeypatch.setattr(health, "_get", fake_get)
+    row = _finnhub_row(client)
+    assert row["state"] == "working"
+    assert row["reason"] == "one quote ok"
+    assert len(calls) == 3           # two 429s, then the success
+    assert sleeps == [1.0, 1.0]      # Retry-After honored, not blind backoff
+
+
+def test_finnhub_health_reports_an_exhausted_429_as_rate_limited(env, client,
+                                                                 monkeypatch):
+    """A 429 that never clears is still a rate limit, never a bad key."""
+    health, _val, _sleeps = _finnhub_env(client, monkeypatch)
+    monkeypatch.setattr(health, "_get", _raise(_http_error(429)))
+    row = _finnhub_row(client)
+    assert row["state"] == "failing"
+    assert "rate limited" in row["reason"]
+    assert "bad key" not in row["reason"]
+
+
+def test_finnhub_health_names_a_bad_key_and_a_network_fault_distinctly(
+        env, client, monkeypatch):
+    """The operator has to tell a rejected key from an unreachable host: they
+    need different actions (re-paste the key vs check the link)."""
+    import urllib.error
+    health, _val, _sleeps = _finnhub_env(client, monkeypatch)
+
+    monkeypatch.setattr(health, "_get", _raise(_http_error(401)))
+    row = _finnhub_row(client)
+    assert row["state"] == "failing"
+    assert row["reason"] == "bad key (HTTP 401)"
+
+    monkeypatch.setattr(health, "_get", _raise(urllib.error.URLError("no route")))
+    row = _finnhub_row(client)
+    assert row["state"] == "failing"
+    assert row["reason"] == "network unreachable (URLError)"
+
+
+def test_finnhub_counts_toward_the_aggregate_only_once_configured(env, client,
+                                                                  monkeypatch):
+    """The top strip reads this summary. A configured-but-failing Finnhub has to
+    clear all_ok (amber), and an unkeyed one must not, or an optional key nobody
+    set would show the operator a fault that is not there."""
+    from api_server import health
+
+    # Unkeyed: not a failure, and not counted.
+    j = client.get("/health/integrations").json()["summary"]
+    assert j["configured_count"] == 0
+    assert j["any_failing"] is False
+
+    # Keyed and rejected: counted, and it drags the aggregate off green.
+    _finnhub_env(client, monkeypatch)
+    monkeypatch.setattr(health, "_get", _raise(_http_error(401)))
+    j = client.get("/health/integrations").json()["summary"]
+    assert j["configured_count"] == 1
+    assert j["any_failing"] is True
+    assert j["all_ok"] is False
+
+
+def test_finnhub_health_never_returns_the_key_even_if_the_transport_leaks_it(
+        env, client, monkeypatch, capsys):
+    """The structural guarantee. _run stringifies an escaping exception into
+    `reason`, which the endpoint returns and the GUI renders, and this URL holds
+    the token. So the check classifies every failure itself and lets nothing raw
+    escape. Fails against a version that returns the exception text."""
+    health, fake_val, _sleeps = _finnhub_env(client, monkeypatch)
+
+    def leaky_get(url, headers):
+        raise ValueError(f"unknown url type: {url}")   # url carries the token
+
+    monkeypatch.setattr(health, "_get", leaky_get)
+    body = client.get("/health/integrations").text
+    assert fake_val not in body
+    row = next(r for r in json.loads(body)["integrations"] if r["name"] == "finnhub")
+    assert row["state"] == "failing"
+    assert row["reason"] == "network unreachable (ValueError)"
+
+    out = capsys.readouterr()
+    assert fake_val not in out.out
+    assert fake_val not in out.err
 
 
 def test_finnhub_health_never_returns_the_key(env, client, monkeypatch):
-    """The token rides in the query string, so the response must not carry it."""
+    """The token rides in the query string, so the response must not carry it.
+
+    The rejection is raised, not returned, because that is what urllib does on a
+    401 and the raised HTTPError carries the tokened URL on it. Stubbing a
+    returned 401 instead would exercise a branch the real transport never
+    reaches, and would prove nothing about the URL the exception holds.
+    """
+    import urllib.error
     fake_val = "unit-test-fake-finnhub-leak-0004"
     client.post("/credentials", json={"name": "finnhub_key", "value": fake_val})
 
     from api_server import health
-    monkeypatch.setattr(health, "_get", lambda url, headers: 401)
+    tokened = f"https://finnhub.io/api/v1/quote?symbol=AAPL&token={fake_val}"
+    monkeypatch.setattr(health, "_get", _raise(
+        urllib.error.HTTPError(tokened, 401, "Unauthorized", {}, None)))
     r = client.get("/health/integrations")
     row = next(x for x in r.json()["integrations"] if x["name"] == "finnhub")
     # A bad key fails honestly by status, without echoing the key.
     assert row["state"] == "failing"
-    assert row["reason"] == "HTTP 401"
+    assert row["reason"] == "bad key (HTTP 401)"
     assert fake_val not in r.text
     assert "token=" not in r.text
 

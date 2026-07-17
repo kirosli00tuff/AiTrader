@@ -14,6 +14,37 @@ Commit message:
 
 ---
 
+## Prompt: Add Finnhub to the live API health check
+
+Date: 2026-07-16
+Model: Opus 4.8
+Prompt summary: Add Finnhub to GET /health/integrations and the Health view so the operator can confirm the Finnhub key actually works, with tests and docs.
+Changes: FOUND IT MOSTLY BUILT AND SAID SO rather than rebuilding it. `_check_finnhub` already existed and was already in `_CHECKS` (committed in 9a28212, the Settings-key session), the Health view maps whatever the backend returns so the Finnhub row already rendered, and StatusBar's aggregate math is integration-agnostic so a configured-but-failing Finnhub already went amber while a not-configured one already did not count. Tasks 1 and 2 were satisfied except for three real gaps, which are what this commit fixes. GAP 1, a 429 read as a HARD FAILURE: the prompt asked for the existing retry-with-backoff and there was none, because `_get` raises on a non-2xx, so a transient rate limit reported failing. The check now retries with the discovery client's OWN policy (`finnhub_source.retry_after_seconds`, bounded, honors Retry-After) rather than a second copy of it, which matters because this check shares the 60/min free tier with a running discovery pass, exactly when a 429 is most likely and least meaningful. GAP 2, reasons were NOT classified: a 401 surfaced as `HTTPError: HTTP Error 401: Unauthorized` from _run's generic handler, but the operator needs `bad key`, `rate limited`, and `network` to be different because they call for different actions (re-paste the key, wait, check the link). Reasons are now fixed phrases. GAP 3, the token rides in the URL: Finnhub is the only check authenticating by query param, and _run stringifies an escaping exception into the `reason` the endpoint returns and the GUI renders, so the check now classifies its own failures and lets nothing raw escape. ALSO FIXED A TEST THAT PINNED AN UNREACHABLE BRANCH: `test_finnhub_health_never_returns_the_key` stubbed `_get` to RETURN 401, but the real transport RAISES on a 401, so it asserted a reason production could never produce; it now raises a realistic HTTPError whose URL carries the token, a stronger test of the same property. Docs: README health-check section, CONTEXT.md (two entries), LIVE_READINESS.md (confirm the key on Health, not via the prerequisite check), PROGRESS.md. NOT touched: RiskGate logic, the live-trading gate, the adaptive limit-weakening invariant, or any Level-1 value.
+THE KEY WORKS (2026-07-16): one real minimal call against the operator's real key returned working, "one quote ok", 107.8ms, with the key absent from the row. This supersedes the 1947-character `finnhub_key` I flagged in the two previous entries, which RESOLVED (so it passed the prerequisite check) while failing every real call. The operator replaced it with a 40-character key since that note was written. That gap between "a value resolves" and "the API accepts it" is the entire reason this check exists, and it is now documented in LIVE_READINESS.md as the reason to read the Health row instead of the prerequisite.
+Safest-choice notes: (1) I did NOT rebuild the working check to match the shape of the request. The prompt reads as though nothing exists, but the check, the row, and the aggregate were already correct, so rewriting them would have been churn against tested code and would have risked regressing behavior the prompt wanted preserved. I fixed the three things that were actually wrong and recorded why the rest was already done. (2) The leak guard is DEFENSE IN DEPTH, not a fix for a demonstrated leak, and the docs say so rather than overclaiming a vulnerability. No realistic exception (HTTPError, URLError) puts the URL in its message today, so the pre-fix code did not demonstrably leak. The guard makes "never returns the key" a property of the CODE instead of a property of which exception happened to fire. A test pins it by raising an exception that CONTAINS the key, and mutation-testing confirms the token appears verbatim in the JSON body without the guard. (3) The 429 retry reuses `finnhub_source.retry_after_seconds` rather than re-deriving a backoff. One policy, already tested, shared with the client that owns the rate limit. (4) The aggregate ("a configured-but-failing Finnhub contributes amber, a not-configured one does not count") is asserted on the BACKEND, where the summary is computed, not in a StatusBar render test. StatusBar only renders that summary and its dot math is integration-agnostic, so a frontend test would restate the backend's semantics against a mock and prove nothing Finnhub-specific. (5) The retry budget fits inside the endpoint's existing aggregate window in the realistic case (a 429 returns fast, so 3 calls plus 2 bounded sleeps is about 3s against a 14s window). A pathological hang would report "check timed out", which is the pre-existing degradation for every check and not a new failure mode. (6) I verified `parse_quote` against a LIVE response since the health check now makes that call anyway and CONTEXT.md flagged the shapes as unverified. It matches (keys c, d, dp, h, l, o, pc, t, parsing to a sane price). I did NOT verify the other five parsers: that is outside this prompt's goal and each costs a call, so CONTEXT.md now records the verification as PARTIAL rather than implying the whole client is confirmed.
+Verification (2026-07-16):
+
+| Check | Result |
+| --- | --- |
+| Python pytest | 590 passed (up from 585, +5) |
+| Frontend vitest | 96 passed (up from 91, +5, new health-finnhub.test.tsx) |
+| Typecheck / production build | clean / green |
+| **The real key, one real call** | **PASS: working, "one quote ok", 107.8ms** |
+| **The key never reaches the response** | **PASS: absent from the row, and absent even when the transport raises it** |
+| A 429 retries then reports cleanly | PASS: 3 calls, Retry-After honored (slept 1.0s, 1.0s), reports working |
+| An exhausted 429 says rate limited, never bad key | PASS |
+| A 401 says bad key, a URLError says network | PASS: distinct, actionable reasons |
+| No key reports not_configured and makes no call | PASS |
+| Aggregate: unkeyed does not count, keyed-and-failing goes amber | PASS |
+| Mutation: remove the 429 retry | Retry test FAILS as intended |
+| Mutation: let the exception escape to _run | Leak test FAILS, token visible in the JSON body |
+| `parse_quote` against a live response | PASS: documented keys, sane price |
+| Bind stays loopback | PASS |
+| RiskGate / live gate / Level-1 untouched | PASS |
+Commit message: `Add Finnhub to the live API health check and Health view, live trading untouched`
+
+---
+
 ## Prompt: Fix the RL/DNN real-fill gate inflation
 
 Date: 2026-07-16
@@ -1196,3 +1227,14 @@ $ git diff --cached --stat
 | Gemini 3.1 Pro | failing | HTTPError: HTTP Error 429: Too Many Requests | 167.0 ms |
 | Alpaca paper market data | working | one quote ok | 238.2 ms |
 | Alpaca paper order-auth (validation-only) | working | paper account auth ok | 259.0 ms |
+
+### Run 2026-07-17T03:02:29Z
+
+| Integration | Result | Detail | Latency |
+| --- | --- | --- | --- |
+| OpenAI GPT-5.5 | working | - | 1809.7 ms |
+| Anthropic Opus 4.8 | working | - | 1108.0 ms |
+| Anthropic Haiku 4.5 (gate path) | working | - | 690.7 ms |
+| Gemini 3.1 Pro | working | - | 1272.7 ms |
+| Alpaca paper market data | working | one quote ok | 255.0 ms |
+| Alpaca paper order-auth (validation-only) | working | paper account auth ok | 241.3 ms |

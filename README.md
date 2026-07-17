@@ -1021,15 +1021,35 @@ bash scripts/test_full_system.sh
 The **live API health check** verifies each integration with a real round trip,
 not just a key-present check. `GET /health/integrations` runs one minimal call
 per integration (OpenAI, Anthropic Opus, the Anthropic Haiku gate, Gemini,
-Alpaca market data, Alpaca paper trading auth, SEC EDGAR, IBKR gateway
-reachability) concurrently with per-check timeouts and returns working,
-failing, or not_configured with a short reason and round-trip latency in
-milliseconds. It never places a resting order (the Alpaca trade check
+Alpaca market data, Alpaca paper trading auth, **Finnhub**, SEC EDGAR, IBKR
+gateway reachability, Whale Alert) concurrently with per-check timeouts and
+returns working, failing, or not_configured with a short reason and round-trip
+latency in milliseconds. It never places a resting order (the Alpaca trade check
 authenticates only), never touches live trading, never writes an operational or
 Level 1 value, and never logs or returns a key value. An absent key reports
 not_configured, not failing. The Health view in the GUI shows each integration
 as a colored row and the top status strip shows an aggregate that is green only
 when every configured integration passes.
+
+The **Finnhub** check resolves `FINNHUB_API_KEY` through the keystore-first
+resolver (the key saved in Settings, then env), then fetches one quote. It is
+the only check whose token rides in the query string rather than a header, which
+is why it differs from the rest in two ways:
+
+- It **classifies** every outcome into a fixed phrase and never lets a raw
+  exception escape. The generic handler stringifies an exception into the
+  `reason` the endpoint returns and the GUI renders, and that URL holds the
+  token. Reasons are `one quote ok`, `bad key (HTTP 401)`, `rate limited (HTTP
+  429) after 2 retries`, `network unreachable (<type>)`, or `HTTP <status>`.
+- It **retries a 429** with the discovery client's own backoff policy (bounded,
+  honoring `Retry-After`), so a transient rate limit reads as busy rather than
+  broken. The check shares the 60-calls-per-minute free tier with a running
+  discovery pass, so a 429 means the budget is in use, not that the key is bad.
+
+A missing Finnhub key is **not a fault**: discovery ships disabled, so the check
+reports not_configured and does not count toward the aggregate. That is the
+distinction the row exists to draw, since a missing key and a rejected key both
+mean "no Finnhub" but only one of them is something to go fix.
 
 ### Operational upgrades
 

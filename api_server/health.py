@@ -19,6 +19,7 @@ import json
 import os
 import socket
 import time
+import urllib.error
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -165,18 +166,67 @@ def _check_whale_alert():
     return (WORKING, "one tx query ok") if status == 200 else (FAILING, f"HTTP {status}")
 
 
+def _finnhub_once(url: str) -> tuple[int, dict]:
+    """One GET, returning (status, response headers) rather than raising.
+
+    _get raises on a non-2xx, but this check has to tell a bad key (401) from a
+    transient rate limit (429), and a 429 carries the Retry-After header the
+    backoff policy honors. Both arrive as an HTTPError, so the status comes off
+    the exception instead of a second request. A transport failure still raises,
+    and the caller classifies it.
+    """
+    try:
+        return _get(url, {"Accept": "application/json"}), {}
+    except urllib.error.HTTPError as e:
+        return int(e.code), dict(getattr(e, "headers", {}) or {})
+
+
 def _check_finnhub():
-    # Finnhub feeds the discovery funnel's free Stage-A pre-screen. One minimal
-    # real call (a single quote) when a key resolves. No key reports
-    # not_configured, never failing: discovery ships off, so a missing optional
-    # key is not a fault. The token is only ever a query param, and neither it
-    # nor the URL is logged or returned.
+    """Finnhub feeds the discovery funnel's free Stage-A pre-screen.
+
+    One minimal real call (a single quote) when a key resolves. No key reports
+    not_configured, never failing: discovery ships off, so a missing optional key
+    is not a fault, and the operator has to be able to tell that apart from a
+    broken one.
+
+    Finnhub carries its token as a QUERY PARAM, not a header, so this check does
+    two things the header-authenticated checks above have no need for:
+
+      * It classifies every outcome into a fixed phrase and never lets a raw
+        exception reach _run. _run stringifies the exception into `reason`, which
+        the endpoint returns and the GUI renders, and this URL holds the token.
+      * It retries a 429 with the discovery client's own backoff policy, so a
+        transient rate limit reads as busy rather than broken. This check shares
+        the 60-calls-per-minute free tier with a running discovery pass, so a 429
+        means the budget is in use, not that the key is bad.
+    """
     key = _key("FINNHUB_API_KEY")
     if not key:
         return NOT_CONFIGURED, "FINNHUB_API_KEY not set"
-    status = _get(f"https://finnhub.io/api/v1/quote?symbol=AAPL&token={key}",
-                  {"Accept": "application/json"})
-    return (WORKING, "one quote ok") if status == 200 else (FAILING, f"HTTP {status}")
+
+    # The discovery client's existing policy, not a second copy of it.
+    from discovery.finnhub_source import (RATE_LIMIT_MAX_RETRIES,
+                                          retry_after_seconds)
+
+    url = f"https://finnhub.io/api/v1/quote?symbol=AAPL&token={key}"
+    status, headers = 0, {}
+    for attempt in range(RATE_LIMIT_MAX_RETRIES + 1):
+        try:
+            status, headers = _finnhub_once(url)
+        except Exception as e:  # noqa: BLE001 — type name only, never the URL
+            return FAILING, f"network unreachable ({type(e).__name__})"
+        if status != 429:
+            break
+        if attempt < RATE_LIMIT_MAX_RETRIES:
+            time.sleep(retry_after_seconds(headers, attempt))
+
+    if status == 200:
+        return WORKING, "one quote ok"
+    if status == 429:
+        return FAILING, f"rate limited (HTTP 429) after {RATE_LIMIT_MAX_RETRIES} retries"
+    if status in (401, 403):
+        return FAILING, f"bad key (HTTP {status})"
+    return FAILING, f"HTTP {status}"
 
 
 _CHECKS = [

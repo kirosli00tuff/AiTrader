@@ -105,6 +105,12 @@ Anthropic key (event reads). Turning this on alone is the safe way to evaluate
 the layer: it spends the adaptive budget and changes NOTHING else. No position
 moves, no watchlist entry changes. Run it here first and read the Adaptive page.
 
+Confirm the Finnhub key on the **Health** page before enabling, and read that row
+rather than the prerequisite check. The prerequisite asks only whether a value
+RESOLVES, which a mistaken paste passes while every real call fails. The Health
+row makes one real call and reports `working`, `bad key (HTTP 401)`, or `rate
+limited`. Verified working 2026-07-16 (`one quote ok`, about 108ms).
+
 Before going further, confirm from that page:
 
 - The free filter is actually dropping the vast majority. If `events_dropped_free`
