@@ -148,22 +148,95 @@ def _check_reserved(env: str, label: str):
     return NOT_CONFIGURED, f"{label} reserved, no adapter wired"
 
 
+def whale_alert_enabled() -> bool:
+    """The operator's intent for the Whale Alert feed: env override, else config.
+
+    The ADAPTER reads the WHALE_ALERT_ENABLED env var, correctly: the whale
+    library takes env opt-ins and the bridge is spawned with them by
+    stack.whale_env(), which DERIVES them from config. So config is the source of
+    truth and the env is how the bridge gets told.
+
+    This check runs in the API BACKEND, which nobody exports that env to. Reading
+    the env here reported "whale_alert_enabled is off" while config said on and
+    the key resolved: one half reading config, the other reading an env var only
+    one process gets. That is the flag-source mismatch class documented in
+    CONTEXT.md, so this resolves it the way everything else does: an explicit env
+    wins (it is how the bridge is actually configured), else config.
+    """
+    raw = os.environ.get("WHALE_ALERT_ENABLED")
+    if raw is not None:
+        return raw.strip().lower() in ("1", "true", "yes", "on")
+    try:
+        return bool((store.load_config().get("whale", {}) or {})
+                    .get("whale_alert_enabled", False))
+    except Exception:  # noqa: BLE001 - unreadable config means off
+        return False
+
+
+def _whale_alert_once(url: str, headers: dict):
+    """One GET, returning (status, resp) rather than raising.
+
+    _get raises on a non-2xx, so the old `status == 200 else FAILING` was DEAD
+    CODE on every failure: the exception escaped to _run instead, which
+    stringifies it into the `reason` the endpoint returns. This check has to tell
+    a bad key (401) from the developer plan's 10-per-minute limit (429), and a
+    429 carries the Retry-After the adapter's backoff honors. Both arrive as an
+    HTTPError, which already exposes .code and .headers, so it doubles as the
+    response object the adapter's own policy reads.
+    """
+    try:
+        return _get(url, headers), None
+    except urllib.error.HTTPError as e:
+        return int(e.code), e
+
+
 def _check_whale_alert():
-    # Whale Alert crypto trial feed. Only when opt-in AND keyed do we make one
-    # real minimal call. Off or unkeyed reports not_configured (never failing).
-    # The key is only ever a query param and is never logged or returned.
-    from whale_signal.adapters import (WHALE_ALERT_ENABLED_ENV, _flag,
-                                       _user_agent)
-    if not _flag(WHALE_ALERT_ENABLED_ENV):
+    """Whale Alert crypto trial feed. One real minimal call when on AND keyed.
+
+    Off or unkeyed reports not_configured, never failing: the feed is an opt-in
+    trial, so an absent key is a choice rather than a fault, and the operator has
+    to be able to tell that from a broken one.
+
+    Like Finnhub, the key rides in the URL as a QUERY PARAM, so this check
+    classifies every outcome into a fixed phrase and never lets a raw exception
+    reach _run, which would stringify it into the reason the GUI renders.
+
+    A 429 retries with the WHALE ADAPTER'S OWN policy (2 retries, 1s base, 5s
+    cap, honors Retry-After) rather than a second copy of it. The developer plan
+    allows 10 calls a minute and the adapter shares that budget with a running
+    whale pass, so a 429 means busy, not broken.
+    """
+    from whale_signal.adapters import (_RATE_LIMIT_MAX_RETRIES,
+                                       _retry_after_seconds, _user_agent)
+    if not whale_alert_enabled():
         return NOT_CONFIGURED, "whale_alert_enabled is off"
     key = _key("WHALE_ALERT_API_KEY")
     if not key:
         return NOT_CONFIGURED, "WHALE_ALERT_API_KEY not set"
+
     start = int(time.time()) - 3600
     url = ("https://api.whale-alert.io/v1/transactions"
            f"?api_key={key}&min_value=500000&start={start}&limit=1")
-    status = _get(url, {"User-Agent": _user_agent(), "Accept": "application/json"})
-    return (WORKING, "one tx query ok") if status == 200 else (FAILING, f"HTTP {status}")
+    headers = {"User-Agent": _user_agent(), "Accept": "application/json"}
+    status, resp = 0, None
+    for attempt in range(_RATE_LIMIT_MAX_RETRIES + 1):
+        try:
+            status, resp = _whale_alert_once(url, headers)
+        except Exception as e:  # noqa: BLE001 - type name only, never the URL
+            return FAILING, f"network unreachable ({type(e).__name__})"
+        if status != 429:
+            break
+        if attempt < _RATE_LIMIT_MAX_RETRIES:
+            time.sleep(_retry_after_seconds(resp, attempt))
+
+    if status == 200:
+        return WORKING, "one tx query ok"
+    if status == 429:
+        return FAILING, (f"rate limited (HTTP 429) after "
+                         f"{_RATE_LIMIT_MAX_RETRIES} retries")
+    if status in (401, 403):
+        return FAILING, f"bad key (HTTP {status})"
+    return FAILING, f"HTTP {status}"
 
 
 def _finnhub_once(url: str) -> tuple[int, dict]:

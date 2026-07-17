@@ -467,8 +467,21 @@ def test_flag_on_routes_to_the_long_term_strategy(tmp_path, monkeypatch):
 
 
 def test_shipped_config_has_the_long_term_sleeve_off():
+    """Reads the shipped config FILE, not the runtime resolution.
+
+    cfg_path=None layers .control/controls.json over config BY DESIGN, since that
+    is how an operator enables the sleeve at runtime. So asking None what the repo
+    SHIPS answers with whatever this machine's operator last toggled, and this
+    test went red the moment one enabled the long-term sleeve: it reported a
+    shipped-default regression that had not happened.
+
+    This is the THIRD instance of the same defect (see the identical fixes in
+    test_discovery_funnel.py and test_discovery_whale.py). An explicit path
+    ignores the control file, which is the documented contract and the thing
+    actually being asserted here.
+    """
     from discovery import settings
-    assert settings.long_term_sleeve_enabled(None) is False
+    assert settings.long_term_sleeve_enabled("config/default_config.yaml") is False
 
 
 # --- key safety -------------------------------------------------------------

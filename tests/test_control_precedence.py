@@ -336,3 +336,31 @@ def test_the_sweep_never_touches_a_write_in_flight(ctl):
     live.write_text("{}")             # fresh: another thread is mid-write
     controls._write_controls({"discovery": {"discovery_enabled": True}})
     assert live.exists(), "a fresh temp file must never be swept"
+
+
+def test_the_suite_cannot_read_the_hosts_live_control_file():
+    """Test isolation, asserted. The fix for the CLASS, not for three instances.
+
+    controls.json is the runtime override that WINS over config, so any test
+    resolving a flag through the runtime path reads whatever THIS machine's
+    operator last toggled. Three tests asserting a SHIPPED default went red the
+    moment a real operator enabled a layer, each was fixed by hand, and the rest
+    were missed. conftest.py now points MAL_CONTROL_DIR at an empty temp dir for
+    the whole suite, the same way it already isolates the credential keystore.
+
+    This pins that isolation, so removing it fails here rather than surfacing as
+    a mystery red suite on someone's machine months later.
+    """
+    import os
+    d = os.environ.get("MAL_CONTROL_DIR")
+    assert d, "conftest must isolate MAL_CONTROL_DIR for the whole suite"
+    assert "mal_test_controls_" in d, f"not the suite's temp control dir: {d}"
+    # And it is really empty, so every reader falls back to config.
+    assert not os.path.exists(os.path.join(d, "controls.json"))
+    assert control_file.control_state() == {}
+
+    # Which means the runtime path and the shipped path AGREE, which is what
+    # made the three hand-fixed tests fragile in the first place.
+    from discovery import settings
+    assert settings.discovery_enabled(None) is False
+    assert settings.long_term_sleeve_enabled(None) is False

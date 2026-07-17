@@ -8,7 +8,7 @@ import type {
   DiscoveryState, DiscoveryPass, DiscoveryCandidate, WatchlistRow,
   WatchlistEvent, LongTermPosition, Prereqs,
   AdaptiveState, AdaptiveEvent, AdaptiveInterpretation, AdaptiveAction,
-  AdaptiveEngineLogRow,
+  AdaptiveEngineLogRow, WhaleFeeds,
 } from "./types";
 
 export const API_BASE = import.meta.env.VITE_API_BASE ?? "http://127.0.0.1:8000";
@@ -104,6 +104,7 @@ export const api = {
   sleeves: () => get<SleeveState>("/sleeves"),
   researchTheses: (limit = 100) =>
     get<{ theses: ResearchThesis[] }>(`/research/theses?limit=${limit}`),
+  whaleFeeds: () => get<WhaleFeeds>("/whale/feeds"),
   setSleeve: (sleeve: string, enabled: boolean) =>
     post<ControlResult>("/controls/sleeve", { sleeve, enabled }),
   requestRebalance: () =>

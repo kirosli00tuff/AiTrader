@@ -548,6 +548,79 @@ def council() -> dict:
 
 # --- Whale ------------------------------------------------------------------
 
+def whale_feeds() -> dict:
+    """Read-only state of BOTH whale sources for the Ops section.
+
+    SEC EDGAR (equities, free, keyless, delayed) and Whale Alert (crypto, keyed,
+    opt-in trial) are the two feeds that can be live, so they are reported side
+    by side: which is on, which is off on purpose, and which one a signal could
+    have come from.
+
+    HONEST ABOUT THE ACTIVITY COUNT. `whale_activity` holds RAW per-fetch rows
+    and is empty in practice (0 rows), because the engine asks the bridge for a
+    SCORED signal and never persists the underlying activity. So the count here
+    is whale FACTOR signals from the `signals` table. That is real data, but it
+    means something narrower than "Whale Alert fetches":
+
+      * it counts SIGNALS, not fetches, and
+      * it is not attributed to a source, because the whale layer combines SEC
+        EDGAR and Whale Alert into one 0.35-capped factor and records one score,
+      * so a signal here may have come from either feed, or from the offline C++
+        mock when the engine runs without the bridge.
+
+    Reporting it as "last successful Whale Alert fetch" would be a fabrication.
+    The question "does Whale Alert actually work" is answered by the health check
+    (GET /health/integrations), which makes one real call and times it. This
+    panel answers "is it on, and is the whale layer producing anything".
+
+    Never returns a key value: it reports whether one RESOLVES, never what it is.
+    """
+    cfg = load_config().get("whale", {}) or {}
+    from api_server.health import whale_alert_enabled  # lazy: health imports store
+
+    try:
+        from account_manager.credentials import resolve_env
+        keyed = bool(resolve_env("WHALE_ALERT_API_KEY"))
+    except Exception:  # noqa: BLE001
+        keyed = False
+
+    row = query_one(
+        "SELECT ts FROM signals WHERE factor='whale_signal' "
+        "ORDER BY id DESC LIMIT 1")
+    recent = query_one(
+        "SELECT COUNT(*) AS n FROM signals WHERE factor='whale_signal' "
+        "AND ts >= datetime('now','-1 day')")
+    total = query_one(
+        "SELECT COUNT(*) AS n FROM signals WHERE factor='whale_signal'")
+
+    return {
+        "sec_edgar": {
+            "enabled": bool(cfg.get("sec_edgar_enabled", False)),
+            "label": "SEC EDGAR 13F + Form 4",
+            "detail": ("equities, free, keyless, delayed (13F about 45 days, "
+                       "Form 4 about 2 business days)"),
+            "needs_key": False,
+        },
+        "whale_alert": {
+            "enabled": whale_alert_enabled(),
+            "keyed": keyed,
+            "label": "Whale Alert (crypto trial)",
+            "detail": ("crypto on-chain, keyed, opt-in trial, developer plan "
+                       "10 calls/minute"),
+            "needs_key": True,
+        },
+        # The whale FACTOR's output, across both feeds. See the docstring: this is
+        # not a per-source fetch count and must not be labelled as one.
+        "signal_activity": {
+            "last_ts": (row or {}).get("ts"),
+            "last_24h": int((recent or {}).get("n") or 0),
+            "total": int((total or {}).get("n") or 0),
+            "note": ("whale factor signals, combined across both feeds and the "
+                     "offline mock. Raw per-fetch rows are not persisted."),
+        },
+    }
+
+
 def whale() -> dict:
     activity = query(
         "SELECT ts, source, delayed, entity, symbol, direction, value_usd "

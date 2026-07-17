@@ -14,6 +14,52 @@ Commit message:
 
 ---
 
+## Prompt: Surface Whale Alert in the Health view and the Ops section
+
+Date: 2026-07-17
+Model: Opus 4.8
+Prompt summary: add Whale Alert to GET /health/integrations with a real minimal call, classified failure reasons, and 429 backoff; add its row to the Health view and the top-strip aggregate; surface its state in Ops beside SEC EDGAR with last fetch and recent activity; test, document, commit.
+
+THE PREMISE WAS STALE AND THE CHECK WAS LYING. `_check_whale_alert` already existed and was already in `_CHECKS`, the Health row already rendered (HealthPage maps whatever the backend returns), and the aggregate already counted it (the math is integration-agnostic). So Task 1's frontend half needed nothing. What was actually wrong: the check reported `not_configured: whale_alert_enabled is off` while config said ON, the key resolved, and the feed worked.
+
+THE CAUSE IS THE FLAG-SOURCE MISMATCH, ONE PROCESS FURTHER OUT than the discovery one. The check called `_flag(WHALE_ALERT_ENABLED_ENV)`, reading an ENV VAR. The whale library takes env opt-ins CORRECTLY, and `stack.whale_env()` DERIVES them from config and spawns the BRIDGE with them. So config is the intent and the env is the transport. The health check runs in the API BACKEND, which nobody exports that env to, so it read a transport it never received and reported the operator's enabled feed as off. `whale_alert_enabled()` now resolves an explicit env override, else config, matching how every other flag resolves.
+
+THE KEY WORKS: one real call returned `working`, `one tx query ok`, 244.5ms, with the key absent from the row. The operator enabled `whale_alert_enabled` in config (still uncommitted) and the feed has been live and reporting itself off ever since.
+
+Changes: TASK 1. Fixed the flag source, then the same three gaps the Finnhub check had, the same way. `_get` RAISES on a non-2xx, so the old `status == 200 else (FAILING, f"HTTP {status}")` was DEAD CODE on every failure: the exception escaped to `_run`, which stringifies it into the `reason` the endpoint returns and the GUI renders, and the Whale Alert key rides in the URL as a QUERY PARAM. Now `_whale_alert_once` returns (status, resp) instead of raising, a 429 retries with the WHALE ADAPTER'S OWN policy rather than a second copy (`_RATE_LIMIT_MAX_RETRIES`, `_retry_after_seconds`, which reads `.headers` off the HTTPError directly), and every outcome classifies to a fixed phrase. TASK 2. Read-only `GET /whale/feeds` and a `WhaleFeedsPanel` on Ops showing BOTH sources side by side. A disabled feed reads "off by choice"; a feed ON but unkeyed is flagged amber because it cannot work. NOT touched: RiskGate logic, the live-trading gate, the adaptive limit-weakening invariant, or any Level-1 value.
+
+Safest-choice notes: (1) I DID NOT REPORT THE ACTIVITY NUMBER AS ASKED, because the honest number is narrower. The prompt asked for "last successful fetch time and recent whale-signal activity count". `whale_activity` (raw per-fetch rows) is EMPTY BY DESIGN (0 rows, and CONTEXT.md already says why: the engine asks the bridge for a SCORED signal and never persists the activity behind it), and `whale_signal_history` is 0 rows too. The only real data is the `signals` table (2113 whale_signal rows). So the panel reports whale FACTOR signals and states, in the payload and on screen, that it counts SIGNALS not fetches and is NOT attributed to a source, because the whale layer combines SEC EDGAR and Whale Alert into one 0.35-capped factor and records one score, and may be the offline mock when the engine runs without the bridge. There is no per-feed fetch log to read, and adding one would be a new write path the task forbids. Labelling the number "last successful Whale Alert fetch" would have been a fabrication that reads as precise. "Does Whale Alert work" is answered by the health check, which makes one real call and times it, and the panel says so. (2) THE FLAG RESOLVES ENV-THEN-CONFIG, not config-then-env. The env is how the bridge is ACTUALLY configured, so an explicit env must win or the health check would disagree with the process doing the fetching. Config is the fallback, which is what fixes the backend. (3) I REUSED THE ADAPTER'S BACKOFF rather than re-deriving one. Its policy is exponential (1.0s then 2.0s), not the flat 1.0s I assumed from the Finnhub work: my test asserted `[1.0, 1.0]` and the suite corrected me. The code was right because it calls the adapter's own function. (4) KILLED A DEFECT CLASS INSTEAD OF ITS THIRD INSTANCE. `test_shipped_config_has_the_long_term_sleeve_off` went red because the operator enabled the long-term sleeve: it asserted a SHIPPED default through the runtime path, which layers controls.json over config by design. That is the THIRD time (test_discovery_funnel, test_discovery_whale, now this), and I fixed the first two by hand without grepping for the rest. `tests/conftest.py` now isolates `MAL_CONTROL_DIR` to an empty temp dir for the whole suite, exactly as it already isolates the credential keystore, so no test can read the host's live toggles. My first attempt was a source-grepping guard, which flagged three FALSE POSITIVES (tests using the runtime path correctly, while isolating the control dir). A brittle static heuristic over test source was the wrong altitude; the fixture is the fix.
+
+Verification (2026-07-17):
+
+| Check | Result |
+| --- | --- |
+| **The check reported the operator's live feed as OFF** | **CONFIRMED before the fix: `not_configured: whale_alert_enabled is off` with config ON and a working key** |
+| **THE KEY WORKS** | **PASS: `working`, `one tx query ok`, 244.5ms, key absent from the row** |
+| The flag resolves env-then-config | PASS both directions; the backend (env unset) now reads config |
+| A 429 retries then reports cleanly | PASS: 3 calls, slept [1.0, 2.0], the adapter's own exponential backoff |
+| An exhausted 429 says rate limited, never bad key | PASS |
+| A 401 says bad key, a URLError says network | PASS, distinct and actionable |
+| Off or unkeyed reports not_configured, never failing | PASS |
+| Aggregate: unkeyed does not count, keyed-and-working does | PASS: configured_count 7 -> 8 |
+| The key is never returned | PASS, including when the transport raises the keyed URL |
+| Health row renders in each state | PASS (working green + latency, failing red + reason, rate-limited not "bad key", off grey) |
+| Ops shows both feeds side by side | PASS; disabled reads "off by choice", on-but-unkeyed flags amber |
+| The activity count is labelled honestly | PASS: says signals not fetches, combined across feeds, raw rows not persisted |
+| No key value in /whale/feeds | PASS: reports only whether one resolves |
+| Bind stays loopback | PASS |
+| Mutation: revert the flag to the env-only read | Its test FAILS as intended |
+| Mutation: remove the control-dir isolation | Its test FAILS as intended |
+| Python pytest | 666 passed (from 653, +13) |
+| Frontend vitest | 116 passed (from 105, +11, new whale-feeds.test.tsx) |
+| C++ ctest | 24/24 |
+| Typecheck / production build | clean / green |
+| RiskGate / live gate / adaptive invariant / Level-1 untouched | PASS |
+
+Commit message: `Surface Whale Alert in the Health view and Ops section, live trading untouched`
+
+---
+
 ## Prompt: Log the review prompts and correct the PROGRESS record
 
 Date: 2026-07-17
@@ -1450,3 +1496,25 @@ $ git diff --cached --stat
 | Gemini 3.1 Pro | working | - | 1199.4 ms |
 | Alpaca paper market data | working | one quote ok | 278.5 ms |
 | Alpaca paper order-auth (validation-only) | working | paper account auth ok | 240.3 ms |
+
+### Run 2026-07-17T08:00:30Z
+
+| Integration | Result | Detail | Latency |
+| --- | --- | --- | --- |
+| OpenAI GPT-5.5 | working | - | 1590.8 ms |
+| Anthropic Opus 4.8 | working | - | 2754.3 ms |
+| Anthropic Haiku 4.5 (gate path) | working | - | 565.9 ms |
+| Gemini 3.1 Pro | failing | TimeoutError: The read operation timed out | 6078.1 ms |
+| Alpaca paper market data | working | one quote ok | 248.7 ms |
+| Alpaca paper order-auth (validation-only) | working | paper account auth ok | 257.4 ms |
+
+### Run 2026-07-17T08:00:46Z
+
+| Integration | Result | Detail | Latency |
+| --- | --- | --- | --- |
+| OpenAI GPT-5.5 | working | - | 1194.2 ms |
+| Anthropic Opus 4.8 | working | - | 1470.5 ms |
+| Anthropic Haiku 4.5 (gate path) | working | - | 622.4 ms |
+| Gemini 3.1 Pro | failing | TimeoutError: The read operation timed out | 6080.1 ms |
+| Alpaca paper market data | working | one quote ok | 240.8 ms |
+| Alpaca paper order-auth (validation-only) | working | paper account auth ok | 245.3 ms |

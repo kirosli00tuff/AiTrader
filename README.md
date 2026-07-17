@@ -1099,6 +1099,51 @@ not_configured, not failing. The Health view in the GUI shows each integration
 as a colored row and the top status strip shows an aggregate that is green only
 when every configured integration passes.
 
+**Whale Alert.** The check runs only when the feed is ON **and** a key resolves.
+It reports `one tx query ok` when working, and otherwise a classified reason:
+`bad key (HTTP 401)`, `rate limited (HTTP 429) after 2 retries`, or
+`network unreachable (<type>)`. A 429 retries with the **whale adapter's own**
+backoff (2 retries, 1s base, 5s cap, honors Retry-After) rather than a second
+copy of it, because the developer plan allows 10 calls a minute and the check
+shares that budget with a running whale pass: a 429 there means busy, not broken.
+Off or unkeyed reports `not_configured`, never failing, since the feed is an
+opt-in trial and an absent key is a choice rather than a fault.
+
+The key rides in the URL as a **query param**, exactly like Finnhub's, so the
+check classifies its own failures and never lets a raw exception reach the
+generic handler, which would stringify it into the reason the GUI renders.
+
+**Where the on/off answer comes from.** `whale.whale_alert_enabled` in config is
+the source of truth. The whale library takes `WHALE_ALERT_ENABLED` as an env
+opt-in and the bridge is spawned with it by `stack.whale_env()`, which derives it
+FROM config, so the env is how the *bridge* is told, not where the intent lives.
+The health check runs in the API backend, which nobody exports that env to, so it
+resolves the flag as an explicit env override else config. Reading only the env
+there reported the feed "off" while config said on and the key worked.
+
+### Whale feeds in Ops
+
+The Ops page shows **both** whale sources side by side, so it is clear which is
+which and which is live:
+
+| Feed | Covers | Key | State |
+| --- | --- | --- | --- |
+| SEC EDGAR 13F + Form 4 | equities | none (free, keyless) | on/off, delayed by design |
+| Whale Alert | crypto | `WHALE_ALERT_API_KEY` | on/off, and flagged when on but unkeyed |
+
+A disabled feed reads as **off by choice**, not as broken. A feed that is on but
+has no key is flagged amber, because it cannot work.
+
+The panel also shows recent **whale-signal activity**, and labels it honestly.
+`whale_activity` (raw per-fetch rows) is empty by design: the engine asks the
+bridge for a **scored** signal and never persists the activity behind it. So the
+count is whale FACTOR signals, which is real data that means something narrower
+than "Whale Alert fetches": it counts signals rather than fetches, and it is not
+attributed to a source, because the whale layer combines both feeds into one
+0.35-capped factor and records one score. Whether a feed **works** is a different
+question, answered by the Health page, which makes one real call per integration.
+Ops is read-only and adds no write path.
+
 The **Finnhub** check resolves `FINNHUB_API_KEY` through the keystore-first
 resolver (the key saved in Settings, then env), then fetches one quote. It is
 the only check whose token rides in the query string rather than a header, which

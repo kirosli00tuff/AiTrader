@@ -334,6 +334,15 @@ def get_council():
     return store.council()
 
 
+@app.get("/whale/feeds")
+def get_whale_feeds():
+    # Ops state of BOTH whale sources side by side: SEC EDGAR (equities, free,
+    # keyless) and Whale Alert (crypto, keyed, opt-in trial). Read-only, no write
+    # path, and it reports whether a key RESOLVES, never what it is. "Does Whale
+    # Alert work" is a different question, answered by /health/integrations.
+    return store.whale_feeds()
+
+
 @app.get("/whale")
 def get_whale():
     return store.whale()

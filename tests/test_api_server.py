@@ -2477,3 +2477,209 @@ def test_the_sleeve_state_never_returns_a_key_value(env, client, monkeypatch):
     assert r.status_code == 200
     assert fake not in r.text
     assert "token=" not in r.text
+
+
+# --- Whale Alert in the health check ----------------------------------------
+#
+# THE DEFECT this covers: _check_whale_alert read the WHALE_ALERT_ENABLED env
+# var, which only the BRIDGE is spawned with (stack.whale_env derives it FROM
+# config). The API backend has it unset, so the check reported "whale_alert_
+# enabled is off" while config said on and the key resolved and worked. Same
+# flag-source mismatch class as the discovery funnel: one half reads config, the
+# other reads an env only one process gets.
+
+def _wa_on(monkeypatch):
+    monkeypatch.delenv("WHALE_ALERT_ENABLED", raising=False)
+    from api_server import store as st
+    monkeypatch.setattr(st, "load_config",
+                        lambda: {"whale": {"whale_alert_enabled": True,
+                                           "sec_edgar_enabled": True}})
+
+
+def _wa_key(client, monkeypatch, val="unit-test-fake-whale-key-0009"):
+    from api_server import health
+    monkeypatch.setattr(health, "_key", lambda env: val
+                        if env == "WHALE_ALERT_API_KEY" else None)
+    return val
+
+
+def test_whale_alert_reads_config_when_the_env_is_unset(env, client, monkeypatch):
+    """THE FIX. The backend is not spawned with the whale env; config decides."""
+    from api_server import health
+    _wa_on(monkeypatch)
+    assert health.whale_alert_enabled() is True
+    # An explicit env still wins: it is how the bridge is actually configured.
+    monkeypatch.setenv("WHALE_ALERT_ENABLED", "false")
+    assert health.whale_alert_enabled() is False
+    monkeypatch.setenv("WHALE_ALERT_ENABLED", "true")
+    assert health.whale_alert_enabled() is True
+
+
+def test_whale_alert_enabled_and_keyed_reports_working(env, client, monkeypatch):
+    from api_server import health
+    _wa_on(monkeypatch)
+    _wa_key(client, monkeypatch)
+    monkeypatch.setattr(health, "_get", lambda url, headers: 200)
+    r = client.get("/health/integrations")
+    row = next(x for x in r.json()["integrations"] if x["name"] == "whale_alert")
+    assert row["state"] == "working"
+    assert row["reason"] == "one tx query ok"
+    assert row["latency_ms"] is not None and row["latency_ms"] >= 0.0
+
+
+def test_whale_alert_off_or_unkeyed_reports_not_configured(env, client,
+                                                           monkeypatch):
+    """An opt-in trial feed that is off is a CHOICE, never a failure."""
+    from api_server import health
+    monkeypatch.delenv("WHALE_ALERT_ENABLED", raising=False)
+    from api_server import store as st
+    monkeypatch.setattr(st, "load_config",
+                        lambda: {"whale": {"whale_alert_enabled": False}})
+    assert health._check_whale_alert() == (health.NOT_CONFIGURED,
+                                           "whale_alert_enabled is off")
+    # On but unkeyed: still not_configured, and the reason names the key.
+    _wa_on(monkeypatch)
+    monkeypatch.setattr(health, "_key", lambda env: None)
+    state, reason = health._check_whale_alert()
+    assert state == health.NOT_CONFIGURED
+    assert "WHALE_ALERT_API_KEY" in reason
+
+
+def test_whale_alert_retries_a_429_then_reports_cleanly(env, client, monkeypatch):
+    """The developer plan allows 10/min. A transient limit means busy, not broken."""
+    import urllib.error
+    from api_server import health
+    _wa_on(monkeypatch)
+    _wa_key(client, monkeypatch)
+    sleeps: list[float] = []
+    monkeypatch.setattr(health.time, "sleep", lambda s: sleeps.append(s))
+    calls: list[int] = []
+
+    def flaky(url, headers):
+        calls.append(1)
+        if len(calls) < 3:
+            raise urllib.error.HTTPError(url, 429, "Too Many Requests", {}, None)
+        return 200
+
+    monkeypatch.setattr(health, "_get", flaky)
+    assert health._check_whale_alert() == (health.WORKING, "one tx query ok")
+    assert len(calls) == 3            # two 429s then a success
+    # The adapter's OWN policy, not a second copy: exponential from a 1.0s
+    # base, capped at 5s. Reusing it is the point, so the expected values
+    # come from _RATE_LIMIT_BASE_BACKOFF_S * 2**attempt.
+    assert sleeps == [1.0, 2.0]
+
+
+def test_whale_alert_exhausted_429_says_rate_limited_not_bad_key(env, client,
+                                                                 monkeypatch):
+    import urllib.error
+    from api_server import health
+    _wa_on(monkeypatch)
+    _wa_key(client, monkeypatch)
+    monkeypatch.setattr(health.time, "sleep", lambda s: None)
+    monkeypatch.setattr(health, "_get", lambda url, headers: (_ for _ in ()).throw(
+        urllib.error.HTTPError(url, 429, "Too Many", {}, None)))
+    state, reason = health._check_whale_alert()
+    assert state == health.FAILING
+    assert "rate limited" in reason and "bad key" not in reason
+
+
+def test_whale_alert_names_a_bad_key_and_a_network_fault_distinctly(env, client,
+                                                                    monkeypatch):
+    """Different causes need different actions: re-paste, wait, check the link."""
+    import urllib.error
+    from api_server import health
+    _wa_on(monkeypatch)
+    _wa_key(client, monkeypatch)
+    monkeypatch.setattr(health, "_get", lambda url, headers: (_ for _ in ()).throw(
+        urllib.error.HTTPError(url, 401, "Unauthorized", {}, None)))
+    assert health._check_whale_alert() == (health.FAILING, "bad key (HTTP 401)")
+
+    monkeypatch.setattr(health, "_get", lambda url, headers: (_ for _ in ()).throw(
+        urllib.error.URLError("no route")))
+    state, reason = health._check_whale_alert()
+    assert state == health.FAILING and "network unreachable" in reason
+
+
+def test_whale_alert_health_never_returns_the_key(env, client, monkeypatch):
+    """The key rides in the URL as a query param, so the response must not carry it.
+
+    The rejection is RAISED, not returned, because that is what urllib does on a
+    401, and the raised HTTPError carries the keyed URL on it.
+    """
+    import urllib.error
+    from api_server import health
+    _wa_on(monkeypatch)
+    fake = _wa_key(client, monkeypatch)
+    keyed_url = f"https://api.whale-alert.io/v1/transactions?api_key={fake}"
+    monkeypatch.setattr(health, "_get", lambda url, headers: (_ for _ in ()).throw(
+        urllib.error.HTTPError(keyed_url, 401, "Unauthorized", {}, None)))
+    r = client.get("/health/integrations")
+    assert fake not in r.text
+    assert "api_key=" not in r.text
+
+
+def test_whale_alert_counts_toward_the_aggregate_only_once_configured(env, client,
+                                                                      monkeypatch):
+    """Off does not count as a failure. On-but-failing contributes amber."""
+    from api_server import health
+    monkeypatch.delenv("WHALE_ALERT_ENABLED", raising=False)
+    from api_server import store as st
+    monkeypatch.setattr(st, "load_config",
+                        lambda: {"whale": {"whale_alert_enabled": False}})
+    before = client.get("/health/integrations").json()["summary"]
+
+    _wa_on(monkeypatch)
+    _wa_key(client, monkeypatch)
+    monkeypatch.setattr(health, "_get", lambda url, headers: 200)
+    after = client.get("/health/integrations").json()["summary"]
+    assert after["configured_count"] == before["configured_count"] + 1
+
+
+# --- Whale Alert + SEC EDGAR state in Ops -----------------------------------
+
+def test_whale_feeds_reports_both_sources_side_by_side(env, client, monkeypatch):
+    _wa_on(monkeypatch)
+    j = client.get("/whale/feeds").json()
+    assert j["sec_edgar"]["enabled"] is True
+    assert j["whale_alert"]["enabled"] is True
+    assert j["sec_edgar"]["needs_key"] is False    # free, keyless
+    assert j["whale_alert"]["needs_key"] is True   # keyed trial
+
+
+def test_whale_feeds_reads_a_disabled_feed_as_intentionally_off(env, client,
+                                                                monkeypatch):
+    monkeypatch.delenv("WHALE_ALERT_ENABLED", raising=False)
+    from api_server import store as st
+    monkeypatch.setattr(st, "load_config",
+                        lambda: {"whale": {"whale_alert_enabled": False,
+                                           "sec_edgar_enabled": False}})
+    j = client.get("/whale/feeds").json()
+    assert j["whale_alert"]["enabled"] is False
+    assert j["sec_edgar"]["enabled"] is False
+
+
+def test_whale_feeds_labels_the_activity_count_honestly(env, client, monkeypatch):
+    """The count is whale FACTOR signals, not per-source fetches.
+
+    whale_activity (raw per-fetch rows) is empty by design: the engine asks the
+    bridge for a scored signal and never persists the activity behind it. Calling
+    this "last successful Whale Alert fetch" would be a fabrication, so the
+    payload carries the caveat with the number.
+    """
+    _wa_on(monkeypatch)
+    a = client.get("/whale/feeds").json()["signal_activity"]
+    assert set(a) == {"last_ts", "last_24h", "total", "note"}
+    assert "combined across both feeds" in a["note"]
+    assert "not persisted" in a["note"]
+
+
+def test_whale_feeds_never_returns_a_key_value(env, client, monkeypatch):
+    _wa_on(monkeypatch)
+    fake = "unit-test-fake-whale-ops-0009"
+    client.post("/credentials", json={"name": "whale_alert_key", "value": fake})
+    r = client.get("/whale/feeds")
+    assert r.status_code == 200
+    assert fake not in r.text
+    # It reports only WHETHER a key resolves.
+    assert isinstance(r.json()["whale_alert"]["keyed"], bool)

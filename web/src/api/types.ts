@@ -570,3 +570,24 @@ export interface AdaptiveEngineLogRow {
   message: string;
   payload: string | null;
 }
+
+// Ops state of the two whale sources. `signal_activity` is the whale FACTOR's
+// output combined across both feeds and the offline mock, NOT a per-source fetch
+// count: raw per-fetch rows are not persisted. See api_server/store.whale_feeds.
+export interface WhaleFeed {
+  enabled: boolean;
+  keyed?: boolean;
+  label: string;
+  detail: string;
+  needs_key: boolean;
+}
+export interface WhaleFeeds {
+  sec_edgar: WhaleFeed;
+  whale_alert: WhaleFeed;
+  signal_activity: {
+    last_ts: string | null;
+    last_24h: number;
+    total: number;
+    note: string;
+  };
+}
