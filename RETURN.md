@@ -14,6 +14,54 @@ Commit message:
 
 ---
 
+## Prompt: Log the review prompts and correct the PROGRESS record
+
+Date: 2026-07-17
+Model: Opus 4.8
+Prompt summary: asked whether everything was done. It was not: three prompts had never been logged here, and the PROGRESS entry for the precedence work read as a clean success when it was not.
+Changes: Logged the three missing prompts below (the code review, the 1-2-3 fixes, the remaining fixes). Corrected the 2026-07-17 precedence entry in PROGRESS.md, which claimed a clean result: that commit shipped with three defects, two of which REINTRODUCED the exact silent-fallback bug it was written to remove. Recorded three noted-but-unfixed findings in Open Flags rather than leaving them only in a chat reply that scrolls away.
+Safest-choice note: I did NOT rewrite the original precedence entry to look like it always knew about the follow-ups. It stays as written, with a pointer to the entry that corrects it. A progress log that quietly edits its own past is worth less than one that shows the correction, and the useful fact here is precisely that the fix needed fixing.
+Commit message: `Log the review prompts to RETURN.md and correct the PROGRESS record: the precedence commit shipped with three defects, two of which reintroduced the bug it fixed`
+
+---
+
+## Prompt: fix the rest of them please
+
+Date: 2026-07-17
+Model: Opus 4.8
+Prompt summary: fix the remaining code-review findings after 1, 2, and 3 were done.
+Changes: Fixed 5, 6, 8, 9, 10, 12, 13, 14 in `64c5a73`. WITHDREW 4 rather than fix it. (5) The RL gate's database now resolves env MAL_DB_PATH, then config system.db_path, then the REPO-ROOT default, matching stack.db_path (which passes --db to the engine), store._DEFAULT_DB, and ui/db.DB_PATH. I checked the convention before assuming: three of four resolvers anchor to the repo root and one of them is the launcher, so repo-root is canonical. Had the convention been cwd-relative, anchoring would have made RL read the WRONG database, which is worse than failing closed. (6) A 30s TTL cache keyed by db path takes the COUNT(*) off the per-bar advisory path: 50 reads now cost 1 query. (8) `rl_ensemble_factor_names` honors the gate, so the factor list and score_rl no longer disagree about whether RL participates. (9) Dropped the dead json/os imports and _REPO_ROOT the control_file extraction left in discovery/settings.py and adaptive/settings.py. (10) Removed the inert monkeypatch (and its now-unused fixture) from the torn-read test. (12) A stale-temp sweep removes files a killed write abandoned, only past 60s so it can never race a write another thread has in flight. (13) Removed the two em dashes I added. (14) The absolute-path test asserts the property, not the current config value.
+WITHDRAWN, finding 4 (rl_advisory drags the council stack): I raised it on module count and MEASURED it before acting. 50ms, no heavy deps (no torch, numpy, or urllib at import), and python_bridge/server.py is the ONLY production importer of rl_advisory and already imports llm_consensus first, so the cost is provably zero. Moving the module would mean a new top-level package and five changed importers to buy nothing. The "light: no torch/gym" comment it appeared to contradict is about torch and gym specifically, and control_file pulls neither. Reporting a finding as unfounded is the right outcome when the measurement says so.
+Verification: pytest 653 (from 646, +7). ctest 24/24. Four new mutants all caught (revert the db anchor, remove the cache, let the ensemble ignore the gate, drop the sweep). The live gate still correctly reports (240, 500). One self-inflicted bug caught in the doing: a `grep || sed` to add `import time` short-circuited on `import tempfile` and silently did not run, which three failing tests reported.
+Commit message: `Fix the remaining review findings: anchor the RL gate's database, cache the fill count off the hot path, keep an under-gated RL out of the ensemble, sweep abandoned temp files, drop dead imports`
+
+---
+
+## Prompt: Can you fix 1 2 and 3?
+
+Date: 2026-07-17
+Model: Opus 4.8
+Prompt summary: fix the three most severe code-review findings against the controls.json precedence commit.
+Changes: All three were mine, and two of them REINTRODUCED the silent-fallback bug that commit existed to remove. Fixed in `a52c69e`. (1) PERMISSIONS: tempfile.mkstemp creates 0600 where the replaced open(path, "w") gave umask-default 0664, so the atomic write silently narrowed controls.json to owner-only. Any reader on another uid would not fail loudly, it would fall back to config and act on the shipped defaults. Now an explicit named _CONTROLS_MODE = 0o644 via os.fchmod before the rename, justified by the file holding toggles and never a credential. The operator's live file had already been narrowed to 600 by the bug, so I rewrote it through the fixed writer: it is back to 644 with their state intact. (2) BOOLEANS: core/bridge_client.cpp json_get_bool accepts 1 and 0, and a strict isinstance(v, bool) rejected them and fell back to config, so a hand-edited {"discovery_enabled": 1} read ON in the engine and OFF in the funnel. New shared `as_bool` accepts 1/0 exactly as the C++ reader does, with the bool check first because isinstance(True, int) is True. (3) NEVER-RAISES: the unguarded cross-package import in rl_enabled propagated ImportError through score_rl, whose docstring promises "none of which ever raise". Guarded, falling back to the shipped config value, which ships RL off and so cannot enable anything.
+Also fixed in the same block, both found while writing the above: (7) the missing fsync, so the write is durable against a crash and not only atomic against readers, since a power loss could otherwise leave a zero-length file and revert every toggle to its default; and (11) the fd leak, where my first cleanup attempt introduced a DOUBLE CLOSE (os.fdopen takes ownership on success, so closing the raw fd in the except could close a number another thread had already reused, closing someone else's file). It now sets fd = -1 once fdopen succeeds.
+Safest-choice notes: (1) 0644 is set explicitly rather than read from the umask, because reading it requires os.umask(0) then restoring, a process-global mutation that races other threads in the API backend. (2) 1 and 0 are accepted, and strings and floats are NOT: exact parity with the C++ char-sniffing is neither achievable nor desirable past that point (it reads "0.5" as false), and a malformed boolean must never be read as an intent to start a spender.
+Verification: pytest 646 (from 640, +6). ctest 24/24. All three mutation-tested: restoring mkstemp's 0600, restoring the strict bool check, and unguarding the import each fail their test.
+Commit message: `Fix three review findings in the control-file precedence layer: keep controls.json readable, accept 1/0 booleans like the C++ reader, and never raise from rl_enabled`
+
+---
+
+## Prompt: /code-review (xhigh)
+
+Date: 2026-07-17
+Model: Opus 4.8
+Prompt summary: extra-high-effort code review of the last commit (ad586f7, the controls.json precedence unification), optimizing for recall.
+Changes: None. Review only, no code touched.
+Result: 14 findings on my own commit, ranked. The three most severe were self-inflicted regressions IN the fix: mkstemp narrowing controls.json to 0600, a strict isinstance(bool) rejecting the 1/0 the C++ reader accepts, and an unguarded import breaking score_rl's never-raises contract. The first two reintroduce the exact silent-fallback defect the commit removed, through different doors. Also found: a missing fsync, an fd leak, a cwd-relative DB path in the RL gate (the same class the commit fixes elsewhere), an uncached COUNT(*) on the advisory hot path, two RL surfaces disagreeing about the gate, dead imports from the extraction, an inert monkeypatch, temp-file leaks on SIGKILL, em dashes against the stated writing rule, and a test coupled to a config value.
+What the review is worth noting for: every one of the top three is invisible in this deployment (single user, GUI writes real bools, llm_consensus always present) and would have sat there silently. Two justifying comments I had written did not survive scrutiny either: "runs ONLY when rl_enabled is true, which today it is not" excused a per-score COUNT(*) for exactly the state the feature exists to reach, and the write I called atomic was atomic against readers but not against a crash.
+Commit message: none (review only). The fixes landed as `a52c69e` and `64c5a73`.
+
+---
+
 ## Prompt: Fix the discovery flag-source mismatch between the engine and the Python funnel
 
 Date: 2026-07-17
