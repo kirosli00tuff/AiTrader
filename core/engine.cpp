@@ -45,38 +45,10 @@ Engine::Engine(config::Config cfg, EngineOptions opts)
 
     continuous_ = opts_.continuous;
 
-    // Dynamic watchlist -> traded universe. BOTH sleeves draw entry candidates
-    // from the watchlist, which they do by the watchlist's active symbols
-    // joining the native whitelist here, so every downstream path (bar
-    // aggregation, warm gate, strategy evaluation, sizing, the RiskGate) treats
-    // a discovered symbol exactly like a configured one. No path is special-cased.
-    //
-    // Gated on discovery_enabled, which is FALSE by default: with discovery off
-    // this block never runs, the whitelist is untouched, and the traded universe
-    // is exactly the configured one. The Python discovery package is the
-    // watchlist's writer; the engine only reads it, once, at construction.
-    // Refreshing mid-run is deliberately NOT done: the traded universe stays
-    // stable for the life of a run, so a pass cannot move symbols under an open
-    // position. A restart picks up the current list.
-    if (cfg_.discovery.discovery_enabled) {
-        auto extra = storage_->watchlist_symbols();
-        auto& wl = cfg_.strategy.whitelist;
-        int added = 0;
-        for (const auto& s : extra) {
-            if (std::find(wl.begin(), wl.end(), s) == wl.end()) {
-                wl.push_back(s);
-                ++added;
-            }
-        }
-        if (added > 0)
-            storage_->append_event(
-                {util::now_iso8601(), "discovery_watchlist", "", "", "info",
-                 "Watchlist added " + std::to_string(added) +
-                     " symbol(s) to the traded universe",
-                 util::to_json({}, {{"added", static_cast<double>(added)},
-                                    {"whitelist_size",
-                                     static_cast<double>(wl.size())}})});
-    }
+    // Dynamic watchlist -> traded universe: see the discovery resume block after
+    // the feed and the bar-history seeding below. It cannot run here, because it
+    // needs controls_path_ (resolved below), the feed (built below), and the
+    // seeded bar history to warm what it adds.
 
     // Adaptive react layer: start life PAST every action already queued, so a
     // defensive action that piled up while the engine was down is never replayed
@@ -153,6 +125,30 @@ Engine::Engine(config::Config cfg, EngineOptions opts)
             hist.push_back({b.open, b.high, b.low, b.close, b.volume});
         bar_history_["alpaca|" + sym] = std::move(hist);
     }
+
+    // --- Discovery: watchlist -> traded universe (resume path) ----------------
+    // BOTH sleeves draw entry candidates from the watchlist, which they do by
+    // the watchlist's active symbols joining the native whitelist, so every
+    // downstream path (bar aggregation, warm gate, strategy evaluation, sizing,
+    // the RiskGate) treats a discovered symbol exactly like a configured one. No
+    // path is special-cased.
+    //
+    // Gated on discovery_enabled read from controls.json (seeded from config,
+    // which ships FALSE), NOT from config alone. That distinction IS the bug this
+    // replaces: the engine read cfg_.discovery.discovery_enabled while the GUI
+    // toggle wrote controls.json, so an operator could turn discovery on, the
+    // Python funnel would honor it, and the engine would still never merge a
+    // discovered symbol. Both sides now resolve the SAME flag from the SAME file.
+    // See core/discovery_controls.hpp.
+    //
+    // This runs here, after the feed and the bar seeding, because onboarding
+    // needs both: a symbol has to be polled to close bars and needs history to
+    // warm. It is the RESUME path (pick up what the watchlist already holds);
+    // consume_discovery does the same merge every iteration for what a pass
+    // surfaces mid-run.
+    discovery_ = read_discovery_controls(controls_path_, cfg_.discovery);
+    prev_discovery_ = discovery_;
+    if (discovery_.enabled) onboard_discovered_symbols(util::now_iso8601());
 
     // --- Offline clock resolution + bar-mode setup ----------------------------
     // feed_mode_ was resolved above. These control ONLY how the offline loop is
@@ -942,6 +938,279 @@ void Engine::consume_layer_toggles() {
     prev_layer_toggles_ = layer_toggles_;
 }
 
+void Engine::log_discovery_state_once(const std::string& kind,
+                                      const std::string& asset_class,
+                                      const std::string& reason,
+                                      const std::string& severity,
+                                      const std::string& ts) {
+    // Dedupe on kind+reason, not on kind alone: "outside US regular trading
+    // hours" and "no FINNHUB_API_KEY resolved" are both blocks, and an operator
+    // reading the log has to be able to tell them apart when one replaces the
+    // other. Dedupe at all because the engine asks every five minutes, and a
+    // reason repeated 288 times a day would bury the passes it sits between.
+    const std::string state = kind + ":" + reason;
+    auto it = discovery_last_state_.find(asset_class);
+    if (it != discovery_last_state_.end() && it->second == state) return;
+    discovery_last_state_[asset_class] = state;
+    storage_->append_event(
+        {ts, kind, "", "", severity,
+         "Discovery " + asset_class + ": " + reason,
+         util::to_json({{"asset_class", asset_class}, {"reason", reason}}, {})});
+}
+
+void Engine::launch_discovery_pass(const std::string& asset_class,
+                                   const std::string& ts) {
+    storage_->append_event(
+        {ts, "discovery_pass_start", "", "", "info",
+         "Discovery pass START (" + asset_class + ")",
+         util::to_json({{"asset_class", asset_class}}, {})});
+    // Capture BY VALUE only. The task must not touch storage_, cfg_, or any
+    // engine member: the loop thread keeps writing them while this runs, and a
+    // shared reference here would be a data race in the money loop. It returns a
+    // string, and the loop thread does every read and every write of engine state.
+    const std::string host = opts_.bridge_host;
+    const int port = opts_.bridge_port;
+    const std::string db = opts_.db_path;
+    const std::string body = std::string("{\"asset_class\":\"") + asset_class +
+                             "\",\"db\":\"" + db + "\",\"force\":true}";
+    // A pass runs the funnel end to end (Finnhub pre-screen, Haiku gate, then up
+    // to max_council_calls_per_pass council calls), so it needs the council
+    // timeout, not the fast-call one. The fast 8s budget would hang up mid-pass
+    // and read as a failure while the work continued on the bridge.
+    const int timeout_ms = cfg_.council.engine_council_call_timeout_ms;
+    discovery_inflight_[asset_class] = std::async(
+        std::launch::async, [host, port, body, timeout_ms]() {
+            return bridge::http_post_json(host, port, "/discovery/run_once",
+                                          body, timeout_ms);
+        });
+}
+
+void Engine::collect_discovery_passes() {
+    for (auto it = discovery_inflight_.begin();
+         it != discovery_inflight_.end();) {
+        // wait_for(0) so the loop only ever PEEKS. It never blocks on a pass.
+        if (it->second.wait_for(std::chrono::seconds(0)) !=
+            std::future_status::ready) {
+            ++it;
+            continue;
+        }
+        const std::string asset_class = it->first;
+        std::optional<std::string> resp;
+        try {
+            resp = it->second.get();
+        } catch (...) {
+            resp = std::nullopt;  // advisory layer: never take the loop down
+        }
+        it = discovery_inflight_.erase(it);
+
+        const std::string ts = util::now_iso8601();
+        if (!resp) {
+            log_discovery_state_once(
+                "discovery_blocked", asset_class,
+                "bridge unreachable, the funnel runs Python-side", "warn", ts);
+            continue;
+        }
+        const std::string status =
+            bridge::json_get_string(*resp, "status", "error");
+        if (status == "not_due") {
+            // Should not normally arrive: the engine asked /discovery/due first
+            // and only starts a pass it was told is due. Python re-checks anyway,
+            // and Python wins, since it owns the cadence.
+            log_discovery_state_once(
+                "discovery_skip", asset_class,
+                bridge::json_get_string(*resp, "reason", "not due"), "info", ts);
+            continue;
+        }
+        if (status != "ok") {
+            // Every non-ok status carries a reason from discovery/run.py: a
+            // missing Finnhub key, an empty universe, no quotes, or the flag off
+            // Python-side. The operator sees WHICH, instead of a silent return.
+            log_discovery_state_once(
+                "discovery_blocked", asset_class,
+                status + ": " + bridge::json_get_string(*resp, "reason", status),
+                "warn", ts);
+            continue;
+        }
+
+        // The pass ran. Log every stage count, so the funnel narrowing is visible
+        // and a stage that silently drops everything is diagnosable.
+        const double universe = bridge::json_get_number(*resp, "universe_count", 0);
+        const double finalists = bridge::json_get_number(*resp, "finalists", 0);
+        const double survivors = bridge::json_get_number(*resp, "survivors", 0);
+        const double evaluated = bridge::json_get_number(*resp, "evaluated", 0);
+        const double calls = bridge::json_get_number(*resp, "council_calls", 0);
+        const double cost = bridge::json_get_number(*resp, "est_cost_usd", 0);
+        discovery_last_state_.erase(asset_class);  // a pass ran: re-arm the skip log
+        storage_->append_event(
+            {ts, "discovery_pass", "", "", "info",
+             "Discovery pass END (" + asset_class + "): universe " +
+                 std::to_string(static_cast<int>(universe)) + " -> finalists " +
+                 std::to_string(static_cast<int>(finalists)) + " -> survivors " +
+                 std::to_string(static_cast<int>(survivors)) + " -> evaluated " +
+                 std::to_string(static_cast<int>(evaluated)) + ", " +
+                 std::to_string(static_cast<int>(calls)) + " council call(s)",
+             util::to_json({{"asset_class", asset_class},
+                            {"onboard_status",
+                             bridge::json_get_string(*resp, "onboard_status",
+                                                     "noop")}},
+                           {{"universe_count", universe},
+                            {"finalists", finalists},
+                            {"survivors", survivors},
+                            {"evaluated", evaluated},
+                            {"council_calls", calls},
+                            {"est_cost_usd", cost}})});
+        onboard_discovered_symbols(ts);
+    }
+}
+
+void Engine::onboard_discovered_symbols(const std::string& ts) {
+    // ADD-ONLY, deliberately. The original design read the watchlist once at
+    // construction so "a pass cannot move symbols under an open position". That
+    // reasoning only ever applied to REMOVING a symbol. Adding one cannot
+    // disturb an open position, while never re-reading meant a symbol surfaced
+    // at 14:00 sat unusable until a restart, which is much of why an enabled
+    // discovery layer looked dead. So: refresh, add only, never withdraw. A
+    // symbol leaves the traded universe on restart, never mid-run.
+    auto extra = storage_->watchlist_symbols();
+    auto& wl = cfg_.strategy.whitelist;
+    for (const auto& sym : extra) {
+        if (std::find(wl.begin(), wl.end(), sym) != wl.end()) continue;
+        wl.push_back(sym);
+        discovery_symbols_.push_back(sym);
+
+        // 1. Poll it. Without this the feed never quotes the symbol, no bar ever
+        //    closes, and it stays cold forever: named, never traded.
+        const bool is_crypto = sym.find('/') != std::string::npos;
+        market_data::Instrument inst{"alpaca", sym, sym,
+                                     is_crypto ? "crypto" : "equity", 0.0};
+        all_instruments_.push_back(inst);
+        if (feed_) feed_->add_instrument(inst);
+
+        // 2. Warm it, through the SAME seed-from-bars path the whitelist uses at
+        //    construction. discovery/run.py backfilled these bars before the
+        //    pass returned, so the history is already in the table.
+        auto bars = storage_->recent_bars(sym, cfg_.strategy.bar_timeframe,
+                                          static_cast<int>(kBarHistoryCap));
+        std::vector<strategy::Bar> hist;
+        hist.reserve(bars.size());
+        for (const auto& b : bars)
+            hist.push_back({b.open, b.high, b.low, b.close, b.volume});
+        const int n = static_cast<int>(hist.size());
+        bar_history_["alpaca|" + sym] = std::move(hist);
+
+        // 3. Say whether it can actually trade yet. A cold symbol is NOT a
+        //    failure: the warm gate holds it back until it has the bars, exactly
+        //    as it holds a cold configured symbol, and it warms as bars close.
+        //    Reporting the count is what lets the operator tell "warming" from
+        //    "the backfill found nothing, so this will never warm".
+        const bool warm = strategy::indicators_warm(n, cfg_.strategy);
+        storage_->append_event(
+            {ts, "discovery_onboard", "alpaca", sym, warm ? "info" : "warn",
+             "Discovery onboarded " + sym + ": " + std::to_string(n) +
+                 " bar(s) seeded, indicators " + (warm ? "WARM" : "COLD") +
+                 (warm ? " (tradeable)"
+                       : " (entries wait until warm, needs " +
+                             std::to_string(
+                                 strategy::min_bars_to_warm(cfg_.strategy)) +
+                             ")"),
+             util::to_json({{"symbol", sym}, {"state", warm ? "warm" : "cold"}},
+                           {{"bars", static_cast<double>(n)},
+                            {"whitelist_size",
+                             static_cast<double>(wl.size())}})});
+    }
+}
+
+void Engine::consume_discovery() {
+    discovery_ = read_discovery_controls(controls_path_, cfg_.discovery);
+    if (!(discovery_ == prev_discovery_)) {
+        const std::string ts = util::now_iso8601();
+        storage_->append_event(
+            {ts, "discovery_toggle", "", "", "info",
+             std::string("Discovery: ") +
+                 (prev_discovery_.enabled ? "on" : "off") + " -> " +
+                 (discovery_.enabled ? "on" : "off"),
+             util::to_json({{"old", prev_discovery_.enabled ? "on" : "off"},
+                            {"new", discovery_.enabled ? "on" : "off"}}, {})});
+        if (discovery_.enabled) {
+            // Ask immediately. The operator just turned it on and is watching.
+            last_discovery_trigger_ = 0;
+        } else {
+            discovery_last_state_.clear();
+        }
+        prev_discovery_ = discovery_;
+    }
+
+    // Reap first, and unconditionally: a pass already paid for must land even if
+    // the operator turned the flag off while it was in flight. Dropping it would
+    // waste the spend and lose the candidates it found.
+    collect_discovery_passes();
+
+    if (!discovery_.enabled) return;
+
+    // Prerequisite: the funnel is Python. Without the bridge there is nothing to
+    // call, so say so rather than looking enabled while doing nothing, which is
+    // exactly the failure this whole change exists to fix.
+    if (!opts_.use_bridge) {
+        log_discovery_state_once(
+            "discovery_blocked", "all",
+            "engine has no bridge (--bridge off), and the funnel runs "
+            "Python-side: no pass can run",
+            "warn", util::now_iso8601());
+        return;
+    }
+
+    const long now = simulated_clock_ ? sim_epoch_ : std::time(nullptr);
+    if (last_discovery_trigger_ != 0 &&
+        now - last_discovery_trigger_ < kDiscoveryTriggerIntervalSeconds)
+        return;
+    last_discovery_trigger_ = now;
+
+    for (const char* ac : {"crypto", "equity"}) {
+        const std::string asset_class = ac;
+        // One pass per asset class at a time. A pass still running is never
+        // restarted: that would double-spend the discovery council budget.
+        if (discovery_inflight_.count(asset_class)) continue;
+
+        // discovery/run.py's due() is the ONE cadence authority (hourly crypto,
+        // hourly equities inside US regular hours). Asking costs one indexed
+        // SQLite read, and asking is what keeps the US-hours rule from being
+        // written a second time in C++ where the two could drift apart.
+        const std::string q = "{\"asset_class\":\"" + asset_class +
+                              "\",\"db\":\"" + opts_.db_path + "\"}";
+        auto resp = bridge::http_post_json(
+            opts_.bridge_host, opts_.bridge_port, "/discovery/due", q,
+            cfg_.council.engine_bridge_call_timeout_ms);
+        const std::string ts = util::now_iso8601();
+        if (!resp) {
+            log_discovery_state_once(
+                "discovery_blocked", asset_class,
+                "bridge unreachable, the funnel runs Python-side", "warn", ts);
+            continue;
+        }
+        if (!bridge::json_get_bool(*resp, "enabled", false)) {
+            // The engine says on, Python says off. They read the same file, so
+            // this means the control file and the shipped config disagree in a
+            // way neither side can see alone. Loud, because it is exactly the
+            // class of silent mismatch that made discovery look dead.
+            log_discovery_state_once(
+                "discovery_blocked", asset_class,
+                "engine reads discovery ON but the Python funnel reads it OFF: " +
+                    bridge::json_get_string(*resp, "reason", "flag mismatch"),
+                "warn", ts);
+            continue;
+        }
+        if (!bridge::json_get_bool(*resp, "due", false)) {
+            log_discovery_state_once(
+                "discovery_skip", asset_class,
+                "not due (" +
+                    bridge::json_get_string(*resp, "reason", "cadence") + ")",
+                "info", ts);
+            continue;
+        }
+        launch_discovery_pass(asset_class, ts);
+    }
+}
+
 AdaptiveRuntime Engine::adaptive_runtime() const {
     // Config seeds it, controls.json overrides it, and it is re-read every
     // iteration rather than cached: the poller is a separate process, so a
@@ -1351,6 +1620,13 @@ int Engine::run_iteration() {
     consume_operator_kill_request();
     consume_layer_toggles();
     consume_operator_controls();
+    // Discovery, same control-file pattern and the same each-iteration cadence.
+    // Deliberately AFTER the kill request: a halt is checked first and this never
+    // blocks, so an in-flight pass can never delay the switch. Only the tick path
+    // runs it; the bar-driven offline modes (synthetic_regimes, replay) are
+    // deterministic test tools with no bridge, and the prerequisite check below
+    // reports that rather than pretending.
+    consume_discovery();
     auto states = feed_->poll();
     if (alpaca_feed_) {
         last_poll_live_ =

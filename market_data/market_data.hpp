@@ -27,17 +27,29 @@ struct MarketState {
     std::string ts;
 };
 
+// Shared instrument descriptor used by the feeds.
+struct Instrument {
+    std::string venue, symbol, market, category;
+    double price;
+};
+
 // Abstract feed.
 class Feed {
 public:
     virtual ~Feed() = default;
     virtual std::vector<MarketState> poll() = 0;
-};
-
-// Shared instrument descriptor used by the feeds.
-struct Instrument {
-    std::string venue, symbol, market, category;
-    double price;
+    // Add an instrument to the polled universe mid-run.
+    //
+    // Discovery needs this: a surfaced symbol the feed never polls closes no
+    // bars, so it never warms and can never trade. It would be NAMED and nothing
+    // more. Adding rather than rebuilding the feed keeps the existing symbols'
+    // last-price and return state intact, which a rebuild would reset.
+    //
+    // Default no-op, so a feed with a fixed universe stays correct by doing
+    // nothing. Adding an instrument only widens what is POLLED. It grants no
+    // permission: the whitelist, the warm gate, and the RiskGate all still judge
+    // the symbol exactly as they judge a configured one.
+    virtual void add_instrument(const Instrument&) {}
 };
 
 // Deterministic mock feed seeded for reproducible demos.
@@ -47,6 +59,7 @@ public:
 
     MockFeed(std::vector<Instrument> instruments, uint64_t seed = 42);
     std::vector<MarketState> poll() override;
+    void add_instrument(const Instrument& i) override;
 
 private:
     std::vector<Instrument> instruments_;
@@ -75,6 +88,7 @@ public:
     AlpacaFeed(std::vector<Instrument> instruments, std::string bridge_host,
                int bridge_port, uint64_t seed = 42);
     std::vector<MarketState> poll() override;
+    void add_instrument(const Instrument& i) override;
 
     bool last_poll_was_live() const { return last_poll_live_; }
 

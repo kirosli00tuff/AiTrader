@@ -9,13 +9,17 @@
 #pragma once
 
 #include <csignal>
+#include <future>
+#include <map>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
 #include "account_manager/account_manager.hpp"
 #include "core/adaptive_actions.hpp"
 #include "core/adaptive_controls.hpp"
+#include "core/discovery_controls.hpp"
 #include "core/feed_clock.hpp"
 #include "core/layer_toggles.hpp"
 #include "core/operator_controls.hpp"
@@ -152,6 +156,41 @@ private:
     // A toggle off drops that layer's factor from the ensemble. Safety has no
     // toggle and is never gated here. Advisory only, never a safety bypass.
     void consume_layer_toggles();
+    // Consume discovery_enabled from controls.json each iteration and drive the
+    // funnel, the same control-file pattern as the kill request and the layer
+    // toggles. Disabled means no pass, exactly as before. Enabled means: ask the
+    // bridge whether a pass is due (discovery/run.py owns the cadence), and if
+    // so start one OFF the loop thread. Never blocks: a pass runs for tens of
+    // seconds once council calls fire, and the kill switch is checked at the top
+    // of every iteration, so the loop must never wait on one.
+    //
+    // The funnel itself is Python (Finnhub, the Haiku gate, the council all live
+    // there), so this drives it over the bridge rather than reimplementing it.
+    // The engine stays the sole writer of the events table, which is why the
+    // pass start, the stage counts, the cadence skips, and the prerequisite
+    // blocks are all logged from here rather than Python-side.
+    void consume_discovery();
+    // Reap any finished pass, log its outcome (stage counts / skip / block), and
+    // onboard whatever it surfaced. Called every iteration from consume_discovery.
+    void collect_discovery_passes();
+    // Start one pass for one asset class on its own thread. Captures by value
+    // only and touches no engine state, so the loop thread stays the only writer.
+    void launch_discovery_pass(const std::string& asset_class,
+                               const std::string& ts);
+    // Merge the watchlist into the traded universe, ADD-ONLY, and warm what is
+    // new: extend the whitelist and the polled feed, then seed indicator history
+    // from the bars the pass backfilled. Add-only is the safety property: a
+    // symbol is never withdrawn mid-run, so a pass can never move a symbol out
+    // from under an open position. A restart still picks up the current list.
+    void onboard_discovered_symbols(const std::string& ts);
+    // Log a discovery skip/block once per state change instead of once per
+    // trigger. The operator needs to SEE that discovery is idle or blocked and
+    // why, without the reason repeating every five minutes forever.
+    void log_discovery_state_once(const std::string& kind,
+                                  const std::string& asset_class,
+                                  const std::string& reason,
+                                  const std::string& severity,
+                                  const std::string& ts);
     // Consume the runtime feed-mode + clock-mode toggle from controls.json each
     // loop iteration (Task 3). A clock switch applies immediately. A feed switch
     // rebuilds the feed source, but a switch AWAY from alpaca_paper with an open
@@ -320,6 +359,26 @@ private:
     // controls.json each iteration like the layer toggles. Advisory/cost only.
     OperatorControls operator_controls_;
     OperatorControls prev_operator_controls_;
+    // Discovery, read from controls.json each iteration like the layer toggles.
+    // Off by default and off when the file is unreadable: this one starts a
+    // spender, so an unreadable file must never turn it on.
+    DiscoveryRuntime discovery_;
+    DiscoveryRuntime prev_discovery_;
+    // Epoch seconds of the last time the engine ASKED whether a pass was due.
+    // 0 means never asked, which is also how an off->on toggle asks immediately
+    // instead of making the operator wait out a trigger interval.
+    long last_discovery_trigger_ = 0;
+    // In-flight passes, asset_class -> pending response body. Bounded at one per
+    // asset class: a class already running is never started again, so a slow pass
+    // can never pile up threads or double-spend the discovery budget.
+    std::map<std::string, std::future<std::optional<std::string>>>
+        discovery_inflight_;
+    // Last logged skip/block state per asset class, so a steady reason is logged
+    // once on entry rather than every trigger.
+    std::map<std::string, std::string> discovery_last_state_;
+    // Symbols this run onboarded from the watchlist, so onboarding is idempotent
+    // across iterations and re-logs nothing.
+    std::vector<std::string> discovery_symbols_;
 
     // --- Offline feed / clock state (Tasks 2-4) ---------------------------
     // feed_mode_: flat_random_walk (tick path) | synthetic_regimes | replay.

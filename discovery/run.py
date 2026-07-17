@@ -90,6 +90,83 @@ def _category_for(symbol: str) -> str:
     return "crypto" if universe.is_crypto(symbol) else "equity"
 
 
+def due_status(asset_class: str, db_path: str = "market_ai_lab.db",
+               cfg_path: str | None = None,
+               now: datetime | None = None) -> dict:
+    """Is a pass due for this asset class right now, and why or why not?
+
+    The engine triggers passes but does NOT decide the cadence: it asks here.
+    One authority, so the engine, the maintenance job, and the CLI can never
+    drift on when a pass is due, and the US-hours rule for equities is not
+    written twice in two languages.
+
+    Cheap: one indexed SQLite read, no Finnhub call and no LLM call, so the
+    engine can ask on a short interval without cost.
+    """
+    now = now or _utcnow()
+    if not settings.discovery_enabled(cfg_path):
+        return {"enabled": False, "due": False, "asset_class": asset_class,
+                "reason": "discovery.discovery_enabled is false"}
+    try:
+        conn = sqlite3.connect(db_path, timeout=10.0)
+        try:
+            store.ensure_schema(conn)
+            last_ts = store.last_pass_ts(conn, asset_class)
+        finally:
+            conn.close()
+    except Exception as e:  # noqa: BLE001 — advisory layer, never fatal
+        return {"enabled": True, "due": False, "asset_class": asset_class,
+                "reason": f"cannot read pass history ({type(e).__name__})"}
+    is_due, reason = due(asset_class, last_ts, now, cfg_path)
+    return {"enabled": True, "due": is_due, "asset_class": asset_class,
+            "reason": reason, "last_pass_ts": last_ts or ""}
+
+
+def onboard(symbols: list[str], db_path: str = "market_ai_lab.db") -> dict:
+    """Backfill bars for newly surfaced symbols so the engine can warm them.
+
+    Surfacing a symbol only NAMES it. Without bars it has no indicator history,
+    so the engine's warm gate refuses it forever and a discovered candidate can
+    never become a trade. This pulls the same 1yr-daily + 30d-5min history the
+    whitelist gets at startup, through the SAME backfill, so a discovered symbol
+    warms through the same path a configured one does and gets no special case.
+
+    The engine seeds its in-memory history from the `bars` table, so writing
+    there is the whole handoff: no direct engine call, and the C++ side stays the
+    sole writer of the operational tables.
+
+    Failure-isolated like the rest of the pass. Without data credentials the
+    backfill is a no-op and the symbol stays cold, which the engine reports as
+    cold rather than trading on nothing.
+    """
+    if not symbols:
+        return {"status": "noop", "onboarded": []}
+    try:
+        from market_data.alpaca_source import backfill
+    except Exception as e:  # noqa: BLE001 — optional deps in a minimal env
+        return {"status": "unavailable", "reason": type(e).__name__,
+                "onboarded": []}
+    try:
+        res = backfill(db_path, list(symbols))
+    except Exception as e:  # noqa: BLE001 — advisory layer, never fatal
+        log.warning("discovery: onboarding backfill failed (%s)",
+                    type(e).__name__)
+        return {"status": "error", "reason": type(e).__name__, "onboarded": []}
+    if res.get("status") != "ok":
+        return {"status": res.get("status", "error"),
+                "reason": res.get("reason", ""), "onboarded": []}
+    written = res.get("written", {})
+    # A symbol counts as onboarded only if bars actually landed. A zero-bar
+    # symbol is reported unonboarded rather than silently called ready.
+    got = {s: sum(int(n) for k, n in written.items()
+                  if k.rsplit(":", 1)[0] == s)
+           for s in symbols}
+    return {"status": "ok",
+            "onboarded": sorted(s for s, n in got.items() if n > 0),
+            "no_bars": sorted(s for s, n in got.items() if n == 0),
+            "bars_written": got}
+
+
 def run_once(asset_class: str, *, db_path: str = "market_ai_lab.db",
              cfg_path: str | None = None, client=None, gate=None,
              evaluator=None, now: datetime | None = None,
@@ -144,13 +221,23 @@ def run_once(asset_class: str, *, db_path: str = "market_ai_lab.db",
                     "reason": "no quotes resolved for the universe"}
 
         if gate is None:
-            from llm_consensus import build_gate
-            gate = build_gate(cfg_path=cfg_path)
+            # Discovery's OWN Stage-B gate, not the council's. Same model and
+            # same key, different prompt: the council's gate renders an order
+            # book and a news catalyst that free Finnhub data does not have, and
+            # defaults both to 0.0, so it read every discovery candidate as flat
+            # and rejected 12 of 12 on every pass. See discovery/gate.py.
+            from discovery.gate import DiscoveryGate
+            gate = DiscoveryGate()
 
         prices = {s["symbol"]: s.get("price", 0.0) for s in snapshots}
+        by_symbol = {str(s.get("symbol", "")): s for s in snapshots}
         if evaluator is None:
             evaluator = evaluate.four_level_evaluator(
                 price_for=lambda s: prices.get(s, 0.0),
+                # The council judges MOVEMENT. Without the snapshot it sees a
+                # price and zeros, and returns avoid at conviction 0.0 for every
+                # survivor, every pass, at a full council call each.
+                snapshot_for=lambda s: by_symbol.get(s, {}),
                 category_for=_category_for, cfg_path=cfg_path)
 
         ts = now.strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -195,10 +282,18 @@ def run_once(asset_class: str, *, db_path: str = "market_ai_lab.db",
             conn, settings.watchlist_max_size(cfg_path), ts)
         conn.commit()
 
+        # A surfaced symbol with no bars can never warm, so it could never trade
+        # and the pass would only have NAMED it. Backfill before returning, so
+        # by the time the engine reads the watchlist the history is already
+        # there and the symbol warms through the normal path.
+        onboarded = onboard(added, db_path)
+
         return {
             "status": payload.get("status", "ok"),
             "asset_class": asset_class,
             "pass_id": pass_id,
+            "onboarded": onboarded.get("onboarded", []),
+            "onboard_status": onboarded.get("status", "noop"),
             "universe_count": payload["universe_count"],
             "finalists": payload["finalists_count"],
             "survivors": payload["survivors_count"],

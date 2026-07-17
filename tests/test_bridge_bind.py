@@ -134,3 +134,100 @@ def test_do_post_no_second_write_after_disconnect(monkeypatch):
     # never a second 500 write over the broken socket.
     h.do_POST()
     assert h._responses == [200]
+
+
+# --- Discovery endpoints ---------------------------------------------------- #
+# The engine drives the funnel over these, because the funnel is Python (Finnhub,
+# the Haiku gate, the council all live there) and the engine is C++. Before this,
+# nothing called the funnel at all: run_due's only non-test caller was the
+# ops/maintenance CLI, and no cron, watchdog, or supervisor ever ran it. So an
+# operator could enable discovery and no pass would ever fire.
+
+def test_discovery_due_is_dispatched_to_the_one_cadence_authority(monkeypatch):
+    """The engine ASKS whether a pass is due, it does not decide.
+
+    Pinning the dispatch matters because the alternative (reimplementing the
+    cadence in C++) would put the equities US-hours rule in two languages, where
+    it could drift silently.
+    """
+    server = pytest.importorskip("python_bridge.server")
+    from discovery import run as discovery_run
+    seen = {}
+
+    def fake_due(asset_class, db_path="market_ai_lab.db"):
+        seen["asset_class"] = asset_class
+        seen["db_path"] = db_path
+        return {"enabled": True, "due": True, "reason": "no previous pass"}
+
+    monkeypatch.setattr(discovery_run, "due_status", fake_due)
+    out = server._handle("/discovery/due",
+                         {"asset_class": "crypto", "db": "test.db"})
+    assert out["due"] is True
+    assert seen == {"asset_class": "crypto", "db_path": "test.db"}
+
+
+def test_discovery_run_once_forces_the_cadence_but_never_the_flag(monkeypatch):
+    """force=true skips the CADENCE (the engine already asked), never the flag.
+
+    This is the load-bearing distinction. The engine forces because it has
+    already been told a pass is due, so re-checking would be a wasted read. It
+    must not be able to force a pass while discovery is disabled: run_once
+    re-checks discovery_enabled on every path regardless of force.
+    """
+    server = pytest.importorskip("python_bridge.server")
+    from discovery import run as discovery_run
+    seen = {}
+
+    def fake_run_once(asset_class, db_path="market_ai_lab.db", force=False):
+        seen.update(asset_class=asset_class, db_path=db_path, force=force)
+        return {"status": "ok", "asset_class": asset_class, "finalists": 3}
+
+    monkeypatch.setattr(discovery_run, "run_once", fake_run_once)
+    out = server._handle("/discovery/run_once",
+                         {"asset_class": "equity", "db": "t.db", "force": True})
+    assert out["status"] == "ok"
+    assert seen == {"asset_class": "equity", "db_path": "t.db", "force": True}
+
+
+def test_discovery_endpoints_default_to_crypto_not_a_crash(monkeypatch):
+    """A payload missing asset_class picks a real class rather than raising.
+
+    The bridge is reached only by our own engine, but a handler that raises on a
+    malformed body turns a typo into a 500 the operator has to decode.
+    """
+    server = pytest.importorskip("python_bridge.server")
+    from discovery import run as discovery_run
+    monkeypatch.setattr(discovery_run, "due_status",
+                        lambda asset_class, db_path="x": {"asset_class": asset_class})
+    assert server._handle("/discovery/due", {})["asset_class"] == "crypto"
+
+
+def test_a_disabled_funnel_refuses_the_engine_even_with_force(tmp_path):
+    """The flag is the OUTER gate, on the real code path, not a mock.
+
+    If force could bypass the flag, the engine could spend the discovery budget
+    against an operator who had turned discovery off. It cannot: run_once checks
+    the flag before it checks anything else.
+    """
+    import os
+    import yaml
+    server = pytest.importorskip("python_bridge.server")
+    cfg = os.path.join(str(tmp_path), "off.yaml")
+    with open(cfg, "w", encoding="utf-8") as f:
+        yaml.safe_dump({"discovery": {"discovery_enabled": False}}, f)
+
+    from discovery import run as discovery_run
+    out = discovery_run.run_once("crypto", db_path=os.path.join(str(tmp_path), "x.db"),
+                                 cfg_path=cfg, force=True)
+    assert out["status"] == "disabled"
+    # Nothing was written: a disabled funnel does not even create the database.
+    assert not os.path.exists(os.path.join(str(tmp_path), "x.db"))
+
+
+def test_discovery_endpoints_are_served_only_on_the_loopback_bridge():
+    """Discovery adds endpoints, it does not widen the bind. Loopback holds."""
+    server = pytest.importorskip("python_bridge.server")
+    import inspect
+    assert inspect.signature(server.serve).parameters["host"].default == "127.0.0.1"
+    with pytest.raises(ValueError):
+        server.resolve_bind_host("0.0.0.0", allow_remote=False)

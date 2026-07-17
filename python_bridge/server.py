@@ -135,6 +135,29 @@ def _handle(path: str, payload: dict) -> dict:
         # Returns direction/conviction/horizon/rationale; the engine enforces the
         # hard cap, the conviction threshold, and the RiskGate on any order.
         return research_thesis(payload)
+    if path == "/discovery/due":
+        # Cadence question only: one indexed SQLite read, no Finnhub or LLM call.
+        # The engine asks before every trigger, so this must stay cheap.
+        from discovery import run as discovery_run
+        return discovery_run.due_status(
+            str(payload.get("asset_class", "crypto")),
+            db_path=str(payload.get("db", "market_ai_lab.db")))
+    if path == "/discovery/run_once":
+        # Runs the funnel: Finnhub pre-screen, Haiku gate, council on survivors.
+        # SLOW (tens of seconds once council calls run), which is why the engine
+        # calls it off its loop thread and never waits on it inline. The bridge
+        # is a ThreadingHTTPServer, so a pass in flight does not block the
+        # engine's market-data or council calls on other connections.
+        #
+        # force=true because the ENGINE already asked /discovery/due and decided.
+        # run_once re-checks discovery_enabled regardless, so the flag is still
+        # honored on every path and force can only skip the cadence, never the
+        # flag.
+        from discovery import run as discovery_run
+        return discovery_run.run_once(
+            str(payload.get("asset_class", "crypto")),
+            db_path=str(payload.get("db", "market_ai_lab.db")),
+            force=bool(payload.get("force", False)))
     if path == "/score/dnn":
         return score_state(payload)
     if path == "/score/rl":

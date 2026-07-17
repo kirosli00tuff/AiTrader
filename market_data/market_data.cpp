@@ -17,6 +17,16 @@ MockFeed::MockFeed(std::vector<Instrument> instruments, uint64_t seed)
     }
 }
 
+void MockFeed::add_instrument(const Instrument& i) {
+    // The three vectors are parallel and indexed together in poll(), so they
+    // must grow together or poll() reads another symbol's price.
+    for (const auto& have : instruments_)
+        if (have.venue == i.venue && have.symbol == i.symbol) return;
+    instruments_.push_back(i);
+    last_prices_.push_back(i.price);
+    recent_returns_.emplace_back();
+}
+
 double MockFeed::next_uniform() {
     // xorshift64 — deterministic, dependency-free PRNG for reproducible demos.
     rng_ ^= rng_ << 13;
@@ -79,6 +89,17 @@ AlpacaFeed::AlpacaFeed(std::vector<Instrument> instruments,
         last_prices_.push_back(i.price);
         recent_returns_.emplace_back();
     }
+}
+
+void AlpacaFeed::add_instrument(const Instrument& i) {
+    // Parallel vectors, same contract as MockFeed::add_instrument. The seeded
+    // price is only the offline-fallback anchor: a live poll overwrites it with
+    // the real Alpaca quote on the next request.
+    for (const auto& have : instruments_)
+        if (have.venue == i.venue && have.symbol == i.symbol) return;
+    instruments_.push_back(i);
+    last_prices_.push_back(i.price);
+    recent_returns_.emplace_back();
 }
 
 double AlpacaFeed::next_uniform() {

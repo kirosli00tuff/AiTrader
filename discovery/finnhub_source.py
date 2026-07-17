@@ -302,7 +302,11 @@ class FinnhubClient:
 
     def quote(self, symbol: str) -> dict | None:
         """Real-time quote. Keys: c current, d change, dp change pct, h high,
-        l low, o open, pc previous close, t epoch timestamp."""
+        l low, o open, pc previous close, t epoch timestamp.
+
+        Pass a symbol Finnhub actually serves. For crypto that is NOT the
+        whitelist symbol: see finnhub_symbol().
+        """
         r = self._get("quote", {"symbol": symbol})
         return r if isinstance(r, dict) else None
 
@@ -356,6 +360,38 @@ class FinnhubClient:
 # Separate from transport so tests exercise real payload shapes with no network.
 # Every parser tolerates a missing or malformed field: a bad parse in a money
 # loop must degrade to "no signal", never to a wrong number.
+
+# Finnhub does not know Alpaca's crypto symbol format, and it does not say so.
+# `/quote?symbol=BTC/USD` returns HTTP 200 with an all-zero body, not an error,
+# so an unmapped crypto symbol reads as a dead-quiet market rather than a wrong
+# request. That silence is why every crypto pass reported no_data: all 50 names
+# parsed to {} and were skipped, and the funnel looked merely unlucky.
+#
+# Finnhub carries crypto as EXCHANGE:PAIR. BINANCE is the deepest book it serves
+# on the free tier, and every name in the curated crypto universe resolves there.
+#
+# USDT IS NOT USD, deliberately. For a Stage-A RANKING that is fine: the
+# pre-screen ranks on momentum, volatility, and gap, and BTCUSDT tracks BTC/USD
+# far more closely than the difference matters for deciding which names deserve a
+# closer look. Nothing trades on this price. The order goes to Alpaca, at
+# Alpaca's price, and the RiskGate sizes it there. The mapping buys a name a
+# look; it never sets a price.
+CRYPTO_QUOTE_EXCHANGE = "BINANCE"
+CRYPTO_QUOTE_FIAT = "USDT"
+
+
+def finnhub_symbol(symbol: str) -> str:
+    """Map a whitelist symbol to the id Finnhub actually serves.
+
+    Equities are already Finnhub ids and pass through untouched. A crypto pair
+    (the "/" is what marks one, matching universe.is_crypto) becomes
+    EXCHANGE:PAIR, so BTC/USD -> BINANCE:BTCUSDT.
+    """
+    if "/" not in symbol:
+        return symbol
+    base = symbol.split("/", 1)[0].strip().upper()
+    return f"{CRYPTO_QUOTE_EXCHANGE}:{base}{CRYPTO_QUOTE_FIAT}"
+
 
 def parse_quote(payload: dict | None) -> dict:
     """Normalize a quote to {price, change_pct, high, low, open, prev_close}.

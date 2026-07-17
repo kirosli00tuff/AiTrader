@@ -14,6 +14,51 @@ Commit message:
 
 ---
 
+## Prompt: Wire engine consumption of the discovery flag
+
+Date: 2026-07-16
+Model: Opus 4.8
+Prompt summary: discovery_enabled is true in controls.json and the engine restarted after, but no funnel pass runs, no Finnhub call is made, no candidates surface, and no new symbol bars are pulled. The only discovery event ever logged is the toggle itself. Trace the gap, wire engine consumption, log prerequisites and blocks loudly, confirm new-symbol onboarding, verify live, test, document, commit.
+
+TASK 1, THE TRACE. The prompt guessed one break. There were SEVEN, and no single one of them was "the bug": each alone was fatal, so fixing any one would have changed nothing the operator could see. Confirmed at the source before touching code: the only discovery row the database has ever held is `control_change: discovery.discovery_enabled: False -> True` at 04:36:54Z, and the engine then ran 94 iterations without once looking at discovery. Zero discovery_pass rows, zero watchlist rows, last_pass_ts empty.
+
+  1. NO SCHEDULER (the primary break). `discovery.run.run_due` had exactly ONE non-test caller: `ops/maintenance.maybe_run_discovery`. That function's only caller was `ops/maintenance.py`'s own `__main__` CLI. Nothing ran that CLI: `crontab -l` is empty, `ops/watchdog.py` does not import maintenance, and neither `api_server/supervisor.py`, `api_server/stack.py`, nor `scripts/start_paper_trading.sh` call it. The funnel was correct, tested, and unreachable. run.py's docstring says "Run it from the existing maintenance scheduling"; maintenance.py's says "Two jobs the watchdog process (or a cron script) runs daily". Neither was ever true. The wiring stopped at a CLI nobody invoked.
+  2. THE ENGINE READ THE WRONG FLAG. `core/engine.cpp:61` gated its watchlist read on `cfg_.discovery.discovery_enabled`, which comes from default_config.yaml (false). The GUI toggle writes `.control/controls.json`. Every other runtime control (layers, sources, feed/clock, models, budget, regime pins, the kill request) reads controls.json each iteration; discovery alone never got that treatment. So even had a pass run, the engine would not have merged a candidate: it read a flag the operator cannot set. `core/adaptive_controls.hpp` already names this exact defect class and cites discovery as its origin ("the flags were CONFIG-only, so a GUI toggle would have been cosmetic"). The react layer got that fix. Discovery never did.
+  3. THE WATCHLIST WAS READ ONCE, at construction, so a symbol surfaced mid-run was unusable until a restart.
+  4. THE FEED NEVER POLLED A DISCOVERED SYMBOL. `all_instruments_` is HARDCODED to the four whitelist names and is NOT built from `cfg_.strategy.whitelist`. So the documented "merges those symbols into the native whitelist" was true and useless: the merged symbol was never quoted, closed no bar, never warmed, and could never trade. Named, and nothing more.
+  5. NOTHING BACKFILLED ITS BARS, so even a polled symbol started cold with no history and the warm gate would hold it back forever.
+  6. STAGE B HANDED THE GATE ZEROS (found only because the funnel finally ran). It passed `**f.signals`, the pre-screen's SCORE COMPONENTS. `build_user_prompt` reads exactly symbol/venue/price/ret_5/imbalance/catalyst/volatility and DEFAULTS ANY MISSING KEY TO 0.0. The components share ONE key name with that list (volatility) and no others, so every finalist arrived as a zero-price, zero-return instrument. The gate rejected 12 of 12 on every pass and said why, plainly ("only volatility present", "zero price data, zero returns"); nobody read it, because the funnel had never run. Proven STRUCTURAL, not a market read: it rejected a synthetic +14% move with a 14% intraday range as a "flat, rangebound setup".
+  7. STAGE C HANDED THE COUNCIL ZEROS, and the council never ran. The evaluator state carried only symbol, price, category, mode, horizon. Worse, `consensus()` runs the TRADING base-check gate internally, which skipped every survivor on the same absent order book, so consensus returned a flat verdict WITHOUT CALLING A SINGLE PROVIDER. A pass recorded 5 "council calls" that never happened and 5 avoid verdicts nobody had reasoned about.
+
+Changes: TASK 2, engine consumption. New `core/discovery_controls.hpp` reads discovery_enabled from controls.json seeded from config, same shape as layer_toggles/operator_controls/adaptive_controls; OFF when the file is missing, empty, or malformed (inverted from layer_toggles on purpose: a broken file must not blind the ensemble there, and must not START A SPENDER here). `Engine::consume_discovery` runs each iteration from run_iteration, right after the kill request. It logs the toggle transition, asks the bridge whether a pass is due, and starts due passes OFF THE LOOP THREAD via std::async, capturing by value only so the task touches no engine state. The loop only ever PEEKS at the future (wait_for(0)), never blocks: a pass takes tens of seconds once council calls fire, and the kill switch is checked at the top of every iteration, so waiting on one would delay a safety halt. One pass per asset class at a time, so a slow pass cannot pile up threads or double-spend the budget. New bridge endpoints `/discovery/due` (cheap: one indexed SQLite read) and `/discovery/run_once`. TASK 3, loud prerequisites: `discovery_pass_start`, `discovery_pass` (with every stage count), `discovery_skip` (cadence, with the reason), `discovery_blocked` (bridge down, no Finnhub key, empty universe, no quotes, or a flag mismatch between the engine and Python), `discovery_toggle`, `discovery_onboard`. Skips and blocks are deduped on kind+reason so a steady state logs once on entry rather than every five minutes, while a pass always logs. TASK 4, onboarding: `discovery.run.onboard` backfills a surfaced symbol's bars through the SAME Alpaca backfill the whitelist gets at startup, and `Engine::onboard_discovered_symbols` extends the whitelist, extends the polled feed (new `Feed::add_instrument`, appended rather than rebuilt so existing symbols keep their price/return state), seeds indicator history from the `bars` table through the same warm-start path, and logs warm or cold with the bar count. ADD-ONLY: never withdraws a symbol mid-run. Also fixed: the Finnhub crypto symbol mapping (`finnhub_symbol`), the Stage-B payload (`funnel.gate_state` + Finalist carries its snapshot), the Stage-C payload (`evaluate.market_state_from` + `snapshot_for`), Stage C no longer re-gates what Stage B already gated, a new discovery-only Stage-B gate (`discovery/gate.py`), and the startup banner (it printed "discovery: DISABLED" while discovery was on, because it too read config). NOT touched: RiskGate logic, the live-trading gate, the adaptive limit-weakening invariant, or any Level-1 value.
+
+Safest-choice notes: (1) THE ENGINE DOES NOT DECIDE THE CADENCE, IT ASKS. `discovery/run.py due()` already encoded hourly crypto and hourly equities inside US regular hours, tested. I could have re-derived that in C++ (the engine already owns an RTH predicate for the entry gate, and the two windows already match at 810-1200 UTC). I did not: two copies of a cadence drift silently, and a drifted cadence does not fail, it just quietly runs at the wrong time. One authority, asked over a cheap endpoint. (2) THE FUNNEL STAYS PYTHON. TASK 2 says "the engine runs the discovery funnel", but Finnhub, the Haiku gate, and the council all live in Python, and CONTEXT.md records keeping them there as a deliberate decision. Porting them to C++ to satisfy the literal wording would be a rewrite of working code with a money-loop blast radius. The engine DRIVES the funnel over the existing bridge instead, which satisfies the intent (the engine consumes the flag, owns the cadence trigger, and logs every pass) and keeps the C++ side the sole writer of the events table. (3) ADD-ONLY ONBOARDING rather than a full refresh. The once-per-run read was justified by "a pass cannot move symbols under an open position", but that reasoning only ever applied to REMOVING a symbol. Adding one cannot disturb an open position. So the engine refreshes every iteration and only adds, which preserves the actual invariant while making discovery useful. A symbol still leaves the universe only on restart. (4) A PASS IN FLIGHT IS REAPED EVEN IF THE FLAG GOES OFF. Dropping it would waste spend already committed and lose the candidates it found. Turning discovery off stops NEW passes, which is what "off" has to mean for a spender. (5) DISCOVERY GOT ITS OWN STAGE-B GATE INSTEAD OF MY CHANGING THE SHARED ONE. The trading gate's prompt is what made it reject everything, but that gate guards real orders on real state and its blast radius is live trading. A discovery-only gate (same model, same key, same cost) changes nothing outside discovery. (6) STAGE C PASSES AlwaysProceedGate, WHICH IS NOT A LOOSENED COST CONTROL. It restores the funnel's own design, where each stage screens ONCE and narrows: Stage A free, Stage B the cheap gate, Stage C the paid council on what survived. max_survivors, max_council_calls_per_pass, and the separate daily discovery budget are all unchanged, and the budget ceiling was observed working live (it cut a pass to 2 evaluations with 2 calls left of 12). (7) I DID NOT INVENT AN ORDER BOOK. Finnhub's free tier serves none, and no crypto news sentiment, so those fields are OMITTED rather than sent as 0.0. That distinction is the entire bug: absent read as "measured, and flat". (8) THE SOL/USD VERIFICATION ROW WAS REMOVED. I inserted one watchlist row to prove the engine's onboarding half end to end, since today's council legitimately approved nothing. A symbol the council never approved must not remain on the operator's traded universe. Its bars stay: they are market data, harmless and reusable. (9) THE SUITE WAS ALREADY RED BEFORE I STARTED, and I verified that by stashing every source change rather than assuming. Three tests asserted SHIPPED DEFAULTS while reading the operator's live control file (cfg_path=None layers controls.json over config BY DESIGN, since that is how a runtime toggle works), so they went red the moment a real operator enabled discovery, reporting a regression that had not happened. Fixed to read the shipped file explicitly, or to pin the flag they claim to test rather than inherit it from the machine.
+
+TASK 5, LIVE VERIFICATION (2026-07-16, crypto, equities closed):
+
+| Check | Result |
+| --- | --- |
+| **A funnel pass actually fires** | **PASS: pass_id 1-5 recorded, the first in the project's history (last_pass_ts was empty)** |
+| **A real Finnhub call is made** | **PASS: 50-name crypto universe quoted live, free, zero LLM tokens** |
+| **Stage counts are logged** | **PASS: `discovery_pass END (crypto): universe 50 -> finalists 12 -> survivors 5 -> evaluated 5, 5 council call(s)`** |
+| **The council REALLY runs now** | **PASS: 3 real providers, real verdicts (gpt-5.5 buy 0.58, opus hold 0.60, gemini hold 0.80 -> consensus buy 0.633, agreement 1); real DNN advisory -0.34** |
+| Candidates surface to the watchlist | NO, and it is CORRECT: crypto is selling off 3-5%, the native strategies are long-only, and NEAR/USD drew a unanimous council SELL (bias -0.26, agreement 3) -> conviction 0.577, under the 0.60 floor -> avoid. The funnel ran and declined. I could not honestly force a buy verdict out of a bearish tape |
+| **A new crypto symbol gets bars + warming** | **PASS, verified end to end separately: 8,519 real 5-min bars + 365 daily backfilled, then `discovery_onboard: SOL/USD: 300 bar(s) seeded, indicators WARM (tradeable)`, feed extended, startup warm report agreeing. Row removed after** |
+| Cadence: crypto hourly | PASS: `discovery_skip: not due (last pass 1m ago, interval 60m)` |
+| Cadence: equities US hours only | PASS: `discovery_skip: not due (outside US regular trading hours)` |
+| A blocked prerequisite is LOUD, not silent | PASS: a bridgeless engine logs `discovery_blocked: engine has no bridge (--bridge off), and the funnel runs Python-side: no pass can run` |
+| The daily budget ceiling holds | PASS, observed live: a pass cut to 2 evaluations with 2 of 12 calls left |
+| Startup banner tells the truth | PASS: `discovery: ENABLED [controls.json]` (was "DISABLED (opt-in)" while discovery was on) |
+| The key is never logged or returned | PASS: the Finnhub token is a query param; nothing logs a URL, and the onboarding error path reports `type(e).__name__` only |
+| Bind stays loopback | PASS |
+| Python pytest | 603 passed (from 590, +13) |
+| C++ ctest | 23/23 (from 22, +1: new `discovery_engine`) |
+| RiskGate / live gate / adaptive invariant / Level-1 untouched | PASS |
+
+Commit message: `Wire engine consumption of the discovery flag so an enabled discovery layer actually runs its funnel and onboards new symbols, live trading untouched`
+
+---
+
 ## Prompt: Add Finnhub to the live API health check
 
 Date: 2026-07-16
@@ -1238,3 +1283,25 @@ $ git diff --cached --stat
 | Gemini 3.1 Pro | working | - | 1272.7 ms |
 | Alpaca paper market data | working | one quote ok | 255.0 ms |
 | Alpaca paper order-auth (validation-only) | working | paper account auth ok | 241.3 ms |
+
+### Run 2026-07-17T04:33:30Z
+
+| Integration | Result | Detail | Latency |
+| --- | --- | --- | --- |
+| OpenAI GPT-5.5 | working | - | 1686.0 ms |
+| Anthropic Opus 4.8 | working | - | 2111.1 ms |
+| Anthropic Haiku 4.5 (gate path) | working | - | 588.5 ms |
+| Gemini 3.1 Pro | working | - | 1277.4 ms |
+| Alpaca paper market data | working | one quote ok | 272.8 ms |
+| Alpaca paper order-auth (validation-only) | working | paper account auth ok | 308.6 ms |
+
+### Run 2026-07-17T04:47:50Z
+
+| Integration | Result | Detail | Latency |
+| --- | --- | --- | --- |
+| OpenAI GPT-5.5 | working | - | 662.7 ms |
+| Anthropic Opus 4.8 | working | - | 1201.1 ms |
+| Anthropic Haiku 4.5 (gate path) | working | - | 601.7 ms |
+| Gemini 3.1 Pro | working | - | 1199.4 ms |
+| Alpaca paper market data | working | one quote ok | 278.5 ms |
+| Alpaca paper order-auth (validation-only) | working | paper account auth ok | 240.3 ms |

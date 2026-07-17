@@ -181,6 +181,14 @@ int main(int argc, char** argv) {
             // what is actually running rather than what config launched with.
             const auto adaptive_rt = mal::core::read_adaptive_controls(
                 ctl_dir + "/controls.json", cfg.adaptive_realtime);
+            // Discovery's RUNTIME state, same control file, same reason. The
+            // banner read cfg.discovery.discovery_enabled and so printed
+            // "DISABLED (opt-in)" while the operator had discovery ON and the
+            // Python funnel agreed it was on. The startup block is where an
+            // operator checks what is running, so it must not report the shipped
+            // default as the truth.
+            const auto discovery_rt = mal::core::read_discovery_controls(
+                ctl_dir + "/controls.json", cfg.discovery);
             // Query the bridge for the true real-vs-mock availability of each
             // advisory service, so the proof block shows the actual state, not
             // just the configured intent. Non-fatal: if the bridge is down the
@@ -315,9 +323,9 @@ int main(int argc, char** argv) {
                 // universe at construction (after this line prints), and logs
                 // the result as a discovery_watchlist event. Say so rather than
                 // let this read as the full traded universe.
-                << (cfg.discovery.discovery_enabled
-                        ? "  [+ active watchlist symbols, see discovery_watchlist "
-                          "event]"
+                << (discovery_rt.enabled
+                        ? "  [+ active watchlist symbols, see discovery_onboard "
+                          "events]"
                         : "")
                 << "\n"
                 << "  whale:     tracking "
@@ -349,8 +357,8 @@ int main(int argc, char** argv) {
                 << " calls/day, conviction>=" << cfg.sleeves.research_conviction_threshold
                 << ", combined ceiling $" << cfg.sleeves.combined_monthly_spend_ceiling_usd
                 << "/month (pauses both sleeves)\n"
-                << "  discovery: " << (cfg.discovery.discovery_enabled
-                                           ? "ENABLED"
+                << "  discovery: " << (discovery_rt.enabled
+                                           ? "ENABLED [controls.json]"
                                            : "DISABLED (opt-in)")
                 << ", long-term sleeve "
                 << (cfg.discovery.long_term_sleeve_enabled

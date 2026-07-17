@@ -223,6 +223,42 @@ never eat the quant loop's calls. Worst case combined: 52 calls/day × $0.04 × 
 through US regular hours** only. An equity pass after hours would rank a market
 nobody can trade.
 
+**Who runs it.** The **engine** does, once you turn discovery on. It reads
+`discovery_enabled` from `controls.json` every loop iteration (the same
+control-file pattern as the kill switch and the layer toggles), asks the bridge
+whether a pass is due, and runs a due pass **off its loop thread** so a pass in
+flight never delays the kill switch. The **cadence itself lives in one place**,
+`discovery/run.py due()`, which the engine asks over `POST /discovery/due`, so the
+hourly interval and the equities US-hours rule are never written twice. The funnel
+stays Python-side (Finnhub, the Haiku gate, and the council all live there); the
+engine drives it over the bridge and stays the sole writer of the events table.
+Discovery needs the bridge: without it the engine says so (`discovery_blocked`)
+rather than looking enabled and doing nothing.
+
+**Everything a pass does is visible in the events log**, so an enabled discovery
+layer is never a mystery. You can always tell whether it **ran**, was **skipped
+for cadence**, or was **blocked by a prerequisite**, and which:
+
+| Event | Meaning |
+| --- | --- |
+| `discovery_toggle` | the flag changed, old to new |
+| `discovery_pass_start` | a pass began, per asset class |
+| `discovery_pass` | a pass finished, with **every stage count** (universe, finalists, survivors, evaluated, council calls, est cost) |
+| `discovery_skip` | not due, with the reason (`last pass 12m ago, interval 60m`, `outside US regular trading hours`) |
+| `discovery_blocked` | a prerequisite stopped it: bridge down, no `FINNHUB_API_KEY`, empty universe, no quotes |
+| `discovery_onboard` | a surfaced symbol joined the traded universe, with its bar count and warm/cold state |
+
+Skips and blocks are logged **once per state change**, not once per check, so a
+steady reason does not bury the passes between. A pass always logs.
+
+**A surfaced symbol is onboarded, not just named.** When a pass adds a candidate,
+its bars are backfilled through the **same Alpaca backfill the whitelist gets at
+startup**, and the engine extends its polled feed, seeds indicator history from
+the `bars` table, and holds the symbol back until its indicators are **warm**,
+exactly as it holds a cold configured symbol. Onboarding is **add-only**: a symbol
+is never withdrawn mid-run, so a pass can never move one out from under an open
+position. A restart picks up the current list.
+
 **Whale activity does two jobs, deliberately.** It **surfaces** candidates in
 Stage A (a strong signal raises an instrument's free pre-screen rank, so a name
 whales moved into can reach the finalist set even when price and volume alone

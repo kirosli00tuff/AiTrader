@@ -137,14 +137,55 @@ def build_verdict(*, symbol: str, council, dnn: dict, whale: dict,
     }
 
 
+def market_state_from(snapshot: dict) -> dict:
+    """The market signals llm_consensus.providers.build_user_prompt reads.
+
+    THE KEY NAMES ARE THE CONTRACT. build_user_prompt renders exactly symbol,
+    venue, price, ret_5, imbalance, catalyst, volatility, and defaults anything
+    absent to 0.0. Stage C used to pass only symbol, price, category, mode, and
+    horizon, so the council was asked to judge an instrument whose return,
+    volatility, catalyst, and order-book imbalance were all zero. It answered
+    "avoid" with conviction 0.0 every time, which was the only honest reading of
+    that payload, at a full council call per survivor. The Stage-A snapshot held
+    the real numbers the whole time; they were dropped on the way in.
+
+    ret_5 is a fraction: Finnhub's change_pct is a percent, so it is scaled.
+    imbalance stays absent because the free tier serves no order book, and an
+    invented number would be worse than a missing one.
+    """
+    def _f(key: str) -> float:
+        try:
+            return float(snapshot.get(key) or 0.0)
+        except (TypeError, ValueError):
+            return 0.0
+
+    price = _f("price")
+    high, low = _f("high"), _f("low")
+    out = {
+        "price": price,
+        "ret_5": _f("change_pct") / 100.0,
+        "volatility": round(((high - low) / price) if price > 0 and high > low
+                            else 0.0, 6),
+    }
+    if snapshot.get("sentiment_score") is not None:
+        out["catalyst"] = _f("sentiment_score")
+    return out
+
+
 def four_level_evaluator(*, price_for=None, category_for=None,
-                         horizon: str = "short_term",
+                         snapshot_for=None, horizon: str = "short_term",
                          cfg_path: str | None = None, providers=None):
     """Build the Stage-C evaluator callable the funnel invokes per survivor.
 
     Returns callable(symbol) -> verdict dict. Imports the layer modules lazily so
     importing the funnel never drags in the ML stack, and so a missing optional
     dependency degrades one layer instead of breaking discovery.
+
+    ``snapshot_for`` maps a symbol to its Stage-A market snapshot, so the council
+    judges the instrument's actual movement. Without it the council sees a price
+    and nothing else. Optional so existing callers keep working, but the funnel
+    always supplies it: a council call against a blank snapshot is money spent to
+    be told nothing.
     """
     from llm_consensus.config_access import council_min_confidence
 
@@ -153,16 +194,39 @@ def four_level_evaluator(*, price_for=None, category_for=None,
         category = category_for(symbol) if category_for else "equity"
         state = {
             "symbol": symbol,
+            "venue": "alpaca",
             "price": price,
             "category": category,
             "mode": "discovery",
             "horizon": horizon,
         }
+        if snapshot_for:
+            # Overlay the real signals, then restore price: the snapshot and
+            # price_for agree, and price_for stays the one authority for it.
+            state.update(market_state_from(snapshot_for(symbol) or {}))
+            state["price"] = price
 
-        # Level 2: the council. The Haiku gate screens inside consensus, so a
-        # weak survivor still cannot run up a full three-provider bill.
+        # Level 2: the council. STAGE B ALREADY GATED THIS SYMBOL, so consensus
+        # must not gate it again.
+        #
+        # It used to. consensus() runs the trading base-check gate by default,
+        # and that gate renders an order book and a news catalyst the free
+        # pre-screen cannot supply, defaulting both to 0.0. It therefore skipped
+        # every discovery survivor, and consensus returned a flat verdict with
+        # confidence 0.0 WITHOUT calling a single provider. So Stage C recorded 5
+        # "council calls" and 5 avoid verdicts per pass while the council never
+        # actually ran: the funnel could not surface a candidate in any market.
+        #
+        # Passing an always-proceed gate here is not a loosened cost control. It
+        # restores the funnel's own design, where each stage screens ONCE and
+        # narrows: Stage A ranks for free, Stage B is the cheap gate, Stage C is
+        # the paid council on what survived. Spend stays bounded by
+        # max_survivors, max_council_calls_per_pass, and the separate daily
+        # discovery budget, none of which changed.
         from llm_consensus import consensus as _consensus
-        council = _consensus(state, providers=providers, cfg_path=cfg_path)
+        from llm_consensus.gate import AlwaysProceedGate
+        council = _consensus(state, providers=providers, cfg_path=cfg_path,
+                             gate=AlwaysProceedGate())
 
         # Level 3: DNN advisory. A failure degrades to neutral, never fatal.
         dnn: dict = {}

@@ -24,6 +24,16 @@ add_executable(test_sleeves test_sleeves.cpp)
 target_link_libraries(test_sleeves PRIVATE mal_config)
 add_test(NAME sleeves COMMAND test_sleeves WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 
+# Discovery flag consumption, engine side: the engine must read discovery_enabled
+# from the controls.json the GUI writes, not from the config default, or the
+# operator's toggle is cosmetic and no discovered symbol is ever traded.
+add_executable(test_discovery_engine test_discovery_engine.cpp)
+# mal_bridge: discovery_controls.hpp reads controls.json through the shared flat
+# JSON reader (bridge::json_get_bool).
+target_link_libraries(test_discovery_engine PRIVATE mal_config mal_util mal_bridge)
+add_test(NAME discovery_engine COMMAND test_discovery_engine
+         WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
 # Adaptive real-time layer, engine side. The asymmetry: a live event may trim,
 # exit, or flag, and has NO representation for opening or increasing a position.
 # Also covers action staleness (old news must not move a position) and that all

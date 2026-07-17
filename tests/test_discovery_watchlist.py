@@ -150,8 +150,17 @@ def test_enforce_max_size_keeps_the_strongest(tmp_path):
 
 # --- the react-layer seam ---------------------------------------------------
 
-def test_a_reserved_source_is_refused_and_journalled(tmp_path):
-    """The deferred react layer parses, is journalled, and is REFUSED."""
+def test_a_reserved_source_is_refused_and_journalled(tmp_path, monkeypatch):
+    """The gated react layer parses, is journalled, and is REFUSED while OFF.
+
+    The off-ness is stated here rather than inherited from the machine. This test
+    read the live .control/controls.json through the lazy
+    adaptive_settings.watchlist_shaping_enabled() call inside _shaping_enabled,
+    so it went red the moment a real operator turned watchlist shaping on: it
+    reported a refusal regression when the source had simply, correctly, been
+    enabled. A test of "refused while off" has to pin off.
+    """
+    monkeypatch.setattr(watchlist, "_shaping_enabled", lambda: False)
     c = _conn(tmp_path)
     r = watchlist.apply_event(c, watchlist.WatchlistEvent(
         action="add", symbol="AAPL", source="adaptive_react",

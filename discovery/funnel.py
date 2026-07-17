@@ -68,6 +68,11 @@ class Finalist:
     signals: dict = field(default_factory=dict)
     whale_surfaced: bool = False
     whale_reason: str = ""
+    # The Stage-A market snapshot this was ranked from. `signals` holds the score
+    # COMPONENTS (momentum, volatility, gap...), which is what explains the rank,
+    # not what the instrument is doing. Stage B needs the latter: it hands the
+    # gate a market snapshot, and components are not one.
+    snapshot: dict = field(default_factory=dict)
 
     def to_dict(self) -> dict:
         return {"symbol": self.symbol, "score": round(self.score, 4),
@@ -296,11 +301,64 @@ def prescreen(snapshots: list[dict], max_finalists: int, min_score: float,
         if surfaced:
             reason = str(by_symbol.get(symbol, {}).get("whale_reason", "")
                          or "whale activity")
-        keep.append(Finalist(symbol, score, components, surfaced, reason))
+        keep.append(Finalist(symbol, score, components, surfaced, reason,
+                             by_symbol.get(symbol, {})))
     return keep, drops
 
 
 # --- Stage B: Haiku gate on finalists only ----------------------------------
+
+def gate_state(f: Finalist) -> dict:
+    """The market snapshot Stage B hands the gate.
+
+    THE KEYS MATTER. The gate renders this through
+    llm_consensus.providers.build_user_prompt, which reads exactly: symbol,
+    venue, price, ret_5, imbalance, catalyst, volatility. Anything else on the
+    dict is invisible to the model.
+
+    Stage B used to pass ``**f.signals``, the pre-screen SCORE COMPONENTS. Those
+    share one key name with what the prompt reads (volatility) and no others, so
+    every finalist reached the gate as a zero-price, zero-return, zero-catalyst
+    instrument with a volatility number and nothing else. The gate did its job
+    and rejected all of them, every pass, saying so plainly ("only volatility
+    present", "zero price data, zero returns"). Nobody read it, because the
+    funnel had never run. So Stage B could never produce a survivor, Stage C
+    could never run, and discovery could never surface a candidate, while still
+    spending a real Haiku call per finalist to be told no.
+
+    Mapping notes, each deliberate:
+      * ret_5 is a FRACTION. Finnhub's change_pct is a percent, so it is scaled.
+        It is the day's change, not a 5-bar return; it is the return signal the
+        free tier gives, and the gate only decides whether to look closer.
+      * catalyst is Finnhub's precomputed news sentiment where it exists. Crypto
+        has none on the free tier, so it is 0: honestly absent, not invented.
+      * imbalance is 0. The free tier serves no order book. A fabricated number
+        would be worse than a missing one.
+    """
+    snap = f.snapshot or {}
+
+    def _f(key: str) -> float:
+        try:
+            return float(snap.get(key) or 0.0)
+        except (TypeError, ValueError):
+            return 0.0
+
+    price = _f("price")
+    high, low = _f("high"), _f("low")
+    volatility = ((high - low) / price) if price > 0 and high > low else 0.0
+    return {
+        "symbol": f.symbol,
+        "venue": "alpaca",
+        "mode": "discovery",
+        "score": f.score,
+        "price": price,
+        "ret_5": _f("change_pct") / 100.0,
+        "volatility": round(volatility, 6),
+        "catalyst": (_f("sentiment_score")
+                     if snap.get("sentiment_score") is not None else 0.0),
+        "imbalance": 0.0,
+    }
+
 
 def gate_finalists(finalists: list[Finalist], gate,
                    max_survivors: int) -> tuple[list[str], list[Drop], int]:
@@ -322,8 +380,7 @@ def gate_finalists(finalists: list[Finalist], gate,
             drops.append(Drop(f.symbol, STAGE_B, "survivor_ceiling_reached",
                               f.score))
             continue
-        state = {"symbol": f.symbol, "score": f.score, "mode": "discovery",
-                 **f.signals}
+        state = gate_state(f)
         try:
             decision = gate.should_review(state)
             calls += 1
@@ -431,12 +488,18 @@ def build_snapshots(symbols: list[str], client, *,
     bounded network cost. Absent whale data scores 0, which is simply the
     pre-whale ranking.
     """
-    from discovery.finnhub_source import parse_news_sentiment, parse_quote
+    from discovery.finnhub_source import (finnhub_symbol, parse_news_sentiment,
+                                          parse_quote)
 
     native_strength = native_strength or {}
     out: list[dict] = []
     for symbol in symbols:
-        quote = parse_quote(client.quote(symbol))
+        # Ask Finnhub for the id IT serves, not the id we trade. Crypto differs:
+        # BTC/USD returns an all-zero 200, which would silently drop every crypto
+        # name from the pre-screen. The snapshot keeps the WHITELIST symbol, so
+        # everything downstream (the watchlist, the engine, Alpaca) still speaks
+        # one symbol format and no mapping leaks past this call.
+        quote = parse_quote(client.quote(finnhub_symbol(symbol)))
         if not quote:
             continue
         snap: dict = {"symbol": symbol, **quote,

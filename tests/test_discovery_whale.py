@@ -386,7 +386,11 @@ def test_whale_serves_both_stages_from_the_same_data():
 
 def test_the_shipped_config_keeps_discovery_off():
     # Whale surfacing lives entirely inside discovery, which ships disabled.
-    assert settings.discovery_enabled(None) is False
+    # Reads the shipped config FILE. cfg_path=None layers .control/controls.json
+    # over config by design (that is how an operator enables discovery), so None
+    # answers "what did this machine's operator last toggle", not "what does the
+    # repo ship". This went red the first time a real operator enabled discovery.
+    assert settings.discovery_enabled("config/default_config.yaml") is False
 
 
 def test_run_once_never_surfaces_when_discovery_is_off(tmp_path):

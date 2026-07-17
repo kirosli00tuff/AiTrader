@@ -394,9 +394,20 @@ def test_run_due_is_disabled_when_the_flag_is_off(tmp_path):
 
 
 def test_shipped_defaults_have_discovery_off():
-    """The repo's real config must ship both flags off."""
-    assert settings.discovery_enabled(None) is False
-    assert settings.long_term_sleeve_enabled(None) is False
+    """The repo's real config must ship both flags off.
+
+    Reads the shipped config FILE, not the runtime resolution. cfg_path=None
+    layers .control/controls.json over config on purpose (that is how an operator
+    enables discovery at runtime), so asking None what the repo SHIPS is asking
+    the wrong question: it answers with whatever the local operator last toggled.
+    This test passed None and went red the first time a real operator turned
+    discovery on, reporting a shipped-default regression that had not happened.
+    An explicit path ignores the control file, which is the documented contract
+    and the thing actually being asserted here.
+    """
+    shipped = "config/default_config.yaml"
+    assert settings.discovery_enabled(shipped) is False
+    assert settings.long_term_sleeve_enabled(shipped) is False
 
 
 def test_python_defaults_match_the_cpp_struct():
@@ -563,3 +574,330 @@ def test_no_finnhub_key_reports_unavailable_not_a_crash(tmp_path, monkeypatch):
                        cfg_path=cfg, now=NOW)
     assert out["status"] == "unavailable"
     assert "FINNHUB_API_KEY" in out["reason"]
+
+
+# --- The engine trigger path: due_status, onboarding, and the bridge ---------
+#
+# THE DEFECT these cover: discovery_enabled was true in controls.json, the engine
+# restarted, and no pass ever ran. The funnel below was correct the whole time.
+# Nothing CALLED it: run_due's only non-test caller was ops/maintenance's CLI,
+# and no cron, watchdog, supervisor, or start script ever ran that CLI. So the
+# engine now drives the funnel over the bridge, and these pin that path.
+
+def test_due_status_is_the_one_cadence_authority_the_engine_asks(tmp_path):
+    """The engine does not decide the cadence, it asks. This is what it asks.
+
+    Written twice (once in Python, once in C++) the hourly interval and the
+    equities US-hours rule would drift, and a drifted cadence is invisible: the
+    layer just quietly runs at the wrong time. So there is one authority.
+    """
+    cfg = _write_cfg(tmp_path)
+    db = os.path.join(str(tmp_path), "due.db")
+
+    # No pass on record: due, and says so rather than returning a bare bool.
+    out = run.due_status("crypto", db_path=db, cfg_path=cfg, now=NOW)
+    assert out["enabled"] is True
+    assert out["due"] is True
+    assert out["reason"] == "no previous pass"
+
+    # Crypto is due hourly around the clock, including at 3am on a Sunday: it
+    # never closes. This is the case the engine most needs right, because it is
+    # the one testable outside US hours.
+    sunday_3am = datetime(2026, 7, 19, 3, 0, tzinfo=timezone.utc)
+    assert run.due_status("crypto", db_path=db, cfg_path=cfg,
+                          now=sunday_3am)["due"] is True
+
+    # Equities are NOT due at 3am on a Sunday, and the reason names the rule.
+    eq = run.due_status("equity", db_path=db, cfg_path=cfg, now=sunday_3am)
+    assert eq["due"] is False
+    assert "outside US regular trading hours" in eq["reason"]
+
+
+def test_due_status_reports_the_flag_off_so_the_engine_can_see_a_mismatch(tmp_path):
+    """Engine on, Python off is a real state, and it must be visible.
+
+    Both sides read discovery_enabled from the same controls.json, so they should
+    agree. When they do not, the engine logs it loudly rather than starting a
+    pass the funnel will silently refuse. That silent refusal is exactly the
+    class of failure being fixed.
+    """
+    cfg = _write_cfg(tmp_path, discovery_enabled=False)
+    out = run.due_status("crypto", db_path=os.path.join(str(tmp_path), "x.db"),
+                         cfg_path=cfg, now=NOW)
+    assert out["enabled"] is False
+    assert out["due"] is False
+    assert "discovery_enabled is false" in out["reason"]
+
+
+def test_due_status_respects_the_interval_and_says_how_long_is_left(tmp_path):
+    cfg = _write_cfg(tmp_path, crypto_interval_minutes=60)
+    db = os.path.join(str(tmp_path), "int.db")
+    conn = sqlite3.connect(db)
+    store.ensure_schema(conn)
+    store.record_pass(conn, {"asset_class": "crypto", "status": "ok",
+                             "ts": NOW.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                             "universe_count": 3, "finalists_count": 1,
+                             "survivors_count": 1, "evaluated_count": 1,
+                             "council_calls": 1, "est_cost_usd": 0.04,
+                             "candidates": [], "drops": []})
+    conn.commit()
+    conn.close()
+
+    # 30 minutes after a pass: not due, and the reason carries the arithmetic so
+    # an operator reading the events log can see WHY, not just that.
+    out = run.due_status("crypto", db_path=db, cfg_path=cfg,
+                         now=NOW + timedelta(minutes=30))
+    assert out["due"] is False
+    assert "interval 60m" in out["reason"]
+
+    # 61 minutes after: due again.
+    assert run.due_status("crypto", db_path=db, cfg_path=cfg,
+                          now=NOW + timedelta(minutes=61))["due"] is True
+
+
+def test_onboard_backfills_bars_for_a_surfaced_symbol(tmp_path, monkeypatch):
+    """A surfaced symbol with no bars can never warm, so it could never trade.
+
+    Without this the funnel only NAMES a candidate: the engine's warm gate holds
+    a bar-less symbol back forever, correctly, and the operator sees a discovery
+    layer that finds names and never acts on them.
+    """
+    calls = {}
+
+    def fake_backfill(db_path, symbols):
+        calls["symbols"] = list(symbols)
+        return {"status": "ok", "written": {f"{s}:5min": 1440 for s in symbols}}
+
+    import market_data.alpaca_source as src
+    monkeypatch.setattr(src, "backfill", fake_backfill)
+
+    out = run.onboard(["AVAX/USD", "LINK/USD"], db_path="x.db")
+    assert out["status"] == "ok"
+    # The SAME backfill the whitelist uses at startup, called with the new
+    # symbols, so a discovered symbol warms through the normal path.
+    assert calls["symbols"] == ["AVAX/USD", "LINK/USD"]
+    assert out["onboarded"] == ["AVAX/USD", "LINK/USD"]
+
+
+def test_onboard_does_not_call_a_symbol_ready_when_no_bars_landed(tmp_path,
+                                                                  monkeypatch):
+    """Zero bars is reported as zero bars, never as onboarded.
+
+    A symbol Alpaca has no history for (a coin it does not carry) must not be
+    reported ready. It stays cold, the engine says COLD, and it never trades on
+    nothing.
+    """
+    import market_data.alpaca_source as src
+    monkeypatch.setattr(src, "backfill", lambda db, symbols: {
+        "status": "ok", "written": {"AVAX/USD:5min": 1440, "FAKE/USD:5min": 0}})
+
+    out = run.onboard(["AVAX/USD", "FAKE/USD"], db_path="x.db")
+    assert out["onboarded"] == ["AVAX/USD"]
+    assert out["no_bars"] == ["FAKE/USD"]
+
+
+def test_onboard_degrades_cleanly_without_data_credentials(monkeypatch):
+    """No key means no bars, reported, never a crash and never a fake success."""
+    import market_data.alpaca_source as src
+    monkeypatch.setattr(src, "backfill", lambda db, symbols: {
+        "status": "unavailable", "reason": "no data credentials"})
+
+    out = run.onboard(["AVAX/USD"], db_path="x.db")
+    assert out["status"] == "unavailable"
+    assert out["onboarded"] == []
+
+
+def test_onboard_never_raises_into_the_pass(monkeypatch):
+    """Discovery is advisory. A backfill fault must not take the loop down."""
+    import market_data.alpaca_source as src
+
+    def boom(db, symbols):
+        raise RuntimeError("alpaca exploded")
+
+    monkeypatch.setattr(src, "backfill", boom)
+    out = run.onboard(["AVAX/USD"], db_path="x.db")
+    assert out["status"] == "error"
+    assert out["reason"] == "RuntimeError"
+    # The message is the TYPE only. A backfill exception can carry a URL, and an
+    # Alpaca URL is not a secret today, but the reason is rendered in the GUI, so
+    # the type name is what travels.
+    assert "alpaca exploded" not in str(out)
+
+
+def test_a_pass_onboards_what_it_surfaces(tmp_path, monkeypatch):
+    """End to end: a surfaced candidate leaves the pass with its bars pulled.
+
+    This is the handoff. The pass writes bars, the engine reads the watchlist and
+    seeds its history from that table, and neither calls the other.
+    """
+    cfg = _write_cfg(tmp_path)
+    db = os.path.join(str(tmp_path), "onb.db")
+    got = {}
+
+    import market_data.alpaca_source as src
+    def fake_backfill(db_path, symbols):
+        got["symbols"] = list(symbols)
+        return {"status": "ok", "written": {f"{s}:5min": 1440 for s in symbols}}
+    monkeypatch.setattr(src, "backfill", fake_backfill)
+
+    # Stub the Finnhub-backed snapshot build: this test is about the handoff
+    # AFTER the funnel picks a candidate, not about the pre-screen.
+    snaps = [_snap("SOL/USD", change_pct=0.08, high=105.0, low=100.0)]
+    monkeypatch.setattr(funnel, "build_snapshots",
+                        lambda symbols, client, whale=None: snaps)
+
+    out = run.run_once("crypto", db_path=db, cfg_path=cfg, now=NOW,
+                       client=object(), gate=SpyGate(),
+                       evaluator=SpyEvaluator(), force=True)
+
+    assert out["status"] == "ok"
+    # The pass surfaced a candidate, and that candidate left the pass with bars
+    # already pulled. No symbol is left named-but-barless.
+    assert out["watchlist_added"] == ["SOL/USD"]
+    assert got["symbols"] == ["SOL/USD"]
+    assert out["onboard_status"] == "ok"
+    assert out["onboarded"] == ["SOL/USD"]
+
+
+# --- The payload bugs: the stages must hand the models real market data -------
+#
+# Both stages built a dict whose KEYS did not match what the prompt reads, so the
+# models were asked to judge an instrument with no price and no return. They
+# correctly said no, every time, in every market. Nobody saw it because the
+# funnel had never actually run. These pin the key contract on both sides.
+
+def test_stage_b_hands_the_gate_a_market_snapshot_not_score_components():
+    """THE STAGE-B BUG: the gate got the pre-screen's score components.
+
+    build_user_prompt reads symbol/venue/price/ret_5/imbalance/catalyst/
+    volatility. The components dict shares exactly ONE key name with that list
+    (volatility) and no others, so every finalist arrived as a zero-price,
+    zero-return instrument and the gate rejected 12 of 12 on every pass.
+    """
+    f = funnel.Finalist("ETH/USD", 0.48,
+                        {"momentum": 0.9, "volatility": 0.5, "gap": 0.1},
+                        False, "",
+                        {"price": 1826.39, "change_pct": -5.12, "high": 1929.0,
+                         "low": 1821.0, "open": 1925.0, "prev_close": 1924.0})
+    st = funnel.gate_state(f)
+
+    # The real market reaches the gate.
+    assert st["price"] == 1826.39
+    assert st["ret_5"] == pytest.approx(-0.0512)   # a FRACTION, not a percent
+    assert st["volatility"] > 0.0
+
+    # And the score components do NOT leak in wearing the prompt's key names.
+    # `momentum` 0.9 is a rank component, not a market signal.
+    assert "momentum" not in st
+
+    # The prompt the model actually sees carries the price.
+    from llm_consensus.providers import build_user_prompt
+    prompt = build_user_prompt(st)
+    assert "1826.39" in prompt
+    assert '"price": 0' not in prompt
+
+
+def test_stage_c_hands_the_council_the_market_not_just_a_price():
+    """THE STAGE-C BUG: the council state carried symbol + price and nothing else.
+
+    Everything build_user_prompt reads besides price defaulted to 0.0, so the
+    council judged a priced instrument with zero return and zero volatility and
+    returned avoid at conviction 0.0 for every survivor, at a real council call
+    each.
+    """
+    from discovery.evaluate import market_state_from
+    st = market_state_from({"price": 100.0, "change_pct": 14.0, "high": 104.0,
+                            "low": 90.0, "open": 91.0, "prev_close": 88.0})
+    assert st["price"] == 100.0
+    assert st["ret_5"] == pytest.approx(0.14)
+    assert st["volatility"] == pytest.approx(0.14)
+
+
+def test_an_absent_signal_stays_absent_rather_than_becoming_zero():
+    """Missing is not zero, and that distinction is the whole bug.
+
+    Crypto has no news sentiment on the free tier. Reporting catalyst=0.0 tells
+    the model "measured, and there is no catalyst", which is a lie about a field
+    that was never fetched. The key is omitted instead.
+    """
+    from discovery.evaluate import market_state_from
+    crypto = market_state_from({"price": 100.0, "change_pct": 5.0,
+                                "high": 102.0, "low": 98.0})
+    assert "catalyst" not in crypto
+
+    equity = market_state_from({"price": 100.0, "change_pct": 5.0, "high": 102.0,
+                                "low": 98.0, "sentiment_score": 0.82})
+    assert equity["catalyst"] == pytest.approx(0.82)
+
+
+def test_the_discovery_gate_prompt_never_invents_absent_fields():
+    """The discovery gate shows only what discovery has.
+
+    The council's gate renders order_book_imbalance and catalyst_score as 0.0
+    when absent. Those two zeros are what made it call a +14% move "flat".
+    """
+    from discovery.gate import build_discovery_prompt
+    f = funnel.Finalist("BTC/USD", 0.9, {}, False, "",
+                        {"price": 100.0, "change_pct": 14.0, "high": 104.0,
+                         "low": 90.0})
+    prompt = build_discovery_prompt(funnel.gate_state(f))
+    assert "order_book_imbalance" not in prompt
+    assert "news_sentiment" not in prompt      # crypto: absent, so not shown
+    assert "0.14" in prompt                    # the move IS shown
+
+
+def test_the_finnhub_crypto_symbol_mapping():
+    """Finnhub does not serve Alpaca's crypto symbols, and does not say so.
+
+    /quote?symbol=BTC/USD returns HTTP 200 with an all-zero body, so every crypto
+    name silently dropped out of the pre-screen and each pass reported no_data.
+    """
+    from discovery.finnhub_source import finnhub_symbol
+    assert finnhub_symbol("BTC/USD") == "BINANCE:BTCUSDT"
+    assert finnhub_symbol("ETH/USD") == "BINANCE:ETHUSDT"
+    # Equities are already Finnhub ids and must pass through untouched.
+    assert finnhub_symbol("AAPL") == "AAPL"
+    assert finnhub_symbol("SPY") == "SPY"
+
+
+def test_the_all_zero_quote_finnhub_returns_for_an_unmapped_symbol_is_no_data():
+    """The zero body must read as absent, never as a real price of 0."""
+    from discovery.finnhub_source import parse_quote
+    zeros = {"c": 0, "d": None, "dp": None, "h": 0, "l": 0, "o": 0, "pc": 0,
+             "t": 0}
+    assert parse_quote(zeros) == {}
+
+
+def test_stage_c_does_not_re_gate_what_stage_b_already_gated(monkeypatch):
+    """Each stage screens ONCE. Stage C re-gating was a wall, not a saving.
+
+    consensus() runs the trading base-check gate by default, and that gate
+    skipped every discovery survivor on the absent order book. So consensus
+    returned a flat verdict WITHOUT calling a provider: Stage C recorded council
+    calls that never happened and avoid verdicts nobody had reasoned about.
+    """
+    from discovery import evaluate
+    seen = {}
+
+    def fake_consensus(state, providers=None, cfg_path=None, gate=None):
+        seen["gate"] = gate
+        seen["state"] = state
+        class R:
+            bias, confidence, edge, agreement_count, per_model = 0.5, 0.8, 0.1, 3, []
+        return R()
+
+    import llm_consensus
+    monkeypatch.setattr(llm_consensus, "consensus", fake_consensus)
+    ev = evaluate.four_level_evaluator(
+        price_for=lambda s: 100.0,
+        snapshot_for=lambda s: {"price": 100.0, "change_pct": 9.0,
+                                "high": 105.0, "low": 96.0},
+        category_for=lambda s: "crypto")
+    ev("BTC/USD")
+
+    # An explicit gate is passed, so consensus cannot fall back to the trading
+    # gate that structurally rejects discovery candidates.
+    assert seen["gate"] is not None
+    assert seen["gate"].should_review({}).proceed is True
+    # And the council sees the movement, not just a price.
+    assert seen["state"]["ret_5"] == pytest.approx(0.09)
