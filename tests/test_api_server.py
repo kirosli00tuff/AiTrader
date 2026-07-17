@@ -146,15 +146,22 @@ def env(tmp_path, monkeypatch):
     monkeypatch.setenv("MAL_DB_PATH", str(db))
     monkeypatch.setenv("MAL_CONTROL_DIR", str(tmp_path / "control"))
     monkeypatch.setenv("MAL_WEIGHT_OVERRIDE_PATH", str(tmp_path / "weights.json"))
-    # Clear real API keys/flags so the integration health checks stay offline
+    # Clear real API keys so the integration health checks stay offline
     # (not_configured) in tests: no real network or socket call is made.
     for _v in ("OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GEMINI_API_KEY",
                "APCA_API_KEY_ID", "APCA_API_SECRET_KEY", "ALPACA_API_KEY",
                "ALPACA_API_SECRET", "ALPACA_PAPER_API_KEY",
                "ALPACA_PAPER_API_SECRET", "WHALE_ALERT_API_KEY",
-               "UNUSUAL_WHALES_API_KEY", "SEC_EDGAR_ENABLED",
-               "FINNHUB_API_KEY"):
+               "UNUSUAL_WHALES_API_KEY", "FINNHUB_API_KEY"):
         monkeypatch.delenv(_v, raising=False)
+    # The whale feed FLAGS are SET off, not deleted. Deleting them used to mean
+    # off, because the checks read the env directly. They now resolve
+    # env > controls.json > config, so a deleted var falls through to the SHIPPED
+    # config, which turns SEC EDGAR ON, and the keyless check then makes a REAL
+    # request to efts.sec.gov. Setting them keeps this fixture's promise above
+    # ("no real network or socket call is made") true under the new resolution.
+    for _f in ("SEC_EDGAR_ENABLED", "WHALE_LIVE_ENABLED", "WHALE_ALERT_ENABLED"):
+        monkeypatch.setenv(_f, "false")
     kdir = tmp_path / "keystore"
     kdir.mkdir()
     import account_manager.credentials as creds
@@ -2489,7 +2496,11 @@ def test_the_sleeve_state_never_returns_a_key_value(env, client, monkeypatch):
 # other reads an env only one process gets.
 
 def _wa_on(monkeypatch):
+    # Delete the env so the patched CONFIG below decides, which is the path the
+    # API backend actually takes (nobody exports the whale env to it). The env
+    # fixture pins these off, so a test wanting a feed on must say so here.
     monkeypatch.delenv("WHALE_ALERT_ENABLED", raising=False)
+    monkeypatch.delenv("SEC_EDGAR_ENABLED", raising=False)
     from api_server import store as st
     monkeypatch.setattr(st, "load_config",
                         lambda: {"whale": {"whale_alert_enabled": True,
@@ -2623,15 +2634,24 @@ def test_whale_alert_counts_toward_the_aggregate_only_once_configured(env, clien
                                                                       monkeypatch):
     """Off does not count as a failure. On-but-failing contributes amber."""
     from api_server import health
-    monkeypatch.delenv("WHALE_ALERT_ENABLED", raising=False)
     from api_server import store as st
+    # Patch _key and _get in BOTH snapshots, so the only thing that differs is
+    # the whale flag. Patching them in just one made the +1 hold only because
+    # conftest happens to empty the keystore: any other check becoming
+    # configured would have broken it for an unrelated reason.
+    _wa_key(client, monkeypatch)
+    monkeypatch.setattr(health, "_get", lambda url, headers: 200)
+
+    # Turn on ONLY whale_alert, so the delta is about the one integration under
+    # test. _wa_on also enables SEC EDGAR, which would make this +2 and hide
+    # what the assertion is claiming.
+    monkeypatch.delenv("WHALE_ALERT_ENABLED", raising=False)
     monkeypatch.setattr(st, "load_config",
                         lambda: {"whale": {"whale_alert_enabled": False}})
     before = client.get("/health/integrations").json()["summary"]
 
-    _wa_on(monkeypatch)
-    _wa_key(client, monkeypatch)
-    monkeypatch.setattr(health, "_get", lambda url, headers: 200)
+    monkeypatch.setattr(st, "load_config",
+                        lambda: {"whale": {"whale_alert_enabled": True}})
     after = client.get("/health/integrations").json()["summary"]
     assert after["configured_count"] == before["configured_count"] + 1
 
@@ -2683,3 +2703,64 @@ def test_whale_feeds_never_returns_a_key_value(env, client, monkeypatch):
     assert fake not in r.text
     # It reports only WHETHER a key resolves.
     assert isinstance(r.json()["whale_alert"]["keyed"], bool)
+
+
+def test_the_health_row_and_the_ops_panel_agree_about_sec_edgar(env, client,
+                                                                monkeypatch):
+    """THE CONTRADICTION. Both surfaces must resolve the flag the same way.
+
+    Fixing the env-vs-config source for Whale Alert and leaving _check_sec_edgar
+    on the old env-only read made the Health row say 'off' while the Ops panel
+    beside it said ON, for the same feed, in the same commit.
+    """
+    from api_server import health, store as st
+    _wa_on(monkeypatch)                       # config: both feeds on
+    monkeypatch.setattr(health, "_get", lambda url, headers: 200)
+
+    ops_on = st.whale_feeds()["sec_edgar"]["enabled"]
+    health_state, _reason = health._check_sec_edgar()
+    assert ops_on is True
+    assert health_state != health.NOT_CONFIGURED, (
+        "the Health row reports sec_edgar unconfigured while the Ops panel "
+        "reports it enabled: the two surfaces disagree about one feed")
+
+    # And OFF agrees too, in the other direction.
+    monkeypatch.setattr(st, "load_config",
+                        lambda: {"whale": {"sec_edgar_enabled": False}})
+    assert st.whale_feeds()["sec_edgar"]["enabled"] is False
+    assert health._check_sec_edgar()[0] == health.NOT_CONFIGURED
+
+
+def test_recent_whale_activity_uses_a_real_24h_window(env, client, monkeypatch):
+    """last_24h must not count the whole calendar date of the cutoff.
+
+    signals.ts is ISO 8601 with a 'T' and a 'Z'; SQLite's datetime() renders a
+    space and no Z. 'T' (0x54) sorts above ' ' (0x20), so comparing against
+    datetime() made every row on the cutoff's DATE compare greater regardless of
+    time: a 32h-old signal counted as 'last 24h' and the window was really 48h.
+    """
+    import sqlite3
+    from datetime import datetime, timedelta, timezone
+    from api_server import store as st
+
+    now = datetime.now(timezone.utc)
+    def iso(hours):
+        return (now - timedelta(hours=hours)).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    conn = sqlite3.connect(os.environ["MAL_DB_PATH"])
+    # 1h and 10h are inside the window. 32h and 45h are outside it. 32h is the
+    # one the old comparison wrongly counted: it lands on the cutoff's date.
+    for h in (1, 10, 32, 45):
+        conn.execute("INSERT INTO signals(ts, venue, symbol, factor, bias, "
+                     "confidence, edge, payload_json) VALUES(?,?,?,?,?,?,?,?)",
+                     (iso(h), "alpaca", "BTC/USD", "whale_signal", 0.1, 0.5,
+                      0.01, "{}"))
+    conn.commit()
+    conn.close()
+
+    _wa_on(monkeypatch)
+    a = st.whale_feeds()["signal_activity"]
+    assert a["last_24h"] == 2, (
+        f"expected the two signals inside 24h, got {a['last_24h']}: the cutoff "
+        f"is comparing an ISO 'T' timestamp against a space-separated datetime()")
+    assert a["total"] == 4

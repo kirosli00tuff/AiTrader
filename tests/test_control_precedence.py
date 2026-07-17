@@ -364,3 +364,74 @@ def test_the_suite_cannot_read_the_hosts_live_control_file():
     from discovery import settings
     assert settings.discovery_enabled(None) is False
     assert settings.long_term_sleeve_enabled(None) is False
+
+
+def test_the_whale_feed_flags_are_pinned_off_for_the_suite(ctl):
+    """No test may make a real request to efts.sec.gov.
+
+    The whale flags resolve env > controls.json > config, and the SHIPPED config
+    turns SEC EDGAR on. _check_sec_edgar is KEYLESS, so nothing else stops it:
+    the moment those checks stopped reading the env directly, any test calling
+    GET /health/integrations started hitting sec.gov for real. conftest pins the
+    flags off, and this fails if that goes away.
+    """
+    import os
+    for flag in ("SEC_EDGAR_ENABLED", "WHALE_LIVE_ENABLED", "WHALE_ALERT_ENABLED"):
+        assert os.environ.get(flag) == "false", (
+            f"{flag} must be pinned off for the suite, or a keyless health "
+            f"check makes a real network call")
+    from api_server import store
+    assert store.whale_flag("sec_edgar_enabled") is False
+    assert store.whale_flag("whale_alert_enabled") is False
+
+
+def test_the_whale_control_block_is_not_named_whale(ctl):
+    """The runtime block is "whale_feeds", never "whale".
+
+    core/layer_toggles.hpp reads the whale LAYER with a FLAT search for a bare
+    "whale" key: json_get_bool(body, "whale", true). A top-level "whale" object
+    would be found first, parse as neither true nor false, and fall back to the
+    default ON, so an operator turning the whale layer OFF would be ignored by
+    the engine. Pinning the name here because the collision is invisible from
+    Python.
+    """
+    from api_server import controls
+    state = controls.read_controls()
+    assert "whale_feeds" in state
+    assert "whale" not in state, (
+        "a top-level 'whale' key would shadow the whale LAYER toggle in the C++ "
+        "flat reader (core/layer_toggles.hpp)")
+    # And a written file keeps the layer toggle readable: the only bare "whale"
+    # key is the one nested in "layers".
+    controls._write_controls(state)
+    body = open(controls._controls_path()).read()
+    assert '"whale_feeds"' in body
+
+    # The C++ reader searches for the exact needle "whale" and reads whatever
+    # follows the FIRST hit. controls.json already carries two bare whale keys
+    # (layers.whale, a bool, and layer_sources.whale, the string "real"), so the
+    # layer toggle is readable only because `layers` is emitted first. That
+    # ordering dependency predates this block and is noted in PROGRESS.md; what
+    # matters here is that whale_feeds does not add a THIRD hit ahead of them.
+    first = body.index('"whale":')
+    after = body[first + len('"whale":'):].lstrip()
+    assert after.startswith(("true", "false")), (
+        f"the first bare whale key must be the layer bool, got: {after[:20]!r}")
+
+
+def test_the_whale_feeds_block_survives_a_control_write(ctl):
+    """A block absent from _defaults would be DROPPED by the next GUI write.
+
+    read_controls builds from _defaults and merges known keys, so an unknown
+    block silently disappears on the next _write_controls. The whale_feeds block
+    is the runtime lever for a feed that used to require editing a SHIPPED
+    default, so losing it would send the operator back to that.
+    """
+    from api_server import controls
+    state = controls.read_controls()
+    state["whale_feeds"]["whale_alert_enabled"] = True
+    controls._write_controls(state)
+    assert controls.read_controls()["whale_feeds"]["whale_alert_enabled"] is True
+    # A write triggered by an unrelated control must not lose it.
+    controls.set_layer("whale", False)
+    assert controls.read_controls()["whale_feeds"]["whale_alert_enabled"] is True

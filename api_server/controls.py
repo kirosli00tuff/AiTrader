@@ -244,6 +244,21 @@ def _defaults() -> dict:
                                        .get("research_satellite_enabled", False)),
         },
         "rebalance_requested": False,
+        # Whale feed enables: same posture as discovery and the sleeves. Seeded
+        # from config, which ships the Whale Alert trial OFF, so a missing
+        # control file means the SHIPPED value. This is the RUNTIME lever the
+        # feeds lacked: config was the only way to turn Whale Alert on, which
+        # forced an operator to edit a SHIPPED default to express a local choice.
+        #
+        # The key is "whale_feeds" and NOT "whale" on purpose: the C++ layer
+        # reader does a flat search for a bare "whale" key, so a top-level
+        # "whale" object would shadow the whale LAYER toggle and make it read as
+        # ON regardless. See core/layer_toggles.hpp.
+        "whale_feeds": {
+            k: bool((cfg.get("whale", {}) or {}).get(k, False))
+            for k in ("sec_edgar_enabled", "whale_live_enabled",
+                      "whale_alert_enabled")
+        },
         "pending_promote": None,
         "pending_rollback": None,
     }
@@ -366,6 +381,11 @@ def read_controls() -> dict:
     # Allocation only, never a Level-1 value. The defaults are seeded from config
     # in _defaults(); the engine consumes the resolved enable from controls.json
     # each iteration (core/sleeve_controls.hpp), the same as the layer toggles.
+    if isinstance(saved.get("whale_feeds"), dict):
+        for k in ("sec_edgar_enabled", "whale_live_enabled",
+                  "whale_alert_enabled"):
+            if k in saved["whale_feeds"]:
+                state["whale_feeds"][k] = bool(saved["whale_feeds"][k])
     if isinstance(saved.get("sleeves"), dict):
         for s in ("quant_core", "research_satellite"):
             if s in saved["sleeves"]:

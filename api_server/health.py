@@ -26,6 +26,14 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from api_server import store
 
 _TIMEOUT = 6.0
+# integrations() reaps futures with as_completed(timeout=_TIMEOUT * 2 + 2), so a
+# check that outruns that window is abandoned and reports a generic timeout
+# instead of its own classified reason. A retrying check must therefore budget
+# itself: stop retrying once the elapsed time leaves no room for another attempt.
+# Without this, whale's worst case (3 calls x 6s plus 3s of backoff = 21s) blew
+# the 14s window and threw away the reason it had just classified.
+_REAP_WINDOW_S = _TIMEOUT * 2 + 2
+_RETRY_BUDGET_S = _REAP_WINDOW_S - _TIMEOUT - 1.0   # room for one final attempt
 WORKING, FAILING, NOT_CONFIGURED = "working", "failing", "not_configured"
 
 
@@ -121,10 +129,12 @@ def _check_alpaca_trading():
 
 
 def _check_sec_edgar():
-    from whale_signal.adapters import (SEC_EDGAR_ENABLED_ENV, _flag,
-                                       _user_agent)
-    if not _flag(SEC_EDGAR_ENABLED_ENV):
-        return NOT_CONFIGURED, "SEC_EDGAR_ENABLED is off"
+    from whale_signal.adapters import _user_agent
+    # Same resolution as Whale Alert and the Ops panel. Reading the env directly
+    # here reported SEC EDGAR off while config said on, because the env only ever
+    # reaches the bridge. That made this row contradict the Ops panel beside it.
+    if not store.whale_flag("sec_edgar_enabled"):
+        return NOT_CONFIGURED, "sec_edgar_enabled is off"
     status = _get("https://efts.sec.gov/LATEST/search-index?q=Apple&forms=13F-HR",
                   {"User-Agent": _user_agent(), "Accept": "application/json"})
     return (WORKING, "") if status == 200 else (FAILING, f"HTTP {status}")
@@ -149,28 +159,10 @@ def _check_reserved(env: str, label: str):
 
 
 def whale_alert_enabled() -> bool:
-    """The operator's intent for the Whale Alert feed: env override, else config.
-
-    The ADAPTER reads the WHALE_ALERT_ENABLED env var, correctly: the whale
-    library takes env opt-ins and the bridge is spawned with them by
-    stack.whale_env(), which DERIVES them from config. So config is the source of
-    truth and the env is how the bridge gets told.
-
-    This check runs in the API BACKEND, which nobody exports that env to. Reading
-    the env here reported "whale_alert_enabled is off" while config said on and
-    the key resolved: one half reading config, the other reading an env var only
-    one process gets. That is the flag-source mismatch class documented in
-    CONTEXT.md, so this resolves it the way everything else does: an explicit env
-    wins (it is how the bridge is actually configured), else config.
-    """
-    raw = os.environ.get("WHALE_ALERT_ENABLED")
-    if raw is not None:
-        return raw.strip().lower() in ("1", "true", "yes", "on")
-    try:
-        return bool((store.load_config().get("whale", {}) or {})
-                    .get("whale_alert_enabled", False))
-    except Exception:  # noqa: BLE001 - unreadable config means off
-        return False
+    """Kept as the check's own name for readability. The resolution lives in
+    store.whale_flag, shared with the Ops panel and with stack.whale_env (which
+    hands the bridge its env), so the three cannot disagree about one feed."""
+    return store.whale_flag("whale_alert_enabled")
 
 
 def _whale_alert_once(url: str, headers: dict):
@@ -219,6 +211,7 @@ def _check_whale_alert():
            f"?api_key={key}&min_value=500000&start={start}&limit=1")
     headers = {"User-Agent": _user_agent(), "Accept": "application/json"}
     status, resp = 0, None
+    t0 = time.monotonic()
     for attempt in range(_RATE_LIMIT_MAX_RETRIES + 1):
         try:
             status, resp = _whale_alert_once(url, headers)
@@ -226,8 +219,14 @@ def _check_whale_alert():
             return FAILING, f"network unreachable ({type(e).__name__})"
         if status != 429:
             break
-        if attempt < _RATE_LIMIT_MAX_RETRIES:
-            time.sleep(_retry_after_seconds(resp, attempt))
+        if attempt >= _RATE_LIMIT_MAX_RETRIES:
+            break
+        backoff = _retry_after_seconds(resp, attempt)
+        # Reporting "rate limited" beats being reaped mid-retry and reporting
+        # nothing. A slow 429 keeps its classified reason.
+        if time.monotonic() - t0 + backoff > _RETRY_BUDGET_S:
+            break
+        time.sleep(backoff)
 
     if status == 200:
         return WORKING, "one tx query ok"

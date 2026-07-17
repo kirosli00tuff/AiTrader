@@ -14,9 +14,12 @@ import { shortTs } from "../api/format";
 import type { WhaleFeed } from "../api/types";
 
 function FeedRow({ f, testid }: { f: WhaleFeed; testid: string }) {
-  // A feed needing a key that is on but unkeyed cannot work, and says so rather
-  // than reading as merely on.
-  const unkeyed = f.enabled && f.needs_key && !f.keyed;
+  // A feed that needs a key and has none cannot work, whether it is on or off.
+  // Showing this only when ENABLED hid the prerequisite from the operator who
+  // most needs it: the one deciding whether to turn the feed on.
+  const unkeyed = f.needs_key && !f.keyed;
+  // Off is grey (a choice). On-but-unkeyed is amber (cannot work). On and keyed
+  // is green. An off feed missing its key stays grey but still says "no key".
   const dot = !f.enabled ? "d" : unkeyed ? "a" : "g";
   return (
     <div className="sleeve-row" data-testid={testid}>

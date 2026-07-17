@@ -1,6 +1,8 @@
 """Pytest config — make repo-root packages importable, and keep the suite
 hermetic against the host credential keystore."""
+import atexit
 import os
+import shutil
 import sys
 import tempfile
 
@@ -31,3 +33,27 @@ os.environ["MAL_KEYSTORE_DIR"] = tempfile.mkdtemp(prefix="mal_test_keystore_")
 # shipped-default assertion is right either way. Tests that need their own
 # control file set MAL_CONTROL_DIR per test, exactly as the keystore tests do.
 os.environ["MAL_CONTROL_DIR"] = tempfile.mkdtemp(prefix="mal_test_controls_")
+
+# Pin the whale feed flags OFF for the suite. These resolve env > controls.json >
+# config, and the SHIPPED config turns SEC EDGAR on, so without this a test that
+# calls GET /health/integrations makes a REAL request to efts.sec.gov: slow,
+# flaky, network-dependent, and rude to SEC's fair-use limit. The env is the
+# highest-precedence override, so setting it here pins every feed off no matter
+# what the host config or control file say.
+#
+# Same reasoning as the keystore and control dir above: a test must never depend
+# on this machine's configuration. A test that wants a feed ON deletes the var it
+# cares about and patches the config it wants, which keeps the intent local and
+# visible in the test.
+for _flag in ("SEC_EDGAR_ENABLED", "WHALE_LIVE_ENABLED", "WHALE_ALERT_ENABLED"):
+    os.environ[_flag] = "false"
+
+
+# Both temp dirs above are process-scoped, so remove them when the run ends
+# rather than leaving one of each per invocation under /tmp forever.
+@atexit.register
+def _cleanup_test_dirs() -> None:
+    for var in ("MAL_KEYSTORE_DIR", "MAL_CONTROL_DIR"):
+        path = os.environ.get(var, "")
+        if "mal_test_" in path:
+            shutil.rmtree(path, ignore_errors=True)

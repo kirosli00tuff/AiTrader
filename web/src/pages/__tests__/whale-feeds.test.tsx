@@ -92,11 +92,18 @@ it("shows an off Whale Alert grey, and it does not count as a failure", async ()
   expect(within(tr).getByText("—")).toBeTruthy();      // no latency
 });
 
-it("never renders the key", async () => {
-  view(<HealthPage />);
-  await screen.findByText("Whale Alert (crypto trial)");
-  expect(document.body.textContent).not.toContain("api_key=");
-});
+// The "never renders the key" assertion lives in tests/test_api_server.py
+// (test_whale_alert_health_never_returns_the_key), NOT here, and deliberately.
+//
+// It was here first, asserting the DOM lacked "api_key=" against a mock that had
+// no key in it: an assertion that could not fail. Making it real (mocking a
+// reason that CARRIES a keyed URL) fails, because HealthPage renders the reason
+// verbatim, which is correct: the guard is the backend classifying its own
+// failures into fixed phrases so a key never reaches `reason` at all. That
+// backend test raises an HTTPError whose URL contains the key and asserts the
+// response does not, which is the same claim at the layer that can actually
+// enforce it. Masking in the UI would only hide a backend bug behind a mangled
+// string.
 
 // --- Ops panel -------------------------------------------------------------
 
@@ -118,6 +125,20 @@ it("reads a disabled feed as intentionally off, not as broken", async () => {
   const wa = await screen.findByTestId("feed-whale-alert");
   expect(within(wa).getByText("off by choice")).toBeTruthy();
   expect(wa.querySelector(".dot.d")).toBeTruthy();     // grey, not red
+});
+
+it("flags an OFF feed that has no key, so the prerequisite is visible first", async () => {
+  // The operator deciding whether to enable it is exactly who needs to know a
+  // key is missing. Showing this only when enabled hid it from them until after
+  // they turned it on and restarted.
+  mockFeeds.mockResolvedValue({
+    ...FEEDS, whale_alert: { ...FEEDS.whale_alert, enabled: false, keyed: false } });
+  view(<WhaleFeedsPanel />);
+  const wa = await screen.findByTestId("feed-whale-alert");
+  expect(within(wa).getByText("off by choice")).toBeTruthy();
+  expect(within(wa).getByText("no key")).toBeTruthy();
+  // Still grey, not amber: it is off by choice, and the key is a note not a fault.
+  expect(wa.querySelector(".dot.d")).toBeTruthy();
 });
 
 it("flags an enabled feed that has no key, since it cannot work", async () => {

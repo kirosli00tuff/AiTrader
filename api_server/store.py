@@ -548,6 +548,61 @@ def council() -> dict:
 
 # --- Whale ------------------------------------------------------------------
 
+# Whale feed flags: the config key each one lives under, and the env var the
+# whale library reads for it. The library takes env opt-ins CORRECTLY (it is a
+# standalone library), and stack.whale_env() derives that env FROM the resolved
+# flag and spawns the bridge with it. So the env is the TRANSPORT and this is
+# where the intent is resolved.
+_WHALE_FLAG_ENV = {
+    "sec_edgar_enabled": "SEC_EDGAR_ENABLED",
+    "whale_live_enabled": "WHALE_LIVE_ENABLED",
+    "whale_alert_enabled": "WHALE_ALERT_ENABLED",
+}
+
+
+def whale_flag(key: str, cfg: dict | None = None) -> bool:
+    """Resolve one whale feed flag: env override, then controls.json, then config.
+
+    ONE resolution for every caller (the health checks, the Ops panel, and
+    stack.whale_env, which hands the bridge its env). Two bugs came from not
+    having this:
+
+      * The health checks read the ENV directly. The env only reaches the BRIDGE,
+        so the API backend read a transport it never received and reported an
+        enabled feed as off.
+      * Fixing that for Whale Alert alone left SEC EDGAR on the old path, so the
+        Health row and the Ops panel disagreed about the same feed.
+
+    Precedence matches the rule in CONTEXT.md (controls.json over config), with
+    the env first because that is how the bridge is ACTUALLY configured: if an
+    operator or a launcher sets it explicitly, the checks must agree with the
+    process doing the fetching rather than with a file it ignored.
+
+    `cfg` is optional so a caller that already loaded config does not pay for a
+    second full YAML parse (load_config is not cached).
+    """
+    env = os.environ.get(_WHALE_FLAG_ENV[key])
+    if env is not None:
+        return env.strip().lower() in ("1", "true", "yes", "on")
+    try:
+        from llm_consensus import control_file
+        # "whale_feeds", NOT "whale": the C++ layer reader does a FLAT search
+        # for a bare "whale" key (core/layer_toggles.hpp json_get_bool(body,
+        # "whale", true)), so a top-level "whale" OBJECT would be found first,
+        # parse as neither true nor false, and silently fall back to the default
+        # ON. That would make the whale LAYER toggle unreadable.
+        override = control_file.control_block("whale_feeds").get(key)
+        if override is not None:
+            # as_bool, so 1/0 agree with the C++ reader and a malformed value
+            # falls through to config rather than being guessed at.
+            return control_file.as_bool(override, False)
+    except Exception:  # noqa: BLE001 - a control file is never load-bearing
+        pass
+    if cfg is None:
+        cfg = load_config().get("whale", {}) or {}
+    return bool(cfg.get(key, False))
+
+
 def whale_feeds() -> dict:
     """Read-only state of BOTH whale sources for the Ops section.
 
@@ -556,9 +611,10 @@ def whale_feeds() -> dict:
     by side: which is on, which is off on purpose, and which one a signal could
     have come from.
 
-    HONEST ABOUT THE ACTIVITY COUNT. `whale_activity` holds RAW per-fetch rows
-    and is empty in practice (0 rows), because the engine asks the bridge for a
-    SCORED signal and never persists the underlying activity. So the count here
+    HONEST ABOUT THE ACTIVITY COUNT. `whale_activity` holds RAW per-fetch rows,
+    and nothing in the live path writes it: the engine asks the bridge for a
+    SCORED signal and never persists the activity behind it (ops/demo.py is the
+    only writer). So the count here
     is whale FACTOR signals from the `signals` table. That is real data, but it
     means something narrower than "Whale Alert fetches":
 
@@ -576,8 +632,6 @@ def whale_feeds() -> dict:
     Never returns a key value: it reports whether one RESOLVES, never what it is.
     """
     cfg = load_config().get("whale", {}) or {}
-    from api_server.health import whale_alert_enabled  # lazy: health imports store
-
     try:
         from account_manager.credentials import resolve_env
         keyed = bool(resolve_env("WHALE_ALERT_API_KEY"))
@@ -587,22 +641,29 @@ def whale_feeds() -> dict:
     row = query_one(
         "SELECT ts FROM signals WHERE factor='whale_signal' "
         "ORDER BY id DESC LIMIT 1")
+    # The cutoff must be built in the STORED format. signals.ts is ISO 8601 with
+    # a 'T' and a 'Z' ("2026-07-16T01:00:00Z"); datetime() renders a space and no
+    # Z ("2026-07-16 08:27:22"). 'T' (0x54) sorts ABOVE ' ' (0x20), so comparing
+    # against datetime() made every row on the cutoff's calendar DATE compare
+    # greater regardless of its time: a 32h-old signal counted as "last 24h" and
+    # the window was really up to 48h. strftime with the stored format compares
+    # like for like, and stays a plain string comparison the index can use.
     recent = query_one(
         "SELECT COUNT(*) AS n FROM signals WHERE factor='whale_signal' "
-        "AND ts >= datetime('now','-1 day')")
+        "AND ts >= strftime('%Y-%m-%dT%H:%M:%SZ','now','-1 day')")
     total = query_one(
         "SELECT COUNT(*) AS n FROM signals WHERE factor='whale_signal'")
 
     return {
         "sec_edgar": {
-            "enabled": bool(cfg.get("sec_edgar_enabled", False)),
+            "enabled": whale_flag("sec_edgar_enabled", cfg),
             "label": "SEC EDGAR 13F + Form 4",
             "detail": ("equities, free, keyless, delayed (13F about 45 days, "
                        "Form 4 about 2 business days)"),
             "needs_key": False,
         },
         "whale_alert": {
-            "enabled": whale_alert_enabled(),
+            "enabled": whale_flag("whale_alert_enabled", cfg),
             "keyed": keyed,
             "label": "Whale Alert (crypto trial)",
             "detail": ("crypto on-chain, keyed, opt-in trial, developer plan "

@@ -158,13 +158,20 @@ def whale_env() -> dict:
     except Exception:
         cfg = {}
 
-    def _b(v) -> str:
-        return "true" if v else "false"
+    def _b(key: str) -> str:
+        # store.whale_flag, the SAME resolution the health checks and the Ops
+        # panel use (controls.json over config). Deriving the bridge's env from
+        # config alone would let the operator's runtime override enable a feed in
+        # the GUI while the process doing the fetching never heard about it.
+        try:
+            return "true" if store.whale_flag(key, cfg) else "false"
+        except Exception:  # noqa: BLE001 - a start must not die on a flag read
+            return "false"
 
-    return {"SEC_EDGAR_ENABLED": _b(cfg.get("sec_edgar_enabled")),
-            "WHALE_LIVE_ENABLED": _b(cfg.get("whale_live_enabled")),
+    return {"SEC_EDGAR_ENABLED": _b("sec_edgar_enabled"),
+            "WHALE_LIVE_ENABLED": _b("whale_live_enabled"),
             # Whale Alert crypto trial feed, opt-in, default OFF.
-            "WHALE_ALERT_ENABLED": _b(cfg.get("whale_alert_enabled"))}
+            "WHALE_ALERT_ENABLED": _b("whale_alert_enabled")}
 
 
 def bridge_env() -> dict:
