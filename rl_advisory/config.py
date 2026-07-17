@@ -65,7 +65,19 @@ def rl_enabled(cfg_path: str | None = None) -> bool:
     shipped = bool(_rl(cfg_path).get("rl_enabled", False))
     if cfg_path is not None:
         return shipped  # a pinned config ignores the control file (the tests)
-    from llm_consensus import control_file
+    try:
+        from llm_consensus import control_file
+    except Exception:  # noqa: BLE001
+        # rl_advisory must degrade, never raise. service.score_rl promises
+        # "none of which ever raise (offline runs must not break)", and this is a
+        # CROSS-PACKAGE import: llm_consensus can be absent in a trimmed
+        # environment, or half-initialised during a circular import. An
+        # unguarded ImportError here propagated through score_rl and would 500
+        # the bridge's /score/rl instead of returning a labelled neutral.
+        #
+        # No control file reachable means no override, so config decides, and
+        # config ships RL off. Falling back cannot enable anything.
+        return shipped
     return control_file.flag("rl_enabled", shipped)
 
 

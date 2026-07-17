@@ -250,3 +250,25 @@ def test_rl_enabled_honors_controls_json_over_config(tmp_path, monkeypatch):
     assert rl_enabled() is True
     # A PINNED config ignores the control file, so tests stay hermetic.
     assert rl_enabled(_cfg(tmp_path, rl_enabled=False)) is False
+
+
+def test_rl_enabled_degrades_instead_of_raising_when_llm_consensus_is_absent(
+        monkeypatch):
+    """rl_advisory must degrade, never raise.
+
+    service.score_rl promises "none of which ever raise (offline runs must not
+    break)". rl_enabled reaches ACROSS packages for the control file, and an
+    unguarded ImportError there propagated through score_rl and would 500 the
+    bridge's /score/rl instead of returning a labelled neutral.
+    """
+    import sys
+    from rl_advisory.config import rl_enabled
+    from rl_advisory.service import score_rl
+    monkeypatch.setitem(sys.modules, "llm_consensus", None)
+
+    # No control file reachable means no override, so config decides, and config
+    # ships RL off. The fallback cannot enable anything.
+    assert rl_enabled() is False
+    v = score_rl({"symbol": "BTC-USD", "ret_5": 0.03})
+    assert v["source"] == "disabled"
+    assert v["bias"] == 0.0 and v["confidence"] == 0.0

@@ -243,8 +243,7 @@ def research_satellite_enabled(cfg_path: str | None = None) -> bool:
     if cfg_path is not None:
         return shipped  # a pinned config ignores the control file (the tests)
     from llm_consensus import control_file
-    v = control_file.control_block("sleeves").get("research_satellite")
-    return bool(v) if isinstance(v, bool) else shipped
+    return control_file.block_flag("sleeves", "research_satellite", shipped)
 
 
 def research_conviction_threshold(cfg_path: str | None = None) -> float:

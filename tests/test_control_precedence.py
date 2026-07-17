@@ -228,3 +228,78 @@ def test_no_control_read_returns_or_logs_a_key_value(ctl):
     body = json.dumps(control_file.control_state())
     for shape in ("sk-", "sk-ant-", "AKIA", "token=", "api_key"):
         assert shape not in body
+
+
+# --- Regressions found in review of the precedence commit itself -------------
+#
+# The atomic-write fix reintroduced the SAME silent-fallback bug through two
+# different doors, and the strict bool check reintroduced it through a third.
+# Every reader falls back to config on any read failure, which is the right
+# posture but makes every one of these silent. They are pinned here because a
+# silent revert to shipped defaults is exactly what this file exists to prevent.
+
+def test_the_control_file_stays_readable_by_other_users(ctl):
+    """tempfile.mkstemp creates 0600. The old open(path, "w") gave 0644.
+
+    The engine, the bridge, and the API backend are three processes that may not
+    share a uid. A reader that cannot open the file does not fail loudly, it
+    falls back to config and silently acts on the shipped defaults.
+    """
+    import stat
+    from api_server import controls
+    controls._write_controls({"discovery": {"discovery_enabled": True}})
+    mode = stat.S_IMODE(os.stat(ctl / "controls.json").st_mode)
+    assert mode == 0o644, f"controls.json must stay group/world readable, got {oct(mode)}"
+    assert mode & stat.S_IROTH, "a reader on another uid must be able to open it"
+
+
+def test_the_write_leaves_no_temp_file_behind(ctl):
+    from api_server import controls
+    for _ in range(3):
+        controls._write_controls({"discovery": {"discovery_enabled": True}})
+    assert [f for f in os.listdir(ctl) if f.startswith(".controls.")] == []
+
+
+def test_an_integer_boolean_agrees_with_the_cpp_reader(ctl):
+    """core/bridge_client.cpp json_get_bool accepts 1/0. Python must too.
+
+    A strict isinstance(v, bool) rejected `1`, fell back to config, and gave the
+    engine ON while the funnel read OFF: the exact reported mismatch, through a
+    hand-edit instead of a torn read.
+    """
+    from discovery import settings
+    from llm_consensus.config_access import gate_enabled, research_satellite_enabled
+
+    _write(ctl, {"discovery": {"discovery_enabled": 1}, "gate_enabled": 1,
+                 "sleeves": {"research_satellite": 1}})
+    assert settings.discovery_enabled(None) is True
+    assert gate_enabled() is True
+    assert research_satellite_enabled() is True
+
+    _write(ctl, {"discovery": {"discovery_enabled": 0}, "gate_enabled": 0,
+                 "sleeves": {"research_satellite": 0}})
+    assert settings.discovery_enabled(None) is False
+    # config ships gate_enabled True, so a control-file 0 has to win.
+    assert gate_enabled() is False
+    assert research_satellite_enabled() is False
+
+
+def test_a_malformed_boolean_is_not_guessed_at(ctl):
+    """1 and 0 are accepted. A string or a float is NOT.
+
+    Exact parity with the C++ char-sniffing is not the goal past that point (it
+    reads "0.5" as false). A value we cannot read means no override, so config
+    decides, and config ships every operator flag off. A malformed boolean must
+    never be read as an intent to start a spender.
+    """
+    from llm_consensus import control_file
+    for bad in ("yes", "true", 0.5, 2, None, [], {}):
+        assert control_file.as_bool(bad, False) is False
+        assert control_file.as_bool(bad, True) is True   # falls back, not flips
+
+
+def test_as_bool_does_not_take_the_int_branch_for_real_bools(ctl):
+    """isinstance(True, int) is True in Python, so bool must be checked first."""
+    from llm_consensus import control_file
+    assert control_file.as_bool(True, False) is True
+    assert control_file.as_bool(False, True) is False

@@ -113,11 +113,47 @@ def overlay(cfg: dict, block_name: str, cfg_path: str | None = None) -> dict:
     return {**cfg, **control_block(block_name)}
 
 
+def as_bool(v: object, default: bool) -> bool:
+    """Coerce a control-file value to a bool the way the C++ reader does.
+
+    THE TWO HALVES MUST AGREE ON WHAT A BOOLEAN IS, or this module's whole
+    purpose fails at the last step. core/bridge_client.cpp json_get_bool accepts
+    `true`/`false` AND the bare integers `1`/`0`:
+
+        if (json[*p] == '1') return true;
+        if (json[*p] == '0') return false;
+
+    A strict isinstance(v, bool) here rejected `1`, fell back to config, and
+    reproduced the exact mismatch this file exists to prevent: a hand-edited
+    {"discovery_enabled": 1} read ON in the engine and OFF in the Python funnel.
+    So 1 and 0 are accepted here too. isinstance(True, int) is True in Python, so
+    the bool check must come first or every bool would take the int branch.
+
+    Anything else (a string, a float, null, a typo) is NOT guessed at: it means
+    "no override" and the caller falls back to config, which ships every operator
+    flag off. Exact parity with the C++ char-sniffing is neither achievable nor
+    desirable past this point (it reads "0.5" as false), and a malformed boolean
+    must never be read as an intent to start a spender.
+    """
+    if isinstance(v, bool):
+        return v
+    if isinstance(v, int) and v in (0, 1):
+        return bool(v)
+    return default
+
+
 def flag(key: str, default: bool) -> bool:
     """A TOP-LEVEL control-file boolean (gate_enabled, rl_enabled, ...), falling
     back to `default`, which the caller reads from config. Distinct from
     control_block: these keys sit at the root of controls.json rather than in a
     block, because that is the shape the GUI writes and the C++ flat reader
     expects."""
-    v = control_state().get(key)
-    return bool(v) if isinstance(v, bool) else default
+    return as_bool(control_state().get(key), default)
+
+
+def block_flag(block: str, key: str, default: bool) -> bool:
+    """A boolean nested inside a control block, for the flags whose key NAME
+    differs between config and the control file (config
+    sleeves.research_satellite_enabled vs control sleeves.research_satellite),
+    which is why they cannot be block-overlaid."""
+    return as_bool(control_block(block).get(key), default)

@@ -30,6 +30,16 @@ from llm_consensus import control_file
 
 _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
+# Mode for controls.json. Readable by anyone, writable by the owner, which is
+# what the previous open(path, "w") produced under the usual umask and what the
+# readers depend on. It is set EXPLICITLY rather than left to mkstemp (0600) or
+# to the process umask, because the engine, the bridge, and the API backend are
+# three processes that may not share a uid, and a reader that cannot open this
+# file does not fail loudly: it falls back to config and silently acts on the
+# shipped defaults. The file carries operator toggles and never a credential
+# (asserted in tests/test_control_precedence.py), so it is readable by design.
+_CONTROLS_MODE = 0o644
+
 # Validated domains -----------------------------------------------------------
 ADAPTIVE, COUNCIL, DNN, WHALE = "adaptive", "council", "dnn_advisory", "whale"
 LAYERS = (ADAPTIVE, COUNCIL, DNN, WHALE)   # safety has NO toggle (always on)
@@ -458,10 +468,42 @@ def _write_controls(state: dict) -> None:
     d = _control_dir()
     fd, tmp = tempfile.mkstemp(dir=d, prefix=".controls.", suffix=".tmp")
     try:
-        with os.fdopen(fd, "w") as fh:
+        # mkstemp creates 0600. The old open(path, "w") created umask-default
+        # (0644 typically), so replacing it blind NARROWED the file to
+        # owner-only. Every reader swallows a read error and falls back to
+        # config, so a reader running as another user (a service account, a
+        # container uid, a desktop launcher) would not fail loudly, it would
+        # silently see the SHIPPED defaults: the exact mismatch this whole
+        # change exists to remove, reintroduced through permissions.
+        #
+        # controls.json holds operator toggles and never a credential (asserted
+        # in tests/test_control_precedence.py), so it is readable by design. The
+        # processes that must read it may not share a uid.
+        os.fchmod(fd, _CONTROLS_MODE)
+        fh = os.fdopen(fd, "w")
+        # fdopen TOOK OWNERSHIP of fd. Closing it ourselves after this point
+        # would be a double close, and a double close is not harmless in a
+        # threaded server: the number can already have been reused by another
+        # thread's open(), so we would be closing someone else's file. Forget
+        # the raw fd and let the file object own it.
+        fd = -1
+        with fh:
             json.dump(out, fh, indent=2)
+            # os.replace makes the RENAME atomic against readers, not the
+            # CONTENTS durable against a crash. Without this, a power loss can
+            # leave a zero-length controls.json, which reads as "no override"
+            # and silently reverts every toggle to its shipped default on
+            # restart. This runs on operator toggles, not a hot path.
+            fh.flush()
+            os.fsync(fh.fileno())
         os.replace(tmp, _controls_path())
     except Exception:
+        # Close the fd only if fdopen never took it (it raised, or fchmod did).
+        if fd != -1:
+            try:
+                os.close(fd)
+            except OSError:
+                pass
         # Never leave a temp file behind on a failed write.
         try:
             os.unlink(tmp)
