@@ -1,0 +1,230 @@
+"""THE precedence rule: controls.json overrides config, on BOTH sides.
+
+The defect these exist to catch, confirmed from live logs: the C++ engine read
+discovery_enabled from controls.json (where the GUI toggle writes it) and saw ON,
+while the Python funnel read the config default and saw OFF. The engine logged
+"engine reads discovery ON but the Python funnel reads it OFF" and refused every
+pass. One flag, two sources, two answers.
+
+Two root causes, both proven here rather than asserted:
+
+  1. A TORN READ. api_server wrote controls.json with open(path, "w"), which
+     TRUNCATES before writing. Every reader swallows a read error and falls back
+     to config, so a read landing in that window did not fail loudly, it silently
+     reported the SHIPPED default. Measured on the old writer: 88 percent of
+     reads returned discovery OFF while the file on disk said ON.
+  2. A CWD-RELATIVE PATH. config ships system.control_dir as the relative
+     ".control", and each of the three processes resolved it against its OWN
+     working directory. They agreed only by all happening to launch from the repo
+     root.
+
+The rule now has one implementation (llm_consensus/control_file.py) that every
+Python reader shares, and the C++ side mirrors it in core/*_controls.hpp.
+"""
+from __future__ import annotations
+
+import json
+import os
+import threading
+
+import pytest
+
+from llm_consensus import control_file
+
+
+@pytest.fixture
+def ctl(tmp_path, monkeypatch):
+    monkeypatch.setenv("MAL_CONTROL_DIR", str(tmp_path))
+    return tmp_path
+
+
+def _write(ctl, state: dict) -> None:
+    (ctl / "controls.json").write_text(json.dumps(state, indent=2))
+
+
+# --- The rule ---------------------------------------------------------------
+
+def test_controls_json_overrides_config(ctl):
+    from discovery import settings
+    _write(ctl, {"discovery": {"discovery_enabled": True}})
+    # Config ships discovery OFF. The operator's file says ON. The operator wins.
+    assert settings.discovery_enabled(None) is True
+
+
+def test_controls_json_overrides_config_in_both_directions(ctl):
+    """A toggle that can only ever turn something ON is not a toggle."""
+    from discovery import settings
+    _write(ctl, {"discovery": {"discovery_enabled": False}})
+    assert settings.discovery_enabled(None) is False
+
+
+def test_absent_control_file_falls_back_to_the_shipped_default(ctl):
+    from discovery import settings
+    assert not (ctl / "controls.json").exists()
+    assert settings.discovery_enabled(None) is False   # config ships it off
+
+
+def test_an_unreadable_control_file_means_no_override_not_a_crash(ctl):
+    from discovery import settings
+    (ctl / "controls.json").write_text('{"discovery": {"discovery_enabled":')
+    # No override, so config decides. A broken file must never START a spender.
+    assert settings.discovery_enabled(None) is False
+    assert control_file.control_state() == {}
+
+
+def test_a_key_the_control_file_omits_falls_back_per_key(ctl):
+    """Precedence is per KEY, not per file: a partial block overrides only what
+    it carries, so an operator setting one field does not reset the rest."""
+    from discovery import settings
+    _write(ctl, {"discovery": {"discovery_enabled": True}})
+    assert settings.discovery_enabled(None) is True
+    # max_finalists is absent from the control file, so config's value stands.
+    assert settings.max_finalists(None) == 12
+
+
+# --- The same rule for every other GUI-toggleable flag ----------------------
+
+def test_the_adaptive_flags_follow_the_rule(ctl):
+    from adaptive import settings as a
+    _write(ctl, {"adaptive_realtime": {"adaptive_news_feed_enabled": True}})
+    assert a.news_feed_enabled() is True
+    _write(ctl, {"adaptive_realtime": {"adaptive_news_feed_enabled": False}})
+    assert a.news_feed_enabled() is False
+
+
+def test_the_sleeve_flag_follows_the_rule(ctl):
+    """config sleeves.research_satellite_enabled vs control sleeves.research_satellite.
+
+    The key NAMES differ between the two files, which is exactly why this one is
+    mapped explicitly: a generic block overlay would silently miss it.
+    """
+    from llm_consensus.config_access import research_satellite_enabled
+    _write(ctl, {"sleeves": {"research_satellite": True}})
+    assert research_satellite_enabled() is True
+    _write(ctl, {"sleeves": {"research_satellite": False}})
+    assert research_satellite_enabled() is False
+
+
+def test_the_haiku_gate_flag_follows_the_rule(ctl):
+    """The GUI's base-check toggle was cosmetic on the Python side.
+
+    api_server.set_model("gate", ...) writes gate_enabled to controls.json and
+    audits it, and llm_consensus read llm.gate_enabled from config, so the
+    council ran the gate no matter what the operator chose.
+    """
+    from llm_consensus.config_access import gate_enabled
+    _write(ctl, {"gate_enabled": False})
+    assert gate_enabled() is False       # config defaults it True
+    _write(ctl, {"gate_enabled": True})
+    assert gate_enabled() is True
+
+
+def test_the_long_term_flag_follows_the_rule(ctl):
+    from discovery import settings
+    _write(ctl, {"discovery": {"long_term_sleeve_enabled": True}})
+    assert settings.long_term_sleeve_enabled(None) is True
+
+
+def test_a_pinned_config_ignores_the_control_file(ctl, tmp_path):
+    """Tests pin a config, and a local controls.json must not leak into them."""
+    import yaml
+    from discovery import settings
+    _write(ctl, {"discovery": {"discovery_enabled": True}})
+    cfg = tmp_path / "pinned.yaml"
+    cfg.write_text(yaml.safe_dump({"discovery": {"discovery_enabled": False}}))
+    # The control file says ON. The pinned config says OFF. The pin wins.
+    assert settings.discovery_enabled(str(cfg)) is False
+
+
+# --- Root cause 1: the write must be atomic ---------------------------------
+
+def test_a_concurrent_write_never_shows_a_torn_file(ctl, monkeypatch):
+    """THE LIVE BUG. A reader during a GUI write must never see a partial file.
+
+    With the old truncating writer this failed on ~88 percent of reads: the
+    funnel read a half-written file, fell back to config, and reported discovery
+    OFF while the file on disk said ON. That is precisely the mismatch the engine
+    logged.
+    """
+    from api_server import controls
+    from discovery import settings
+
+    state = {"discovery": {"discovery_enabled": True},
+             "padding": ["x" * 200] * 200}      # big enough to tear mid-write
+    monkeypatch.setattr(controls, "read_controls", lambda: dict(state))
+    controls._write_controls(dict(state))
+    assert settings.discovery_enabled(None) is True
+
+    stop = threading.Event()
+    errors: list[str] = []
+
+    def writer():
+        while not stop.is_set():
+            controls._write_controls(dict(state))
+
+    t = threading.Thread(target=writer, daemon=True)
+    t.start()
+    try:
+        for _ in range(400):
+            if settings.discovery_enabled(None) is not True:
+                errors.append("read discovery OFF while the file said ON")
+                break
+    finally:
+        stop.set()
+        t.join(timeout=5)
+
+    assert not errors, errors[0]
+    # And the atomic write leaves no temp file behind.
+    assert [f for f in os.listdir(ctl) if f.startswith(".controls.")] == []
+
+
+# --- Root cause 2: the path must not depend on the process's cwd ------------
+
+def test_the_control_dir_is_absolute_so_three_processes_agree(monkeypatch):
+    """The engine, the bridge, and the API backend are three processes.
+
+    config ships system.control_dir as the relative ".control". Resolved against
+    each process's cwd, a launcher starting one of them elsewhere split them
+    silently. An absolute anchor cannot.
+    """
+    monkeypatch.delenv("MAL_CONTROL_DIR", raising=False)
+    d = control_file.control_dir()
+    assert os.path.isabs(d), f"control_dir must be absolute, got {d!r}"
+    assert d.endswith(".control")
+
+
+def test_the_control_dir_is_the_same_from_any_cwd(monkeypatch, tmp_path):
+    monkeypatch.delenv("MAL_CONTROL_DIR", raising=False)
+    here = control_file.control_dir()
+    monkeypatch.chdir(tmp_path)
+    assert control_file.control_dir() == here
+
+
+def test_every_python_reader_resolves_the_same_control_dir(monkeypatch):
+    """One rule needs one path. Three copies of it had drifted."""
+    monkeypatch.delenv("MAL_CONTROL_DIR", raising=False)
+    from api_server import controls
+    assert controls._control_dir() == control_file.control_dir()
+
+
+def test_mal_control_dir_still_overrides(ctl):
+    assert control_file.control_dir() == str(ctl)
+
+
+def test_an_absolute_control_dir_is_honored_as_given(monkeypatch, tmp_path):
+    monkeypatch.delenv("MAL_CONTROL_DIR", raising=False)
+    from llm_consensus import config_access
+    monkeypatch.setattr(config_access, "config_block",
+                        lambda name, path=None: {"control_dir": str(tmp_path)}
+                        if name == "system" else {})
+    assert control_file.control_dir() == str(tmp_path)
+
+
+# --- No key value, ever -----------------------------------------------------
+
+def test_no_control_read_returns_or_logs_a_key_value(ctl):
+    """controls.json holds toggles, never credentials. Assert it stays that way."""
+    _write(ctl, {"discovery": {"discovery_enabled": True}})
+    body = json.dumps(control_file.control_state())
+    for shape in ("sk-", "sk-ant-", "AKIA", "token=", "api_key"):
+        assert shape not in body

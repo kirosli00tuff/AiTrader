@@ -26,13 +26,20 @@ def _rising_series(n: int):
     return [[0.0] * _N_FEATS for _ in range(n)], [100.0 + i for i in range(n)]
 
 
-def _cfg(tmp_path, rl_enabled: bool) -> str:
+def _cfg(tmp_path, rl_enabled: bool, min_fills: int = 500) -> str:
     # Distinct filename per toggle: the config loader lru_caches on the path, and
     # a real config path has stable content across a run, so two toggle states
     # must live at two paths (not one rewritten file) to be read independently.
-    p = tmp_path / f"rl_{'on' if rl_enabled else 'off'}.yaml"
+    #
+    # min_fills is explicit because the real-fill gate is now enforced at the
+    # READ (rl_advisory.service.rl_gate_unmet), not only at the GUI write. A test
+    # that wants to reach the scoring paths BEHIND the gate has to say so, by
+    # setting the gate to 0. That is the point: the CLAUDE.md hard rule ("RL
+    # activates only past the rl_min_real_fills gate") is no longer something a
+    # caller can walk past by setting one flag.
+    p = tmp_path / f"rl_{'on' if rl_enabled else 'off'}_{min_fills}.yaml"
     p.write_text(f"rl:\n  rl_enabled: {'true' if rl_enabled else 'false'}\n"
-                 f"  rl_min_real_fills: 500\n")
+                 f"  rl_min_real_fills: {min_fills}\n")
     return str(p)
 
 
@@ -123,7 +130,10 @@ def test_score_rl_disabled_is_neutral_and_out(tmp_path):
 
 
 def test_score_rl_mock_fallback_when_enabled_no_artifact(tmp_path):
-    cfg = _cfg(tmp_path, rl_enabled=True)     # enabled, but no trained artifact
+    # Enabled, gate met (min_fills=0), but no trained artifact. The gate has to
+    # be met explicitly: the mock path sits BEHIND the real-fill gate, and that
+    # ordering is the hard rule.
+    cfg = _cfg(tmp_path, rl_enabled=True, min_fills=0)
     v = score_rl({"symbol": "BTC-USD", "ret_5": 0.03}, cfg_path=cfg)
     assert v["source"] == "mock"
     assert "MOCK" in v["rationale"]
@@ -179,3 +189,64 @@ def test_challenger_rejected_when_drawdown_worse():
              "validation_sharpe": 0.9, "max_drawdown": 0.20}
     ok, reason = challenger_beats_champion(champ, worse)
     assert ok is False and "drawdown" in reason
+
+
+# --- The real-fill gate is enforced at the READ, not just at the GUI write ----
+#
+# CLAUDE.md, a hard rule: "RL ships toggled off, trains only on real fills, and
+# activates only past the rl_min_real_fills gate". That gate used to live ONLY in
+# api_server.set_rl, which refuses to WRITE an enable below it. So the rule held
+# only for operators who went through the GUI. A hand-edited config, or now a
+# hand-edited controls.json (which the runtime-precedence fix makes
+# authoritative), could set rl_enabled true under-gated and score_rl would serve
+# a policy that was never entitled to run. Now the flag is a REQUEST and the gate
+# decides.
+
+def test_the_fill_gate_blocks_an_under_gated_rl_at_the_read(tmp_path, monkeypatch):
+    """rl_enabled=true does NOT activate RL below the fill gate."""
+    from rl_advisory import service
+    monkeypatch.setattr(service, "rl_gate_unmet", lambda cfg_path=None: (240, 500))
+    cfg = _cfg(tmp_path, rl_enabled=True)
+    v = score_rl({"symbol": "BTC-USD", "ret_5": 0.03}, cfg_path=cfg)
+
+    assert v["source"] == "gated"
+    # Out of the ensemble entirely: it contributes nothing rather than a guess.
+    assert v["bias"] == 0.0 and v["confidence"] == 0.0
+    assert v["rl_position_scale_hint"] == 0.0
+    assert "240" in v["rationale"] and "500" in v["rationale"]
+
+
+def test_the_fill_gate_fails_closed_when_the_count_cannot_be_read(tmp_path,
+                                                                  monkeypatch):
+    """An unreadable fill count gates RL. Unprovable means not yet."""
+    from rl_advisory import service
+    monkeypatch.setenv("MAL_DB_PATH", str(tmp_path / "does_not_exist.db"))
+    unmet = service.rl_gate_unmet(_cfg(tmp_path, rl_enabled=True))
+    assert unmet is not None
+    fills, gate = unmet
+    assert fills == 0 and gate == 500
+
+
+def test_a_zero_gate_means_no_gate_even_when_the_count_is_unreadable(tmp_path,
+                                                                    monkeypatch):
+    """min_fills=0 disables the gate. The fail-closed path must not override it."""
+    from rl_advisory import service
+    monkeypatch.setenv("MAL_DB_PATH", str(tmp_path / "does_not_exist.db"))
+    assert service.rl_gate_unmet(_cfg(tmp_path, rl_enabled=True,
+                                      min_fills=0)) is None
+
+
+def test_rl_enabled_honors_controls_json_over_config(tmp_path, monkeypatch):
+    """The precedence rule reaches RL too: controls.json wins over config.
+
+    Safe only because the fill gate is enforced at the read. The toggle is a
+    request; the gate is the authority.
+    """
+    import json
+    from rl_advisory.config import rl_enabled
+    monkeypatch.setenv("MAL_CONTROL_DIR", str(tmp_path))
+    (tmp_path / "controls.json").write_text(json.dumps({"rl_enabled": True}))
+    # cfg_path=None is the runtime path, which reads the control file.
+    assert rl_enabled() is True
+    # A PINNED config ignores the control file, so tests stay hermetic.
+    assert rl_enabled(_cfg(tmp_path, rl_enabled=False)) is False

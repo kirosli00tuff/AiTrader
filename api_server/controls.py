@@ -22,9 +22,11 @@ from __future__ import annotations
 
 import json
 import os
+import tempfile
 from datetime import datetime, timezone
 
 from api_server import store
+from llm_consensus import control_file
 
 _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -136,15 +138,20 @@ def _now() -> str:
 # --- control-file path (mirrors the engine + kill-request resolution) -------
 
 def _control_dir() -> str:
-    env = os.environ.get("MAL_CONTROL_DIR")
-    if env:
-        return env
-    sys_cfg = store.load_config().get("system", {}) or {}
-    return sys_cfg.get("control_dir") or os.path.join(_REPO_ROOT, ".control")
+    """THE one resolution, shared with every reader (llm_consensus.control_file).
+
+    It used to be a third private copy that resolved a relative config
+    control_dir (it ships ".control") against THIS process's cwd, while the
+    funnel and the engine resolved it against theirs. Three processes, three
+    answers, agreeing only because they all happened to launch from the repo
+    root. Now they all call one function that anchors a relative dir to the repo
+    root, so a launcher starting one of them elsewhere cannot split them.
+    """
+    return control_file.control_dir()
 
 
 def _controls_path() -> str:
-    return os.path.join(_control_dir(), "controls.json")
+    return control_file.control_path()
 
 
 def _weight_override_path() -> str:
@@ -433,8 +440,34 @@ def _write_controls(state: dict) -> None:
     # Flat per-symbol regime pins the engine reads (regime_pin:<symbol>).
     for sym, regime in (state.get("regime_pins", {}) or {}).items():
         out[f"regime_pin:{sym}"] = regime
-    with open(_controls_path(), "w") as fh:
-        json.dump(out, fh, indent=2)
+    # ATOMIC. Write a temp file in the same directory, then rename over the real
+    # one. os.replace is atomic on POSIX, so a concurrent reader always sees a
+    # COMPLETE file: either the old state or the new one, never a partial one.
+    #
+    # This was a plain open(path, "w"), which TRUNCATES and then writes. Every
+    # reader of controls.json swallows a read error and falls back to the config
+    # default, so a read landing inside that window did not fail loudly, it
+    # silently reported the SHIPPED value. That is how an operator saw "engine
+    # reads discovery ON but the Python funnel reads it OFF": the funnel read a
+    # half-written file and fell back to config, which ships discovery off.
+    # Measured on the old code: 88 percent of reads returned discovery OFF while
+    # the file on disk said ON. It hit every runtime toggle on both sides, at
+    # random, and hit hardest exactly when the operator was toggling.
+    #
+    # Same directory matters: os.replace is only atomic within one filesystem.
+    d = _control_dir()
+    fd, tmp = tempfile.mkstemp(dir=d, prefix=".controls.", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w") as fh:
+            json.dump(out, fh, indent=2)
+        os.replace(tmp, _controls_path())
+    except Exception:
+        # Never leave a temp file behind on a failed write.
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
 
 
 def _audit(param: str, old, new, source: str = "gui") -> None:

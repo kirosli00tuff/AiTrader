@@ -64,9 +64,21 @@ def use_real_council(cfg_path: str | None = None) -> bool:
 def gate_enabled(cfg_path: str | None = None) -> bool:
     """True when the cheap Claude Haiku base-check runs before the council.
 
-    Sourced from ``llm.gate_enabled`` (default True — the gate is on by default).
+    Config ``llm.gate_enabled`` (default True) is the SHIPPED value, and the
+    operator's controls.json ``gate_enabled`` overrides it. That precedence is
+    the rule: see llm_consensus/control_file.py.
+
+    It used to read config only, which made the GUI's gate toggle cosmetic on
+    this side: the operator turned the base-check off, api_server.set_model
+    validated and audited the write, and the council ran the gate anyway. The
+    toggle is a COST control (off means every candidate reaches the full
+    council), so ignoring it spent the operator's money against their decision.
     """
-    return bool((_cfg(cfg_path).get("llm", {}) or {}).get("gate_enabled", True))
+    shipped = bool((_cfg(cfg_path).get("llm", {}) or {}).get("gate_enabled", True))
+    if cfg_path is not None:
+        return shipped  # a pinned config ignores the control file (the tests)
+    from llm_consensus import control_file
+    return control_file.flag("gate_enabled", shipped)
 
 
 def equities_market_hours_only(cfg_path: str | None = None) -> bool:
@@ -217,8 +229,22 @@ def _sleeve_num(key: str, cfg_path: str | None):
 
 
 def research_satellite_enabled(cfg_path: str | None = None) -> bool:
-    """True when the research_satellite sleeve is on (OFF by default)."""
-    return bool(_sleeves(cfg_path).get("research_satellite_enabled", False))
+    """True when the research_satellite sleeve is on (OFF by default).
+
+    Config ``sleeves.research_satellite_enabled`` is the SHIPPED value, and the
+    operator's controls.json ``sleeves.research_satellite`` overrides it, the
+    same precedence the engine now uses (core/sleeve_controls.hpp).
+
+    The two key names differ (`_enabled` in config, bare in the control file),
+    which is exactly why this mapping is written out rather than block-overlaid:
+    a generic overlay would silently miss it and leave the reader on config.
+    """
+    shipped = bool(_sleeves(cfg_path).get("research_satellite_enabled", False))
+    if cfg_path is not None:
+        return shipped  # a pinned config ignores the control file (the tests)
+    from llm_consensus import control_file
+    v = control_file.control_block("sleeves").get("research_satellite")
+    return bool(v) if isinstance(v, bool) else shipped
 
 
 def research_conviction_threshold(cfg_path: str | None = None) -> float:

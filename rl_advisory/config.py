@@ -48,8 +48,25 @@ def _rl(cfg_path: str | None) -> dict:
 
 
 def rl_enabled(cfg_path: str | None = None) -> bool:
-    """True only when the operator has explicitly toggled RL on (default False)."""
-    return bool(_rl(cfg_path).get("rl_enabled", False))
+    """True only when the operator has explicitly toggled RL on (default False).
+
+    Config ``rl.rl_enabled`` (ships False) is the SHIPPED value, and the
+    operator's controls.json ``rl_enabled`` overrides it, the same precedence
+    every other GUI-toggleable flag now uses (llm_consensus/control_file.py).
+
+    THIS FLAG ALONE IS NOT THE GATE, and honoring the control file here is only
+    safe because of that. CLAUDE.md: "RL ships toggled off, trains only on real
+    fills, and activates only past the rl_min_real_fills gate". That gate used to
+    live ONLY at the GUI write (api_server.set_rl refuses below it), so a
+    hand-edited file of EITHER kind could activate RL under-gated. The gate is
+    now enforced at the READ too (rl_advisory.service.rl_gate_unmet), so the hard
+    rule is a property of the code rather than of which file someone edited.
+    """
+    shipped = bool(_rl(cfg_path).get("rl_enabled", False))
+    if cfg_path is not None:
+        return shipped  # a pinned config ignores the control file (the tests)
+    from llm_consensus import control_file
+    return control_file.flag("rl_enabled", shipped)
 
 
 def rl_min_real_fills(cfg_path: str | None = None) -> int:

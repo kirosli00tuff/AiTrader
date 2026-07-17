@@ -6,6 +6,23 @@ The reasoning behind AiTrader. Read at the start of each session. Update when a 
 
 A 24/7 paper and live AI auto-trading platform. Four layers: static safety, adaptive strategy, DNN advisory, whale advisory. Paper trading is the default and primary training environment. Safety is the final authority and cannot be weakened by any intelligence layer.
 
+## THE PRECEDENCE RULE (read this before adding any operator flag)
+
+**`controls.json` (the operator's runtime override) WINS over `config/default_config.yaml` (the shipped default). On BOTH sides. Per key.**
+
+Config says what the system SHIPS with. controls.json says what the operator DECIDED. Any flag the GUI can toggle must be read through this precedence in the C++ engine AND in the Python bridge/funnel, or one half acts on a value the other half never sees, silently.
+
+- **Python:** read it through `llm_consensus/control_file.py`. One implementation: `overlay(cfg, block)` for a block that mirrors a config block, `flag(key, default)` for a top-level control key, `control_block(name)` for anything whose key names differ between the two files. Never open controls.json directly, and never resolve the control dir yourself.
+- **C++:** mirror it in a `core/*_controls.hpp` reader. Seed the field from config, then let `bridge::json_get_bool` override it from controls.json. `layer_toggles.hpp`, `discovery_controls.hpp`, `adaptive_controls.hpp`, `sleeve_controls.hpp`, and `operator_controls.hpp` are the pattern.
+- **An explicit `cfg_path` PINS a config and ignores the control file.** That is how the tests stay hermetic: without it a developer's local controls.json leaks into a test that thought it had set every value.
+- **Unreadable means NO OVERRIDE, so config decides**, and config ships every operator flag off. That is the safe direction: a broken file must never start a spender. It is also why the WRITER must stay atomic, see below.
+- **A flag is a REQUEST, never an authority over a hard rule.** `rl_enabled` honors this precedence, and the `rl_min_real_fills` gate is enforced at the READ (`rl_advisory.service.rl_gate_unmet`), so no file of any kind can activate RL under-gated.
+
+Two failure modes produced this rule, both found live and both fixed (2026-07-17):
+
+1. **A TORN READ.** `api_server/controls._write_controls` used `open(path, "w")`, which TRUNCATES then writes. Every reader swallows a read error and falls back to config, so a read landing inside that window did not fail loudly, it silently reported the SHIPPED default. **Measured: 88 percent of reads returned discovery OFF while the file on disk said ON.** It hit every runtime toggle on both sides at random, and hit hardest exactly when the operator was toggling. The write is now atomic (temp file in the same directory, then `os.replace`), so a reader always sees a complete file: the old state or the new one, never a partial one. **Any new writer of a control file must be atomic.**
+2. **A CWD-RELATIVE PATH.** config ships `system.control_dir` as the relative `.control`, and three separate copies of the resolution (api_server, discovery, adaptive) each resolved it against their OWN process's working directory. The engine, the bridge, and the API backend are three processes that agreed only by all happening to launch from the repo root. A relative control_dir now resolves against the REPO ROOT, an absolute anchor every process agrees on. `MAL_CONTROL_DIR` still overrides, and an absolute value is honored as given.
+
 ## Key Decisions and Rationale
 
 - Alpaca chosen as first real venue. Safest and easiest paper API.

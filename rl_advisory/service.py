@@ -19,7 +19,7 @@ from __future__ import annotations
 import hashlib
 import os
 
-from .config import RL_ADVISORY_CAP, rl_enabled
+from .config import RL_ADVISORY_CAP, rl_enabled, rl_min_real_fills
 
 _MODELS_DIR = os.path.join(os.path.dirname(__file__), "models")
 # stable-baselines3 saves policies as a .zip archive.
@@ -62,12 +62,60 @@ def _verdict(bias: float, confidence: float, edge: float, *, source: str,
     }
 
 
+def rl_gate_unmet(cfg_path: str | None = None) -> tuple[int, int] | None:
+    """(fills, gate) when the real-fill gate is NOT met, else None.
+
+    CLAUDE.md, a hard rule: "RL ships toggled off, trains only on real fills, and
+    activates only past the rl_min_real_fills gate". That gate lived ONLY at the
+    GUI write (api_server.set_rl refuses below it), so it was a property of one
+    code path rather than of the system: a hand-edited config, or now a
+    hand-edited controls.json, could set rl_enabled true under-gated and score_rl
+    would serve a policy that was never entitled to run.
+
+    So the gate is checked HERE, at the read, where it cannot be routed around.
+    Counted with ml_factor.real_dataset.count_closed_trades, the canonical
+    definition (STRATEGY fills only, so an adaptive exit or a rebalance trim
+    cannot inflate a gate that exists to withhold RL until the policy itself has
+    been exercised).
+
+    Cost: this runs ONLY when rl_enabled is already true, which today it is not,
+    so the disabled path stays one dict read with no DB touch and no numpy
+    import. Fails CLOSED: if the count cannot be read, the gate reports unmet.
+    """
+    gate = rl_min_real_fills(cfg_path)
+    try:
+        import sqlite3
+        from ml_factor.real_dataset import count_closed_trades
+        db = os.environ.get("MAL_DB_PATH", "market_ai_lab.db")
+        conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True, timeout=2.0)
+        try:
+            fills = int(count_closed_trades(conn))
+        finally:
+            conn.close()
+    except Exception:  # noqa: BLE001 — unprovable counts as zero, so it gates
+        fills = 0
+    # One comparison for both paths, so an unreadable count fails CLOSED without
+    # special-casing it. A gate of 0 means no gate, and must stay ungated even
+    # when the count cannot be read.
+    return None if fills >= gate else (fills, gate)
+
+
 def score_rl(state: dict, cfg_path: str | None = None) -> dict:
     """Advisory RL verdict for a market state. Never raises."""
     if not rl_enabled(cfg_path):
         # RL ships OFF: neutral + labelled, and out of the ensemble entirely.
         return _verdict(0.0, 0.0, 0.0, source="disabled",
                         rationale="RL disabled (rl_enabled=false): out of ensemble")
+
+    # Enabled, but the hard rule outranks the flag. A toggle is a request; the
+    # real-fill gate decides. Neutral and labelled exactly like disabled, so an
+    # under-gated RL contributes nothing to the ensemble rather than a guess.
+    unmet = rl_gate_unmet(cfg_path)
+    if unmet is not None:
+        fills, gate = unmet
+        return _verdict(0.0, 0.0, 0.0, source="gated",
+                        rationale=(f"RL gated: {fills} real strategy fills < "
+                                   f"{gate} rl_min_real_fills: out of ensemble"))
 
     if not os.path.exists(_CHAMPION_PATH):
         # Enabled but no trained artifact yet -> deterministic labelled MOCK so

@@ -14,6 +14,54 @@ Commit message:
 
 ---
 
+## Prompt: Fix the discovery flag-source mismatch between the engine and the Python funnel
+
+Date: 2026-07-17
+Model: Opus 4.8
+Prompt summary: live logs show the engine reading discovery ON from controls.json while the Python funnel reads it OFF from static config, so every pass is refused with the flag-mismatch block. Unify the flag source, establish and document one precedence rule (controls.json over config) for both sides, audit every other GUI-toggleable flag for the same class of mismatch, verify live, test, document, commit.
+
+THE DIAGNOSIS WAS HALF RIGHT, AND THE REAL CAUSE WAS WORSE. `discovery/settings.py` ALREADY layered controls.json over config, and had since it was built, so "the funnel reads the static config" was not true as stated. But the mismatch was real and I reproduced it. The operator's own event timeline is what gave it away: until 06:46 the SAME funnel was logging `discovery_skip: not due (last pass 36m ago, interval 60m)`, which it can only log when it reads the flag as ON. Then at 06:51:10 both asset classes flipped to "the Python funnel reads it OFF" in the same second. A missing override cannot do that. Something INTERMITTENT can.
+
+  ROOT CAUSE 1, A TORN READ. THE LIVE BUG. `api_server/controls._write_controls` wrote with `open(path, "w")`, which TRUNCATES the file and then writes it. Every reader of controls.json swallows a read error and falls back to config (correctly: a broken control file must never start a spender). So a read landing inside that write window did not fail loudly, it SILENTLY reported the shipped default, which for discovery is off. I measured it on the old writer rather than assert it: **2634 of 3000 reads (88 percent) returned discovery OFF while the file on disk said ON.** That is the reported mismatch exactly. It explains the intermittency, it explains both asset classes flipping in the same second (the engine asks about them back to back, inside one truncation window), and it explains why it appeared right when the operator was actively toggling: the GUI's own writes were the trigger. It was never discovery-specific either. The same window silently reset EVERY runtime toggle to its default, on BOTH sides, at random. Fixed with an atomic write: temp file in the same directory, then os.replace. Re-measured after: 0 of 3000, no temp files left behind.
+  ROOT CAUSE 2, A CWD-RELATIVE PATH. config ships `system.control_dir` as the relative `.control`, and THREE separate copies of the resolution (api_server/controls.py, discovery/settings.py, adaptive/settings.py) each resolved it against their OWN process's working directory. The engine, the bridge, and the API backend are three processes; they agreed only by all happening to be launched from the repo root. Reproduced: the identical call returns discovery ON from the repo root and OFF from /tmp. A relative control_dir now anchors to the REPO ROOT.
+
+Changes: TASK 1 + TASK 2, one rule with one implementation. New `llm_consensus/control_file.py` is THE Python reader (`control_dir`, `control_state`, `control_block`, `overlay`, `flag`), replacing the three drifted copies. discovery/settings.py, adaptive/settings.py, and api_server/controls.py all route through it, so there is one path resolution and one precedence. THE AUDIT found three more instances of the class, each a flag the GUI writes to controls.json that a Python component read from config only: (a) `gate_enabled`, where `set_model("gate", ...)` writes and audits the operator's choice and `llm_consensus` ran the Haiku base-check regardless, so a COST control was silently ignored; (b) `research_satellite_enabled`, where the key NAMES differ between the files (config `sleeves.research_satellite_enabled` vs control `sleeves.research_satellite`), which is exactly why it is mapped explicitly instead of block-overlaid, since a generic overlay would silently miss it; (c) `rl_enabled`, fixed only alongside the safety change below. Everything else the GUI writes (layers, layer_sources, feed/clock, models, budget, regime pins, sleeves) is consumed by the C++ engine, which already reads controls.json each iteration, so those were not mismatched. TASK 5 documents the rule at the TOP of CONTEXT.md so future flags follow it. NOT touched: RiskGate logic, the live-trading gate, the adaptive limit-weakening invariant, or any Level-1 value.
+
+THE RL HARD RULE IS NOW STRUCTURAL, and this is the one place I did more than the prompt asked, deliberately. CLAUDE.md: "RL ships toggled off, trains only on real fills, and activates only past the `rl_min_real_fills` gate". That gate lived ONLY in `api_server.set_rl`, which refuses to WRITE an enable below it. `score_rl` gated on the flag alone. So the hard rule held only for operators who went through the GUI: a hand-edited config could already activate RL under-gated today. Applying the new precedence to `rl_enabled` without fixing that would have WIDENED the bypass to a file the GUI rewrites constantly, so I enforced the gate at the READ (`rl_advisory.service.rl_gate_unmet`), counted with `ml_factor.real_dataset.count_closed_trades` (the canonical strategy-fills-only counter, so an adaptive exit or a rebalance trim cannot inflate it), failing CLOSED when the count cannot be read. The flag is now a REQUEST and the gate is the authority. This makes the rule STRICTER than before in every direction, and it costs nothing on the normal path: the check runs only when rl_enabled is already true, which today it is not.
+
+Safest-choice notes: (1) I MEASURED THE TORN READ INSTEAD OF ASSERTING IT. "A truncating write could race" is a plausible story; 2634/3000 is a fact. It is also what let me be sure this was the operator's bug rather than a bug: the reported symptom (intermittent, both classes at once, during active toggling) is a signature that only a race produces. (2) I DID NOT "FIX" THE PREMISE AS STATED. The funnel already layered controls.json, so adding an override there would have changed nothing and I would have reported a fix that fixed nothing. The stated diagnosis was a reasonable read of the symptom; it just was not the cause. (3) THE READ POSTURE STAYS FAIL-SAFE. An unreadable control file still means "no override", so config decides and config ships every operator flag off. I did not make an unreadable file loud, because for a spender the silent direction is the SAFE one. The right fix was to stop producing unreadable files, which the atomic write does. (4) THE CONTROL DIR ANCHORS TO THE REPO ROOT, not to os.getcwd(). MAL_CONTROL_DIR still wins, and an absolute config value is honored as given, so no existing deployment moves. (5) THE PINNED-CONFIG ESCAPE HATCH IS PRESERVED EVERYWHERE. An explicit cfg_path still ignores the control file, in every getter I touched, so the tests stay hermetic and a developer's local controls.json cannot leak into them. (6) `rl_ensemble_factor_names` still keys off the flag alone, so an under-gated RL would be NAMED in that Python helper's list while scoring 0/0. I left it: the verdict is what reaches the ensemble, it is neutral, and the C++ `gather_factors` is the real authority. Noted rather than widened. (7) `api_server.controls.real_fills()` uses a raw unfiltered COUNT while its docstring claims it is "the canonical definition from count_closed_trades", which is the origin-filtered one. The two disagree. It only relaxes the GUI WRITE gate (the read gate I added uses the canonical counter, so the hard rule holds regardless), so I noted it rather than change a second gate's arithmetic in a prompt about flag sources. (8) I RESTORED THE OPERATOR'S STATE. Verifying the off-toggle required writing discovery off through the real endpoint; it is back ON, confirmed, with both halves agreeing.
+
+TASK 3, LIVE VERIFICATION (2026-07-17):
+
+| Check | Result |
+| --- | --- |
+| **The torn read, on the OLD writer** | **2634/3000 reads (88%) returned discovery OFF while the file said ON. This is the reported bug** |
+| **The torn read, on the FIXED writer** | **0/3000. No temp files left behind** |
+| **The cwd bug, reproduced** | **The identical call: discovery ON from the repo root, OFF from /tmp** |
+| **The Python funnel now reads discovery ON** | **PASS: `{"enabled": true, "due": true, "reason": "last pass 70m ago"}` over the bridge** |
+| **A pass runs with NO flag-mismatch block** | **PASS: engine logged `discovery_pass_start (crypto)` and `discovery_skip (equity, outside US regular trading hours)`. No `discovery_blocked`** |
+| **Toggling discovery OFF stops the funnel** | **PASS: `{"enabled": false, "reason": "discovery.discovery_enabled is false"}`, and a FORCED pass refuses with `{"status": "disabled"}`** |
+| The engine and the funnel read one flag | PASS: banner `discovery: ENABLED [controls.json]`, funnel `discovery_enabled(None) = True`, same file |
+| All three Python readers resolve one dir | PASS: identical absolute path, and unchanged from any cwd |
+| gate_enabled follows the rule | PASS both directions (was config-only, GUI toggle cosmetic) |
+| research_satellite follows the rule | PASS both directions (differing key names mapped explicitly) |
+| **RL: a hand-edited enable is refused under-gated** | **PASS: `source: "gated"`, bias 0, confidence 0, out of the ensemble at 240/500 fills** |
+| RL gate fails closed on an unreadable count | PASS |
+| A zero gate still means no gate | PASS |
+| A pinned config ignores the control file | PASS (tests stay hermetic) |
+| Precedence is per KEY, not per file | PASS (a partial block overrides only what it carries) |
+| No control path returns or logs a key value | PASS (controls.json holds toggles, never credentials) |
+| Bind stays loopback | PASS |
+| Mutation: restore the truncating write | The torn-read test FAILS as intended |
+| Mutation: restore the cwd-relative dir | The absolute-path test FAILS as intended |
+| Python pytest | 640 passed (from 619, +21, new `test_control_precedence.py`) |
+| C++ ctest | 24/24 |
+| RiskGate / live gate / adaptive invariant / Level-1 untouched | PASS |
+
+Commit message: `Fix discovery flag-source mismatch so the GUI toggle controls the Python funnel, unify controls.json precedence across engine and Python side, live trading untouched`
+
+---
+
 ## Prompt: Add the research_satellite sleeve enable toggle
 
 Date: 2026-07-16
