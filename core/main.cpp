@@ -189,6 +189,11 @@ int main(int argc, char** argv) {
             // default as the truth.
             const auto discovery_rt = mal::core::read_discovery_controls(
                 ctl_dir + "/controls.json", cfg.discovery);
+            // The sleeve's RUNTIME state, same control file, same reason as
+            // discovery above: the banner read the config default and printed
+            // "OFF (opt-in)" while the operator had the sleeve toggled ON.
+            const auto sleeve_rt = mal::core::read_sleeve_controls(
+                ctl_dir + "/controls.json", cfg.sleeves);
             // Query the bridge for the true real-vs-mock availability of each
             // advisory service, so the proof block shows the actual state, not
             // just the configured intent. Non-fatal: if the bridge is down the
@@ -348,7 +353,8 @@ int main(int argc, char** argv) {
                 << "  sleeves:   quant_core " << (cfg.sleeves.quant_core_target_pct * 100)
                 << "% / research_satellite " << (cfg.sleeves.research_satellite_target_pct * 100)
                 << "% (band " << (cfg.sleeves.drift_band_pct * 100) << "%), satellite "
-                << (cfg.sleeves.research_satellite_enabled ? "ON" : "OFF (opt-in)")
+                << (sleeve_rt.research_satellite ? "ON [controls.json]"
+                                                 : "OFF (opt-in)")
                 << ", hard cap "
                 << ((cfg.sleeves.research_satellite_target_pct + cfg.sleeves.drift_band_pct) * 100)
                 << "% of equity\n"

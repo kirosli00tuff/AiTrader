@@ -150,6 +150,14 @@ Engine::Engine(config::Config cfg, EngineOptions opts)
     prev_discovery_ = discovery_;
     if (discovery_.enabled) onboard_discovered_symbols(util::now_iso8601());
 
+    // Sleeve enable, seeded from the control file before the first bar so the
+    // sleeve does not spend one bar on the config default before the first
+    // consume. prev_ is set to match, so construction logs no toggle event: the
+    // engine did not change anything, it read what was already true.
+    sleeves_ = read_sleeve_controls(controls_path_, cfg_.sleeves);
+    cfg_.sleeves.research_satellite_enabled = sleeves_.research_satellite;
+    prev_sleeves_ = sleeves_;
+
     // --- Offline clock resolution + bar-mode setup ----------------------------
     // feed_mode_ was resolved above. These control ONLY how the offline loop is
     // driven; they never affect live trading (Alpaca is paper + market-data only,
@@ -459,6 +467,7 @@ int Engine::step_bar_mode() {
     consume_operator_kill_request();
     consume_layer_toggles();
     consume_operator_controls();
+    consume_sleeves();
     if (feed_mode_ == "synthetic_regimes") {
         // All whitelisted instruments close a bar at the same simulated instant.
         const std::string ts = util::epoch_to_iso8601(sim_epoch_);
@@ -1120,6 +1129,43 @@ void Engine::onboard_discovered_symbols(const std::string& ts) {
     }
 }
 
+void Engine::consume_sleeves() {
+    sleeves_ = read_sleeve_controls(controls_path_, cfg_.sleeves);
+    // Refresh the field both consumers already read, rather than adding a second
+    // source of truth beside it. on_closed_bar's maintenance gate and
+    // sleeves::satellite_has_room both key off this one bool, so writing it here
+    // is what makes the GUI toggle actually reach the sleeve. It is an enable
+    // flag only: the hard cap, the drift band, and the RiskGate are untouched.
+    cfg_.sleeves.research_satellite_enabled = sleeves_.research_satellite;
+    if (sleeves_ == prev_sleeves_) return;
+    const std::string ts = util::now_iso8601();
+    storage_->append_event(
+        {ts, "sleeve_toggle", "", "", "info",
+         std::string("Sleeve research_satellite: ") +
+             (prev_sleeves_.research_satellite ? "on" : "off") + " -> " +
+             (sleeves_.research_satellite ? "on" : "off") +
+             (sleeves_.research_satellite
+                  ? " (target " +
+                        std::to_string(static_cast<int>(
+                            cfg_.sleeves.research_satellite_target_pct * 100)) +
+                        "% of equity, hard cap " +
+                        std::to_string(static_cast<int>(
+                            (cfg_.sleeves.research_satellite_target_pct +
+                             cfg_.sleeves.drift_band_pct) * 100)) +
+                        "%, never exceeded)"
+                  : " (no new satellite positions; open ones exit on their own "
+                    "terms)"),
+         util::to_json({{"sleeve", "research_satellite"},
+                        {"old", prev_sleeves_.research_satellite ? "on" : "off"},
+                        {"new", sleeves_.research_satellite ? "on" : "off"}},
+                       {{"target_pct",
+                         cfg_.sleeves.research_satellite_target_pct},
+                        {"hard_cap_pct",
+                         cfg_.sleeves.research_satellite_target_pct +
+                             cfg_.sleeves.drift_band_pct}})});
+    prev_sleeves_ = sleeves_;
+}
+
 void Engine::consume_discovery() {
     discovery_ = read_discovery_controls(controls_path_, cfg_.discovery);
     if (!(discovery_ == prev_discovery_)) {
@@ -1620,6 +1666,7 @@ int Engine::run_iteration() {
     consume_operator_kill_request();
     consume_layer_toggles();
     consume_operator_controls();
+    consume_sleeves();
     // Discovery, same control-file pattern and the same each-iteration cadence.
     // Deliberately AFTER the kill request: a halt is checked first and this never
     // blocks, so an in-flight pass can never delay the switch. Only the tick path

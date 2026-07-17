@@ -22,6 +22,7 @@
 #include "core/discovery_controls.hpp"
 #include "core/feed_clock.hpp"
 #include "core/layer_toggles.hpp"
+#include "core/sleeve_controls.hpp"
 #include "core/operator_controls.hpp"
 #include "config/config.hpp"
 #include "execution/execution.hpp"
@@ -170,6 +171,16 @@ private:
     // pass start, the stage counts, the cadence skips, and the prerequisite
     // blocks are all logged from here rather than Python-side.
     void consume_discovery();
+    // Consume the research_satellite sleeve enable from controls.json each
+    // iteration, the same control-file pattern as the layer toggles. It
+    // REFRESHES cfg_.sleeves.research_satellite_enabled in place, because that
+    // is the single field both consumers already read (the maintenance gate in
+    // on_closed_bar, and sleeves::satellite_has_room), so one write makes the
+    // toggle real everywhere with no second source of truth.
+    //
+    // Allocation only. An enabled sleeve is still bounded by the hard cap and
+    // the RiskGate still judges every order in both sleeves.
+    void consume_sleeves();
     // Reap any finished pass, log its outcome (stage counts / skip / block), and
     // onboard whatever it surfaced. Called every iteration from consume_discovery.
     void collect_discovery_passes();
@@ -364,6 +375,12 @@ private:
     // spender, so an unreadable file must never turn it on.
     DiscoveryRuntime discovery_;
     DiscoveryRuntime prev_discovery_;
+    // research_satellite sleeve enable, read from controls.json each iteration
+    // like the layer toggles. Off by default and off when the file is
+    // unreadable: a broken file must not allocate capital to a sleeve nobody
+    // turned on.
+    SleeveRuntime sleeves_;
+    SleeveRuntime prev_sleeves_;
     // Epoch seconds of the last time the engine ASKED whether a pass was due.
     // 0 means never asked, which is also how an off->on toggle asks immediately
     // instead of making the operator wait out a trigger interval.

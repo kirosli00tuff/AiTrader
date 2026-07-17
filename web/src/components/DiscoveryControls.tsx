@@ -14,86 +14,12 @@ import { useEffect, useState } from "react";
 import { api } from "../api/client";
 import { useApi } from "../api/useApi";
 import { Panel, DataState } from "./ui";
+import { ArmedToggle } from "./controls";
 import { shortTs, money } from "../api/format";
-import type { DiscoveryState, Prereqs } from "../api/types";
+import type { DiscoveryState } from "../api/types";
 
-function PrereqList({ prereqs }: { prereqs: Prereqs }) {
-  return (
-    <ul className="prereq-list" data-testid="prereq-list">
-      {prereqs.checks.map((c) => (
-        <li key={c.key} className={c.ok ? "ok" : "warn"}>
-          <span className={`dot ${c.ok ? "g" : "a"}`} />
-          <b>{c.label}</b> <span className="muted">{c.detail}</span>
-        </li>
-      ))}
-    </ul>
-  );
-}
 
-// An enable that arms, states what it starts, then fires. Disable is immediate:
-// turning a spender OFF should never need a ceremony.
-function ArmedToggle({ on, label, what, prereqs, busy, onSet, testid }: {
-  on: boolean;
-  label: string;
-  what: string;
-  prereqs: Prereqs;
-  busy: boolean;
-  onSet: (next: boolean) => void;
-  testid: string;
-}) {
-  const [armed, setArmed] = useState(false);
-  const blocked = !prereqs.ok;
 
-  return (
-    <div className="disc-toggle" data-testid={testid}>
-      <div className="disc-toggle-head">
-        <span className={`dot ${on ? "g" : "d"}`} />
-        <b>{label}</b>
-        <span className={on ? "ok" : "dim"}>{on ? "ON" : "off"}</span>
-        {on ? (
-          <button className="btn ghost sm" disabled={busy}
-            onClick={() => onSet(false)}>
-            disable
-          </button>
-        ) : !armed ? (
-          <button className="btn sm" disabled={busy || blocked}
-            onClick={() => setArmed(true)}>
-            enable
-          </button>
-        ) : (
-          <>
-            <button className="btn sm" disabled={busy}
-              onClick={() => { onSet(true); setArmed(false); }}>
-              {busy ? "…" : "confirm"}
-            </button>
-            <button className="btn ghost sm" disabled={busy}
-              onClick={() => setArmed(false)}>
-              cancel
-            </button>
-          </>
-        )}
-      </div>
-
-      {/* The confirm states plainly what turning this on does, before it does
-          it. An operator should never learn what a toggle spends afterwards. */}
-      {armed && (
-        <div className="disc-confirm" data-testid={`${testid}-confirm`}>
-          <b>This starts spending.</b> {what}
-        </div>
-      )}
-
-      {blocked && !on && (
-        <div className="disc-blocked" data-testid={`${testid}-blocked`}>
-          <b>Cannot enable yet.</b> Missing prerequisites:
-          <PrereqList prereqs={prereqs} />
-        </div>
-      )}
-    </div>
-  );
-}
-
-// A bounded number the server clamps. The input shows the server's own bounds so
-// the GUI never keeps a second copy of a limit that could drift from it.
 function BoundedNumber({ label, value, bounds, step, hint, onCommit }: {
   label: string;
   value: number;

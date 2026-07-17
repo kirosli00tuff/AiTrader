@@ -14,6 +14,55 @@ Commit message:
 
 ---
 
+## Prompt: Add the research_satellite sleeve enable toggle
+
+Date: 2026-07-16
+Model: Opus 4.8
+Prompt summary: the long-term strategy prerequisite panel requires the research_satellite sleeve to be enabled first, but no GUI toggle exists for the sleeve, so it cannot be enabled from the interface. Add the toggle through the existing validated control-endpoint pattern, have the engine consume it from controls.json, confirm the prerequisite chain, show sleeve state and allocation, test, document, commit.
+
+THE PREMISE WAS STALE, AND THE TRUTH WAS WORSE. The toggle EXISTS and always did: `web/src/components/SleevesPanel.tsx` renders it on the Controls page, it calls `api.setSleeve("research_satellite", ...)`, which posts to `/controls/sleeve`, which calls `controls.set_sleeve`, which writes controls.json validated and audited. The operator had ALREADY USED IT: `.control/controls.json` reads `sleeves.research_satellite: true`. It changed nothing, for FOUR independent reasons, and the codebase admitted two of them in its own comments. The operator's diagnosis ("there is no toggle") was wrong, but their conclusion ("it cannot be enabled from the interface") was exactly right.
+
+  1. THE PREREQUISITE WAS UNSATISFIABLE FROM THE GUI. `longterm_prerequisites` required `sleeve_on AND cfg_on`, where cfg_on is the raw `sleeves.research_satellite_enabled` from default_config.yaml. Config ships that false and NO endpoint writes config. So the check could never go green from the interface no matter what the operator did, and its own detail line told them to go hand-edit a YAML file. An AND also INVERTS what a runtime toggle means: it lets the control file only ever turn a sleeve OFF, never on. Confirmed live before changing anything: sleeve_on=True, cfg_on=False, prerequisite FAIL.
+  2. THE ENGINE READ CONFIG, NOT THE CONTROL FILE. `cfg_.sleeves.research_satellite_enabled` gated both consumers (the maintenance gate at engine.cpp on_closed_bar, and `sleeves::satellite_has_room`), so the toggle never reached the sleeve. This was KNOWN and written down: api_server/controls.py carried "The engine reads sleeve enable from config at startup ... engine consumption is a documented follow-up", and the GUI panel told the operator to their face that "the toggle here records intent". The follow-up was never done. It is the identical cosmetic-control defect that core/discovery_controls.hpp and core/adaptive_controls.hpp were each written to fix.
+  3. THE SLEEVES CONTROL BLOCK WAS NOT SEEDED FROM CONFIG, unlike every other block (discovery uses `_discovery_defaults(cfg)`, adaptive uses `_adaptive_defaults(cfg)`). It hardcoded `research_satellite: False` regardless of config, so an operator who enabled the sleeve in config still read off, and the two sources of truth disagreed with no way to tell which won.
+  4. THE PANEL RENDERED EVERY SLEEVE PERCENTAGE 100x TOO SMALL, WITH A MEANINGLESS SIGN. `pct()` is the SIGNED PnL formatter for already-percent values (StatusBar feeds it `equity_change_pct`). The sleeve panel fed it FRACTIONS, so the 30 percent target rendered as "+0.30%" and the 35 percent hard cap as "+0.35%". An operator reading the panel saw a third of one percent. Found by a new test asserting the target reads "30%", not by inspection.
+
+Changes: TASK 1, the toggle. It already existed, so I did NOT rebuild it. I gave it the confirm step it lacked and made it real. New `core/sleeve_controls.hpp` reads the sleeve enable from controls.json seeded from config, same shape as layer_toggles / operator_controls / adaptive_controls / discovery_controls, OFF when the file is missing, empty, or malformed (a broken file must never allocate capital to a sleeve nobody turned on). `Engine::consume_sleeves` runs each iteration on BOTH loop paths and REFRESHES `cfg_.sleeves.research_satellite_enabled` in place, because that single bool is what both consumers already read, so one write makes the toggle real everywhere with no second source of truth to drift. Seeded at construction as well, so the first bar honors the toggle rather than spending one bar on the config default; prev_ is set to match so construction logs no event (the engine did not change anything, it read what was already true). Every change logs `sleeve_toggle` with the target and the cap. The toggle is now an `ArmedToggle`: it arms and states the 30 percent target, the 35 percent hard cap, and drift-band rebalancing before it fires. TASK 2, the chain: `longterm_prerequisites` now reads the RESOLVED state. TASK 3, visibility: on shows allocation against the target with the cap and position count, off reads "off by choice ... holds no capital and opens no position", and the config-mismatch note now says which source is winning instead of "records intent". Also fixed: the sleeves block is seeded from config, `sharePct()` was added for shares (pct() untouched, so StatusBar's PnL rendering is unchanged), and the startup banner's sleeve line now reads the control file (it printed "OFF (opt-in)" while the sleeve was on, the same bug the discovery banner had). NOT touched: RiskGate logic, the live-trading gate, the adaptive limit-weakening invariant, or any Level-1 value.
+
+Safest-choice notes: (1) I DID NOT REBUILD THE EXISTING TOGGLE. The prompt reads as though nothing exists. The write path, the endpoint, and the panel were all there and correct; only the consumption and the prerequisite were broken. Rewriting the working half would have been churn against tested code. (2) THE ENGINE REFRESHES cfg_ IN PLACE rather than gaining a parallel `sleeves_.research_satellite` that the consumers would have to be taught to read. Two fields holding one truth is how this bug class starts: config vs controls.json is exactly what was already wrong here. One field, one write, both consumers fixed, no call-site changes. (3) THE PREREQUISITE READS THE RESOLVED STATE, NOT AN OR. I considered `sleeve_on OR cfg_on`, which would also have unblocked the GUI. It is wrong: it makes config able to force a sleeve on that the operator turned off, which is the same inversion in the other direction. Resolved precedence (config seeds, control file decides) is what every other toggle here uses. (4) ArmedToggle MOVED to the shared controls.tsx instead of becoming a third copy. It was already duplicated in DiscoveryControls and AdaptiveControls. I migrated only the DiscoveryControls copy, whose prop shape matches; AdaptiveControls keeps its own variant (`blocked`/`blockedWhy` rather than `prereqs`), because unifying a second, differently-shaped, working, tested component is a refactor this prompt did not ask for. Defaults keep DiscoveryControls byte-identical, and its tests pass untouched. (5) THE CONFIRM HEADING IS A PARAMETER. The shared heading is "This starts spending", which is true of discovery and false of a sleeve: enabling a sleeve ALLOCATES, it spends nothing. A confirm that cries wolf trains an operator to stop reading it, so the sleeve says "This allocates capital" and a test asserts it does not say "starts spending". (6) I DID NOT CHANGE pct(). StatusBar and ui.tsx depend on its signed PnL semantics. `sharePct()` is additive, and only the sleeve panel uses it. (7) THE SLEEVE TOGGLE STAYS UNGATED. TASK 2 asked me to confirm this and it is right: a sleeve allocates, it calls nothing, so gating it on the bridge would make the enable order circular (the panel says enable the sleeve first, then refuses without a bridge the sleeve never uses). Verified with both the key and the bridge unreachable. (8) THE LIVE VERIFICATION RAN ON A SCRATCH DB AND SCRATCH CONTROL DIR, so the operator's real controls.json and market_ai_lab.db were never written by my test flips.
+
+Verification (2026-07-16):
+
+| Check | Result |
+| --- | --- |
+| **The prerequisite was unsatisfiable from the GUI** | **CONFIRMED before the fix: sleeve_on=True, cfg_on=False, longterm prerequisite FAIL, detail telling the operator to edit YAML** |
+| **The prerequisite now goes green on the toggle alone** | **PASS: all three checks green, `pre["ok"] is True`** |
+| **The engine consumes the toggle from controls.json** | **PASS live, mid-run, BOTH directions on a running continuous loop: `off -> on (target 30% of equity, hard cap 35%, never exceeded)` then `on -> off (no new satellite positions; open ones exit on their own terms)`** |
+| **Startup banner tells the truth** | **PASS: `satellite ON [controls.json]` against a config that ships OFF (was "OFF (opt-in)")** |
+| The toggle writes through the validated endpoint, no new path | PASS: same controls.json channel, audited old to new |
+| Enable order: sleeve independently, strategy after | PASS: strategy-first is refused naming the sleeve; sleeve-then-strategy succeeds |
+| The sleeve has no prerequisite of its own | PASS: enables with BOTH the Finnhub key and the bridge unreachable, while the strategy correctly refuses |
+| Four-level framework + bridge checked at the STRATEGY, not the sleeve | PASS: `discovery_prerequisites` checks are `finnhub_key`, `bridge`, and the sleeve check is appended only by `longterm_prerequisites` |
+| Confirm states the allocation plainly | PASS: 30% target, 35% cap, drift band, RiskGate, and what it unlocks; asserts it does NOT say "starts spending" |
+| A disabled sleeve reads as intentionally off | PASS: "off by choice ... holds no capital and opens no position" |
+| Sleeve defaults seeded from config, not hardcoded | PASS: config on with no control file now reads on |
+| The panel's percentages | FIXED: the 30% target rendered as "+0.30%" and the 35% cap as "+0.35%" (100x off, signed). Caught by a test, not by eye |
+| No control writes a Level 1 value | PASS: risk config byte-identical after the toggle and a rebalance request; no `risk` key in controls.json |
+| **The hard cap is unchanged by the toggle** | **PASS: cap identical whether the sleeve is on or off. Enabling allocates WITHIN the cap, it never widens it** |
+| No key value logged or returned | PASS: `/sleeves` never carries the credential |
+| Bind stays loopback | PASS |
+| Mutation: engine reads config only (the original bug) | ctest `sleeve_controls` FAILS as intended |
+| Mutation: prerequisite ANDs with config (the original bug) | 2 backend tests FAIL as intended |
+| Python pytest | 619 passed (from 610, +9) |
+| Frontend vitest | 105 passed (from 96, +9, new sleeve-toggle.test.tsx) |
+| C++ ctest | 24/24 (from 23, +1, new `sleeve_controls`) |
+| Typecheck / production build | clean / green |
+| RiskGate / live gate / adaptive invariant / Level-1 untouched | PASS |
+
+Commit message: `Add the research_satellite sleeve enable toggle so the long-term strategy prerequisite can be satisfied from the GUI, live trading untouched`
+
+---
+
 ## Prompt: Wire engine consumption of the discovery flag
 
 Date: 2026-07-16

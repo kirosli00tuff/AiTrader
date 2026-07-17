@@ -208,6 +208,19 @@ def _defaults() -> dict:
         # config, which ships all three flags false, so a missing control file
         # means OFF rather than an accident.
         "adaptive_realtime": _adaptive_defaults(cfg),
+        # Core-satellite sleeve enables: same posture as discovery. Seeded from
+        # config, which ships research_satellite OFF, so a missing control file
+        # means the SHIPPED value rather than a hardcoded guess. This block used
+        # to hardcode research_satellite False regardless of config, so an
+        # operator who enabled the sleeve in config still read off here, and the
+        # two sources of truth disagreed with no way to tell which won.
+        "sleeves": {
+            "quant_core": bool((cfg.get("sleeves", {}) or {})
+                               .get("quant_core_enabled", True)),
+            "research_satellite": bool((cfg.get("sleeves", {}) or {})
+                                       .get("research_satellite_enabled", False)),
+        },
+        "rebalance_requested": False,
         "pending_promote": None,
         "pending_rollback": None,
     }
@@ -326,11 +339,10 @@ def read_controls() -> dict:
         for layer in LAYERS:
             if layer in saved["layers"]:
                 state["layers"][layer] = bool(saved["layers"][layer])
-    # Core-satellite sleeve enable toggles + a manual rebalance request. Advisory
-    # only, never a Level-1 value. The engine reads sleeve enable from config at
-    # startup; the runtime toggle + manual rebalance mirror the control-file
-    # pattern (engine consumption is a documented follow-up).
-    state.setdefault("sleeves", {"quant_core": True, "research_satellite": False})
+    # Core-satellite sleeve enable toggles + a manual rebalance request.
+    # Allocation only, never a Level-1 value. The defaults are seeded from config
+    # in _defaults(); the engine consumes the resolved enable from controls.json
+    # each iteration (core/sleeve_controls.hpp), the same as the layer toggles.
     if isinstance(saved.get("sleeves"), dict):
         for s in ("quant_core", "research_satellite"):
             if s in saved["sleeves"]:
@@ -552,17 +564,25 @@ def longterm_prerequisites() -> dict:
     config validator already refuses, so the GUI refuses it too.
     """
     base = discovery_prerequisites()
+    # The RESOLVED sleeve state, which is what the engine acts on: config seeds
+    # it, controls.json overrides it, exactly like every other runtime toggle.
+    #
+    # This used to require the control toggle AND the raw config value. That made
+    # the check UNSATISFIABLE FROM THE GUI: config ships research_satellite off
+    # and no endpoint writes config, so an operator could turn the sleeve on,
+    # have the write validated and audited, and still be told the sleeve was off,
+    # with the detail line telling them to go hand-edit a YAML file. An AND also
+    # inverts what a runtime toggle means: it lets the control file only ever
+    # turn a sleeve OFF, never on, which is not a toggle.
     sleeve_on = bool(read_controls()["sleeves"]["research_satellite"])
-    cfg_on = bool((store.load_config().get("sleeves", {}) or {})
-                  .get("research_satellite_enabled", False))
     checks = list(base["checks"])
     checks.append({
-        "key": "research_satellite", "ok": sleeve_on and cfg_on,
+        "key": "research_satellite", "ok": sleeve_on,
         "label": "research_satellite sleeve",
-        "detail": ("enabled" if (sleeve_on and cfg_on) else
+        "detail": ("enabled" if sleeve_on else
                    "off. The long-term strategy has no sleeve to trade in. "
-                   "Enable the sleeve first: config "
-                   "sleeves.research_satellite_enabled plus the sleeve toggle."),
+                   "Enable the research_satellite sleeve first, in the "
+                   "Core-satellite sleeves panel on this page."),
     })
     return {"ok": all(c["ok"] for c in checks), "checks": checks}
 

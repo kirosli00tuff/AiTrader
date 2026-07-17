@@ -1,4 +1,96 @@
 import { useState } from "react";
+import type { Prereqs } from "../api/types";
+
+export function PrereqList({ prereqs }: { prereqs: Prereqs }) {
+  return (
+    <ul className="prereq-list" data-testid="prereq-list">
+      {prereqs.checks.map((c) => (
+        <li key={c.key} className={c.ok ? "ok" : "warn"}>
+          <span className={`dot ${c.ok ? "g" : "a"}`} />
+          <b>{c.label}</b> <span className="muted">{c.detail}</span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+// An enable that arms, states what it starts, then fires. Disable is immediate:
+// turning a spender OFF should never need a ceremony.
+//
+// Lives here rather than beside one caller because three controls now need it
+// (discovery, the long-term strategy, and the research_satellite sleeve). It is
+// the shared idiom for "an action with consequences asks twice", the same
+// posture as the kill switch and the engine start.
+//
+// `prereqs` is optional: a control can have no prerequisite of its own and still
+// deserve a confirm. The research_satellite sleeve is exactly that. It allocates
+// capital, so it must state what it does before it does it, but nothing has to be
+// reachable first for a sleeve to be enabled.
+//
+// `heading` is overridable because not every armed control spends. Enabling a
+// sleeve ALLOCATES, and telling an operator "this starts spending" when it does
+// not would train them to ignore the line that matters.
+export function ArmedToggle({ on, label, what, prereqs, busy, onSet, testid,
+                             heading = "This starts spending." }: {
+  on: boolean;
+  label: string;
+  what: string;
+  prereqs?: Prereqs;
+  busy: boolean;
+  onSet: (next: boolean) => void;
+  testid: string;
+  heading?: string;
+}) {
+  const [armed, setArmed] = useState(false);
+  const blocked = !!prereqs && !prereqs.ok;
+
+  return (
+    <div className="disc-toggle" data-testid={testid}>
+      <div className="disc-toggle-head">
+        <span className={`dot ${on ? "g" : "d"}`} />
+        <b>{label}</b>
+        <span className={on ? "ok" : "dim"}>{on ? "ON" : "off"}</span>
+        {on ? (
+          <button className="btn ghost sm" disabled={busy}
+            onClick={() => onSet(false)}>
+            disable
+          </button>
+        ) : !armed ? (
+          <button className="btn sm" disabled={busy || blocked}
+            onClick={() => setArmed(true)}>
+            enable
+          </button>
+        ) : (
+          <>
+            <button className="btn sm" disabled={busy}
+              onClick={() => { onSet(true); setArmed(false); }}>
+              {busy ? "…" : "confirm"}
+            </button>
+            <button className="btn ghost sm" disabled={busy}
+              onClick={() => setArmed(false)}>
+              cancel
+            </button>
+          </>
+        )}
+      </div>
+
+      {/* The confirm states plainly what turning this on does, before it does
+          it. An operator should never learn what a toggle does afterwards. */}
+      {armed && (
+        <div className="disc-confirm" data-testid={`${testid}-confirm`}>
+          <b>{heading}</b> {what}
+        </div>
+      )}
+
+      {blocked && !on && prereqs && (
+        <div className="disc-blocked" data-testid={`${testid}-blocked`}>
+          <b>Cannot enable yet.</b> Missing prerequisites:
+          <PrereqList prereqs={prereqs} />
+        </div>
+      )}
+    </div>
+  );
+}
 
 // Gold toggle switch. Controlled: parent owns the value, the switch reports a
 // requested change. Disabled toggles never fire.

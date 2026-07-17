@@ -2292,3 +2292,188 @@ def test_sleeve_endpoints_never_return_a_key(env, client):
     blob = (client.get("/sleeves").text + client.get("/research/theses").text +
             client.get("/sleeves/history").text)
     assert "sk-" not in blob and "API_KEY" not in blob
+
+
+# --- The research_satellite sleeve toggle -----------------------------------
+#
+# THE DEFECT these cover: the long-term strategy's prerequisite panel demanded
+# the research_satellite sleeve be enabled first, and the operator could not
+# satisfy it from the interface. Two reasons, both real:
+#   1. longterm_prerequisites ANDed the control toggle with the raw CONFIG value.
+#      Config ships the sleeve off and no endpoint writes config, so the check
+#      was unsatisfiable from the GUI no matter what the operator did. An AND
+#      also inverts a runtime toggle: it lets the control file only turn a sleeve
+#      OFF, never on.
+#   2. The engine read cfg_.sleeves.research_satellite_enabled, so even a written
+#      toggle never reached the sleeve. api_server/controls.py admitted it
+#      ("engine consumption is a documented follow-up") and the GUI told the
+#      operator the toggle "records intent".
+
+def test_sleeve_enable_writes_the_control_file_and_audits(env, client):
+    """No new write path: the same validated, audited control-file channel."""
+    r = client.post("/controls/sleeve",
+                    json={"sleeve": "research_satellite", "enabled": True}).json()
+    assert r == {"ok": True, "sleeve": "research_satellite", "enabled": True}
+
+    saved = json.load(open(os.path.join(env["control"], "controls.json")))
+    assert saved["sleeves"]["research_satellite"] is True
+
+    con = sqlite3.connect(env["db"])
+    rows = con.execute(
+        "SELECT message, payload_json FROM events WHERE kind='control_change'"
+    ).fetchall()
+    con.close()
+    assert any("sleeve.research_satellite" in r[0] for r in rows)
+    assert any('"new": true' in (r[1] or "") for r in rows)
+
+
+def test_the_engine_consumes_the_sleeve_toggle_from_controls_json(env, client):
+    """THE FIX. The C++ reader must see what the GUI wrote.
+
+    Reads core/sleeve_controls.hpp the way the engine does: config seeds it,
+    controls.json overrides it. Before this, the engine read the config default
+    and the toggle was cosmetic, so an operator could enable the sleeve, have the
+    write validated and audited, and watch the engine ignore it forever.
+    """
+    client.post("/controls/sleeve",
+                json={"sleeve": "research_satellite", "enabled": True})
+    path = os.path.join(env["control"], "controls.json")
+    body = open(path).read()
+
+    # The key the C++ flat reader looks for, with the exact quoting it uses.
+    assert '"research_satellite": true' in body
+    # And it must not collide with the neighbouring config-shaped key names.
+    assert '"research_satellite_enabled"' not in body
+
+    client.post("/controls/sleeve",
+                json={"sleeve": "research_satellite", "enabled": False})
+    assert '"research_satellite": false' in open(path).read()
+
+
+def test_enabling_the_sleeve_satisfies_the_long_term_prerequisite(env, client,
+                                                                  monkeypatch):
+    """THE OPERATOR'S ACTUAL COMPLAINT, end to end.
+
+    The sleeve check must go green on the toggle alone. It used to require the
+    config value too, which the GUI cannot write, so this transition was
+    impossible from the interface.
+    """
+    _bridge_up(monkeypatch)
+    _finnhub_present(monkeypatch)
+
+    client.post("/controls/sleeve",
+                json={"sleeve": "research_satellite", "enabled": False})
+    pre = client.get("/discovery/prerequisites").json()["longterm"]
+    sleeve_check = next(c for c in pre["checks"] if c["key"] == "research_satellite")
+    assert sleeve_check["ok"] is False
+    assert pre["ok"] is False
+    # The detail points at the panel on this page, not at a YAML file the
+    # operator has no way to edit from here.
+    assert "Core-satellite sleeves panel" in sleeve_check["detail"]
+    assert "config sleeves.research_satellite_enabled" not in sleeve_check["detail"]
+
+    client.post("/controls/sleeve",
+                json={"sleeve": "research_satellite", "enabled": True})
+    pre = client.get("/discovery/prerequisites").json()["longterm"]
+    sleeve_check = next(c for c in pre["checks"] if c["key"] == "research_satellite")
+    assert sleeve_check["ok"] is True
+    assert sleeve_check["detail"] == "enabled"
+    # Every check green, so the long-term strategy can now be enabled.
+    assert pre["ok"] is True
+
+
+def test_the_long_term_strategy_can_then_be_enabled(env, client, monkeypatch):
+    """The enable ORDER: sleeve first, then the strategy. The whole point."""
+    _bridge_up(monkeypatch)
+    _finnhub_present(monkeypatch)
+
+    # Strategy first is REFUSED, and says why.
+    client.post("/controls/sleeve",
+                json={"sleeve": "research_satellite", "enabled": False})
+    r = client.post("/controls/longterm", json={"enabled": True}).json()
+    assert r["ok"] is False
+    assert "research_satellite sleeve" in r["error"]
+
+    # Sleeve first, then the strategy: allowed.
+    client.post("/controls/sleeve",
+                json={"sleeve": "research_satellite", "enabled": True})
+    r = client.post("/controls/longterm", json={"enabled": True}).json()
+    assert r["ok"] is True
+    assert r["long_term_sleeve_enabled"] is True
+
+
+def test_the_sleeve_toggle_has_no_prerequisite_of_its_own(env, client,
+                                                          monkeypatch):
+    """A sleeve allocates, it does not call anything.
+
+    The four-level framework and the bridge are what the long-term STRATEGY
+    needs, and they are checked at that toggle. Gating the sleeve on them too
+    would make the enable order circular: the operator could not enable the
+    sleeve without the bridge, and the panel tells them to enable the sleeve
+    first.
+    """
+    # No _bridge_up and no _finnhub_present: the default env has neither
+    # reachable, which is exactly the state being tested.
+    r = client.post("/controls/sleeve",
+                    json={"sleeve": "research_satellite", "enabled": True}).json()
+    assert r["ok"] is True   # nothing unreachable can block a sleeve enable
+
+    # The strategy toggle, by contrast, still refuses: it needs both.
+    r = client.post("/controls/longterm", json={"enabled": True}).json()
+    assert r["ok"] is False
+    assert "Finnhub" in r["error"] or "bridge" in r["error"]
+
+
+def test_sleeve_defaults_are_seeded_from_config_not_hardcoded(env, client,
+                                                              monkeypatch):
+    """A missing control file means the SHIPPED value, like every other block.
+
+    The sleeves block hardcoded research_satellite False regardless of config, so
+    an operator who enabled the sleeve in config still read off here, and the two
+    sources of truth disagreed with no way to tell which won.
+    """
+    ctl = os.path.join(env["control"], "controls.json")
+    if os.path.exists(ctl):
+        os.remove(ctl)
+    from api_server import controls, store
+
+    # Config ships the sleeve off, so a missing file reads off.
+    assert controls.read_controls()["sleeves"]["research_satellite"] is False
+
+    # Config on, no control file: the shipped value is what shows.
+    cfg = store.load_config()
+    cfg.setdefault("sleeves", {})["research_satellite_enabled"] = True
+    monkeypatch.setattr(store, "load_config", lambda: cfg)
+    assert controls.read_controls()["sleeves"]["research_satellite"] is True
+
+
+def test_an_unknown_sleeve_is_refused(env, client):
+    r = client.post("/controls/sleeve",
+                    json={"sleeve": "moon_shot", "enabled": True}).json()
+    assert r["ok"] is False
+    assert "unknown sleeve" in r["error"]
+
+
+def test_no_sleeve_control_writes_a_level_1_value(env, client):
+    """STRUCTURAL: a sleeve toggle allocates, it can never widen a risk limit."""
+    from api_server import store
+    before = json.dumps(store.load_config().get("risk", {}), sort_keys=True)
+    client.post("/controls/sleeve",
+                json={"sleeve": "research_satellite", "enabled": True})
+    client.post("/controls/rebalance", json={})
+    after = json.dumps(store.load_config().get("risk", {}), sort_keys=True)
+    assert before == after
+
+    saved = json.load(open(os.path.join(env["control"], "controls.json")))
+    assert "risk" not in saved
+    # And the sleeve toggle never enables live.
+    assert "live" not in json.dumps(saved).lower() or saved.get("live") is None
+
+
+def test_the_sleeve_state_never_returns_a_key_value(env, client, monkeypatch):
+    fake = "unit-test-fake-finnhub-sleeve-0007"
+    client.post("/credentials", json={"name": "finnhub_key", "value": fake})
+    r = client.get("/sleeves")
+    assert r.status_code == 200
+    assert fake not in r.text
+    assert "token=" not in r.text

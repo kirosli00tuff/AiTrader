@@ -24,6 +24,14 @@ add_executable(test_sleeves test_sleeves.cpp)
 target_link_libraries(test_sleeves PRIVATE mal_config)
 add_test(NAME sleeves COMMAND test_sleeves WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 
+# research_satellite sleeve enable, engine side: the engine must read the sleeve
+# toggle from the controls.json the GUI writes, not from the config default, or
+# the toggle is cosmetic and the long-term strategy can never get a sleeve.
+add_executable(test_sleeve_controls test_sleeve_controls.cpp)
+target_link_libraries(test_sleeve_controls PRIVATE mal_config mal_util mal_bridge)
+add_test(NAME sleeve_controls COMMAND test_sleeve_controls
+         WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
 # Discovery flag consumption, engine side: the engine must read discovery_enabled
 # from the controls.json the GUI writes, not from the config default, or the
 # operator's toggle is cosmetic and no discovered symbol is ever traded.

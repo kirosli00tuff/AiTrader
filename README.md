@@ -180,8 +180,40 @@ combined API spend near or under **100 dollars** a month.
 
 The GUI Controls page shows a **sleeve allocation panel** (live split vs target,
 drift band, rebalance-due flag), per-sleeve **enable toggles**, a **rebalance-now**
-button, and the **research thesis feed** — so the higher-equity long-term
-decisions are transparent. Enable via `sleeves.research_satellite_enabled: true`.
+button, and the **research thesis feed**, so the higher-equity long-term decisions
+are transparent.
+
+### Enabling it: sleeve first, then the strategy
+
+The order matters, and the GUI enforces it:
+
+1. **Enable the `research_satellite` sleeve**, in the Core-satellite sleeves panel
+   on the Controls page. The sleeve is where a long-term position LIVES, so it has
+   to exist before a strategy can put anything in it. Enabling **allocates**: it
+   gives satellite positions a 30 percent target of equity inside the 35 percent
+   hard cap they can never exceed, so the toggle **arms and states that** before
+   it fires. The sleeve has **no prerequisite of its own** beyond the engine
+   running: it allocates, it does not call anything.
+2. **Enable the long-term strategy**, in the Discovery + long-term sleeve panel.
+   THIS is what needs the four-level framework, so the **Finnhub key and the
+   bridge are checked here**, not at the sleeve. It is refused with a reason until
+   its prerequisites (including an enabled sleeve) are all green.
+
+Checking the framework at the sleeve instead would make the order circular: the
+panel would tell the operator to enable the sleeve first, then refuse to do it
+without a bridge the sleeve never uses.
+
+Both toggles write `controls.json` through the same validated, audited control
+endpoint, and **the engine reads the sleeve enable from that file every
+iteration** (`core/sleeve_controls.hpp`), the same way it reads the layer toggles
+and the kill switch. The control file **overrides** the shipped config, which
+ships the sleeve off, so the toggle is the operator's answer and config is only
+the default. A missing or malformed control file means **off**: a broken file must
+never allocate capital to a sleeve nobody turned on. Every change is logged as a
+`sleeve_toggle` event with the target and the cap.
+
+`sleeves.research_satellite_enabled: true` in config is the other way to set the
+default, but the GUI toggle is the one that decides at runtime.
 
 ## Discovery funnel + dynamic watchlist (ships DISABLED)
 

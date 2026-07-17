@@ -14,9 +14,25 @@ export function money(x: number | null | undefined): string {
   })}`;
 }
 
+// SIGNED percent for a value that is ALREADY a percentage, e.g. a daily PnL of
+// -1.5 rendering as "-1.50%". The sign is the point: a PnL reader needs the
+// direction before the magnitude. Do not pass a fraction to this.
 export function pct(x: number | null | undefined): string {
   const v = Number(x ?? 0);
   return `${v >= 0 ? "+" : ""}${v.toFixed(2)}%`;
+}
+
+// A SHARE, given as a fraction in [0,1], rendered as a plain percent: 0.30 to
+// "30%". Distinct from pct() on both counts, and both differences matter.
+//
+// The sleeve panel used pct() for its targets, which are fractions, so a 30
+// percent satellite target rendered as "+0.30%" and its 35 percent hard cap as
+// "+0.35%". An operator reading that saw a third of one percent: off by 100x,
+// carrying a sign that means nothing on an allocation. A share is never
+// negative, so it takes no sign, and it is scaled where a PnL percent is not.
+export function sharePct(x: number | null | undefined, digits = 0): string {
+  const v = Number(x ?? 0) * 100;
+  return `${v.toFixed(digits)}%`;
 }
 
 export function num(x: number | null | undefined, digits = 4): string {
