@@ -18,12 +18,22 @@ from __future__ import annotations
 
 import hashlib
 import os
+import time
 
 from .config import RL_ADVISORY_CAP, rl_enabled, rl_min_real_fills
 
+_REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _MODELS_DIR = os.path.join(os.path.dirname(__file__), "models")
 # stable-baselines3 saves policies as a .zip archive.
 _CHAMPION_PATH = os.path.join(_MODELS_DIR, "ppo_champion.zip")
+
+# The fill count changes only when a trade closes, and the gate is checked on
+# every score once RL is on. Without this, enabling RL puts a sqlite connect plus
+# a COUNT(*) over a growing trades table on the engine's per-symbol, per-bar
+# advisory path. 30s bounds it to a couple of reads a minute while still noticing
+# the gate opening promptly.
+_FILLS_TTL_S = 30.0
+_fills_cache: tuple[float, str, int] = (0.0, "", 0)
 
 
 def _det_unit(seed: str) -> float:
@@ -83,21 +93,73 @@ def rl_gate_unmet(cfg_path: str | None = None) -> tuple[int, int] | None:
     import. Fails CLOSED: if the count cannot be read, the gate reports unmet.
     """
     gate = rl_min_real_fills(cfg_path)
+    # A gate of 0 means no gate. Answered before any I/O, so it stays ungated
+    # even when the count cannot be read.
+    if gate <= 0:
+        return None
+    fills = _cached_real_fills()
+    return None if fills >= gate else (fills, gate)
+
+
+def reset_gate_cache() -> None:
+    """Drop the cached fill count. For tests, which change the DB under us."""
+    global _fills_cache
+    _fills_cache = (0.0, "", 0)
+
+
+def _db_path() -> str:
+    """The database, resolved the way the LAUNCHERS resolve it.
+
+    api_server/stack.db_path (which passes --db to the engine),
+    api_server/store._DEFAULT_DB, and ui/db.DB_PATH all anchor the default to the
+    REPO ROOT, so that is where the database canonically lives. A bare relative
+    "market_ai_lab.db" resolved against this process's cwd, which is the same
+    cwd-dependence the control-file fix removed: from a bridge started outside
+    the repo root the count would silently read 0 and RL would never activate,
+    even past 500 real fills.
+
+    Order: env MAL_DB_PATH, then config system.db_path, then the repo-root
+    default. Mirrors adaptive/run._db_path, plus the repo-root anchor the
+    launchers use.
+    """
+    env = os.environ.get("MAL_DB_PATH")
+    if env:
+        return env
+    try:
+        from llm_consensus.config_access import config_block
+        configured = (config_block("system", None) or {}).get("db_path")
+    except Exception:  # noqa: BLE001 - config is not load-bearing for a path
+        configured = None
+    return str(configured) if configured else os.path.join(
+        _REPO_ROOT, "market_ai_lab.db")
+
+
+def _cached_real_fills() -> int:
+    """Closed STRATEGY fills, cached for _FILLS_TTL_S. 0 when unreadable.
+
+    Keyed by the resolved db path so a test pointing elsewhere is never served a
+    count from the previous database. An unreadable count caches as 0, which
+    gates: a transient lock withholds RL for at most the TTL, which is the safe
+    direction.
+    """
+    global _fills_cache
+    db = _db_path()
+    now = time.monotonic()
+    expires, cached_db, cached = _fills_cache
+    if cached_db == db and now < expires:
+        return cached
     try:
         import sqlite3
         from ml_factor.real_dataset import count_closed_trades
-        db = os.environ.get("MAL_DB_PATH", "market_ai_lab.db")
         conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True, timeout=2.0)
         try:
             fills = int(count_closed_trades(conn))
         finally:
             conn.close()
-    except Exception:  # noqa: BLE001 — unprovable counts as zero, so it gates
+    except Exception:  # noqa: BLE001 - unprovable counts as zero, so it gates
         fills = 0
-    # One comparison for both paths, so an unreadable count fails CLOSED without
-    # special-casing it. A gate of 0 means no gate, and must stay ungated even
-    # when the count cannot be read.
-    return None if fills >= gate else (fills, gate)
+    _fills_cache = (now + _FILLS_TTL_S, db, fills)
+    return fills
 
 
 def score_rl(state: dict, cfg_path: str | None = None) -> dict:
@@ -154,13 +216,20 @@ def _score_with_policy(state: dict) -> dict:
 
 
 def rl_ensemble_factor_names(base_factors, cfg_path: str | None = None) -> list[str]:
-    """Ensemble factor list with ``rl_advisory`` appended ONLY when RL is enabled.
+    """Ensemble factor list with ``rl_advisory`` appended ONLY when RL is both
+    enabled AND past the real-fill gate.
 
-    When rl_enabled is false the RL factor stays out of the ensemble entirely —
-    this mirrors the C++ engine's gather_factors behaviour and is the Python
-    surface the test asserts against.
+    The gate is checked here and not just in score_rl, or this module's two
+    public surfaces disagree: the factor list would NAME rl_advisory as
+    participating while score_rl refused it as gated, and any consumer that
+    sizes, weights, or reports off the list would believe RL was live. The flag
+    is a request, the gate is the authority, and both surfaces have to say so.
+
+    Cheap: the gate reads a cached count (see _cached_real_fills), and returns
+    before any I/O when RL is off, which is the shipped default. Mirrors the C++
+    engine's gather_factors, which is the real authority over the ensemble.
     """
     names = list(base_factors)
-    if rl_enabled(cfg_path):
+    if rl_enabled(cfg_path) and rl_gate_unmet(cfg_path) is None:
         names.append("rl_advisory")
     return names

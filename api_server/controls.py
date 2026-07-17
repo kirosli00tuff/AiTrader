@@ -23,6 +23,7 @@ from __future__ import annotations
 import json
 import os
 import tempfile
+import time
 from datetime import datetime, timezone
 
 from api_server import store
@@ -39,6 +40,11 @@ _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # shipped defaults. The file carries operator toggles and never a credential
 # (asserted in tests/test_control_precedence.py), so it is readable by design.
 _CONTROLS_MODE = 0o644
+
+# A temp file older than this was abandoned by a killed write, not left by one in
+# flight. A real write completes in milliseconds, so a minute is far past any
+# live writer and the sweep can never race one.
+_TEMP_STALE_S = 60.0
 
 # Validated domains -----------------------------------------------------------
 ADAPTIVE, COUNCIL, DNN, WHALE = "adaptive", "council", "dnn_advisory", "whale"
@@ -424,6 +430,35 @@ def read_controls() -> dict:
     return state
 
 
+def _sweep_stale_temps(d: str) -> None:
+    """Remove temp files left by a write that was killed mid-flight.
+
+    The write's own except path cleans up a FAILED write, but a SIGKILL (the
+    supervisor force-kills after a graceful signal) or a host crash between
+    mkstemp and os.replace leaves the temp file behind forever, in the same
+    directory as controls.json and the kill-request file.
+
+    Only files older than _TEMP_STALE_S are touched, so this can never delete a
+    write that another thread has in flight: that write would have to stall for a
+    minute between creating its temp file and renaming it. Best effort by design.
+    A failed sweep must never fail the write it precedes.
+    """
+    cutoff = time.time() - _TEMP_STALE_S
+    try:
+        names = os.listdir(d)
+    except OSError:
+        return
+    for name in names:
+        if not (name.startswith(".controls.") and name.endswith(".tmp")):
+            continue
+        path = os.path.join(d, name)
+        try:
+            if os.stat(path).st_mtime < cutoff:
+                os.unlink(path)
+        except OSError:
+            pass
+
+
 def _write_controls(state: dict) -> None:
     os.makedirs(_control_dir(), exist_ok=True)
     out = {**state, "ts": _now()}
@@ -466,6 +501,7 @@ def _write_controls(state: dict) -> None:
     #
     # Same directory matters: os.replace is only atomic within one filesystem.
     d = _control_dir()
+    _sweep_stale_temps(d)
     fd, tmp = tempfile.mkstemp(dir=d, prefix=".controls.", suffix=".tmp")
     try:
         # mkstemp creates 0600. The old open(path, "w") created umask-default

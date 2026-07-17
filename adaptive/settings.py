@@ -18,13 +18,8 @@ and a fresh checkout all mean the same thing: nothing here runs.
 """
 from __future__ import annotations
 
-import json
-import os
-
 from llm_consensus import control_file
 from llm_consensus.config_access import config_block
-
-_REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 _BLOCK = "adaptive_realtime"
 

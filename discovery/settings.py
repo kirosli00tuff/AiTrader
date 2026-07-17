@@ -12,13 +12,8 @@ are already stored.
 """
 from __future__ import annotations
 
-import json
-import os
-
 from llm_consensus import control_file
 from llm_consensus.config_access import config_block
-
-_REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 # Defaults mirror config/config.hpp DiscoveryConfig exactly. Change one, change
 # both: tests/test_discovery_funnel.py asserts the two stay in parity.

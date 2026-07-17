@@ -64,7 +64,7 @@ def control_dir() -> str:
         from llm_consensus.config_access import config_block
         configured = str((config_block("system", None) or {}).get(
             "control_dir") or "")
-    except Exception:  # noqa: BLE001 — config is not load-bearing for a path
+    except Exception:  # noqa: BLE001 - config is not load-bearing for a path
         configured = ""
     d = configured or ".control"
     # THE FIX: anchor a relative dir to the repo root, not to os.getcwd(). Three

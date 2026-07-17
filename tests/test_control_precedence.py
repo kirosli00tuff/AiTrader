@@ -138,7 +138,7 @@ def test_a_pinned_config_ignores_the_control_file(ctl, tmp_path):
 
 # --- Root cause 1: the write must be atomic ---------------------------------
 
-def test_a_concurrent_write_never_shows_a_torn_file(ctl, monkeypatch):
+def test_a_concurrent_write_never_shows_a_torn_file(ctl):
     """THE LIVE BUG. A reader during a GUI write must never see a partial file.
 
     With the old truncating writer this failed on ~88 percent of reads: the
@@ -149,9 +149,12 @@ def test_a_concurrent_write_never_shows_a_torn_file(ctl, monkeypatch):
     from api_server import controls
     from discovery import settings
 
+    # _write_controls takes its state as an argument and never reads the
+    # file, so the only isolation this test needs is the MAL_CONTROL_DIR
+    # fixture. Patching read_controls here would be inert and would imply an
+    # isolation that is not doing any work.
     state = {"discovery": {"discovery_enabled": True},
              "padding": ["x" * 200] * 200}      # big enough to tear mid-write
-    monkeypatch.setattr(controls, "read_controls", lambda: dict(state))
     controls._write_controls(dict(state))
     assert settings.discovery_enabled(None) is True
 
@@ -188,9 +191,11 @@ def test_the_control_dir_is_absolute_so_three_processes_agree(monkeypatch):
     silently. An absolute anchor cannot.
     """
     monkeypatch.delenv("MAL_CONTROL_DIR", raising=False)
+    # Absolute is the PROPERTY. The trailing name is whatever
+    # system.control_dir happens to be set to, and asserting it would fail on
+    # a correct system that configured the dir elsewhere.
     d = control_file.control_dir()
     assert os.path.isabs(d), f"control_dir must be absolute, got {d!r}"
-    assert d.endswith(".control")
 
 
 def test_the_control_dir_is_the_same_from_any_cwd(monkeypatch, tmp_path):
@@ -303,3 +308,31 @@ def test_as_bool_does_not_take_the_int_branch_for_real_bools(ctl):
     from llm_consensus import control_file
     assert control_file.as_bool(True, False) is True
     assert control_file.as_bool(False, True) is False
+
+
+def test_a_temp_file_from_a_killed_write_is_swept(ctl):
+    """A SIGKILL between mkstemp and os.replace leaves a temp file forever.
+
+    The write's except path only cleans up a FAILED write, not a killed one, and
+    these accumulate in the same directory as controls.json and the kill-request
+    file across a week-long unattended run.
+    """
+    from api_server import controls
+    orphan = ctl / ".controls.abandoned.tmp"
+    orphan.write_text("{}")
+    os.utime(orphan, (0, 0))          # backdate it past the stale window
+    controls._write_controls({"discovery": {"discovery_enabled": True}})
+    assert not orphan.exists(), "a stale temp file should have been swept"
+
+
+def test_the_sweep_never_touches_a_write_in_flight(ctl):
+    """Only files past the stale window are removed.
+
+    A temp file another thread is writing right now is seconds old at most.
+    Deleting it would make that thread's os.replace fail and lose its write.
+    """
+    from api_server import controls
+    live = ctl / ".controls.inflight.tmp"
+    live.write_text("{}")             # fresh: another thread is mid-write
+    controls._write_controls({"discovery": {"discovery_enabled": True}})
+    assert live.exists(), "a fresh temp file must never be swept"

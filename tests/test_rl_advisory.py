@@ -150,8 +150,28 @@ def test_rl_enabled_false_keeps_factor_out_of_ensemble(tmp_path):
     off = rl_ensemble_factor_names(base, cfg_path=_cfg(tmp_path, rl_enabled=False))
     assert "rl_advisory" not in off
     assert off == base
-    on = rl_ensemble_factor_names(base, cfg_path=_cfg(tmp_path, rl_enabled=True))
+    # Enabled AND past the gate (min_fills=0) is what puts it in the ensemble.
+    # The gate has to be stated: the factor list and score_rl must agree, and
+    # neither joins the ensemble on the flag alone.
+    on = rl_ensemble_factor_names(
+        base, cfg_path=_cfg(tmp_path, rl_enabled=True, min_fills=0))
     assert "rl_advisory" in on
+
+
+def test_an_under_gated_rl_is_kept_out_of_the_ensemble_too(tmp_path, monkeypatch):
+    """The factor list must not NAME an RL that score_rl refuses.
+
+    Before this, the list keyed off rl_enabled alone: an under-gated RL was
+    reported as participating while score_rl returned source='gated' with bias 0,
+    so the module's two public surfaces disagreed about the hard rule.
+    """
+    from rl_advisory import service
+    monkeypatch.setattr(service, "rl_gate_unmet", lambda cfg_path=None: (240, 500))
+    base = ["llm_primary", "rule_based"]
+    names = service.rl_ensemble_factor_names(
+        base, cfg_path=_cfg(tmp_path, rl_enabled=True))
+    assert "rl_advisory" not in names
+    assert names == base
 
 
 # --- Walk-forward eval + champion/challenger gate --------------------------- #
@@ -272,3 +292,71 @@ def test_rl_enabled_degrades_instead_of_raising_when_llm_consensus_is_absent(
     v = score_rl({"symbol": "BTC-USD", "ret_5": 0.03})
     assert v["source"] == "disabled"
     assert v["bias"] == 0.0 and v["confidence"] == 0.0
+
+
+def test_the_fill_count_is_cached_off_the_hot_path(tmp_path, monkeypatch):
+    """The gate runs on EVERY score once RL is on. It must not re-query per call.
+
+    Without a cache, enabling RL puts a sqlite connect plus a COUNT(*) over a
+    growing trades table on the engine's per-symbol, per-bar advisory path.
+    """
+    from rl_advisory import service
+    service.reset_gate_cache()
+    calls = []
+    monkeypatch.setattr(service, "_db_path", lambda: str(tmp_path / "x.db"))
+    real = service._cached_real_fills
+
+    import ml_factor.real_dataset as rd
+    def counting(conn):
+        calls.append(1)
+        return 7
+    monkeypatch.setattr(rd, "count_closed_trades", counting)
+    # Give it a real database so the count path is actually reached.
+    import sqlite3
+    conn = sqlite3.connect(str(tmp_path / "x.db"))
+    conn.execute("CREATE TABLE trades (outcome TEXT, origin TEXT)")
+    conn.commit(); conn.close()
+
+    for _ in range(50):
+        assert service._cached_real_fills() == 7
+    assert len(calls) == 1, f"expected 1 query for 50 reads, got {len(calls)}"
+
+
+def test_the_fill_cache_is_keyed_by_database(tmp_path, monkeypatch):
+    """A different database must never be served the previous one's count."""
+    from rl_advisory import service
+    service.reset_gate_cache()
+    monkeypatch.setattr(service, "_db_path", lambda: str(tmp_path / "a.db"))
+    assert service._cached_real_fills() == 0        # absent db -> 0, gated
+    monkeypatch.setattr(service, "_db_path", lambda: str(tmp_path / "b.db"))
+    assert service._cached_real_fills() == 0        # re-read, not served from a.db
+    # The cache key changed, so the second call did not reuse the first entry.
+    assert service._fills_cache[1] == str(tmp_path / "b.db")
+
+
+def test_the_db_path_is_repo_root_anchored_not_cwd_relative(tmp_path, monkeypatch):
+    """The launchers (stack.db_path, store._DEFAULT_DB, ui/db) all anchor the
+    default to the repo root, so the gate must resolve the same file from any cwd.
+
+    A bare relative default meant a bridge started outside the repo root read a
+    database that was not there, counted 0, and silently gated RL forever.
+    """
+    import os
+    from rl_advisory import service
+    monkeypatch.delenv("MAL_DB_PATH", raising=False)
+    here = service._db_path()
+    assert os.path.isabs(here)
+    monkeypatch.chdir(tmp_path)
+    assert service._db_path() == here, "the db path must not follow the cwd"
+
+
+def test_mal_db_path_and_config_db_path_still_win(tmp_path, monkeypatch):
+    from rl_advisory import service
+    monkeypatch.setenv("MAL_DB_PATH", "/tmp/explicit.db")
+    assert service._db_path() == "/tmp/explicit.db"
+    monkeypatch.delenv("MAL_DB_PATH")
+    from llm_consensus import config_access
+    monkeypatch.setattr(config_access, "config_block",
+                        lambda name, path=None: {"db_path": "/tmp/from_config.db"}
+                        if name == "system" else {})
+    assert service._db_path() == "/tmp/from_config.db"
