@@ -26,8 +26,8 @@ int main() {
 
     const std::string good = "/tmp/mal_good_controls.json";
     { std::ofstream o(good);
-      o << R"({"layers": {"adaptive": true, "council": false, )"
-           R"("dnn_advisory": false, "whale": true}})"; }
+      o << R"({"layer_adaptive_enabled": true, "layer_council_enabled": false, )"
+           R"("layer_dnn_advisory_enabled": false, "layer_whale_enabled": true})"; }
     LayerToggles t = read_layer_toggles(good);
     maltest::check(t.adaptive && !t.council && !t.dnn_advisory && t.whale,
                    "explicit layer toggles are respected");
@@ -53,8 +53,8 @@ int main() {
 
     const std::string src = "/tmp/mal_src_controls.json";
     { std::ofstream o(src);
-      o << R"({"layers": {"adaptive": true, "council": true, )"
-           R"("dnn_advisory": true, "whale": true}, )"
+      o << R"({"layer_adaptive_enabled": true, "layer_council_enabled": true, )"
+           R"("layer_dnn_advisory_enabled": true, "layer_whale_enabled": true, )"
            R"("council_source": "mock", "whale_source": "real"})"; }
     LayerToggles s = read_layer_toggles(src);
     maltest::check(!s.council_real, "council_source mock => council_real false");
@@ -73,6 +73,52 @@ int main() {
                    "rule_based has no source axis, reports real");
     maltest::check(factor_source_real("rl_advisory", s),
                    "rl_advisory has no source axis, reports real");
+
+    // --- The enable key must not collide with the source key ----------------
+    // THIS IS THE REGRESSION. The enable axis used to read a BARE layer name
+    // ("whale"), and the GUI keys BOTH of its maps by layer name, so
+    // controls.json carried "whale" twice: the bool in layers and the source
+    // string in layer_sources. json_get_bool is a flat search that takes the
+    // FIRST hit, so the bool won only because layers is emitted first.
+    //
+    // Both orders are written here. Before the fix the second one read whale ON
+    // with the file plainly saying off: a string parses as neither true nor
+    // false, so json_get_bool returned its DEFAULT of true. The failure is
+    // silent and one-directional, the layer STICKS ON, which is the wrong
+    // direction for a spender the operator is trying to switch off.
+    const std::string ord = "/tmp/mal_order_controls.json";
+    for (int sources_first = 0; sources_first < 2; ++sources_first) {
+        { std::ofstream o(ord);
+          o << "{";
+          if (sources_first)
+              o << R"("layer_sources": {"whale": "real"}, )"
+                   R"("layers": {"whale": false}, )";
+          else
+              o << R"("layers": {"whale": false}, )"
+                   R"("layer_sources": {"whale": "real"}, )";
+          o << R"("layer_whale_enabled": false, "whale_source": "real"})"; }
+        LayerToggles ot = read_layer_toggles(ord);
+        maltest::check(!ot.whale,
+                       sources_first
+                           ? "whale off resolves with layer_sources emitted FIRST"
+                           : "whale off resolves with layers emitted first");
+        maltest::check(ot.whale_real,
+                       "whale source stays real regardless of block order");
+    }
+    std::remove(ord.c_str());
+
+    // The enable key and the source key resolve INDEPENDENTLY: off + real is a
+    // real state (the layer is off, and it would use the live service if on).
+    const std::string ind = "/tmp/mal_indep_controls.json";
+    { std::ofstream o(ind);
+      o << R"({"layer_whale_enabled": false, "whale_source": "mock", )"
+           R"("layer_council_enabled": true, "council_source": "real"})"; }
+    LayerToggles it = read_layer_toggles(ind);
+    maltest::check(!it.whale && !it.whale_real,
+                   "whale resolves off + mock independently");
+    maltest::check(it.council && it.council_real,
+                   "council resolves on + real independently");
+    std::remove(ind.c_str());
 
     // Three-state label: off / on-mock / on-real.
     maltest::check(std::string(layer_state(false, true)) == "off",

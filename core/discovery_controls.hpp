@@ -58,9 +58,12 @@ struct DiscoveryRuntime {
 // is on. That agreement is the entire point: they disagreed before, and the
 // disagreement was invisible.
 //
-// The JSON reader is flat (it finds a key anywhere in the body), which is how
-// read_layer_toggles already reads its nested "layers" object. discovery_enabled
-// is unique in controls.json, so it cannot collide with another block's key.
+// The JSON reader is FLAT: it finds a key anywhere in the body and cannot tell
+// which object it landed in. So a key this engine reads must be unique across
+// the WHOLE file, not merely within its own block. discovery_enabled is unique,
+// so it cannot collide. read_layer_toggles was the counter-example and is now
+// fixed: it read a bare layer name that the GUI also used to key its
+// layer_sources map, and survived only because layers was emitted first.
 inline DiscoveryRuntime read_discovery_controls(
     const std::string& path, const config::DiscoveryConfig& cfg) {
     DiscoveryRuntime d;

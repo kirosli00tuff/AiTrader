@@ -56,8 +56,25 @@ inline bool source_is_real(const std::string& body, const std::string& key) {
 
 // Read the layer enable + source states from controls.json. Missing/malformed
 // file => all layers ON and source real. Safety has neither axis and never
-// appears here. The source keys are distinct from the enable keys
-// (council_source vs council) so the flat JSON reader cannot confuse them.
+// appears here.
+//
+// EVERY KEY READ HERE IS UNIQUE ACROSS THE WHOLE FILE, and it has to be.
+// bridge::json_get_bool is a FLAT search: it finds the first occurrence of the
+// needle "<key>" anywhere in the file and reads what follows, with no idea which
+// object it landed in.
+//
+// The enable axis used to read a BARE layer name ("whale"). The GUI keys both
+// its maps by layer name, so controls.json carried that name twice: the bool in
+// layers and the source string in layer_sources. The bool won only because
+// layers is emitted first. Reorder the writer's dict and the search lands on the
+// source string, which parses as neither true nor false, so json_get_bool
+// returns its DEFAULT of true: the layer sticks ON and the operator's off is
+// discarded silently. The enable keys are now layer_<name>_enabled, which
+// nothing else in the file contains as a substring, so the reader no longer
+// depends on emission order. The source keys (<name>_source) were already
+// distinct and are unchanged.
+//
+// A missing enable key still means ON, matching the missing-file default above.
 inline LayerToggles read_layer_toggles(const std::string& path) {
     LayerToggles t;  // defaults: all ON, source real
     std::ifstream in(path);
@@ -65,10 +82,11 @@ inline LayerToggles read_layer_toggles(const std::string& path) {
     std::string body((std::istreambuf_iterator<char>(in)),
                      std::istreambuf_iterator<char>());
     if (body.empty()) return t;
-    t.adaptive = bridge::json_get_bool(body, "adaptive", true);
-    t.council = bridge::json_get_bool(body, "council", true);
-    t.dnn_advisory = bridge::json_get_bool(body, "dnn_advisory", true);
-    t.whale = bridge::json_get_bool(body, "whale", true);
+    t.adaptive = bridge::json_get_bool(body, "layer_adaptive_enabled", true);
+    t.council = bridge::json_get_bool(body, "layer_council_enabled", true);
+    t.dnn_advisory =
+        bridge::json_get_bool(body, "layer_dnn_advisory_enabled", true);
+    t.whale = bridge::json_get_bool(body, "layer_whale_enabled", true);
     t.council_real = source_is_real(body, "council_source");
     t.dnn_advisory_real = source_is_real(body, "dnn_advisory_source");
     t.whale_real = source_is_real(body, "whale_source");

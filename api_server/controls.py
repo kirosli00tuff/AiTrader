@@ -489,6 +489,36 @@ def _write_controls(state: dict) -> None:
     srcs = state.get("layer_sources", {}) or {}
     for layer in SOURCE_LAYERS:
         out[f"{layer}_source"] = "mock" if srcs.get(layer) == "mock" else "real"
+    # Emit flat per-layer ENABLE keys the C++ engine reads (layer_whale_enabled
+    # etc.), derived from the nested layers map the GUI uses.
+    #
+    # THE ENGINE'S JSON READER IS FLAT: bridge::json_get_bool searches the whole
+    # file for the needle "<key>" and reads whatever follows the FIRST hit, with
+    # no idea which object it landed in. So a key name the engine reads must be
+    # unique across the ENTIRE file, not merely unique within its own block.
+    #
+    # It was not. The GUI keys BOTH maps by layer name, so "council",
+    # "dnn_advisory", and "whale" each appeared TWICE: a bool in layers and a
+    # source string in layer_sources. The engine read the first hit, which was
+    # the bool only because layers happens to be emitted before layer_sources in
+    # _defaults. Reorder that dict, sort the keys on dump, or insert any block
+    # carrying a layer name, and the engine reads the source STRING instead. A
+    # string parses as neither true nor false, so json_get_bool returns its
+    # DEFAULT, which is true. The failure is therefore silent and always in one
+    # direction: the layer STICKS ON and the operator's off is discarded. An
+    # advisory spender the GUI cannot turn off is the bad half of that trade.
+    #
+    # Measured both ways before the fix (tests/test_layer_toggles.cpp pins it):
+    # layers first, whale off -> whale=0 correct; layer_sources first, whale off
+    # -> whale=1, the off silently dropped.
+    #
+    # These names collide with nothing: no other key in the file contains
+    # "layer_<name>_enabled" as a substring. The nested layers and layer_sources
+    # maps stay exactly as they are, because Python and the GUI read them by
+    # PATH, where keying both by layer name is correct and unambiguous.
+    layer_enables = state.get("layers", {}) or {}
+    for layer in LAYERS:
+        out[f"layer_{layer}_enabled"] = bool(layer_enables.get(layer, True))
     # Flat per-slot council model enables the C++ engine reads (llm_primary_enabled
     # etc.), derived from the models map (keyed by model id) and the slot order.
     models = state.get("models", {}) or {}

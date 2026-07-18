@@ -51,9 +51,12 @@ struct AdaptiveRuntime {
 // false. So a missing file, an empty file, a malformed file, and a fresh
 // checkout all mean the same thing: off.
 //
-// The JSON reader is flat (it finds a key anywhere in the body), which is how
-// read_layer_toggles already reads its nested "layers" object. The adaptive keys
-// are long and unique, so they cannot collide with another block's.
+// The JSON reader is FLAT: it finds a key anywhere in the body and cannot tell
+// which object it landed in. So a key this engine reads must be unique across
+// the WHOLE file, not merely within its own block. The adaptive keys are long
+// and unique, so they cannot collide. read_layer_toggles was the counter-example
+// and is now fixed: it read a bare layer name that the GUI also used to key its
+// layer_sources map, and survived only because layers was emitted first.
 inline AdaptiveRuntime read_adaptive_controls(
     const std::string& path, const config::AdaptiveRealtimeConfig& cfg) {
     AdaptiveRuntime a;

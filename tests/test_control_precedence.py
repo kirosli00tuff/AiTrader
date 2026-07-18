@@ -407,16 +407,144 @@ def test_the_whale_control_block_is_not_named_whale(ctl):
     body = open(controls._controls_path()).read()
     assert '"whale_feeds"' in body
 
-    # The C++ reader searches for the exact needle "whale" and reads whatever
-    # follows the FIRST hit. controls.json already carries two bare whale keys
-    # (layers.whale, a bool, and layer_sources.whale, the string "real"), so the
-    # layer toggle is readable only because `layers` is emitted first. That
-    # ordering dependency predates this block and is noted in PROGRESS.md; what
-    # matters here is that whale_feeds does not add a THIRD hit ahead of them.
-    first = body.index('"whale":')
-    after = body[first + len('"whale":'):].lstrip()
-    assert after.startswith(("true", "false")), (
-        f"the first bare whale key must be the layer bool, got: {after[:20]!r}")
+    # The engine no longer flat-searches a bare "whale" for the layer enable: it
+    # reads layer_whale_enabled, which nothing else contains as a substring. The
+    # bare name may still appear inside the nested layers/layer_sources maps,
+    # which Python and the GUI read by PATH, so those are unambiguous.
+    assert '"layer_whale_enabled"' in body
+
+
+def _engine_control_keys() -> list[str]:
+    """Every key name the C++ engine FLAT-searches in controls.json.
+
+    Scraped from the control readers themselves rather than restated here, so a
+    new key cannot be added to the engine and quietly skip the uniqueness check
+    below.
+    """
+    import glob
+    import re
+    keys: list[str] = []
+    pattern = re.compile(
+        r'(?:json_get_bool|json_get_string|json_get_number|source_is_real)'
+        r'\(\s*body\s*,\s*"([A-Za-z0-9_:]+)"')
+    readers = sorted(glob.glob("core/*_controls.hpp")) + ["core/layer_toggles.hpp",
+                                                          "core/feed_clock.hpp"]
+    for path in readers:
+        try:
+            keys += pattern.findall(open(path).read())
+        except OSError:
+            continue
+    # A scrape that silently finds nothing would make the test vacuous, which is
+    # exactly how a guard rots. Fail loudly instead.
+    assert len(keys) >= 10, (
+        f"scraped only {len(keys)} engine control keys, the call shape probably "
+        f"changed and this guard has gone blind")
+    return keys
+
+
+def test_every_key_the_engine_flat_searches_is_unique_in_the_written_file(ctl):
+    """THE GENERAL GUARD for the duplicate-key class.
+
+    bridge::json_get_bool is a FLAT search: it finds the first occurrence of the
+    needle "<key>" anywhere in the file and reads what follows, with no idea
+    which object it landed in. So every key the engine reads must be unique
+    across the WHOLE file, not merely within its own block.
+
+    It was not. The GUI keys both of its maps by layer name, so "council",
+    "dnn_advisory", and "whale" each appeared TWICE: a bool in layers and a
+    source string in layer_sources. The engine read the bool only because layers
+    is emitted first. Reorder that dict and it reads the source STRING, which
+    parses as neither true nor false, so json_get_bool returns its DEFAULT of
+    true: the layer sticks ON and the operator's off is discarded silently.
+
+    Counting occurrences catches the whole class at the writer, for every layer
+    and every future key, without depending on emission order.
+
+    EXACTLY once, not at most once. A key the engine reads but the writer never
+    emits is the same silent failure from the other side: json_get_bool falls
+    back to its default, which for a layer enable is ON, so the operator's off
+    is discarded just as quietly.
+    """
+    import re
+    from api_server import controls
+    controls._write_controls(controls.read_controls())
+    body = open(controls._controls_path()).read()
+    wrong = {}
+    for key in _engine_control_keys():
+        if key.endswith(":"):        # regime_pin: is a per-symbol prefix, not a key
+            continue
+        hits = len(re.findall(re.escape(f'"{key}"'), body))
+        if hits != 1:
+            wrong[key] = hits
+    assert not wrong, (
+        f"every key the engine flat-searches must appear EXACTLY once in "
+        f"controls.json. Duplicates resolve by emission order, absent keys "
+        f"resolve to the engine's default. Got {{key: hits}}: {wrong}")
+
+
+def test_the_layer_toggle_and_its_source_resolve_independently(ctl):
+    """Enable and source are two axes and must never share a key name.
+
+    off + real is a real state: the layer is off, and it would use the live
+    service if it were on. Writing one must not move the other.
+    """
+    from api_server import controls
+    controls.set_layer("whale", False)
+    controls.set_source("whale", "real")
+    st = controls.read_controls()
+    assert st["layers"]["whale"] is False
+    assert st["layer_sources"]["whale"] == "real"
+    body = open(controls._controls_path()).read()
+    assert '"layer_whale_enabled": false' in body
+    assert '"whale_source": "real"' in body
+
+
+def test_a_layer_left_off_survives_writes_of_other_settings(ctl):
+    """Every setter is a read-modify-write of the WHOLE state, so a setter that
+    dropped or defaulted a key would silently re-enable a layer the operator
+    turned off. Walk the setters and assert the off sticks."""
+    from api_server import controls
+    controls.set_layer("whale", False)
+    controls.set_feed_clock("alpaca_paper", "real")
+    controls.set_source("council", "mock")
+    controls.set_model(controls.COUNCIL_MODELS[0], True)
+    controls.set_budget(30, 60)
+    controls.set_sleeve("research_satellite", True)
+    assert controls.read_controls()["layers"]["whale"] is False
+    body = open(controls._controls_path()).read()
+    assert '"layer_whale_enabled": false' in body
+
+
+def test_the_cpp_and_python_readers_agree_on_enable_and_source(ctl):
+    """Resolve both axes the way the C++ engine does (flat search, first hit)
+    and assert it matches what Python resolves by path. Disagreement between the
+    two halves is the whole failure mode this file exists to prevent."""
+    import re
+    from api_server import controls
+
+    def cpp_bool(body: str, key: str, default: bool) -> bool:
+        m = re.search(re.escape(f'"{key}"') + r"\s*:\s*", body)
+        if not m:
+            return default
+        tail = body[m.end():]
+        if tail.startswith("true") or tail.startswith("1"):
+            return True
+        if tail.startswith("false") or tail.startswith("0"):
+            return False
+        return default          # a string lands here, and defaults ON
+
+    def cpp_source_real(body: str, key: str) -> bool:
+        m = re.search(re.escape(f'"{key}"') + r'\s*:\s*"([a-z]+)"', body)
+        return (m.group(1) if m else "real") != "mock"
+
+    for enabled, source in ((False, "real"), (True, "mock"), (False, "mock")):
+        controls.set_layer("whale", enabled)
+        controls.set_source("whale", source)
+        st = controls.read_controls()
+        body = open(controls._controls_path()).read()
+        assert cpp_bool(body, "layer_whale_enabled", True) is st["layers"]["whale"]
+        assert cpp_source_real(body, "whale_source") == (
+            st["layer_sources"]["whale"] == "real")
 
 
 def test_the_whale_feeds_block_survives_a_control_write(ctl):

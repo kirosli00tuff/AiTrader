@@ -14,6 +14,45 @@ Commit message:
 
 ---
 
+## Prompt: Fix the duplicate whale keys in controls.json
+
+Date: 2026-07-18
+Model: Opus 4.8
+Prompt summary: controls.json carries two keys named whale (a bare layer bool and a source string), the C++ flat reader collides on them, fix it, audit the same class across every layer, verify live, test, document, commit.
+
+THE DUPLICATE KEY IS REAL. THE REPORTED SYMPTOM CANNOT BE CAUSED BY IT, AND THE DIRECTION IS THE POINT. The report was that the collision drives the whale layer to False. I probed the REAL reader against the REAL file before changing anything: it returns `whale=1`, ON. Reading `json_get_bool` shows why it must. On a collision the flat search lands on the source STRING `"real"`, a string matches neither `true` nor `false` nor bare `1`/`0`, so the function returns its DEFAULT, and for a layer enable that default is `true`. **A collision can only make a layer STICK ON. It can never turn one off.** So I fixed the hazard and did not invent a mechanism to match the report.
+
+WHAT THE COLLISION ACTUALLY COSTS, MEASURED BOTH WAYS. `layers` emitted first, whale off: reads `whale=0`, correct. `layer_sources` emitted first, whale off: reads `whale=1`, the operator's off silently discarded. The whale, council, and dnn_advisory OFF switches worked only because of the order two dicts happen to appear in `_defaults()`. A `sort_keys=True`, an alphabetical tidy, or any new block carrying a layer name would have turned all three into no-ops with nothing in the logs to say so. An advisory spender the GUI cannot switch off is the bad half of that trade.
+
+Changes: TASK 1. `api_server/controls._write_controls` now emits flat `layer_<name>_enabled` keys derived from the nested `layers` map, and `core/layer_toggles.hpp` reads those instead of the bare layer name. No other key in the file contains `layer_<name>_enabled` as a substring, so the reader no longer depends on emission order. The source keys (`whale_source`) were already distinct and are unchanged. The nested `layers` and `layer_sources` maps are UNTOUCHED, because Python and the GUI read them by PATH, where keying both maps by layer name is correct and unambiguous. Migrated the live control file: the operator's intent (whale ON, source real) was read, re-emitted with the new keys, and verified through the C++ reader. TASK 2. Audited every needle the `core/*` readers flat-search against the live file: `council`, `dnn_advisory`, and `whale` each appeared TWICE; the other 17 keys appeared once. Those three are the complete set and all three are fixed. `adaptive` was safe only by luck (no source axis, so no twin) and was renamed with them so a future adaptive source cannot reintroduce it. Corrected the comments in `discovery_controls.hpp` and `adaptive_controls.hpp`, which both cited the old bare-name read as the precedent to copy. NOT touched: RiskGate logic, the live-trading gate, the adaptive limit-weakening invariant, or any Level-1 value. Live trading stays off.
+
+Safest-choice notes: (1) I DID NOT RENAME THE NESTED MAP KEYS. Strictly, the file still contains the string `"whale"` twice, inside `layers` and `layer_sources`. Those are distinct PATHS, not duplicate keys in any JSON sense, and the GUI legitimately keys both maps by layer name. The defect is the FLAT READER, which ignores structure, so the fix belongs at the names the reader searches. Renaming the nested keys would have broken the GUI contract to satisfy a literal reading of the word duplicate. (2) THE OPEN FLAG'S OWN PROPOSED FIX WAS REJECTED. It said to emit the layer enables before any block reusing those names and document it. That leaves the hazard live and load-bearing on a comment, and the next person to sort a dict breaks it. Distinct names make the order irrelevant. (3) A MISSING ENABLE KEY STILL MEANS ON, matching the existing documented posture that a missing or malformed control file means all layers on-real. I did not change that default while changing the key names, because two changes at once in a safety-adjacent reader is how a regression hides. (4) THE GUARD ASSERTS EXACTLY ONCE, NOT AT MOST ONCE. A key the engine reads but the writer never emits falls back to the same default and fails identically from the other side, so counting only duplicates would have left half the class uncovered. The mutation proved it: removing the writer's emission is caught with `{layer_*_enabled: 0}`. (5) I RAN THE LIVE ENGINE AGAINST A SCRATCH DB, not `market_ai_lab.db`, so verification could not pollute the operator's data.
+
+VERIFICATION (2026-07-18):
+
+| Check | Result |
+| --- | --- |
+| **The reported mechanism** | **DISPROVEN: the real reader on the real file returns `whale=1` (ON), and a collision can only default ON, never off** |
+| **The hazard is real, measured both orders** | **CONFIRMED: `layers` first -> `whale=0` correct; `layer_sources` first -> `whale=1`, the off silently dropped** |
+| Audit across every layer | 3 instances (`council`, `dnn_advisory`, `whale`), 17 other keys clean, all 3 fixed |
+| Operator intent migrated, not reset | PASS: whale ON, source real, verified through the C++ reader after migration |
+| GUI toggle round-trip reaches the engine | PASS: off -> engine reads `whale=0`; on -> engine reads `whale=1`; source stays real throughout |
+| Whale layer ON across iterations | PASS: banner `L4 whale on-real [controls.json]`, 12 iterations, ZERO `layer.whale` events |
+| Whale factor contributes | PASS: 48 `whale_signal` rows, ensemble weight 0.1007, inside the 0.35 cap |
+| Mutation: C++ reader back to bare `"whale"` | FAILS the reordered case and the independence case, PASSES layers-first, which is the invisibility that let this ship |
+| Mutation: writer stops emitting the flat keys | FAILS the uniqueness guard with `{layer_*_enabled: 0}` |
+| No key value logged | PASS: controls.json carries toggles only, asserted in tests |
+| Bind stays loopback | PASS, unchanged |
+| Suites | pytest 675 (from 671), vitest 116, ctest 24/24, typecheck clean, build green |
+
+NOT CLOSED, AND I AM NOT PRETENDING OTHERWISE. The six `layer.whale True -> False` events are still unexplained. They are Python-formatted, so `set_layer` wrote them, and each read `old=True` right after the previous click wrote False, so something restored True unaudited between clicks. Ruled out with evidence: all 17 write sites audit; every setter persists correctly in isolation; `seed_feed_clock` preserves layers; only `controls.py` writes the key and the C++ side never writes; the events postdate the atomic-write fix by 76 minutes; one control file exists on the box, mode 0644, untouched since 08:48Z. The likeliest remaining explanation is a backend still running pre-fix code, since Python does not hot-reload, but I could not reproduce it and will not assert it. Logged in Open Flags with the evidence to capture next time.
+
+ALSO FOUND, NOT FIXED: `whale_position_scale_cap` (0.35) and `dnn_position_scale_cap` (0.5) are parsed and range-validated but no consumer enforces them. The weights that actually bind are `whale_signal_weight` / `whale_signal_factor_weight` (0.10 shipped, 0.1007 live), so the whale layer is comfortably under 0.35 in practice, but the documented cap is not the thing holding it there. This sits in the sizing path, which this prompt put out of bounds, so it is logged rather than touched.
+
+Commit message: `Fix duplicate whale keys in controls.json so the whale layer stays enabled, audit the same class across layers, live trading untouched`
+
+---
+
 ## Prompt: Please fix all of them (the 10 whale-commit review findings)
 
 Date: 2026-07-17
@@ -1530,3 +1569,14 @@ $ git diff --cached --stat
 | Gemini 3.1 Pro | failing | TimeoutError: The read operation timed out | 6080.1 ms |
 | Alpaca paper market data | working | one quote ok | 240.8 ms |
 | Alpaca paper order-auth (validation-only) | working | paper account auth ok | 245.3 ms |
+
+### Run 2026-07-17T08:48:08Z
+
+| Integration | Result | Detail | Latency |
+| --- | --- | --- | --- |
+| OpenAI GPT-5.5 | working | - | 1688.9 ms |
+| Anthropic Opus 4.8 | working | - | 1631.5 ms |
+| Anthropic Haiku 4.5 (gate path) | working | - | 1038.3 ms |
+| Gemini 3.1 Pro | working | - | 1386.9 ms |
+| Alpaca paper market data | working | one quote ok | 290.4 ms |
+| Alpaca paper order-auth (validation-only) | working | paper account auth ok | 285.4 ms |
