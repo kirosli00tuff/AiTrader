@@ -921,6 +921,16 @@ def runstate() -> dict:
         _layers = {}
         _layer_sources = {}
     council_mode = "real" if (use_real and bridge.get("reachable")) else "mock"
+    # Feed substitution (2026-07-17 outage): active when the engine's latest
+    # substitution/restoration event says the real path is running on non-real
+    # ticks. The engine logs once per transition, so the newest of the two
+    # kinds IS the current state. No events means never substituted.
+    substitution = query_one(
+        "SELECT kind, ts, message FROM events"
+        " WHERE kind IN ('feed_substitution','feed_restored')"
+        " ORDER BY id DESC LIMIT 1")
+    feed_substituted = bool(substitution
+                            and substitution.get("kind") == "feed_substitution")
     return {"feed_mode": _feed,
             "clock_mode": _clock,
             "market_data_source": md.get("source", "mock"),
@@ -931,6 +941,8 @@ def runstate() -> dict:
             "live_enabled": bool(ap.get("live_enabled")),
             "layers": _layers,
             "layer_sources": _layer_sources,
+            "feed_substituted": feed_substituted,
+            "feed_substitution_ts": (substitution or {}).get("ts", ""),
             "ts": _now()}
 
 

@@ -190,3 +190,12 @@ add_executable(test_time_modes test_time_modes.cpp)
 target_link_libraries(test_time_modes PRIVATE mal_util)
 add_test(NAME time_modes COMMAND test_time_modes
          WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+# Bar provenance (2026-07-18): the entry gate refuses synthetic/unknown bars on
+# the real path, normalization never invents realness, and the storage round
+# trip persists sources with no default to real.
+add_executable(test_provenance test_provenance.cpp)
+target_link_libraries(test_provenance PRIVATE mal_storage mal_util
+                      ${MAL_SQLITE_LIB})
+add_test(NAME provenance COMMAND test_provenance
+         WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})

@@ -221,8 +221,26 @@ _BARS_DDL = (
     "id INTEGER PRIMARY KEY AUTOINCREMENT, venue TEXT NOT NULL, symbol TEXT NOT NULL,"
     " timeframe TEXT NOT NULL, timestamp TEXT NOT NULL, open REAL NOT NULL,"
     " high REAL NOT NULL, low REAL NOT NULL, close REAL NOT NULL, volume REAL NOT NULL,"
+    " source TEXT DEFAULT 'unknown',"
     " UNIQUE(venue, symbol, timeframe, timestamp))"
 )
+
+# Tolerant provenance migration for a DB created before the column existed.
+# Existing rows land 'unknown', never a guess at real. Mirrors the C++
+# storage.cpp migration, so whichever side opens the DB first migrates it.
+_BARS_MIGRATIONS = (
+    "ALTER TABLE bars ADD COLUMN source TEXT DEFAULT 'unknown'",
+)
+
+
+def ensure_bars_schema(conn: sqlite3.Connection) -> None:
+    """Create the bars table if absent and add the provenance column. Idempotent."""
+    conn.execute(_BARS_DDL)
+    for mig in _BARS_MIGRATIONS:
+        try:
+            conn.execute(mig)
+        except sqlite3.OperationalError:
+            pass  # duplicate column: already migrated
 
 
 def _iso_days_ago(days: int) -> str:
@@ -262,10 +280,11 @@ def _upsert_bars(conn: sqlite3.Connection, venue: str, symbol: str,
             continue
         conn.execute(
             "INSERT INTO bars(venue,symbol,timeframe,timestamp,open,high,low,"
-            "close,volume) VALUES(?,?,?,?,?,?,?,?,?) "
+            "close,volume,source) VALUES(?,?,?,?,?,?,?,?,?,'backfill') "
             "ON CONFLICT(venue,symbol,timeframe,timestamp) DO UPDATE SET "
             "open=excluded.open, high=excluded.high, low=excluded.low, "
-            "close=excluded.close, volume=excluded.volume",
+            "close=excluded.close, volume=excluded.volume, "
+            "source=excluded.source",
             (venue, symbol, timeframe, ts, float(o), float(h), float(l),
              float(c), float(b.get("v", 0) or 0)))
         written += 1
@@ -298,7 +317,7 @@ def backfill(db_path: str = "market_ai_lab.db",
     conn = sqlite3.connect(db_path)
     written: dict[str, int] = {}
     try:
-        conn.execute(_BARS_DDL)
+        ensure_bars_schema(conn)
         for api_tf, db_tf, start in plan:
             if equity:
                 got = _fetch_bars(f"{_DATA_BASE}/v2/stocks/bars", headers,

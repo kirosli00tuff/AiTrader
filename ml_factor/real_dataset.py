@@ -145,6 +145,18 @@ def _has_origin_column(conn: sqlite3.Connection) -> bool:
     return any(c[1] == "origin" for c in cols)
 
 
+def _has_bar_source_column(conn: sqlite3.Connection) -> bool:
+    """Whether this DB records the provenance of the bar each trade executed
+    against. Absent on a DB older than the 2026-07-18 migration: those fills
+    count unfiltered, the honest fallback, because the information was never
+    recorded."""
+    try:
+        cols = conn.execute("PRAGMA table_info(trades)").fetchall()
+    except sqlite3.Error:
+        return False
+    return any(c[1] == "bar_source" for c in cols)
+
+
 def count_closed_trades(conn: sqlite3.Connection) -> int:
     """Closed STRATEGY fills with a realized outcome. The real-fill gate.
 
@@ -167,9 +179,17 @@ def count_closed_trades(conn: sqlite3.Connection) -> int:
     """
     if not _has_origin_column(conn):
         return _count_all_closed(conn)
+    # A fill against a proven-synthetic bar exercised nothing: the prices were
+    # the walk generator, not a market (2026-07-17: BTC bought at 74,335 against
+    # a real 63,000). Excluding it is the same direction as the origin filter,
+    # STRICTER only. 'unknown' still counts: historical fills predate the
+    # provenance column and were real, so excluding them would rewrite history.
+    extra = (" AND COALESCE(bar_source, 'unknown') <> 'synthetic'"
+             if _has_bar_source_column(conn) else "")
     row = conn.execute(
         "SELECT COUNT(*) FROM trades WHERE outcome IN ('win','loss','flat')"
         " AND pnl IS NOT NULL AND COALESCE(origin, 'strategy') = 'strategy'"
+        + extra
     ).fetchone()
     return int(row[0]) if row else 0
 

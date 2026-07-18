@@ -38,31 +38,74 @@ def _db_path() -> str:
     return os.environ.get("MAL_DB_PATH", "market_ai_lab.db")
 
 
-def bars_fresh(threshold_seconds: int, db: str | None = None) -> bool:
-    """True when at least one crypto bar is newer than the staleness threshold.
-    Reads the bars table read-only. A missing DB or no bars reads as NOT fresh."""
+def _real_feed_mode() -> bool:
+    """True when the loop runs the real path (feed_mode alpaca_paper), read the
+    same way the engine reads it: controls.json wins, config seeds. Unreadable
+    means not-real, so an offline run is never held to the real-path bar."""
+    try:
+        from llm_consensus import control_file
+        from llm_consensus.config_access import config_block
+        feed = control_file.control_state().get("feed_mode")
+        if not feed:
+            feed = (config_block("simulation") or {}).get("feed_mode", "")
+        return str(feed) == "alpaca_paper"
+    except Exception:
+        return False
+
+
+def feed_ok(threshold_seconds: int, db: str | None = None) -> dict:
+    """Freshness AND provenance of the newest crypto bar.
+
+    Staleness alone is NOT evidence of health: the 2026-07-17 outage wrote
+    synthetic walk bars for 19 hours and they always advance, so the old
+    MAX(timestamp) check reported a healthy feed throughout. On the real path
+    the newest bar must also be REAL (real_feed or backfill). A DB from before
+    the provenance migration has no source column and falls back to freshness
+    only, stated in the result rather than silently.
+    """
     db = db or _db_path()
+    out = {"fresh": False, "source": "unknown", "real": False, "ok": False,
+           "provenance_checked": False}
     try:
         uri = f"file:{db}?mode=ro"
         conn = sqlite3.connect(uri, uri=True, timeout=2.0)
         try:
-            row = conn.execute(
-                "SELECT MAX(timestamp) FROM bars WHERE symbol LIKE '%/%'"
-            ).fetchone()
+            try:
+                row = conn.execute(
+                    "SELECT timestamp, COALESCE(source,'unknown') FROM bars"
+                    " WHERE symbol LIKE '%/%'"
+                    " ORDER BY timestamp DESC LIMIT 1").fetchone()
+                out["provenance_checked"] = True
+            except sqlite3.OperationalError:
+                # Pre-migration DB: no source column. Freshness only.
+                row = conn.execute(
+                    "SELECT MAX(timestamp), 'unknown' FROM bars"
+                    " WHERE symbol LIKE '%/%'").fetchone()
         finally:
             conn.close()
     except Exception:
-        return False
+        return out
     if not row or not row[0]:
-        return False
-    # ISO-8601 UTC. Compare to now with a tolerant parse.
+        return out
     from datetime import datetime, timezone
     try:
         ts = datetime.fromisoformat(str(row[0]).replace("Z", "+00:00"))
     except Exception:
-        return False
+        return out
     age = (datetime.now(timezone.utc) - ts).total_seconds()
-    return age <= threshold_seconds
+    out["fresh"] = age <= threshold_seconds
+    out["source"] = str(row[1] or "unknown")
+    out["real"] = out["source"] in ("real_feed", "backfill")
+    if _real_feed_mode() and out["provenance_checked"]:
+        out["ok"] = out["fresh"] and out["real"]
+    else:
+        out["ok"] = out["fresh"]
+    return out
+
+
+def bars_fresh(threshold_seconds: int, db: str | None = None) -> bool:
+    """Back-compat wrapper: freshness only. Health decisions use feed_ok."""
+    return bool(feed_ok(threshold_seconds, db)["fresh"])
 
 
 def kill_tripped() -> bool:
@@ -77,19 +120,42 @@ def kill_tripped() -> bool:
         return False
 
 
+def bridge_state() -> dict:
+    """Reachability AND capability of the bridge, from its /health payload.
+
+    The 2026-07-17 bridge answered liveness probes while internally sick, so
+    reachable alone is not up. status: "ok" | "degraded" | "down". A reachable
+    bridge whose payload carries no status field reads "ok" (an old bridge)."""
+    try:
+        with urllib.request.urlopen(stack.bridge_health_url(), timeout=3) as r:
+            data = json.loads(r.read().decode())
+        return {"reachable": True,
+                "status": str(data.get("status", "ok")) or "ok",
+                "degraded": list(data.get("degraded", []) or [])}
+    except Exception:
+        return {"reachable": False, "status": "down", "degraded": []}
+
+
 def check_health(cfg: dict | None = None) -> dict:
-    """One health snapshot: engine, bridge, backend, feed freshness, kill state."""
+    """One health snapshot: engine, bridge capability, backend, feed freshness
+    AND provenance, kill state. A degraded bridge or a synthetic feed on the
+    real path is a FAILURE, not a warning."""
     cfg = cfg if cfg is not None else _cfg()
     stale = int(cfg.get("bar_staleness_seconds", 900))
     running = stack.stack_running()
-    bridge_ok = stack.http_ok(stack.bridge_health_url(), tries=1, delay=0)
+    bstate = bridge_state()
+    bridge_ok = bool(bstate["reachable"] and bstate["status"] == "ok")
     backend_ok = stack.http_ok(stack.api_health_url(), tries=1, delay=0)
-    fresh = bars_fresh(stale)
+    feed = feed_ok(stale)
     tripped = kill_tripped()
-    healthy = bool(running.get("running") and bridge_ok and backend_ok and fresh)
+    healthy = bool(running.get("running") and bridge_ok and backend_ok
+                   and feed["ok"])
     return {"engine": bool(running.get("running")), "bridge": bridge_ok,
-            "backend": backend_ok, "feed_fresh": fresh, "kill_tripped": tripped,
-            "healthy": healthy}
+            "bridge_status": bstate["status"],
+            "bridge_degraded": bstate["degraded"],
+            "backend": backend_ok, "feed_fresh": feed["fresh"],
+            "feed_source": feed["source"], "feed_ok": feed["ok"],
+            "kill_tripped": tripped, "healthy": healthy}
 
 
 def notify(message: str, cfg: dict | None = None, title: str = "AiTrader watchdog") -> bool:
@@ -157,10 +223,18 @@ def run_once(cfg: dict | None = None) -> dict:
 
 
 def _status_line(h: dict) -> str:
+    bridge = ("up" if h["bridge"]
+              else ("DEGRADED" if h.get("bridge_status") == "degraded"
+                    else "DOWN"))
+    if not h.get("feed_ok", h["feed_fresh"]):
+        feed = "STALE" if not h["feed_fresh"] else \
+            f"NON-REAL ({h.get('feed_source', 'unknown')})"
+    else:
+        feed = "fresh"
     return (f"engine={'up' if h['engine'] else 'DOWN'} "
-            f"bridge={'up' if h['bridge'] else 'DOWN'} "
+            f"bridge={bridge} "
             f"backend={'up' if h['backend'] else 'DOWN'} "
-            f"feed={'fresh' if h['feed_fresh'] else 'STALE'}")
+            f"feed={feed}")
 
 
 def main() -> None:

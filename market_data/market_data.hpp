@@ -25,6 +25,12 @@ struct MarketState {
     double volume = 0.0;
     double order_book_imbalance = 0.0;  // [-1,1]
     std::string ts;
+    // Where this tick's price came from: "real_feed" (live venue quote) or
+    // "synthetic" (mock feed, or the per-symbol walk fallback when a live quote
+    // is missing). Set by every feed. Empty means the source could not be
+    // established, which downstream reads as unknown, NEVER as real. See
+    // core/provenance.hpp.
+    std::string data_source;
 };
 
 // Shared instrument descriptor used by the feeds.

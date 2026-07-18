@@ -40,6 +40,10 @@ struct TradeRow {
     // the two non-strategy paths set it. Read by the real-fill gates, which
     // count strategy fills only.
     std::string origin = "strategy";
+    // Provenance of the bar this trade executed against (same five values as
+    // BarRow.source). Default unknown, never real. The real-fill gates exclude
+    // proven-synthetic fills: a trade against walk prices exercised nothing.
+    std::string bar_source = "unknown";
 };
 
 // A persisted LLM deep-research thesis attached to a research_satellite position,
@@ -105,6 +109,10 @@ struct ParamHistoryRow {
 struct BarRow {
     std::string venue, symbol, timeframe, timestamp;
     double open = 0, high = 0, low = 0, close = 0, volume = 0;
+    // Provenance: real_feed | backfill | synthetic | replay | unknown. The
+    // default is unknown, NEVER real: a caller that does not know where its
+    // prices came from must not claim they are real (core/provenance.hpp).
+    std::string source = "unknown";
 };
 
 // RAII SQLite wrapper. Non-copyable.

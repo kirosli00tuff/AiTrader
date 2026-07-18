@@ -123,10 +123,19 @@ def _session_of(dt: datetime) -> str:
 # Collectors (pure reads over a time window [start, end))
 # --------------------------------------------------------------------------- #
 def _trades_in_window(conn: sqlite3.Connection, start: str, end: str) -> list[sqlite3.Row]:
-    return list(conn.execute(
-        "SELECT ts, symbol, category, side, qty, price, notional, fee, pnl, "
-        "outcome, combined_conf, sleeve FROM trades "
-        "WHERE ts >= ? AND ts < ? ORDER BY ts", (start, end)))
+    # bar_source flags fills executed against non-real prices (the 2026-07-17
+    # walk substitution). Tolerant of a pre-migration DB without the column.
+    try:
+        return list(conn.execute(
+            "SELECT ts, symbol, category, side, qty, price, notional, fee, pnl, "
+            "outcome, combined_conf, sleeve, "
+            "COALESCE(bar_source,'unknown') AS bar_source FROM trades "
+            "WHERE ts >= ? AND ts < ? ORDER BY ts", (start, end)))
+    except sqlite3.OperationalError:
+        return list(conn.execute(
+            "SELECT ts, symbol, category, side, qty, price, notional, fee, pnl, "
+            "outcome, combined_conf, sleeve, 'unknown' AS bar_source FROM trades "
+            "WHERE ts >= ? AND ts < ? ORDER BY ts", (start, end)))
 
 
 def _events_in_window(conn: sqlite3.Connection, start: str, end: str,
@@ -177,7 +186,13 @@ def collect_trades(trades: list[sqlite3.Row]) -> dict:
     worst = min(closed, key=lambda t: float(t["pnl"] or 0.0), default=None)
     hold_s = _fifo_hold_seconds(trades)
     win_rate = (100.0 * len(wins) / len(closed)) if closed else 0.0
+    # Fills executed against non-real prices are counted and FLAGGED, never
+    # silently blended: a walk-price win is not evidence about the strategy.
+    synthetic_feed = [t for t in trades
+                      if (t["bar_source"] if "bar_source" in t.keys()
+                          else "unknown") == "synthetic"]
     return {
+        "n_synthetic_feed": len(synthetic_feed),
         "n_total": len(trades),
         "n_entries": len(entries),
         "n_closed": len(closed),
@@ -465,6 +480,11 @@ def render_daily_section(digest: dict, label: str) -> str:
     lines.append(f"- Total rows {t['n_total']} | entries {t['n_entries']} | "
                  f"closed {t['n_closed']} (win {t['n_wins']}, loss {t['n_losses']}, "
                  f"win rate {t['win_rate']}%)")
+    if t.get("n_synthetic_feed"):
+        lines.append(
+            f"- WARNING: {t['n_synthetic_feed']} fill(s) executed against "
+            f"SYNTHETIC prices (bar_source=synthetic). Excluded from the "
+            f"real-fill gates. Their pnl is not evidence about the strategy.")
     lines.append(f"- PnL net ${t['net_pnl']} | gross ${t['gross_pnl']} | "
                  f"fees ${t['fees']} | avg hold "
                  f"{t['avg_hold_hours'] if t['avg_hold_hours'] is not None else 'n/a'} h")

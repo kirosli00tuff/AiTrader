@@ -47,6 +47,91 @@ from account_manager.log_safety import safe_print  # noqa: E402
 _LOOPBACK_HOSTS = frozenset({"127.0.0.1", "::1", "localhost"})
 
 
+# --- Capability health (2026-07-18, after the silent bridge outage) ----------
+# On 2026-07-17 this process answered /health 200 for 19 hours while its
+# fresh-socket and fresh-file paths were dead: market data fell to the walk
+# fallback and controls.json reads returned nothing, while pooled provider
+# connections kept working. Liveness proved nothing. /health now exercises the
+# exact capabilities that died: a brand-new file descriptor for a file read, a
+# brand-new loopback socket, and the ability to fetch a real market quote.
+# Reported as "ok" or "degraded", always HTTP 200, so an unreachable bridge
+# stays distinguishable from a sick one.
+
+_BOUND_PORT: int | None = None  # set by serve(); the fresh-socket probe target
+_QUOTE_PROBE_TTL_SECONDS = 60.0
+_quote_probe_cache: tuple[float, str] | None = None
+
+
+def _fresh_file_check() -> str:
+    """Read a file through a brand-new descriptor. Uses the control file path,
+    the exact read that silently returned nothing during the outage."""
+    try:
+        from llm_consensus import control_file
+        with open(control_file.control_path(), "rb") as fh:
+            fh.read(64)
+        return "ok"
+    except FileNotFoundError:
+        return "ok_absent"  # no control file is a valid state (config fallback)
+    except Exception as e:  # noqa: BLE001
+        return f"fail ({type(e).__name__})"
+
+
+def _fresh_socket_check() -> str:
+    """Open a brand-new loopback socket to our own listener. Pooled connections
+    survived the outage while fresh sockets died, so reusing a pool here would
+    prove nothing."""
+    if not _BOUND_PORT:
+        return "skipped (port unknown)"
+    import socket as _socket
+    try:
+        with _socket.create_connection(("127.0.0.1", _BOUND_PORT), timeout=1.0):
+            pass
+        return "ok"
+    except Exception as e:  # noqa: BLE001
+        return f"fail ({type(e).__name__})"
+
+
+def _quote_probe() -> str:
+    """One real market-quote fetch through the same path the feed uses.
+    Keyless is 'skipped', not degraded: the offline paper loop has no
+    credentials by design and must not read as sick."""
+    try:
+        if not all(alpaca_source._data_keys()):
+            return "skipped (no data key)"
+        out = alpaca_source.fetch_prices(["BTC/USD"])
+        src = str(out.get("source", ""))
+        return "ok" if src == "alpaca" else f"fail (source={src or 'none'})"
+    except Exception as e:  # noqa: BLE001
+        return f"fail ({type(e).__name__})"
+
+
+def _quote_capability() -> str:
+    """The quote probe, cached so frequent health polls do not hammer Alpaca."""
+    global _quote_probe_cache
+    import time as _time
+    now = _time.time()
+    if (_quote_probe_cache
+            and now - _quote_probe_cache[0] < _QUOTE_PROBE_TTL_SECONDS):
+        return _quote_probe_cache[1]
+    result = _quote_probe()
+    _quote_probe_cache = (now, result)
+    return result
+
+
+def health_payload() -> dict:
+    """Capability health: up means every exercised capability works right now.
+    degraded means the process is alive but a capability is failing, which is
+    exactly the state the old liveness check could not see."""
+    checks = {
+        "fresh_file": _fresh_file_check(),
+        "fresh_socket": _fresh_socket_check(),
+        "market_quote": _quote_capability(),
+    }
+    failing = sorted(k for k, v in checks.items() if v.startswith("fail"))
+    return {"status": "degraded" if failing else "ok",
+            "checks": checks, "degraded": failing}
+
+
 def _bridge_status() -> dict:
     """Report which real advisory services are actually available.
 
@@ -218,7 +303,10 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         if self.path == "/health":
-            self._send(200, {"status": "ok"})
+            # Capability, not liveness: exercises a fresh file read, a fresh
+            # socket, and the market-quote path. Always HTTP 200 so degraded
+            # stays distinguishable from unreachable.
+            self._send(200, health_payload())
         elif self.path == "/status":
             # Which real advisory services are available (for the start script's
             # health check and the strict-mode readiness view). No paid call.
@@ -278,8 +366,10 @@ def resolve_bind_host(host: str, allow_remote: bool | None = None) -> str:
 
 
 def serve(host: str = "127.0.0.1", port: int = 8765) -> None:
+    global _BOUND_PORT
     host = resolve_bind_host(host)
     httpd = ThreadingHTTPServer((host, port), Handler)
+    _BOUND_PORT = port  # the fresh-socket health probe connects back here
     mode = "REAL council ACTIVE" if use_real_council() else "mock council"
     safe_print(f"python_bridge serving on http://{host}:{port} ({mode})")
     # Unambiguous, single source of truth for which council + gate are running.

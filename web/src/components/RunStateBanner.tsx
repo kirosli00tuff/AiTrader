@@ -26,6 +26,26 @@ export default function RunStateBanner() {
     ? present.map((k) => `${k.replace("_advisory", "")}:${state(k)}`).join("  ")
     : "all on";
   return (
+    <>
+      {data.feed_substituted && (
+        // The 2026-07-17 failure ran 19 hours with every signal green. This
+        // strip exists so a substituted feed is impossible to miss: entries
+        // are blocked engine-side while it shows.
+        <div
+          className="runstate"
+          data-testid="feed-substitution-warning"
+          style={{
+            background: "#3a1214",
+            border: "1px solid #e5484d",
+            color: "#ff9598",
+            fontWeight: 600,
+          }}
+        >
+          FEED SUBSTITUTION: the real path is receiving non-real prices
+          (since {data.feed_substitution_ts || "unknown"}). Entries are
+          blocked until the real feed returns. Check the bridge.
+        </div>
+      )}
     <div className="runstate">
       <span className="runstate-item">Loop <b className="mono">{data.feed_mode}</b></span>
       {/* Off is the shipped default, so a grey dot here is expected, not a
@@ -52,5 +72,6 @@ export default function RunStateBanner() {
       <span className="runstate-item">Layers <b>{layersLabel}</b></span>
       <span className="runstate-item dim">live {data.live_enabled ? "ENABLED" : "off"}</span>
     </div>
+    </>
   );
 }

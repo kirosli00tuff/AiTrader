@@ -14,6 +14,49 @@ Commit message:
 
 ---
 
+## Prompt: Tag bar provenance, refuse entries on non-real bars, detect silent feed substitution
+
+Date: 2026-07-18
+Model: Fable 5 (FABLE)
+Prompt summary: build session on the FABLE outage findings. Tag every bar with provenance (real feed, backfill, synthetic, replay, unknown, never defaulting to real). Refuse entries on non-real bars on the alpaca_paper path while permitting exits. Detect the substitution itself with a critical event, GUI surface, and ntfy. Make bridge health verify capability (fresh socket, fresh file read, real quote) not liveness. Watchdog acts on degraded and cannot be fooled by advancing synthetic bars. Quarantine the 916 contaminated bars and 2 contaminated trades by provenance. Tests with mutation coverage. No RiskGate, live-gate, or adaptive-invariant changes. Live trading stays off.
+
+Changes: TASK 1. `bars.source` and `trades.bar_source` (TEXT DEFAULT 'unknown'), added by tolerant ALTER migrations on BOTH sides (storage.cpp and alpaca_source.py, whichever opens the DB first migrates it). Every write path sets provenance explicitly: AlpacaFeed tags each tick PER SYMBOL (`real_feed` on a live quote, `synthetic` on the per-symbol walk fallback, because one missing quote walks one symbol even with the bridge up), MockFeed tags `synthetic`, `on_closed_bar` takes a REQUIRED bar_source param so the compiler refuses a caller that forgets (synthetic_regimes passes `synthetic`, replay passes `replay`), the tick aggregator contaminates a whole bar on ONE non-real tick, and the Python backfill writes `backfill`. `upsert_bar` maps an empty source to `unknown` at the bind, so no path can default to real even by passing nothing. TASK 2. `core/provenance.hpp` (pure, exhaustive): on `alpaca_paper` only `real_feed`/`backfill` bars may open. The gate sits at the top of the ENTRY branch, before the warm gate, logs `provenance_block` (warn) once per symbol transition, and returns. Exits execute regardless and record the provenance in the trade row and the `trade_exit` payload. TASK 3. `check_feed_substitution` runs on every tick poll on the real path: a non-real tick for any whitelisted symbol fires `feed_substitution` (CRITICAL, names symbols and provenance, once per transition), recovery fires `feed_restored`. `/runstate` derives `feed_substituted` from the newest of the two events and the GUI banner renders a red warning strip while active. TASK 4. Bridge `/health` returns `{status: ok|degraded, checks, degraded}` on HTTP 200: a fresh open+read of the control file path (the exact read that died), a brand-new loopback socket to its own listener (pooled connections survived the outage, so a pool proves nothing), and a real-quote probe through `fetch_prices` cached 60s (keyless reads `skipped`, never degraded, so the offline loop stays clean). TASK 5. The watchdog parses the health payload (`bridge_state`), treats `degraded` as failure, and `feed_ok` requires the newest crypto bar to be BOTH fresh AND real on the real path, falling back to freshness-only on a pre-migration DB and saying so. Notifications name the state (`bridge=DEGRADED`, `feed=NON-REAL (synthetic)`). Restart policy unchanged, kill trips never auto-resumed. TASK 6. Quarantine executed against the live DB, counts below. `count_closed_trades` excludes `bar_source='synthetic'` fills when the column exists (stricter only, `unknown` still counts because historical fills predate the column and were real). WEEKLOG selects `bar_source` tolerantly and prints a WARNING line counting synthetic-feed fills. TASK 7. `tests/test_provenance.cpp` (ctest 25th test) and `tests/test_feed_integrity.py` (+16 pytest). NOT touched: RiskGate logic, the live-trading gate, the adaptive limit-weakening invariant, any Level-1 value. Live trading stays off.
+
+CONTAMINATION REPORT (Task 6, run against `market_ai_lab.db` this session):
+
+| What | Count | Marking |
+| --- | --- | --- |
+| Walk bars marked `source='synthetic'` | **892** | window 2026-07-17T11:55:00Z to 2026-07-18T06:56:00Z, 4 symbols, engine-written odd-second stamps |
+| Walk bars left `unknown` deliberately | **24** | landed on aligned `:00` stamps (the timestamp drift crossed :00 for a stretch around 22:30Z). Backfill-shaped, so the triple guard refuses them. SELF-HEALING: the next backfill upserts those exact timestamps with real prices and `backfill` provenance. `unknown` never trades and never reads as real meanwhile |
+| Trades marked `bar_source='synthetic'` | **2** | BTC/USD buy 74,335.74 at 13:35:10Z and sell 81,650.09 at 13:50:10Z, both walk prices |
+| Real-fill gate effect | 240 vs 241 | `count_closed_trades` excludes the contaminated closed fill. The RL 500-fill gate and the DNN trainer both read this counter |
+
+The diagnostic's 916 = 892 odd-second + 24 aligned. Both cohorts are non-real in the DB now, by different honest labels.
+
+Safest-choice notes: (1) THE 24 ALIGNED WALK BARS STAY UNKNOWN instead of being swept by a widened guard. A widened guard would also sweep the REAL aligned rows the next backfill writes into that window, and a quarantine script that can mark future real data synthetic is worse than 24 self-healing unknowns. (2) THE ENTRY GATE READS THE CLOSED BAR'S PROVENANCE, not the whole seeded history: history rows are warm-up context and legacy rows are all `unknown`, so gating on history would refuse every entry forever after migration. The current bar is what the trade executes against, and that is what is gated. (3) `unknown` COUNTS in the real-fill gates while `synthetic` does not: excluding `unknown` would erase every pre-migration real fill from the gates and reopen them years later, punishing history for a column it predates. Proven-synthetic is the only honest exclusion. (4) BOOTSTRAP-SIM AND ADAPTIVE-EXIT trade rows keep the `unknown` default rather than borrowing `current_bar_source_`, because they execute off the bar-close call tree where that member is stale. Unknown is the honest label for them. (5) `/health` STAYS HTTP 200 WHEN DEGRADED: the start script's `wait_http` gates on the HTTP code, and failing the code would make a degraded-at-boot bridge indistinguishable from an absent one. The watchdog reads the status field, which is where the decision belongs. (6) THE QUOTE PROBE IS CACHED 60s AND SKIPS WHEN KEYLESS, so health polls cannot hammer Alpaca and the offline paper loop (no keys by design) never reads degraded.
+
+VERIFICATION (2026-07-18):
+
+| Check | Result |
+| --- | --- |
+| ctest | 25/25 (was 24, `test_provenance` added) |
+| pytest | 691 (was 675, +16 in `test_feed_integrity.py`) |
+| vitest / typecheck | 116/116, tsc clean |
+| Live engine writes provenance | scratch synthetic-regimes run: 160 bars, ALL `source='synthetic'` through the real write path |
+| Quarantine on the live DB | 892 bars + 2 trades marked, second run marks 0/0 (idempotent) |
+| Real-fill gate | canonical 240 vs 241 unfiltered: the contaminated fill is out |
+| Mutation: `allows_entry` returns true | KILLED, 6 checks fail |
+| Mutation: upsert empty source not mapped to unknown | KILLED, 2 checks fail |
+| Mutation: counter ignores `bar_source` | KILLED |
+| Mutation: `feed_ok` ignores provenance | KILLED (the advancing-synthetic-bars test fails) |
+| Mutation: health never degrades | KILLED, 2 tests fail |
+| No real network in tests | all probes monkeypatched, DBs in tmp_path |
+| Bind | loopback unchanged |
+
+Commit message: `Tag bar provenance and refuse entries on non-real bars, detect silent feed substitution, verify bridge capability not liveness, quarantine contaminated data, live trading untouched`
+
+---
+
 ## Prompt: Diagnose the discovery layer end to end (FABLE run, DIAGNOSTIC ONLY, no fixes)
 
 Date: 2026-07-18

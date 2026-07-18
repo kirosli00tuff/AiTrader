@@ -72,6 +72,9 @@ std::vector<MarketState> MockFeed::poll() {
         ms.volume = 1000.0 + 9000.0 * next_uniform();
         ms.order_book_imbalance = (next_uniform() - 0.5) * 2.0;
         ms.ts = ts;
+        // A mock tick is synthetic by definition. Stated explicitly so no bar
+        // built from it can ever read as real (core/provenance.hpp).
+        ms.data_source = "synthetic";
         out.push_back(std::move(ms));
     }
     return out;
@@ -179,6 +182,10 @@ std::vector<MarketState> AlpacaFeed::poll() {
         ms.volume = 1000.0 + 9000.0 * next_uniform();
         ms.order_book_imbalance = (next_uniform() - 0.5) * 2.0;
         ms.ts = ts;
+        // Provenance is PER SYMBOL, not per poll: with the bridge up, one
+        // missing quote still walks that one symbol. The 2026-07-17 outage
+        // walked every symbol for 19 hours with nothing recording it.
+        ms.data_source = live ? "real_feed" : "synthetic";
         out.push_back(std::move(ms));
     }
     last_poll_live_ = any_live;

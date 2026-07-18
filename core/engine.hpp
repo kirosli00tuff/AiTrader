@@ -129,8 +129,13 @@ private:
     // and (unless bootstrap-sim) run the native strategy on it. Reached from the
     // tick aggregator (flat_random_walk) AND directly from the bar-driven feed
     // modes (synthetic_regimes / replay), so all three exercise the same logic.
+    // bar_source is REQUIRED at every call site (no default), so the compiler
+    // refuses a new caller that forgets to say where its prices came from. The
+    // tick path derives it per bar from tick provenance, synthetic_regimes
+    // passes "synthetic", replay passes "replay". See core/provenance.hpp.
     void on_closed_bar(const market_data::MarketState& ms,
-                       const strategy::Bar& closed, long epoch);
+                       const strategy::Bar& closed, long epoch,
+                       const std::string& bar_source);
     // Set up the bar-driven feed modes (synthetic_regimes / replay). Builds the
     // per-symbol synthetic generators or loads the replay queue from the bars
     // table; throws with a clear message if replay has no bars for the range.
@@ -317,6 +322,35 @@ private:
     // ("venue|symbol" -> bars, oldest-first) seeded from storage on startup.
     strategy::BarAggregator bar_agg_;
     std::map<std::string, std::vector<strategy::Bar>> bar_history_;
+
+    // --- Bar provenance (2026-07-18, after the silent walk-substitution
+    // outage; see core/provenance.hpp for the rules) -----------------------
+    // Per-key contamination of the bar currently being aggregated on the tick
+    // path. One synthetic tick makes the whole bar synthetic. One tick of
+    // unestablished source makes it unknown. Only all-real ticks make it real.
+    struct BarProv {
+        bool synthetic = false;
+        bool unknown = false;
+    };
+    std::map<std::string, BarProv> bar_prov_;
+    // Record one tick's provenance into the building bar.
+    void note_tick_provenance(const std::string& key, const std::string& src);
+    // Resolve and reset the building bar's provenance at bar close.
+    std::string finish_bar_provenance(const std::string& key);
+    // Provenance of the bar currently being handled by on_closed_bar and
+    // everything it calls (entry gate, exit logging, trade rows, research
+    // path). Set once per closed bar. "unknown" outside a bar close.
+    std::string current_bar_source_ = "unknown";
+    // Substitution detector state (real path only): true while any whitelisted
+    // symbol's ticks are non-real. Logged as a critical event on the way in and
+    // an info event on recovery, once per transition.
+    bool feed_substituted_ = false;
+    void check_feed_substitution(
+        const std::vector<market_data::MarketState>& states,
+        const std::string& ts);
+    // Entry-gate dedup: symbol -> the non-real source last logged, so the
+    // provenance_block event fires once per transition, not once per bar.
+    std::map<std::string, std::string> provenance_block_state_;
 
     // An open native position plus the advisory context captured at ENTRY, so
     // realized PnL can be attributed back to the factors when it closes.

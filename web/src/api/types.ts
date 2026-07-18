@@ -285,7 +285,11 @@ export interface RunState {
   use_real_council: boolean; gate_enabled: boolean; council_mode: string;
   bridge: { reachable: boolean; url: string; status: string | null };
   live_enabled: boolean; layers?: Record<string, boolean>;
-  layer_sources?: Record<string, string>; ts: string;
+  layer_sources?: Record<string, string>;
+  // True while the engine reports the real path is running on non-real ticks
+  // (feed_substitution event newer than any feed_restored). The banner turns
+  // this into an impossible-to-miss warning.
+  feed_substituted?: boolean; feed_substitution_ts?: string; ts: string;
 }
 export interface DaySummary {
   day: string; trades_today: number; wins_today: number; losses_today: number;

@@ -13,6 +13,7 @@
 #include <thread>
 
 #include "core/bridge_client.hpp"
+#include "core/provenance.hpp"
 #include "core/util.hpp"
 #include "learning/adapt_gate.hpp"
 
@@ -335,22 +336,97 @@ bool Engine::is_whitelisted(const std::string& symbol) const {
     return std::find(wl.begin(), wl.end(), symbol) != wl.end();
 }
 
+void Engine::check_feed_substitution(
+    const std::vector<market_data::MarketState>& states,
+    const std::string& ts) {
+    // Task 3, distinct from staleness: the 2026-07-17 outage defeated the
+    // watchdog's staleness check precisely because walk bars always advance.
+    // This asks the sharper question: on the real path, are the ticks REAL.
+    // Fires once per transition each way, so 19 hours of substitution is one
+    // critical event, not thousands, and recovery is visible.
+    if (feed_mode_ != "alpaca_paper") return;
+    bool any_nonreal = false;
+    std::string detail;
+    for (const auto& ms : states) {
+        if (!is_whitelisted(ms.symbol)) continue;
+        if (ms.data_source == provenance::kRealFeed) continue;
+        any_nonreal = true;
+        if (!detail.empty()) detail += ", ";
+        detail += ms.symbol + "=" +
+                  (ms.data_source.empty() ? provenance::kUnknown
+                                          : ms.data_source);
+    }
+    if (any_nonreal && !feed_substituted_) {
+        feed_substituted_ = true;
+        storage_->append_event(
+            {ts, "feed_substitution", "alpaca", "", "critical",
+             "FEED SUBSTITUTION on the real path: non-real ticks for " +
+                 detail +
+                 ". Entries on affected symbols are blocked until the real "
+                 "feed returns. Bars close tagged non-real.",
+             util::to_json({{"detail", detail}}, {})});
+    } else if (!any_nonreal && feed_substituted_) {
+        feed_substituted_ = false;
+        storage_->append_event(
+            {ts, "feed_restored", "alpaca", "", "info",
+             "Real feed restored for every whitelisted symbol", "{}"});
+    }
+}
+
+void Engine::note_tick_provenance(const std::string& key,
+                                  const std::string& src) {
+    // One synthetic tick contaminates the whole building bar. One tick whose
+    // source was never established makes it unknown. Only all-real ticks close
+    // as real. There is no path from here to "real_feed" without every tick
+    // saying so explicitly.
+    auto& p = bar_prov_[key];
+    if (src == provenance::kSynthetic)
+        p.synthetic = true;
+    else if (src != provenance::kRealFeed)
+        p.unknown = true;
+}
+
+std::string Engine::finish_bar_provenance(const std::string& key) {
+    auto it = bar_prov_.find(key);
+    if (it == bar_prov_.end()) return provenance::kUnknown;
+    const std::string src = it->second.synthetic
+                                ? provenance::kSynthetic
+                                : (it->second.unknown ? provenance::kUnknown
+                                                      : provenance::kRealFeed);
+    bar_prov_.erase(it);
+    return src;
+}
+
 void Engine::update_bars(const market_data::MarketState& ms, long epoch_seconds) {
     // Tick path (flat_random_walk): aggregate streaming ticks into bars; route a
     // just-CLOSED bar through the shared closed-bar handler.
     if (!is_whitelisted(ms.symbol)) return;
     const std::string key = ms.venue + "|" + ms.symbol;
     auto closed = bar_agg_.add(key, epoch_seconds, ms.price, ms.volume);
-    if (!closed) return;
-    on_closed_bar(ms, *closed, epoch_seconds);
+    if (!closed) {
+        note_tick_provenance(key, ms.data_source);
+        return;
+    }
+    // The bar that just closed was built from the PREVIOUS ticks: resolve its
+    // provenance first, then record the current tick, which opens the next bar.
+    const std::string bar_source = finish_bar_provenance(key);
+    note_tick_provenance(key, ms.data_source);
+    on_closed_bar(ms, *closed, epoch_seconds, bar_source);
 }
 
 void Engine::on_closed_bar(const market_data::MarketState& ms,
-                           const strategy::Bar& closed, long epoch) {
+                           const strategy::Bar& closed, long epoch,
+                           const std::string& bar_source) {
     const std::string& tf = cfg_.strategy.bar_timeframe;
+    // Provenance of everything this closed bar drives: the persisted row, the
+    // entry gate, exit logging, and the trade rows written downstream.
+    current_bar_source_ = provenance::normalize(bar_source);
     // Persist the closed bar (idempotent on venue,symbol,timeframe,timestamp).
-    storage_->upsert_bar({ms.venue, ms.symbol, tf, ms.ts, closed.open,
-                          closed.high, closed.low, closed.close, closed.volume});
+    storage::BarRow bar_row{ms.venue, ms.symbol, tf, ms.ts, closed.open,
+                            closed.high, closed.low, closed.close,
+                            closed.volume};
+    bar_row.source = current_bar_source_;
+    storage_->upsert_bar(bar_row);
 
     // Append to bounded in-memory history (oldest-first).
     const std::string key = ms.venue + "|" + ms.symbol;
@@ -482,7 +558,7 @@ int Engine::step_bar_mode() {
             ms.price = ob.close;
             ms.ts = ts;
             strategy::Bar bar{ob.open, ob.high, ob.low, ob.close, ob.volume};
-            on_closed_bar(ms, bar, sim_epoch_);
+            on_closed_bar(ms, bar, sim_epoch_, provenance::kSynthetic);
         }
         sim_epoch_ += bar_step_seconds_;
         return static_cast<int>(bar_instruments_.size());
@@ -490,7 +566,7 @@ int Engine::step_bar_mode() {
     // replay: one stored bar per step, chronological, until the range is spent.
     if (replay_pos_ >= replay_queue_.size()) return 0;
     const auto& t = replay_queue_[replay_pos_++];
-    on_closed_bar(t.ms, t.bar, t.epoch);
+    on_closed_bar(t.ms, t.bar, t.epoch, provenance::kReplay);
     return 1;
 }
 
@@ -564,6 +640,9 @@ void Engine::handle_bar_close(const market_data::MarketState& ms,
         tr.notional = notional; tr.fee = fee; tr.mode = "paper"; tr.pnl = pnl;
         tr.outcome = win ? "win" : "loss";
         tr.sleeve = ap.sleeve;  // attribute the close to the position's sleeve
+        // Exits are NEVER blocked by provenance (a position must not be
+        // trapped), but they record what they executed against.
+        tr.bar_source = current_bar_source_;
         auto exit_verdict = signal_engine::combine(ap.entry_signals, weights_);
         tr.combined_conf = exit_verdict.confidence;
         tr.combined_edge = exit_verdict.edge;
@@ -578,8 +657,10 @@ void Engine::handle_bar_close(const market_data::MarketState& ms,
         storage_->append_event(
             {ts, "trade_exit", ms.venue, ms.symbol, "info",
              "Native exit (" + strategy::exit_reason_to_string(reason) + ") " +
-                 ms.symbol + " pnl=" + std::to_string(pnl),
-             util::to_json({{"reason", strategy::exit_reason_to_string(reason)}},
+                 ms.symbol + " pnl=" + std::to_string(pnl) + " [bar " +
+                 current_bar_source_ + "]",
+             util::to_json({{"reason", strategy::exit_reason_to_string(reason)},
+                            {"bar_source", current_bar_source_}},
                            {{"pnl", pnl}, {"exit_price", exit_price}})});
 
         // Real-fill learning: attribute the realized win/loss to each factor
@@ -600,6 +681,30 @@ void Engine::handle_bar_close(const market_data::MarketState& ms,
     }
 
     // ---------- ENTRY path: consider a new native strategy entry ----------
+    // Provenance gate (2026-07-17 outage): on the real path an entry may only
+    // open against a real bar (live feed or real backfill). A synthetic or
+    // unknown bar skips entry evaluation for this symbol, logged once per
+    // transition rather than once per bar. Exits above are never gated: a
+    // position is not trapped, it just records what it executed against.
+    // RiskGate logic and thresholds are untouched: this runs BEFORE any
+    // signal, and can only refuse, never approve.
+    if (!provenance::allows_entry(feed_mode_, current_bar_source_)) {
+        auto& logged = provenance_block_state_[ms.symbol];
+        if (logged != current_bar_source_) {
+            logged = current_bar_source_;
+            storage_->append_event(
+                {ts, "provenance_block", ms.venue, ms.symbol, "warn",
+                 "Entry evaluation skipped for " + ms.symbol +
+                     ": bar provenance '" + current_bar_source_ +
+                     "' on the real path (alpaca_paper opens positions on "
+                     "real_feed/backfill bars only)",
+                 util::to_json({{"symbol", ms.symbol},
+                                {"bar_source", current_bar_source_}}, {})});
+        }
+        return;
+    }
+    provenance_block_state_.erase(ms.symbol);
+
     // Warm-state gate (Task 2): on the real paper path, do not evaluate a symbol
     // for entry until its indicators are warm. A cold symbol waits (the cold/warm
     // transition is logged in on_closed_bar); it never fires on partial data.
@@ -848,6 +953,10 @@ void Engine::handle_bar_close(const market_data::MarketState& ms,
     tr.notional = o.notional; tr.fee = fill.fee; tr.mode = "paper";
     tr.outcome = "open";  // pnl left unset until the native exit closes it
     tr.combined_conf = verdict.confidence; tr.combined_edge = verdict.edge;
+    // The provenance gate upstream means this can only be a real bar on the
+    // real path. Recorded anyway: on offline modes it is synthetic/replay, and
+    // the real-fill gates read it.
+    tr.bar_source = current_bar_source_;
     storage_->insert_trade(tr);
     storage_->upsert_position(o.venue, o.symbol, o.market, o.category, o.side,
                               o.qty, o.price, o.notional, ts);
@@ -1679,6 +1788,9 @@ int Engine::run_iteration() {
         last_poll_live_ =
             static_cast<market_data::AlpacaFeed*>(feed_.get())->last_poll_was_live();
     }
+    // Detect silent feed substitution at the tick, before any bar closes: the
+    // fastest signal the engine has (one poll interval, not one bar).
+    check_feed_substitution(states, util::now_iso8601());
     // In continuous mode, optionally skip US equity instruments when the regular
     // trading session is closed. Crypto + prediction markets keep ticking 24/7.
     const bool gate_equity = continuous_ && cfg_.engine.respect_market_hours;
@@ -2193,6 +2305,7 @@ void Engine::maybe_rebalance(const std::string& ts, long now_epoch) {
         // decision, so it must not inflate the real-fill gates either. This bug
         // predates the adaptive layer; the discriminator fixes both at once.
         tr.origin = "rebalance";
+        tr.bar_source = current_bar_source_;
         storage_->insert_trade(tr);
         storage_->upsert_position(ap.pos.venue, ap.pos.symbol, ap.pos.market,
                                   ap.pos.category, side, 0.0, px, 0.0, ts, ap.sleeve);
@@ -2375,6 +2488,7 @@ void Engine::maybe_run_research_pass(const market_data::MarketState& ms,
     tr.notional = o.notional; tr.fee = notional * 0.0001; tr.mode = "paper";
     tr.outcome = "open"; tr.combined_conf = conviction; tr.combined_edge = 0.02;
     tr.sleeve = "research_satellite";
+    tr.bar_source = current_bar_source_;
     storage_->insert_trade(tr);
     storage_->upsert_position(o.venue, o.symbol, o.market, o.category, "buy", o.qty,
                               o.price, o.notional, ts, "research_satellite");

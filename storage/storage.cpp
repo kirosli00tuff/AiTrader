@@ -97,6 +97,15 @@ void Storage::init_schema(const std::string& schema_sql_path) {
         "ALTER TABLE research_thesis ADD COLUMN invalidation_price REAL",
         "ALTER TABLE research_thesis ADD COLUMN invalidation TEXT",
         "ALTER TABLE research_thesis ADD COLUMN entry_price REAL",
+        // Bar provenance (2026-07-18, after the silent walk-substitution
+        // outage). Existing rows mark 'unknown', NEVER a guess at real: the
+        // information about where their prices came from was not recorded.
+        // The one identified contaminated window is marked 'synthetic' by
+        // scripts/quarantine_synthetic_bars_20260717.py, from diagnostic
+        // evidence, not from here.
+        "ALTER TABLE bars ADD COLUMN source TEXT DEFAULT 'unknown'",
+        // Provenance of the bar each trade executed against. Same posture.
+        "ALTER TABLE trades ADD COLUMN bar_source TEXT DEFAULT 'unknown'",
     };
     for (const char* m : migrations) {
         char* e = nullptr;
@@ -119,13 +128,14 @@ long long Storage::insert_trade(const TradeRow& t) {
     Stmt s(db_,
            "INSERT INTO trades(ts,venue,symbol,market,category,side,qty,price,"
            "notional,fee,mode,pnl,outcome,combined_conf,combined_edge,sleeve,"
-           "origin) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)");
+           "origin,bar_source) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)");
     s.bind(1, t.ts).bind(2, t.venue).bind(3, t.symbol).bind(4, t.market)
         .bind(5, t.category).bind(6, t.side).bind(7, t.qty).bind(8, t.price)
         .bind(9, t.notional).bind(10, t.fee).bind(11, t.mode);
     if (t.pnl) s.bind(12, *t.pnl); else s.bind_null(12);
     s.bind(13, t.outcome).bind(14, t.combined_conf).bind(15, t.combined_edge)
-        .bind(16, t.sleeve).bind(17, t.origin);
+        .bind(16, t.sleeve).bind(17, t.origin)
+        .bind(18, t.bar_source.empty() ? "unknown" : t.bar_source);
     s.step_done();
     return sqlite3_last_insert_rowid(db_);
 }
@@ -285,15 +295,18 @@ long long Storage::insert_sleeve_snapshot(const SleeveSnapshotRow& r) {
 }
 
 void Storage::upsert_bar(const BarRow& b) {
+    // source is written on every path. An empty string still lands as
+    // 'unknown' (BarRow defaults it), so no write can default to real.
     Stmt s(db_,
            "INSERT INTO bars(venue,symbol,timeframe,timestamp,open,high,low,"
-           "close,volume) VALUES(?,?,?,?,?,?,?,?,?)"
+           "close,volume,source) VALUES(?,?,?,?,?,?,?,?,?,?)"
            " ON CONFLICT(venue,symbol,timeframe,timestamp) DO UPDATE SET"
            " open=excluded.open, high=excluded.high, low=excluded.low,"
-           " close=excluded.close, volume=excluded.volume");
+           " close=excluded.close, volume=excluded.volume,"
+           " source=excluded.source");
     s.bind(1, b.venue).bind(2, b.symbol).bind(3, b.timeframe).bind(4, b.timestamp)
         .bind(5, b.open).bind(6, b.high).bind(7, b.low).bind(8, b.close)
-        .bind(9, b.volume);
+        .bind(9, b.volume).bind(10, b.source.empty() ? "unknown" : b.source);
     s.step_done();
 }
 
@@ -301,7 +314,8 @@ std::vector<BarRow> Storage::recent_bars(const std::string& symbol,
                                          const std::string& timeframe,
                                          int limit) {
     Stmt s(db_,
-           "SELECT venue,symbol,timeframe,timestamp,open,high,low,close,volume"
+           "SELECT venue,symbol,timeframe,timestamp,open,high,low,close,volume,"
+           "COALESCE(source,'unknown')"
            " FROM bars WHERE symbol=? AND timeframe=?"
            " ORDER BY timestamp DESC LIMIT ?");
     s.bind(1, symbol).bind(2, timeframe).bind(3, limit);
@@ -321,6 +335,7 @@ std::vector<BarRow> Storage::recent_bars(const std::string& symbol,
         b.low = sqlite3_column_double(s.raw(), 6);
         b.close = sqlite3_column_double(s.raw(), 7);
         b.volume = sqlite3_column_double(s.raw(), 8);
+        b.source = col_text(9);
         rows.push_back(std::move(b));
     }
     std::reverse(rows.begin(), rows.end());  // oldest-first for indicator math
@@ -334,7 +349,8 @@ std::vector<BarRow> Storage::bars_in_range(const std::string& symbol,
     // ISO-8601 timestamps sort lexicographically, so string bounds work as time
     // bounds. Each bound is optional (empty => unbounded on that side).
     std::string sql =
-        "SELECT venue,symbol,timeframe,timestamp,open,high,low,close,volume"
+        "SELECT venue,symbol,timeframe,timestamp,open,high,low,close,volume,"
+        "COALESCE(source,'unknown')"
         " FROM bars WHERE symbol=? AND timeframe=?";
     if (!start_ts.empty()) sql += " AND timestamp>=?";
     if (!end_ts.empty()) sql += " AND timestamp<=?";
@@ -361,6 +377,7 @@ std::vector<BarRow> Storage::bars_in_range(const std::string& symbol,
         b.low = sqlite3_column_double(s.raw(), 6);
         b.close = sqlite3_column_double(s.raw(), 7);
         b.volume = sqlite3_column_double(s.raw(), 8);
+        b.source = col_text(9);
         rows.push_back(std::move(b));
     }
     return rows;
