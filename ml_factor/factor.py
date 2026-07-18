@@ -11,7 +11,7 @@ import os
 import sqlite3
 import time
 
-from .features import build_features
+from .features import FEATURE_NAMES, features_at, serve_window
 from .model import DnnModel
 
 _MODELS_DIR = os.path.join(os.path.dirname(__file__), "models")
@@ -94,17 +94,85 @@ def bench_state(db_path: str | None = None) -> tuple[bool, str]:
 
 
 def load_champion() -> DnnModel:
-    """Return the champion model, training + persisting a tiny one if absent."""
+    """Return the champion model, training + persisting a tiny one if absent.
+
+    Self-heal, narrow by design: a champion.npz that predates the bars-v2
+    signature AND is the known synthetic bootstrap (dnn-0.x) is retrained and
+    replaced, because the bootstrap is a deterministic regenerable stand-in.
+    Any OTHER unsigned artifact is left on disk untouched: score_state refuses
+    it closed at serve time rather than destroying a model we cannot rebuild.
+    """
     global _cached
     if _cached is not None:
         return _cached
     os.makedirs(_MODELS_DIR, exist_ok=True)
     if os.path.exists(_CHAMPION_PATH):
-        _cached = DnnModel.load(_CHAMPION_PATH)
+        model = DnnModel.load(_CHAMPION_PATH)
+        if (not model.feature_names) and model.model_id.startswith("dnn-0"):
+            model = DnnModel.train_synthetic(model_id=model.model_id)
+            model.save(_CHAMPION_PATH)
+        _cached = model
     else:
         _cached = DnnModel.train_synthetic(model_id="dnn-0.1.0")
         _cached.save(_CHAMPION_PATH)
     return _cached
+
+
+def artifact_loadable(path: str) -> tuple[bool, str]:
+    """Whether an artifact exists, loads, and carries the canonical signature
+    plus its normalizer. The promotion path refuses a challenger that fails
+    this: a metadata-only promotion must be impossible."""
+    if not path or not os.path.exists(path):
+        return False, f"no artifact on disk at '{path or '(none)'}'"
+    try:
+        model = DnnModel.load(path)
+    except Exception as e:  # noqa: BLE001 — an unloadable artifact refuses
+        return False, f"artifact failed to load ({type(e).__name__})"
+    ok, why = model.signature_matches(list(FEATURE_NAMES))
+    if not ok:
+        return False, why
+    return True, f"artifact {model.model_id} loadable, signature ok"
+
+
+def install_champion_artifact(path: str) -> tuple[bool, str]:
+    """Install a verified challenger artifact as the serving champion.
+
+    Called by the audited promotion endpoint AFTER the registry promote, so
+    the registry champion and the serving artifact agree, which is exactly
+    what bench_state's artifact-match rule requires to unbench. Refuses an
+    unloadable artifact rather than replacing a working champion with one.
+    """
+    global _cached, _bench_cache
+    ok, why = artifact_loadable(path)
+    if not ok:
+        return False, why
+    import shutil
+    os.makedirs(_MODELS_DIR, exist_ok=True)
+    shutil.copy2(path, _CHAMPION_PATH)
+    _cached = None       # next score serves the new champion
+    _bench_cache = None  # re-evaluate the bench against the new registry state
+    return True, "installed"
+
+
+def _unavailable(model_id: str, reason: str) -> dict:
+    """Full-shape zero response for a state that cannot be scored honestly.
+
+    Consistent with the bench behavior: the composed aliases are zero, the
+    payload SAYS why, and nothing is invented. This replaces the old silent
+    constant defaults: a symbol without real bars is unavailable, never scored
+    on inputs the model would read as signal.
+    """
+    benched, bench_detail = bench_state()
+    return {
+        "dnn_action_bias": 0.0, "dnn_confidence": 0.0,
+        "dnn_expected_edge": 0.0, "dnn_regime_label": "unavailable",
+        "dnn_risk_flag": 0, "dnn_position_scale_hint": 0.0,
+        "model_id": model_id, "available": False,
+        "unavailable_reason": reason,
+        "benched": benched,
+        **({"benched_reason": bench_detail} if benched else {}),
+        "bias": 0.0, "confidence": 0.0, "edge": 0.0,
+    }
 
 
 def score_state(state: dict, scale_cap: float = _DEFAULT_SCALE_CAP) -> dict:
@@ -112,9 +180,25 @@ def score_state(state: dict, scale_cap: float = _DEFAULT_SCALE_CAP) -> dict:
 
     The position scale hint is hard-capped here so the DNN can never request a
     size beyond its advisory cap; Layer-1 risk still bounds everything further.
+
+    Serving builds features through THE canonical pipeline (features_at over
+    the symbol's real bars), the same builder training uses, and refuses
+    closed when it cannot: a signature mismatch, a missing symbol, or a symbol
+    without enough real bars returns a flagged zero response instead of
+    scoring invented inputs.
     """
     model = load_champion()
-    out = model.forward(build_features(state))
+    sig_ok, sig_why = model.signature_matches(list(FEATURE_NAMES))
+    if not sig_ok:
+        return _unavailable(model.model_id, f"refused to serve: {sig_why}")
+    symbol = str(state.get("symbol", "") or "")
+    if not symbol:
+        return _unavailable(model.model_id, "no symbol in state")
+    bars, reason = serve_window(_default_db_path(), symbol)
+    if bars is None:
+        return _unavailable(model.model_id, reason)
+    out = model.forward(features_at(bars, len(bars) - 1))
+    out["available"] = True
     out["dnn_position_scale_hint"] = round(
         min(out["dnn_position_scale_hint"], scale_cap), 4
     )

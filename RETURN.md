@@ -14,6 +14,51 @@ Commit message:
 
 ---
 
+## Prompt: Unify the DNN train and serve pipeline, close the remaining known defects
+
+Date: 2026-07-18
+Model: Fable 5 (FABLE)
+Prompt summary: close the DNN pipeline defects while the factor stays benched. One canonical feature pipeline shared by training and serving with the fitted normalizer persisted in the artifact. One feature definition with a serve-time signature check that fails closed. Challengers must save a loadable artifact and promotion must refuse one without it. Remove every silently defaulted serving feature. Fix the mal_engine --help footgun, the real_fills write-gate contradiction, and the cwd-relative db paths. Tests with mutation coverage, docs, commit, push, then a code review with all issues addressed. No RiskGate, live-gate, adaptive-invariant, Level 1, promotion-criteria, or RL-fill-gate changes. Live trading stays off.
+
+Changes: TASK 1 + 2. ONE canonical feature pipeline: `real_dataset._features_at` is THE builder, `ml_factor/features.py` is a thin facade re-exporting it (`features_at`, `FEATURE_NAMES`, `FEATURE_SET_VERSION` "bars-v2"), and `build_features(state)` is DELETED. Training builds every row through it and serving scores the newest real-bar window (`serve_window`, warm-up-guarded, synthetic bars excluded) through it, so train and serve are the same function by identity, pinned by test (`real_dataset._features_at is features_at`). NORMALIZATION APPROACH: standardization (per-feature mean/std) fitted on the training set, applied inside `DnnModel.forward`, and PERSISTED IN THE ARTIFACT (`norm_mean`, `norm_std` in the npz beside `feature_names` and `feature_set_version`). Chosen because it is the minimal transform that fixes the measured failure (train at N(0,1) scale, serve at production scale), it travels with the model, and `signature_matches` refuses an artifact missing EITHER the signature or the normalizer, so a model is never servable without the normalization it was trained with. The training loop itself was extracted to one `_fit` shared by the synthetic bootstrap and the new real trainer so the two cannot drift. TASK 3. `train_real_challenger` now trains `DnnModel.train_real_supervised` on the canonical features and SAVES `models/challenger-<id>.npz` with signature and normalizer, recording `artifact_path` in the registry metrics. `request_promote` refuses a challenger whose artifact is missing, unloadable, or unsigned (BEFORE touching the registry), and on success INSTALLS the artifact as champion.npz and resets the serving caches. No conflict with bench_state: the install step is what makes the registry champion and serving artifact ids agree, which is exactly what the artifact-match rule requires to unbench, and a promotion that installs nothing leaves the factor benched, stated in the endpoint's error. Promotion CRITERIA untouched. TASK 4. Audit below, every constant default removed. TASK 5. `mal_engine --help` and `-h` print usage and exit 0 before any config load, schema init, or DB open, verified by subprocess test and by hand (no db file created in a scratch cwd). TASK 6. `api_server.controls.real_fills` now CALLS `ml_factor.real_dataset.count_closed_trades` (origin strategy only, proven-synthetic excluded), docstring rewritten, failure reads 0 so an unreadable DB keeps the gate SHUT. Write gate == read gate by construction, pinned by test. TASK 7. `adaptive/run.py::_db_path` repo-anchored (env, config, and default all resolve relative against the repo root). Audit also fixed: `ops/watchdog._db_path`, `discovery/run.py` defaults (`_DEFAULT_DB`), and the quarantine script's CLI default. `ml_factor.factor._default_db_path`, `api_server.store`, `stack.db_path`, `ui/db.DB_PATH`, and `llm_consensus.control_file` were already anchored. NOT touched: RiskGate logic, the live-trading gate, the adaptive limit-weakening invariant, Level 1 values, promotion criteria, the RL fill gate value. Live trading stays off. The DNN stays benched throughout: nothing here unbenches it, it makes the graduation path correct for when it earns it.
+
+DEFAULTED-FEATURE AUDIT (Task 4), every hardcoded or defaulted value in the old serving path and its fate:
+
+| Old feature | Old serving value | Fate |
+| --- | --- | --- |
+| recent_winrate | CONSTANT 0.5, the -0.33 driver | REMOVED |
+| streak | CONSTANT 0 (tanh(0)) | REMOVED |
+| drawdown | CONSTANT 0 | REMOVED |
+| time_of_day | CONSTANT 0.5 | KEPT, now COMPUTED from the bar timestamp |
+| imbalance | 0 when absent (always absent, and synthesized upstream even when present) | REMOVED |
+| catalyst | 0 when absent (absent for all crypto) | REMOVED from the DNN set (the council reads catalyst) |
+| spread_rel | price*0.001 fabricated default | REMOVED |
+| ret_1 | fell back to ret_5 when absent | now COMPUTED from bars |
+| ret_5, volatility | state-supplied | now COMPUTED from bars (atr_norm replaces the ambiguous volatility) |
+| vol_z (train side) | real at train, synthesized volume at serve | REMOVED from the set (kept exported for rl_advisory's own dataset) |
+
+Remaining computed-cold values, stated: `_rsi` returns 0.5 and `_atr`/`_regime_scalar` return 0.0 on windows shorter than their lookbacks. Unreachable at serve time because `serve_window` refuses windows shorter than the warm-up (21 bars), and identical at train time because `build_real_dataset` starts at the same warm-up. A symbol without enough real bars is UNAVAILABLE (flagged, zero contribution), never scored on cold constants.
+
+Safest-choice notes: (1) THE CANONICAL SET IS BARS-DERIVED, NOT STATE-DERIVED. The serving state's spread, volume, and imbalance are synthesized by the feed even on the live path, so any feature built from them trains on real values and serves on invented ones. Bars (real_feed and backfill provenance, synthetic excluded) are the one input both paths can trust. (2) LEGACY-ARTIFACT SELF-HEAL IS NARROW: an unsigned champion.npz is retrained-and-replaced ONLY when it is the known synthetic bootstrap (dnn-0.x). Any other unsigned artifact is left on disk and refused closed at serve time, because a model we cannot rebuild must never be overwritten. (3) THE PROMOTE INSTALL REDIRECTS NOTHING SILENTLY: a registry promote whose artifact install fails returns an error saying the factor stays benched, rather than pretending success or rolling back the registry write mid-flight. (4) real_fills READS 0 ON ERROR, the shut-gate direction. (5) THE REGENERATED champion.npz (signed, normalized) replaces the unsigned bootstrap in the repo: same synthetic model class, same benched state, now carrying the metadata the serving path requires.
+
+VERIFICATION (2026-07-18):
+
+| Check | Result |
+| --- | --- |
+| pytest | 718 (from 705: +12 in test_dnn_pipeline.py, test_ml_factor.py rewritten to the new pipeline, 2 fixtures updated) |
+| ctest | 25/25 |
+| vitest / typecheck | 116/116, tsc clean |
+| Train == serve | `real_dataset._features_at is features_at`, identical vectors, pinned |
+| Mutation: signature check bypassed | KILLED, 2 tests fail |
+| Mutation: promotion artifact refusal bypassed | KILLED, 1 test fails (and the registry is proven untouched on refusal) |
+| --help / -h | exit 0, Usage printed, no DB file created (subprocess test + manual scratch-cwd run) |
+| real_fills vs count_closed_trades | equal (2) on a mixed fixture: origin and provenance exclusions both applied |
+| Absolute paths under a foreign cwd | adaptive, watchdog, discovery, factor all repo-anchored, pinned by test |
+
+Commit message: `Unify the DNN train and serve feature pipeline, require loadable artifacts with matching signatures, remove silent feature defaults, fix the help footgun, RL write gate, and cwd-relative path, live trading untouched`
+
+---
+
 ## Prompt: Holds abstain from the directional vote, bench the synthetic-trained DNN
 
 Date: 2026-07-18

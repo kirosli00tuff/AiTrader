@@ -15,6 +15,7 @@ fills** — this supervised forward-return objective is the interim Stage B.
 """
 from __future__ import annotations
 
+import os
 import sqlite3
 
 import numpy as np
@@ -134,6 +135,20 @@ def train_real_challenger(db_path: str, symbols: list[str],
     result.update(metrics)
     result["status"] = "challenger_recorded"
 
+    # Train the SERVABLE artifact (2026-07-18). A challenger used to be
+    # registry metadata only, so a promotion flipped roles while serving kept
+    # loading the old champion.npz. Now the challenger trains on the canonical
+    # features through the same builder serving uses and saves an artifact
+    # carrying its feature signature and fitted normalizer. Promotion refuses
+    # a challenger without a loadable artifact (api_server.controls).
+    from .model import DnnModel
+    model = DnnModel.train_real_supervised(ds.X, ds.y, model_id=model_id)
+    models_dir = os.path.join(os.path.dirname(__file__), "models")
+    os.makedirs(models_dir, exist_ok=True)
+    artifact_path = os.path.join(models_dir, f"challenger-{model_id}.npz")
+    model.save(artifact_path)
+    result["artifact_path"] = artifact_path
+
     # Record as a GATED challenger with full provenance. Promotion is a separate,
     # explicit step (registry.evaluate_and_maybe_promote with auto_promote=False).
     conn = sqlite3.connect(db_path)
@@ -143,7 +158,8 @@ def train_real_challenger(db_path: str, symbols: list[str],
             {"provenance": "real-data", "n_samples": ds.n_samples,
              "validation_sharpe": metrics["validation_sharpe"],
              "max_drawdown": metrics["max_drawdown"],
-             "horizon": horizon, "feature_set": REAL_FEATURE_NAMES},
+             "horizon": horizon, "feature_set": REAL_FEATURE_NAMES,
+             "artifact_path": artifact_path},
             notes="walk-forward validated on real bars; promotion gated",
         )
     finally:

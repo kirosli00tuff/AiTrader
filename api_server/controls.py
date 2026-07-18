@@ -619,12 +619,28 @@ def level1() -> dict:
 
 
 def real_fills() -> int:
-    """Closed real fills (the RL training gate count). Canonical definition
-    from ml_factor.real_dataset.count_closed_trades, read-only."""
-    row = store.query_one(
-        "SELECT COUNT(*) AS n FROM trades "
-        "WHERE outcome IN ('win','loss','flat')")
-    return int(row["n"]) if row and row.get("n") is not None else 0
+    """Closed STRATEGY fills, the RL write-gate count, read-only.
+
+    Calls ml_factor.real_dataset.count_closed_trades DIRECTLY, so the write
+    gate and the read gate (rl_advisory.service.rl_gate_unmet) are the same
+    counter by construction: origin='strategy' only, proven-synthetic
+    bar_source excluded. This function used to run a raw unfiltered COUNT(*)
+    while its docstring claimed the canonical definition, which made the GUI
+    write gate LOOSER than the read gate. Any failure reads 0, which keeps
+    the gate shut rather than opening it on an error.
+    """
+    import sqlite3 as _sqlite3
+
+    from ml_factor.real_dataset import count_closed_trades
+    try:
+        conn = _sqlite3.connect(f"file:{store._db_path()}?mode=ro", uri=True,
+                                timeout=2.0)
+        try:
+            return int(count_closed_trades(conn))
+        finally:
+            conn.close()
+    except Exception:  # noqa: BLE001 — an unreadable DB must not open the gate
+        return 0
 
 
 def rl_gate() -> int:
@@ -1475,6 +1491,22 @@ def request_promote() -> dict:
     chall = summ["challenger"] or {}
     challenger_id = chall.get("model_id")
     old_champ = (summ["champion"] or {}).get("model_id")
+    # Artifact refusal (2026-07-18): a promoted challenger must have a REAL
+    # artifact the serving path can load, with its feature signature and
+    # normalizer. Without this, a promotion flipped registry roles while
+    # champion.npz kept serving the old model, and bench_state's
+    # artifact-match rule kept the factor benched forever. Refusing here plus
+    # installing below is what makes a metadata-only promotion impossible.
+    # Promotion CRITERIA (meets_promotion_criteria) are unchanged: this is an
+    # existence check, not a quality bar.
+    from ml_factor.factor import artifact_loadable, install_champion_artifact
+    artifact = str((chall.get("metrics", {}) or {}).get("artifact_path", ""))
+    loadable, why = artifact_loadable(artifact)
+    if not loadable:
+        return {"ok": False,
+                "error": f"promotion refused: challenger {challenger_id} has "
+                         f"no servable artifact ({why})",
+                "registry": summ}
     from ml_factor import registry as reg
     try:
         conn = _registry_conn()
@@ -1486,6 +1518,15 @@ def request_promote() -> dict:
             conn.close()
     except Exception as e:
         return {"ok": False, "error": f"promote failed: {e}"}
+    installed, install_why = install_champion_artifact(artifact)
+    if not installed:
+        # The registry promoted but the artifact did not install: say so
+        # loudly. bench_state's artifact-match rule keeps the factor benched
+        # in this state, so nothing serves a wrong model silently.
+        return {"ok": False,
+                "error": f"registry promoted {challenger_id} but the artifact "
+                         f"did not install ({install_why}); factor stays "
+                         f"benched until resolved"}
     st = read_controls()
     st["pending_promote"] = {"model_id": challenger_id, "ts": _now(),
                              "executed": True}

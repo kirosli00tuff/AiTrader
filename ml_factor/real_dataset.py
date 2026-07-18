@@ -21,13 +21,31 @@ import math
 import sqlite3
 from dataclasses import dataclass
 
+# THE canonical feature set (2026-07-18). One definition, defined here, used by
+# training AND serving through the same builder (_features_at). Version bumps
+# when the set changes, and the serving path refuses an artifact whose recorded
+# signature does not match (ml_factor/factor.py).
+#
+# Every feature computes from real bars. Nothing is a constant default:
+#   * vol_z was REMOVED from the set: the engine's tick path synthesizes bar
+#     volume even on the live feed, so a volume feature would train on real
+#     backfill volumes and serve on invented ones, the exact train/serve
+#     mismatch this set exists to prevent. _vol_zscore stays exported below
+#     for rl_advisory, which builds its own dataset.
+#   * time_of_day is COMPUTED from the bar timestamp, replacing the old
+#     serving-path constant 0.5.
+#   * recent_winrate, streak, drawdown, imbalance, spread_rel from the old
+#     serving builder are GONE: none was computable from real data at serve
+#     time, and the constant recent_winrate=0.5 alone moved the synthetic
+#     champion's read from +0.03 to -0.33.
+FEATURE_SET_VERSION = "bars-v2"
 REAL_FEATURE_NAMES = [
     "ret_1",        # 1-bar close-to-close return
     "ret_5",        # 5-bar return
     "atr_norm",     # ATR(14) / close  (volatility, price-relative)
     "rsi",          # RSI(14) in [0,1]
-    "vol_z",        # 20-bar volume z-score (clipped)
     "regime",       # trend-strength scalar in [-1,1] (sign = direction)
+    "time_of_day",  # bar UTC time as a fraction of the day [0,1)
 ]
 N_REAL_FEATURES = len(REAL_FEATURE_NAMES)
 
@@ -117,12 +135,27 @@ def _regime_scalar(closes: list[float], lookback: int = _VOL_LOOKBACK) -> float:
 
 def load_bars(conn: sqlite3.Connection, symbol: str,
               timeframe: str) -> list[dict]:
-    """Return bars for (symbol, timeframe) ordered oldest-first."""
-    rows = conn.execute(
-        "SELECT timestamp, open, high, low, close, volume FROM bars"
-        " WHERE symbol=? AND timeframe=? ORDER BY timestamp ASC",
-        (symbol, timeframe),
-    ).fetchall()
+    """Return bars for (symbol, timeframe) ordered oldest-first.
+
+    Proven-synthetic bars are EXCLUDED: training or serving on walk prices is
+    the contamination the provenance column exists to prevent. `unknown` still
+    loads (historical rows predate the column and were real). A pre-migration
+    DB without the column falls back to the unfiltered read.
+    """
+    try:
+        rows = conn.execute(
+            "SELECT timestamp, open, high, low, close, volume FROM bars"
+            " WHERE symbol=? AND timeframe=?"
+            " AND COALESCE(source,'unknown') <> 'synthetic'"
+            " ORDER BY timestamp ASC",
+            (symbol, timeframe),
+        ).fetchall()
+    except sqlite3.OperationalError:
+        rows = conn.execute(
+            "SELECT timestamp, open, high, low, close, volume FROM bars"
+            " WHERE symbol=? AND timeframe=? ORDER BY timestamp ASC",
+            (symbol, timeframe),
+        ).fetchall()
     return [
         {"ts": r[0], "open": r[1], "high": r[2], "low": r[3],
          "close": r[4], "volume": r[5]}
@@ -206,20 +239,60 @@ def _count_all_closed(conn: sqlite3.Connection) -> int:
 
 # --- dataset assembly ------------------------------------------------------- #
 
+def _time_of_day(ts: str | None) -> float:
+    """Bar UTC time as a fraction of the day [0,1). COMPUTED from the bar
+    timestamp, never a constant: the old serving default of 0.5 was one of the
+    invented inputs that made every inference an out-of-distribution point."""
+    s = str(ts or "")
+    try:
+        hh, mm = int(s[11:13]), int(s[14:16])
+        if 0 <= hh < 24 and 0 <= mm < 60:
+            return (hh * 60 + mm) / 1440.0
+    except (ValueError, IndexError):
+        pass
+    return 0.0
+
+
 def _features_at(bars: list[dict], i: int) -> list[float]:
-    """Feature vector using bars[:i+1] (no lookahead)."""
+    """THE canonical feature builder (REAL_FEATURE_NAMES order), using
+    bars[:i+1] with no lookahead. Training builds every row through this
+    function and serving scores the newest window through this function, so
+    the features a model trains on are exactly the features it is served."""
     closes = [b["close"] for b in bars[: i + 1]]
     highs = [b["high"] for b in bars[: i + 1]]
     lows = [b["low"] for b in bars[: i + 1]]
-    vols = [b["volume"] for b in bars[: i + 1]]
     close = closes[-1] or 1.0
     ret_1 = (closes[-1] / closes[-2] - 1.0) if len(closes) >= 2 and closes[-2] else 0.0
     ret_5 = (closes[-1] / closes[-6] - 1.0) if len(closes) >= 6 and closes[-6] else 0.0
     atr_norm = _atr(highs, lows, closes) / close
     rsi = _rsi(closes)
-    vol_z = _vol_zscore(vols)
     regime = _regime_scalar(closes)
-    return [ret_1, ret_5, atr_norm, rsi, vol_z, regime]
+    tod = _time_of_day(bars[i].get("ts"))
+    return [ret_1, ret_5, atr_norm, rsi, regime, tod]
+
+
+def serve_window(db_path: str, symbol: str, timeframe: str = "5min",
+                 lookback: int = 64) -> tuple[list[dict] | None, str]:
+    """The newest real-bar window for serve-time feature building.
+
+    Returns (bars, "ok") or (None, reason). Refuses a window shorter than the
+    warm-up so every indicator in the canonical set computes from data rather
+    than emitting its cold value. A symbol with no real bars is UNAVAILABLE,
+    never scored on invented inputs.
+    """
+    try:
+        conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True,
+                               timeout=2.0)
+        try:
+            bars = load_bars(conn, symbol, timeframe)
+        finally:
+            conn.close()
+    except Exception as e:  # noqa: BLE001 — an unreadable DB is unavailable
+        return None, f"bars unavailable ({type(e).__name__})"
+    if len(bars) < _WARMUP + 1:
+        return None, (f"insufficient real bars for {symbol}: "
+                      f"{len(bars)} < {_WARMUP + 1}")
+    return bars[-lookback:], "ok"
 
 
 def build_real_dataset(db_path: str, symbols: list[str],

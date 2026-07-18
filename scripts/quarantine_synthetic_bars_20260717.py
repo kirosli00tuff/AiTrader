@@ -89,5 +89,8 @@ def quarantine(db_path: str = "market_ai_lab.db") -> dict:
 
 
 if __name__ == "__main__":
-    db = sys.argv[1] if len(sys.argv) > 1 else "market_ai_lab.db"
+    import os
+    _repo = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    db = sys.argv[1] if len(sys.argv) > 1 else os.path.join(
+        _repo, "market_ai_lab.db")
     print(json.dumps(quarantine(db), indent=2))

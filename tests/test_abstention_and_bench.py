@@ -155,6 +155,20 @@ def _registry_db(tmp_path, model_id=None, provenance=None):
             "INSERT INTO model_registry(ts, model_id, role, metrics_json)"
             " VALUES('2026-07-18T00:00:00Z', ?, 'champion', ?)",
             (model_id, json.dumps({"provenance": provenance})))
+    # Serving now builds features from the symbol's real bars in the SAME DB
+    # (the unified pipeline), so the bench tests seed a warm bar window.
+    conn.execute(
+        "CREATE TABLE bars (venue TEXT, symbol TEXT, timeframe TEXT,"
+        " timestamp TEXT, open REAL, high REAL, low REAL, close REAL,"
+        " volume REAL, source TEXT DEFAULT 'unknown')")
+    price = 100.0
+    for i in range(40):
+        price *= 1.0 + (0.002 if i % 3 else -0.001)
+        conn.execute(
+            "INSERT INTO bars VALUES('alpaca','BTC/USD','5min',?,?,?,?,?,?,"
+            "'backfill')",
+            (f"2026-07-18T{(i // 12):02d}:{(i % 12) * 5:02d}:00Z",
+             price * 0.999, price * 1.004, price * 0.996, price, 10.0))
     conn.commit()
     conn.close()
     return str(db)
@@ -164,8 +178,8 @@ def _fresh_score(monkeypatch, db):
     from ml_factor import factor
     monkeypatch.setenv("MAL_DB_PATH", db)
     monkeypatch.setattr(factor, "_bench_cache", None)
-    return factor.score_state({"price": 100.0, "ret_5": 0.02,
-                               "volatility": 0.05})
+    return factor.score_state({"symbol": "BTC/USD", "price": 100.0,
+                               "ret_5": 0.02, "volatility": 0.05})
 
 
 def test_synthetic_champion_contributes_exactly_zero(tmp_path, monkeypatch):
@@ -179,7 +193,11 @@ def test_synthetic_champion_contributes_exactly_zero(tmp_path, monkeypatch):
     assert out["bias"] == 0.0
     assert out["confidence"] == 0.0
     assert out["edge"] == 0.0
-    assert out["dnn_action_bias"] != 0.0  # raw stays visible, nothing hidden
+    # Raw stays visible and the model really scored: the confidence head is
+    # structurally positive (softmax max_p >= 0.2), so a served raw read is
+    # provably distinct from the zeroed unavailable payload.
+    assert out["available"] is True
+    assert out["dnn_confidence"] > 0.0
 
 
 def test_synthetic_provenance_champion_is_benched(tmp_path, monkeypatch):

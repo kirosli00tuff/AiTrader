@@ -846,14 +846,27 @@ def _seed_registry(db, champ_metrics, chall_metrics):
     conn.close()
 
 
-def test_controls_promote_and_rollback_execute(env, client):
+def test_controls_promote_and_rollback_execute(env, client, tmp_path,
+                                               monkeypatch):
     # A qualifying challenger (real-data, >=200 samples, higher sharpe, no worse
     # drawdown) so meets_promotion_criteria passes and the promote executes.
+    # Since 2026-07-18 a promotion also requires a LOADABLE artifact with the
+    # canonical signature, so the test saves a real one and points the
+    # challenger metrics at it. The install step is redirected to a scratch
+    # champion path so the test never touches the repo's serving artifact.
+    import ml_factor.factor as _mlf
+    from ml_factor.model import DnnModel
+    art = str(tmp_path / "challenger-dnn-chall.npz")
+    DnnModel.train_synthetic(n=300, epochs=20, model_id="dnn-chall").save(art)
+    monkeypatch.setattr(_mlf, "_CHAMPION_PATH",
+                        str(tmp_path / "champion.npz"))
+    monkeypatch.setattr(_mlf, "_cached", None)
     _seed_registry(env["db"],
                    {"validation_sharpe": 0.5, "max_drawdown": 0.2,
                     "provenance": "synthetic"},
                    {"validation_sharpe": 0.9, "max_drawdown": 0.15,
-                    "provenance": "real-data", "n_samples": 300})
+                    "provenance": "real-data", "n_samples": 300,
+                    "artifact_path": art})
     r = client.post("/controls/promote").json()
     assert r["ok"] is True and r["champion"] == "dnn-chall" \
         and r["retired"] == "dnn-champ"

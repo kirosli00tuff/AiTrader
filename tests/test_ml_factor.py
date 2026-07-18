@@ -1,30 +1,69 @@
-"""Tests for the DNN/RL advisory factor: scoring, IO round-trip, sizing cap."""
-import os
+"""DNN advisory factor: canonical features, serving, artifact round trip.
 
-from ml_factor.factor import score_state, load_champion
+Rewritten 2026-07-18 for the unified pipeline: build_features(state) is gone,
+both training and serving build through features_at over real bars, and
+serving refuses what it cannot compute honestly.
+"""
+from __future__ import annotations
+
+import sqlite3
+
+from ml_factor.factor import load_champion, score_state
+from ml_factor.features import (FEATURE_NAMES, FEATURE_SET_VERSION,
+                                N_FEATURES, features_at)
 from ml_factor.model import DnnModel
-from ml_factor.features import build_features, N_FEATURES
-
-_SCALE_CAP = 0.5
-
-_STATE = {"symbol": "BTC-USD", "ret_5": 0.03, "volatility": 0.2, "imbalance": 0.4,
-          "catalyst": 0.5, "price": 100, "spread": 0.1}
 
 
-def test_features_have_fixed_width():
-    feats = build_features(_STATE)
-    assert len(feats) == N_FEATURES
+def _bars(n=40, start_price=100.0):
+    bars = []
+    price = start_price
+    for i in range(n):
+        price *= 1.0 + (0.002 if i % 3 else -0.001)
+        bars.append({"ts": f"2026-07-18T{(i // 12):02d}:{(i % 12) * 5:02d}:00Z",
+                     "open": price * 0.999, "high": price * 1.004,
+                     "low": price * 0.996, "close": price, "volume": 10.0})
+    return bars
 
 
-def test_score_state_emits_named_fields():
-    out = score_state(_STATE)
+def _bars_db(tmp_path, symbol="BTC/USD", n=40):
+    db = tmp_path / "bars.db"
+    conn = sqlite3.connect(db)
+    conn.execute(
+        "CREATE TABLE bars (venue TEXT, symbol TEXT, timeframe TEXT,"
+        " timestamp TEXT, open REAL, high REAL, low REAL, close REAL,"
+        " volume REAL, source TEXT DEFAULT 'unknown')")
+    for b in _bars(n):
+        conn.execute(
+            "INSERT INTO bars VALUES('alpaca',?, '5min',?,?,?,?,?,?,"
+            "'backfill')",
+            (symbol, b["ts"], b["open"], b["high"], b["low"], b["close"],
+             b["volume"]))
+    conn.commit()
+    conn.close()
+    return str(db)
+
+
+def _served(tmp_path, monkeypatch, state=None, n=40):
+    from ml_factor import factor
+    monkeypatch.setenv("MAL_DB_PATH", _bars_db(tmp_path, n=n))
+    monkeypatch.setattr(factor, "_bench_cache", None)
+    return score_state(state or {"symbol": "BTC/USD", "price": 100.0})
+
+
+def test_features_have_fixed_width_and_version():
+    feats = features_at(_bars(), 39)
+    assert len(feats) == N_FEATURES == len(FEATURE_NAMES)
+    assert FEATURE_SET_VERSION == "bars-v2"
+
+
+def test_score_state_emits_named_fields(tmp_path, monkeypatch):
+    out = _served(tmp_path, monkeypatch)
     for key in ("dnn_action_bias", "dnn_confidence", "dnn_expected_edge",
-                "dnn_regime_label", "dnn_risk_flag", "dnn_position_scale_hint"):
+                "dnn_regime_label", "dnn_risk_flag",
+                "dnn_position_scale_hint", "available", "benched"):
         assert key in out
-    # bridge aliases the C++ engine consumes. A synthetic-trained champion is
-    # BENCHED (2026-07-18): the aliases are zero while the raw dnn_* outputs
-    # stay visible. A real-trained champion serves the aliases unchanged.
-    assert "benched" in out
+    assert out["available"] is True
+    # The synthetic champion is benched: aliases zero, raw visible.
     if out["benched"]:
         assert out["bias"] == 0.0
         assert out["confidence"] == 0.0
@@ -36,35 +75,37 @@ def test_score_state_emits_named_fields():
         assert out["edge"] == out["dnn_expected_edge"]
 
 
-def test_scale_hint_is_capped():
-    out = score_state(_STATE)
-    assert out["dnn_position_scale_hint"] <= _SCALE_CAP + 1e-9
+def test_scale_hint_is_capped(tmp_path, monkeypatch):
+    out = _served(tmp_path, monkeypatch)
+    assert out["dnn_position_scale_hint"] <= 0.5
 
 
-def test_output_ranges():
-    out = score_state(_STATE)
+def test_output_ranges(tmp_path, monkeypatch):
+    out = _served(tmp_path, monkeypatch)
     assert -1.0 <= out["dnn_action_bias"] <= 1.0
     assert 0.0 <= out["dnn_confidence"] <= 1.0
+    assert out["dnn_expected_edge"] >= 0.0
+    assert out["dnn_risk_flag"] in (0, 1)
 
 
-def test_champion_is_loadable_and_has_id():
+def test_champion_is_loadable_and_signed():
     model = load_champion()
     assert model.model_id
-    assert isinstance(model, DnnModel)
+    # The self-healed bootstrap carries the canonical signature + normalizer.
+    ok, why = model.signature_matches(list(FEATURE_NAMES))
+    assert ok, why
 
 
-def test_model_save_load_roundtrip(tmp_path):
-    model = load_champion()
-    path = os.path.join(tmp_path, "rt.npz")
+def test_model_save_load_roundtrip_with_normalizer(tmp_path):
+    model = DnnModel.train_synthetic(n=400, epochs=30, model_id="dnn-rt")
+    path = str(tmp_path / "m.npz")
     model.save(path)
-    assert os.path.exists(path)
     reloaded = DnnModel.load(path)
-    assert reloaded.model_id == model.model_id
-    a = model.forward(build_features(_STATE))
-    b = reloaded.forward(build_features(_STATE))
+    assert reloaded.model_id == "dnn-rt"
+    assert list(reloaded.feature_names) == list(FEATURE_NAMES)
+    assert reloaded.norm_mean is not None and reloaded.norm_std is not None
+    feats = features_at(_bars(), 39)
+    a = model.forward(feats)
+    b = reloaded.forward(feats)
     assert a["dnn_action_bias"] == b["dnn_action_bias"]
     assert a["dnn_confidence"] == b["dnn_confidence"]
-
-
-def test_scoring_is_deterministic():
-    assert score_state(_STATE)["dnn_action_bias"] == score_state(_STATE)["dnn_action_bias"]

@@ -34,8 +34,13 @@ def _cfg(cfg_path: str | None = None) -> dict:
         return {}
 
 
+_REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
 def _db_path() -> str:
-    return os.environ.get("MAL_DB_PATH", "market_ai_lab.db")
+    """Repo-anchored, never cwd-relative (the adaptive/run.py bug class)."""
+    d = os.environ.get("MAL_DB_PATH", "market_ai_lab.db")
+    return d if os.path.isabs(d) else os.path.join(_REPO_ROOT, d)
 
 
 def _real_feed_mode() -> bool:

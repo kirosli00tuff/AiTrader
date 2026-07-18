@@ -88,6 +88,48 @@ extern "C" void handle_stop(int) { g_stop = 1; }
 }  // namespace
 
 int main(int argc, char** argv) {
+    // --help / -h print usage and EXIT before anything else runs. This used to
+    // fall through into the 20-iteration demo against the real database, which
+    // wrote spurious events into market_ai_lab.db and confused a live trace.
+    // Checked before any config load, schema init, or DB open, so asking for
+    // help touches nothing.
+    for (int i = 1; i < argc; ++i) {
+        const std::string a = argv[i];
+        if (a == "--help" || a == "-h") {
+            std::cout
+                << "mal_engine - Market AI Lab trading engine (paper by "
+                   "default, live gated off)\n\n"
+                   "Usage: mal_engine [options]\n\n"
+                   "Options:\n"
+                   "  --help, -h                 print this usage and exit\n"
+                   "  --config PATH              config file (default "
+                   "config/default_config.yaml)\n"
+                   "  --db PATH                  SQLite database (default "
+                   "market_ai_lab.db)\n"
+                   "  --schema PATH              schema file (default "
+                   "storage/schema.sql)\n"
+                   "  --iterations N             finite demo iterations "
+                   "(default 20)\n"
+                   "  --continuous               run the continuous paper "
+                   "loop\n"
+                   "  --interval-seconds N       continuous loop interval\n"
+                   "  --bridge HOST:PORT         Python advisory bridge "
+                   "(off when absent)\n"
+                   "  --data-source NAME         market data source "
+                   "override\n"
+                   "  --feed-mode MODE           alpaca_paper | "
+                   "synthetic_regimes | replay | flat_random_walk\n"
+                   "  --clock-mode MODE          real | simulated\n"
+                   "  --native-bar-seconds N     bar bucket size (default "
+                   "300)\n"
+                   "  --bootstrap-sim            legacy demo factor loop\n"
+                   "  --seed N                   deterministic seed\n\n"
+                   "WITHOUT --help this binary RUNS the engine (a finite "
+                   "demo unless --continuous), writing to the configured "
+                   "database.\n";
+            return 0;
+        }
+    }
     try {
         std::string cfg_path =
             arg_value(argc, argv, "--config", "config/default_config.yaml");

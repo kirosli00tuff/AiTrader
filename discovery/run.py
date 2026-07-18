@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import sqlite3
 from datetime import datetime, timezone
 
@@ -26,6 +27,11 @@ from discovery import (evaluate, funnel, settings, store, universe,
                        watchlist, whale_surfacer)
 
 log = logging.getLogger("discovery.run")
+
+# Repo-anchored default DB, never cwd-relative (the adaptive/run.py bug
+# class). Callers that pass an explicit path are honored as given.
+_REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_DEFAULT_DB = os.path.join(_REPO_ROOT, "market_ai_lab.db")
 
 # US regular trading hours in UTC minutes-of-day: 13:30-20:00 UTC.
 # Mirrors the NY window in config/regional_session.hpp (810-1200).
@@ -90,7 +96,7 @@ def _category_for(symbol: str) -> str:
     return "crypto" if universe.is_crypto(symbol) else "equity"
 
 
-def due_status(asset_class: str, db_path: str = "market_ai_lab.db",
+def due_status(asset_class: str, db_path: str = _DEFAULT_DB,
                cfg_path: str | None = None,
                now: datetime | None = None) -> dict:
     """Is a pass due for this asset class right now, and why or why not?
@@ -122,7 +128,7 @@ def due_status(asset_class: str, db_path: str = "market_ai_lab.db",
             "reason": reason, "last_pass_ts": last_ts or ""}
 
 
-def onboard(symbols: list[str], db_path: str = "market_ai_lab.db") -> dict:
+def onboard(symbols: list[str], db_path: str = _DEFAULT_DB) -> dict:
     """Backfill bars for newly surfaced symbols so the engine can warm them.
 
     Surfacing a symbol only NAMES it. Without bars it has no indicator history,
@@ -167,7 +173,7 @@ def onboard(symbols: list[str], db_path: str = "market_ai_lab.db") -> dict:
             "bars_written": got}
 
 
-def run_once(asset_class: str, *, db_path: str = "market_ai_lab.db",
+def run_once(asset_class: str, *, db_path: str = _DEFAULT_DB,
              cfg_path: str | None = None, client=None, gate=None,
              evaluator=None, now: datetime | None = None,
              force: bool = False) -> dict:
@@ -314,7 +320,7 @@ def run_once(asset_class: str, *, db_path: str = "market_ai_lab.db",
         conn.close()
 
 
-def run_due(db_path: str = "market_ai_lab.db", cfg_path: str | None = None,
+def run_due(db_path: str = _DEFAULT_DB, cfg_path: str | None = None,
             now: datetime | None = None, force: bool = False) -> dict:
     """Run every asset class whose cadence is due. The maintenance entry point."""
     now = now or _utcnow()
@@ -332,7 +338,7 @@ if __name__ == "__main__":
 
     ap = argparse.ArgumentParser(
         description="Run the discovery funnel for a due asset class.")
-    ap.add_argument("--db", default="market_ai_lab.db")
+    ap.add_argument("--db", default=_DEFAULT_DB)
     ap.add_argument("--config", default=None)
     ap.add_argument("--asset-class", choices=ASSET_CLASSES, default=None,
                     help="default: every class that is due")

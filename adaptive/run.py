@@ -241,11 +241,19 @@ def run_due(conn: sqlite3.Connection, *, client=None, interpreter=None,
                     cfg_path=cfg_path)
 
 
+_REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
 def _db_path() -> str:
+    """Repo-anchored, never cwd-relative. A relative db_path (env, config, or
+    the default) resolves against the repo root, the same fix already applied
+    in rl_advisory, api_server.store, and llm_consensus.control_file: three
+    processes agree on a path only when none of them asks its own cwd."""
     from llm_consensus.config_access import config_block
-    return (os.environ.get("MAL_DB_PATH")
-            or config_block("system", None).get("db_path")
-            or "market_ai_lab.db")
+    d = (os.environ.get("MAL_DB_PATH")
+         or str(config_block("system", None).get("db_path") or "")
+         or "market_ai_lab.db")
+    return d if os.path.isabs(d) else os.path.join(_REPO_ROOT, d)
 
 
 def main(argv: list[str] | None = None) -> int:
