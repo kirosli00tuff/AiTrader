@@ -14,6 +14,151 @@ Commit message:
 
 ---
 
+## Prompt: Diagnose the discovery layer end to end (DIAGNOSTIC ONLY, no fixes)
+
+Date: 2026-07-18
+Model: Opus 4.8 (OPUS)
+Prompt summary: discovery has failed four distinct ways over two days and has never completed one clean funnel pass. Run a full pass in isolation with real keys and the real bridge, explain the budget exhaustion, explain the stale onboarded SOL/USD, characterize the bridge race, explain 13 restarts in 24h, and report findings with evidence. Do not fix anything unless trivially safe and required to continue. Do not touch RiskGate, the live-trading gate, or the adaptive limit-weakening invariant. Live trading stays off.
+
+**THE FUNNEL IS NOT BROKEN. IT COMPLETES. THE OUTPUT GATE IS SET ABOVE WHAT THE PIPELINE CAN PRODUCE.** I ran a full pass in isolation against the real Finnhub key and the real bridge. It reached the end of every stage and returned status `ok` in 95 seconds. It produced five verdicts. All five were `avoid`. `run.py` skips `avoid` when it builds the watchlist, so the pass added nothing, onboarded nothing, and looked identical to a broken layer from the outside. Seven real council verdicts now exist across two days. Every one lands between 0.5265 and 0.5938 conviction. The floor is 0.60. Not one has ever cleared it.
+
+### TASK 1: full discovery pass in isolation
+
+Ran 2026-07-18T08:40:30Z, pass_id 11, crypto, `force=True`, real Finnhub key, real bridge (`council_real: true`, "real council, all provider keys resolve"). Instrumented every stage with tracing proxies over the production callables, so the path exercised is the production path.
+
+| Stage | Result |
+| --- | --- |
+| Universe load | 50 crypto symbols, 50 Finnhub quotes resolved, 0 unresolved |
+| Stage A free pre-screen | 50 scored, ZERO LLM tokens, 12 finalists |
+| Stage A drops | 3 `below_min_score` (MATIC 0.140, RNDR 0.139, ALGO 0.130 against floor 0.15), 35 `not_top_ranked` |
+| Finalist cut | top INJ/USD 0.5461, cut at AVAX/USD 0.3363, 3 whale-surfaced (ICP, AAVE, SHIB) |
+| Stage B Haiku gate | 5 calls, 5 of 5 proceeded, each with a substantive reason |
+| Stage B drops | 7 `survivor_ceiling_reached`, never gated, so never paid for |
+| Stage C four-level | 5 council calls, all three providers answered on all five (`per_model=3` each) |
+| Verdicts | **5 of 5 `avoid`** |
+| Watchlist update | **0 added** |
+| Onboarding | **noop, 0 symbols** |
+| Cost | $0.20, budget 5 of 12 spent, 7 remaining |
+
+WHERE IT STOPS: `build_verdict` sets `verdict = avoid` when conviction falls below `council_min_confidence` (0.60). The five convictions were INJ 0.5938, RUNE 0.5786, EGLD 0.5726, ADA 0.5366, TIA 0.5265. Add 2026-07-17 pass 5: NEAR 0.5773, INJ 0.5537. Seven real verdicts, range 0.5265 to 0.5938, shortfall 0.006 to 0.074. The pipeline lands consistently just under its own floor.
+
+TWO COMPOUNDING CAUSES, both measured.
+
+1. THE ENSEMBLE AVERAGES HOLDS INTO A DIRECTIONAL READ. `consensus()` computes confidence as a weighted mean over all three providers. INJ/USD: llm_primary buy at 0.560, llm_secondary hold at 0.600, llm_tertiary hold at 0.500, weights 0.27 / 0.18 / 0.12, giving 0.56. One convinced model plus two holds produces a number near the provider mean, and the provider mean sits around 0.55. The floor is 0.60.
+
+2. THE SYNTHETIC DNN IS THE DECIDING VOTE, AGAINST. `dnn_bias` came back between -0.31 and -0.34 on all 12 symbols ever evaluated and never once positive. On a long verdict it disagrees and subtracts. ADA/USD is the proof: council confidence 0.6026, ABOVE the floor, pushed to 0.5366 by `advisory_adjustment` -0.066. The advisory layer converted the only above-floor council read on record into an `avoid`. PROGRESS.md already records the champion as synthetic-trained. It is currently vetoing the layer it is supposed to advise.
+
+### TASK 2: the budget exhaustion
+
+Full ledger for 2026-07-17, budget 12:
+
+| Pass | Time | Status | Gate calls | Council calls | Remaining |
+| --- | --- | --- | --- | --- | --- |
+| 1 | 06:00:58 | no_survivors | 12 | 0 | 12 |
+| 2 | 06:03:34 | no_survivors | 12 | 0 | 12 |
+| 3 | 06:06:54 | ok | 5 | **5** | 7 |
+| 4 | 06:08:46 | ok | 5 | **5** | 2 |
+| 5 | 06:10:29 | ok | 5 | **2** | 0 |
+| 6 to 10 | 07:20 to 11:51 | budget_exhausted | 5 each | 0 | 0 |
+
+The entire daily allowance went in 3 minutes 35 seconds, between 06:06:54 and 06:10:29.
+
+WHAT THE 12 CALLS BOUGHT. Pass 5's two calls returned real council data (`per_model` populated, `llm_primary=sell; llm_secondary=hold; llm_tertiary=hold`). Passes 3 and 4's ten calls returned confidence 0.0, agreement 0, and an EMPTY `per_model`. That is the `_flat_consensus` signature, which means no provider was ever contacted. **10 of 12 daily calls, 83 percent, bought nothing, spent nothing at the provider, and consumed the whole allowance.**
+
+THE MECHANISM, PROVEN BY CODE. `discovery/funnel.py:429-431`:
+
+```python
+verdict = evaluator(symbol)
+calls += 1
+```
+
+The counter increments when the evaluator RETURNS, not when a provider is called. Every short-circuit inside `llm_consensus.consensus()` returns `_flat_consensus(...)` with `per_model=[]` at full budget cost: the base-check gate declining (line 209), the risk pre-check (line 200), the market-hours skip (line 203). `store.record_pass` persists `council_calls` and `store.council_calls_today` sums that column, so the burn survives the process that caused it. **This is the mechanism that lets discovery exhaust its budget without completing a single productive pass.**
+
+WHY PASSES 3 AND 4 SHORT-CIRCUITED. The pre-fix evaluator used the trading base-check gate, which renders an order book and a news catalyst the free Finnhub tier cannot supply and defaults both to 0.0, so it declined every discovery survivor. `discovery/evaluate.py:209-225` documents exactly this failure. `git show e348d28` confirms `gate=AlwaysProceedGate()` and `snapshot_for` were ADDED in that commit, dated 2026-07-16 23:19:28. Passes 3 and 4 show the documented pre-fix behavior seven hours after the fix was committed.
+
+HYPOTHESIS, NOT PROVEN: the process serving those two passes started before the commit and still held the old module in memory, because Python does not hot-reload. Supporting evidence: five of the ten passes match no engine `discovery_pass_start` event, so they came from a separate long-lived process, and `ps` still shows vite processes started Thu Jul 16 21:46:47 alive today, so processes from that pre-commit session demonstrably survived. NOT PROVEN: the process is gone, `.run/bridge.log` stopped being written at Jul 16 21:46 because the 07-17 bridges logged to a terminal, and I could not recover its start time. I will not assert it.
+
+SEPARATELY WORTH STATING: five passes ran in nine and a half minutes against a 60-minute cadence. None matches an engine trigger event, so they were operator-driven forced runs during setup. The cadence guard is real and the engine honors it. A forced run bypasses it by design (`run_once(force=True)`), and no per-day limit on forced runs exists apart from the budget itself. Three forced passes spent a day.
+
+### TASK 3: the stale onboarded symbol
+
+PROVEN BY THE DATA:
+
+- SOL/USD 5min bars: 8519 rows, last `2026-07-17T06:10:00Z`. BTC/USD, ETH/USD, SPY, QQQ all last `2026-07-18T06:55:19Z`.
+- SOL/USD has **0** bars with a non-zero seconds field. BTC/USD has 427. The backfill writes 5-minute-aligned timestamps and the engine's live aggregation writes at odd seconds (:19, :18, :17). **Every SOL/USD bar came from the backfill. Not one came from a live engine poll.**
+- 0 SOL/USD bars exist after the onboarding instant.
+
+NOT THE CAUSE: the bar-fetch loop does not read only the static whitelist. I checked. `Engine::onboard_discovered_symbols` (core/engine.cpp:1075-1130) pushes the symbol onto `cfg_.strategy.whitelist`, onto `all_instruments_`, and calls `feed_->add_instrument(inst)`. `AlpacaFeed::add_instrument` (market_data/market_data.cpp:94) appends to `instruments_`, and `AlpacaFeed::poll()` builds its request from `instruments_`. Inside a live process the plumbing is correct.
+
+THE ACTUAL CAUSE: the symbol never reached a live process.
+
+1. `watchlist_event` holds exactly one row: `add SOL/USD` at 2026-07-17T06:11:28Z, source `discovery`, reason **"onboarding path verification"**. That is a hand-seeded test row, not a discovery verdict. No pass has ever added a watchlist member, because all 12 candidates ever produced are `avoid`.
+2. The single `discovery_onboard` event is at 2026-07-17T06:11:39Z, eleven seconds later, sharing its timestamp with a `startup` event. Onboarding ran on the RESUME path in the Engine constructor. That process was one of the eight short-lived non-continuous runs and exited before polling a bar.
+3. The `watchlist` table is now EMPTY, so every later engine construction found nothing to onboard. The three continuous engines that followed (06:30:48, 08:01:00, 08:48:27) never re-added SOL/USD, and only one `discovery_onboard` event exists in the whole database.
+
+CAN A DISCOVERED SYMBOL EVER TRADE IN THE CURRENT DESIGN? The machinery is complete and correct, and it has never been reachable. The watchlist is fed only by non-`avoid` verdicts and no verdict has ever been non-`avoid`. The onboarding path was verified by hand precisely because the funnel could not exercise it. Fix the conviction floor and the path opens. Leave it and no discovered symbol can ever trade, whatever the plumbing does.
+
+ONE MORE GAP, FOUND WHILE CHECKING: the watchdog's freshness probe is `SELECT MAX(timestamp) FROM bars WHERE symbol LIKE '%/%'` (ops/watchdog.py:47-49), meaning ANY crypto symbol. BTC/USD staying current keeps it green, so a discovered symbol going stale is invisible to the watchdog.
+
+### TASK 4: the bridge race
+
+STARTUP ORDERING IS CORRECT AND HEALTH-GATED. `scripts/start_paper_trading.sh` step 1 starts the bridge and blocks on `wait_http .../health` for up to 20 seconds. Step 2 launches the engine with `--bridge` only after that returns. In the scripted path the bridge is ready before the engine exists. No race there.
+
+NO READINESS GATE EXISTS ON THE DISCOVERY PATH ITSELF. `Engine::consume_discovery` (core/engine.cpp:1193-1256) checks `opts_.use_bridge`, POSTs `/discovery/due`, and on a null response logs `discovery_blocked: bridge unreachable`. `last_discovery_trigger_` initializes to 0 (core/engine.hpp:387), so the guard at line 1209 is skipped and **the first loop iteration of every fresh engine process attempts a discovery trigger immediately.** With 13 process starts that is 13 immediate attempts. Mitigating: `kDiscoveryTriggerIntervalSeconds` is 300, so a transient miss costs 5 minutes rather than an hour, and `log_discovery_state_once` dedups the warning.
+
+THE MORE IMPORTANT HALF: TWO OF THE FOUR REPORTED FAILURE MODES ARE NOT THE PRODUCTION ENGINE. Of the 13 startup events on 07-17, only 5 have a matching `continuous_start`. The other 8 were short bounded runs. Five of them share a timestamp to the second with a `discovery_blocked: engine has no bridge (--bridge off)` event: 05:57:03, 06:12:35, 06:51:50, 07:21:06 to 07, and 08:39:43. Every launcher that starts the production stack passes `--bridge` (start_paper_trading.sh:141, api_server/stack.py:219, ui/desktop.py:146). So those warnings came from bare engine invocations against the production database, consistent with the already-logged footgun that `mal_engine --help` runs a 20-iteration demo instead of printing help.
+
+VERIFIED LIVE THIS SESSION: `/discovery/due` through the real bridge returns `{"enabled": true, "due": false, "reason": "last pass 2m ago, interval 60m"}`. The trigger path works.
+
+THE FLAG-MISMATCH MODE IS NOT REPRODUCIBLE AND NOT EXPLAINED. "engine reads discovery ON but the Python funnel reads it OFF" fired at 06:51:10 and 11:56:36, both asset classes. Right now `settings.discovery_enabled()` returns True, `controls.json` carries `discovery.discovery_enabled: true`, and the bridge reports `enabled: true`. No `control_change` event brackets either occurrence. The only discovery toggle that day is 07:20:59 off and 07:21:06 on, matching neither. `control_file.control_state()` returns `{}` on any read failure and `{}` falls back to config, which ships FALSE, so a torn or transiently unreadable control file would produce exactly this message. That is a plausible mechanism and not a demonstrated one. I could not reproduce it and I am not asserting it.
+
+### TASK 5: the restarts
+
+13 `startup` events on 2026-07-17: 04:36:45, 04:48:16, 05:57:03, 05:57:09, 06:11:39, 06:12:35, 06:30:48, 06:51:50, 07:20:33, 07:21:06, 08:01:00, 08:39:43, 08:48:26. All 13 fall inside one 4h12m window.
+
+COMPOSITION: 5 are `--continuous` loops (04:36:45, 04:48:16, 06:30:48, 08:01:00, 08:48:27). 8 are short bounded runs with no `continuous_start`.
+
+ATTRIBUTION: operator-initiated. Not crashes, not the watchdog, not the engine exiting on its own. `~/.bash_history` shows `bash scripts/start_paper_trading.sh` run repeatedly, interleaved with `ps aux | grep -E "mal_engine|ops.watchdog"` checks, which is a hands-on debugging session. Only 2 clean `continuous_stop` records exist in the window (04:47:42 after 22 iterations, 05:36:02 after 94), so the rest were killed by the script's own teardown trap on Ctrl-C. The watchdog restarts through `POST /engine/start` and notifies via ntfy, and no such restart appears in the events. No crash, no kill-switch trip, and no engine self-exit shows in the record.
+
+UPTIME: the last start at 08:48:27 on 07-17 ran to `continuous_stop` at 2026-07-18T06:55:51Z after **2648 iterations, 2 trades**. 2648 times 30 seconds is 22.07 hours, matching the 22h07m wall clock exactly. **The engine ran continuously for 22 of the 24 hours.** All 13 restarts compressed into the 4-hour setup window before it.
+
+DID RESTART FREQUENCY PREVENT AN HOURLY PASS? No, and the premise needs correcting. During the churn, passes fired at 07:20:33, 08:48:27, 09:49:30, 10:50:32, and 11:51:34, roughly hourly, exactly as designed. The cadence held. Discovery stopped because the budget was gone by 06:10, so all five returned `budget_exhausted`.
+
+THE REAL UPTIME PROBLEM IS THE OPPOSITE OF THE ONE REPORTED. **The engine has been DOWN since 2026-07-18T06:55:51Z**, about 1h45m before this session started. Nothing restarted it. No process is running now: no `mal_engine`, no bridge, no backend, no watchdog. `.control/engine.lock` still holds a stale pid 751735 from 07-17T08:48:30Z. That is why not one discovery pass exists on 07-18. Not the budget, not the bridge, not the flag. Nothing was running.
+
+### TASK 6: synthesis
+
+INDEPENDENT OR SHARED? Three clusters.
+
+**Cluster 1, the only one that actually blocks discovery.** The output gate. The funnel completes and produces nothing because conviction cannot clear 0.60. Independent of every bridge and restart issue. This alone is sufficient to explain "never completed a productive pass", and it is the finding today's isolated run proves.
+
+**Cluster 2, self-limiting and already fixed in code.** The budget burn. Passes 3 and 4 spent 10 calls on a short-circuit that `e348d28` fixed. The allowance reset at midnight, and today's pass bought 5 real council verdicts with 5 calls. Shares a root with cluster 1 only in that both sit in Stage C.
+
+**Cluster 3, noise rather than defects in the running system.** Two of the four reported failure modes come from bare engine invocations writing warnings into the production database. One is an unexplained transient. The restarts were an operator debugging session that ended in a clean 22-hour run.
+
+RECOMMENDED FIX ORDER, by severity and dependency:
+
+1. **Decide what the discovery conviction floor should be.** It currently reuses `council.council_min_confidence` (0.60), which is the TRADING gate's threshold. Seven of seven real verdicts land 0.5265 to 0.5938. Either discovery needs its own floor or the ensemble must stop averaging non-directional holds into a directional read. Nothing downstream can work until this changes. No dependencies.
+2. **Decide what the synthetic DNN may do to a discovery verdict.** It returned -0.31 to -0.34 on all 12 symbols ever evaluated and never once positive. ADA/USD cleared the council floor at 0.6026 and the advisory layer pushed it to 0.5366. An untrained advisory factor is the deciding vote today. Settle item 1 first or this only moves the failure.
+3. **Charge the discovery budget for provider calls, not for evaluator returns.** `funnel.py:430` increments on return, so any short-circuit costs a full unit for zero spend. Isolated and low risk, and it makes the budget mean what its name says.
+4. **Restart the stack and keep it up.** The engine has been down since 06:55 today. Decide separately whether a bare `mal_engine` should be able to write to the production database at all, since that is the source of two of the four reported failure modes.
+5. **Watch the flag-mismatch mode.** Unexplained, twice. If it recurs, capture the control file bytes and the reading process's start time at that instant. Do not fix what has not been reproduced.
+
+PROVEN versus HYPOTHESIS, stated plainly:
+
+- PROVEN: the funnel completes end to end. All seven real convictions fall below the 0.60 floor. `avoid` is never added to the watchlist. The budget counter increments on evaluator return rather than provider call. 10 of 12 calls on 07-17 contacted no provider. Every SOL/USD bar came from the backfill and none from a live poll. Only one `discovery_onboard` event exists and its watchlist row was hand-seeded for a path test. The engine ran 22 of 24 hours and is down now. Five "no bridge" warnings coincide exactly with short non-continuous engine starts.
+- HYPOTHESIS: the 06:06 and 06:08 passes ran pre-`e348d28` code in a process started before that commit. Supported by the exact behavioral signature, the commit diff, and surviving processes from that session. The process is gone and I could not recover its start time.
+- UNKNOWN: why the Python funnel read discovery OFF at 06:51:10 and 11:56:36. Not reproducible today. A torn control-file read fits the symptom and I did not demonstrate it.
+- UNKNOWN: whether the conviction floor would ever be cleared in a stronger market. Seven samples across two days is the whole population. The shortfall is consistent at 0.006 to 0.074, not a wild miss.
+
+Changes: NO BEHAVIOR CHANGES. Documentation only, plus one instrumented pass run against the production path. Wrote this findings report to RETURN.md and a dated diagnostic entry to PROGRESS.md. Did not touch RiskGate logic, the live-trading gate, the adaptive limit-weakening invariant, or any Level-1 value. Live trading stays off. The instrumented harness lives in the session scratchpad and is not committed.
+
+Side effects of the diagnostic run, disclosed: the isolated pass wrote `discovery_pass` row 11, five `discovery_candidate` rows, and 45 `discovery_drop` rows to `market_ai_lab.db`, and spent 5 of today's 12 discovery council calls ($0.20). I ran it against the real database deliberately, because the budget counter reads that database and recording the spend where it is counted is the honest choice. It added nothing to the watchlist and onboarded nothing, so the traded universe is unchanged. I started a bridge on 127.0.0.1:8765 for the run and stopped it afterwards.
+
+Commit message: `Diagnose the discovery layer end to end, findings only, no behavior changes, live trading untouched`
+
+---
+
 ## Prompt: Fix the duplicate whale keys in controls.json
 
 Date: 2026-07-18
