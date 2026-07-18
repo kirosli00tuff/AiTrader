@@ -69,17 +69,27 @@ def advisory_adjustment(council_bias: float, dnn_bias: float,
 
 def build_verdict(*, symbol: str, council, dnn: dict, whale: dict,
                   horizon: str = "short_term",
-                  conviction_floor: float = 0.60) -> dict:
+                  conviction_floor: float = 0.60,
+                  min_directional: int = 1) -> dict:
     """Fuse the three advisory levels into a buy / sell / avoid verdict.
 
     Pure: takes already-scored layer outputs, so it is testable without any
     provider. ``council`` is a ConsensusResult-like object (bias, confidence,
-    edge, verdict, agreement_count, per_model).
+    edge, verdict, agreement_count, per_model, directional_count, abstentions).
+
+    Holds abstain (2026-07-18): ``council.confidence`` is the conviction among
+    DIRECTIONAL voters, and ``min_directional`` is the minimum number of
+    directional votes for a non-avoid verdict. At 1 (deliberately permissive,
+    this evaluation period) a single convinced provider with two abstentions
+    can act. The conviction_floor still applies to that conviction, so a lone
+    unconvinced voter never passes on count alone.
     """
     council_bias = _safe_float(getattr(council, "bias", 0.0))
     council_conf = _clamp(_safe_float(getattr(council, "confidence", 0.0)), 0.0, 1.0)
     council_edge = _safe_float(getattr(council, "edge", 0.0))
     agreement = int(_safe_float(getattr(council, "agreement_count", 0)))
+    directional_count = int(_safe_float(getattr(council, "directional_count", 0)))
+    abstentions = int(_safe_float(getattr(council, "abstentions", 0)))
 
     dnn_bias = _clamp(_safe_float((dnn or {}).get("bias")), -1.0, 1.0)
     whale_bias = _clamp(
@@ -97,8 +107,11 @@ def build_verdict(*, symbol: str, council, dnn: dict, whale: dict,
         direction = "flat"
 
     # avoid is the default. A verdict becomes actionable only when the council
-    # has a real direction AND conviction clears the floor.
-    if direction == "flat" or conviction < conviction_floor:
+    # has a real direction, enough DIRECTIONAL voters, AND conviction (among
+    # those voters) clears the floor. An all-abstain council is flat at
+    # conviction 0.0 and lands here regardless of how confident the holds were.
+    if (direction == "flat" or conviction < conviction_floor
+            or directional_count < max(1, int(min_directional))):
         verdict = "avoid"
     elif direction == "long":
         verdict = "buy"
@@ -115,9 +128,11 @@ def build_verdict(*, symbol: str, council, dnn: dict, whale: dict,
         parts.append(f"{getattr(v, 'model', 'model')}={getattr(v, 'verdict', '')}")
     rationale = (
         f"Council {getattr(council, 'verdict', '?')} on {symbol}: bias "
-        f"{council_bias:.2f}, confidence {council_conf:.2f}, agreement "
-        f"{agreement}. Advisory dnn {dnn_bias:+.2f}, whale {whale_bias:+.2f} "
-        f"-> conviction {conviction:.2f} ({adj:+.3f}). " + "; ".join(parts)
+        f"{council_bias:.2f}, conviction {council_conf:.2f} among "
+        f"{directional_count} directional voter(s), {abstentions} abstained, "
+        f"agreement {agreement}. Advisory dnn {dnn_bias:+.2f}, whale "
+        f"{whale_bias:+.2f} -> conviction {conviction:.2f} ({adj:+.3f}). "
+        + "; ".join(parts)
     )[:1000]
 
     return {
@@ -127,6 +142,8 @@ def build_verdict(*, symbol: str, council, dnn: dict, whale: dict,
         "conviction": round(conviction, 4),
         "edge": round(council_edge, 4),
         "agreement": agreement,
+        "directional_count": directional_count,
+        "abstentions": abstentions,
         "size_pct": size_pct,
         "horizon": horizon,
         "rationale": rationale,
@@ -187,7 +204,8 @@ def four_level_evaluator(*, price_for=None, category_for=None,
     always supplies it: a council call against a blank snapshot is money spent to
     be told nothing.
     """
-    from llm_consensus.config_access import council_min_confidence
+    from llm_consensus.config_access import (council_min_confidence,
+                                             min_directional_votes)
 
     def _evaluate(symbol: str) -> dict:
         price = float(price_for(symbol)) if price_for else 0.0
@@ -247,6 +265,7 @@ def four_level_evaluator(*, price_for=None, category_for=None,
 
         return build_verdict(symbol=symbol, council=council, dnn=dnn,
                              whale=whale, horizon=horizon,
-                             conviction_floor=council_min_confidence(cfg_path))
+                             conviction_floor=council_min_confidence(cfg_path),
+                             min_directional=min_directional_votes(cfg_path))
 
     return _evaluate

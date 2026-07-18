@@ -21,10 +21,19 @@ def test_score_state_emits_named_fields():
     for key in ("dnn_action_bias", "dnn_confidence", "dnn_expected_edge",
                 "dnn_regime_label", "dnn_risk_flag", "dnn_position_scale_hint"):
         assert key in out
-    # bridge aliases the C++ engine consumes
-    assert out["bias"] == out["dnn_action_bias"]
-    assert out["confidence"] == out["dnn_confidence"]
-    assert out["edge"] == out["dnn_expected_edge"]
+    # bridge aliases the C++ engine consumes. A synthetic-trained champion is
+    # BENCHED (2026-07-18): the aliases are zero while the raw dnn_* outputs
+    # stay visible. A real-trained champion serves the aliases unchanged.
+    assert "benched" in out
+    if out["benched"]:
+        assert out["bias"] == 0.0
+        assert out["confidence"] == 0.0
+        assert out["edge"] == 0.0
+        assert out["benched_reason"]
+    else:
+        assert out["bias"] == out["dnn_action_bias"]
+        assert out["confidence"] == out["dnn_confidence"]
+        assert out["edge"] == out["dnn_expected_edge"]
 
 
 def test_scale_hint_is_capped():

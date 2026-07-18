@@ -120,6 +120,7 @@ _COUNCIL_DEFAULTS: dict[str, float] = {
     "council_max_tokens": 2048,
     "council_min_confidence": 0.6,
     "council_min_agreement": 2,
+    "min_directional_votes": 1,
     "neutral_skip_strength_threshold": 0.5,
     # Bridge-to-provider call timeouts (seconds). Mirror the C++ council block.
     # A single slow or hung provider fails alone after provider_timeout_seconds,
@@ -320,6 +321,20 @@ def council_min_confidence(cfg_path: str | None = None) -> float:
 def council_min_agreement(cfg_path: str | None = None) -> int:
     """Council-side minimum provider agreement (separate from the gate)."""
     return int(_council_num("council_min_agreement", cfg_path))
+
+
+def min_directional_votes(cfg_path: str | None = None) -> int:
+    """Directional votes required for a non-avoid discovery verdict.
+
+    Holds abstain from the directional vote (2026-07-18), so this counts the
+    providers that actually expressed a direction. 1 is DELIBERATELY PERMISSIVE,
+    chosen for this evaluation period to measure whether the abstention rule
+    produces actionable verdicts at a sane rate. 2 is the conservative setting
+    to revisit with outcome data. The council_min_confidence floor still
+    applies to the conviction computed among directional voters, so a lone
+    unconvinced voter never passes on count alone.
+    """
+    return max(1, int(_council_num("min_directional_votes", cfg_path)))
 
 
 def neutral_skip_strength_threshold(cfg_path: str | None = None) -> float:

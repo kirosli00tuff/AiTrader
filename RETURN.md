@@ -14,6 +14,79 @@ Commit message:
 
 ---
 
+## Prompt: Holds abstain from the directional vote, bench the synthetic-trained DNN
+
+Date: 2026-07-18
+Model: Fable 5 (FABLE)
+Prompt summary: fix the structurally unsatisfiable verdict rule. Holds abstain instead of diluting, conviction is computed among directional voters only, abstentions are reported. Add council.min_directional_votes (set 1 for this evaluation period, documented as deliberately permissive). Investigate the 17-of-17 negative DNN reads for a defect (sign, scaling, labels, feature mismatch) and report proven vs hypothesis. Bench the synthetic-trained dnn_advisory to zero contribution until a real-data champion is promoted, visible as benched, distinct from operator-disabled, promotion criteria unchanged. Verify with a real funnel run. Tests with mutation coverage. No RiskGate, live-gate, adaptive-invariant, or Level 1 changes. Live trading stays off.
+
+**DISCOVERY PRODUCED ITS FIRST WATCHLIST MEMBER IN THE SYSTEM'S HISTORY.** Pass 13, live key, live bridge: LDO/USD, verdict SELL, conviction 0.61 among 1 directional voter with 2 abstentions, whale confirming, dnn contributing exactly zero, onboarded with 8,698 backfill-tagged bars. The rule change did it without touching the floor.
+
+### TASK 3 FINDINGS: the uniformly negative DNN, three defects, mechanism proven
+
+**D1, PROVEN: a training/serving feature-distribution mismatch, with one constant default casting the vote.** `DnnModel.train_synthetic` draws every feature from N(0,1) (`X = rng.normal(0, 1, ...)`). `build_features` at serving feeds production-scale values: returns ~0.001 to 0.07, volatility ~0.01 to 0.095, spread_rel ~0.001, and the hardcoded defaults `time_of_day=0.5`, `recent_winrate=0.5`, `streak=0`, `drawdown=0` that never vary in production. The model therefore evaluates ONE near-constant out-of-distribution point for every symbol. Reproduced and decomposed live:
+
+| Probe | dnn_action_bias |
+| --- | --- |
+| 7 historical discovery states (production scale) | -0.2487 to -0.3304, the exact diagnostic band |
+| 12 draws at TRAINING scale N(0,1) | -0.789 to +0.815, fully responsive |
+| The all-zero origin | +0.0338 |
+| Origin + each production feature alone | all stay ~+0.03 except one |
+| **Origin + `recent_winrate=0.5` alone** | **-0.3272** |
+
+The entire uniform negativity is the constant default `recent_winrate=0.5` landing on an arbitrary synthetic weight. NOT a sign error (the DIRECTION_BIAS mapping and verdict folding are consistent, and the model spans both signs at training scale). NOT skewed labels (direction labels are balanced quintiles by construction). The uniform negativity is attributable to synthetic training evaluated out of distribution, with the specific mechanism identified.
+
+**D2, PROVEN: the real trainer and serving disagree on features.** `real_dataset._features_at` builds 6 features (ret_1, ret_5, atr_norm, rsi, vol_z, regime). Serving builds 10 different ones. A real-trained model served through `build_features` would repeat D1 exactly.
+
+**D3, PROVEN: train_real saves no servable artifact.** `train_real_challenger` registers challenger METADATA in model_registry and never writes weights. A promotion would flip registry roles while champion.npz keeps serving.
+
+**THE CORRECTION RECORDED:** D1's effect is eliminated by the Task 4 bench (a synthetic-trained model cannot vote at all, which is stronger than rescaling it). D2 and D3 are guarded by the bench gate's artifact-match rule: `champion_is_real_trained` requires the registry champion's model_id to MATCH the serving artifact, so a metadata-only or mismatched promotion stays benched instead of serving a model that never existed. The functional fix for D2/D3 (save a real artifact, one shared feature builder at production scale) is logged in PROGRESS.md Open Flags as the graduation build. Fixing the synthetic trainer's scale was deliberately NOT done: a corrected synthetic model is still synthetic and still benched, so the change would alter shipped behavior for zero effect.
+
+### TASK 5 VERIFICATION: pass 13 against the real key and bridge
+
+Budget note: the two diagnostic passes had spent 10 of today's 12 discovery calls, so Stage C evaluated 2 survivors and dropped 3 as daily_budget_exhausted. Stages A and B ran in full. No threshold beyond min_directional_votes was changed.
+
+| Stage | Result |
+| --- | --- |
+| Universe | 50 symbols, 50 quotes resolved |
+| Stage A | 12 finalists (15 below floor, 23 not top ranked), 3 whale-surfaced |
+| Stage B | 5 survivors of 12 gated |
+| Stage C | 2 evaluated (budget), 3 dropped unpaid |
+| Bridge status | `dnn_benched: true`, "BENCHED pending real training", council_real true, capability health ok (fresh_file ok, fresh_socket ok, market_quote ok) |
+
+THE TWO VERDICTS, with the new facts the rule reports:
+
+| Symbol | Direction | Conviction (directional voters) | Directional | Abstained | dnn | whale | Result |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| TIA/USD | flat | 0.00 | 0 | 3 | +0.00 | +1.0 (no effect on a flat council) | avoid |
+| **LDO/USD** | **short** | **0.56 council, 0.61 after whale +0.05** | **1** | **2** | **+0.00 (benched)** | **-1.0, agrees with the sell** | **SELL, watchlist, onboarded** |
+
+LDO/USD is the first non-avoid verdict and the first watchlist member ever. Onboarding backfilled 8,546 five-minute bars and 152 daily bars, every row `source='backfill'` (the provenance system verifying the path live). Honest note: the directional voter alone (0.56) still sits under the 0.60 floor. The verdict passed because the whale layer CONFIRMED the direction within its bounded +0.05. That is the advisory design working as intended, not a waived floor.
+
+AGAINST THE TWELVE HISTORICAL VERDICTS: the five all-hold reads (0.5326 to 0.6937 manufactured conviction) now read conviction 0.00 flat, avoid, with 3 abstentions, proven live on TIA. The seven directional reads (0.4929 to 0.5938 diluted) now carry the directional voters' own conviction with abstentions reported: one buy at 0.56 plus two holds reads 0.56/1 directional/2 abstained instead of 0.56 conviction with a phantom agreement of 3. The dnn drag (-0.31 to -0.34 on every one) is gone: benched, exactly 0.00, raw output still logged. ADA/USD's case (council 0.6026 dragged to 0.5366 by the dnn) can no longer occur, pinned by test.
+
+Changes: TASK 1. `llm_consensus/consensus.py` computes bias, conviction, and edge over DIRECTIONAL voters only (|bias| > 1e-9), holds abstain, `ConsensusResult` carries `directional_count` and `abstentions`, per_model stays raw and complete. Agreement counts directional voters, which also fixes the pre-existing artifact where a hold's bias 0.0 satisfied the negative-sign test and one seller plus two holds logged agreement 3. TASK 2. `council.min_directional_votes` (config, shipped 1, floored at 1 in the getter) consumed by `build_verdict` through `four_level_evaluator`. Documented in config and CONTEXT.md as deliberately permissive for this evaluation period with 2 the conservative revisit. The 0.60 floor still applies to the directional conviction. TASK 3. Findings above, correction recorded. TASK 4. `ml_factor.factor.bench_state` (30s TTL cache) gates the served aliases: benched unless the registry champion is provenance real-data AND matches the serving artifact id. While benched, bias/confidence/edge are 0.0, raw dnn_* outputs and model_id stay served, `benched`/`benched_reason` are in the payload, bridge /status reports `dnn_benched` with a BENCHED detail that flows into the engine startup block (main.cpp prints dnn_detail) and the GUI readiness view. dnn_real stays reachability so strict mode is unaffected. TASKS 5 to 7 as reported here. NOT touched: RiskGate logic, the live-trading gate, the adaptive limit-weakening invariant, Level 1 values, promotion criteria. Live trading stays off.
+
+Safest-choice notes: (1) THE ABSTENTION RULE LIVES IN consensus() ITSELF, so the trading council and research path inherit it: an all-hold council now contributes conviction 0.0 to the trading gate instead of ~0.55, STRICTER on flat reads, truthier on directional ones. One ensemble, one rule. (2) A COUNCIL OBJECT WITHOUT THE NEW FIELDS READS directional_count 0 AND IS REFUSED: strictness is the safe default for an object that cannot say how many voted. Production ConsensusResult always populates the fields; two test fakes were updated to the new contract. (3) THE BENCH GATE READS THE REGISTRY, NOT THE MODEL ID STRING: an id-prefix heuristic would break the moment someone renames a model. Registry provenance plus artifact match is evidence, not convention. (4) BENCHED ZEROES THE ALIASES, NOT THE RAW OUTPUTS: dnn_action_bias and friends stay in every payload and log, so nothing is hidden and the benched model remains observable for comparison. (5) THE VERIFICATION SPENT THE LAST 2 BUDGET CALLS rather than pointing at a scratch DB to reset the allowance: the spend is real either way, and the budget must record it where it is counted.
+
+VERIFICATION (2026-07-18):
+
+| Check | Result |
+| --- | --- |
+| pytest | 705 (from 691: +14 new in test_abstention_and_bench.py, 3 old fakes updated to the new contract) |
+| ctest | 25/25 |
+| Mutation: abstention filter removed (holds vote) | KILLED, 3 tests fail |
+| Mutation: bench gate never benches | KILLED, 4 tests fail |
+| Live: bridge /status | dnn_benched true, BENCHED detail, council_real true |
+| Live: bridge /health capability | ok on all three checks including a real quote |
+| Live: pass 13 | first non-avoid verdict, first watchlist member, onboarded with provenance-tagged bars |
+| dnn contribution in both live verdicts | exactly +0.00, raw model outputs still logged |
+| No real network in tests | stub providers, tmp registries, loopback unchanged |
+
+Commit message: `Holds abstain from the directional vote so conviction is measured among directional voters, bench the synthetic-trained DNN until real training, live trading untouched`
+
+---
+
 ## Prompt: Tag bar provenance, refuse entries on non-real bars, detect silent feed substitution
 
 Date: 2026-07-18

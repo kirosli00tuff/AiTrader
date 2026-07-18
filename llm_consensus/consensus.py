@@ -216,15 +216,38 @@ def consensus(state: dict, providers: list[LLMProvider] | None = None,
     # verdict, so this never raises and order is preserved. Falls back to a plain
     # sequential map if a thread pool cannot be created.
     verdicts = _score_all(prov, state)
-    wsum = sum(p.weight for p in prov) or 1.0
 
-    bias = sum(v.bias * p.weight for v, p in zip(verdicts, prov)) / wsum
-    conf = sum(v.confidence * p.weight for v, p in zip(verdicts, prov)) / wsum
-    edge = sum(v.edge * p.weight for v, p in zip(verdicts, prov)) / wsum
+    # A hold ABSTAINS from the directional vote (2026-07-18). The old rule
+    # averaged holds (bias 0, confidence ~0.5) into the ensemble, which made
+    # direction and conviction anti-correlated by construction: one convinced
+    # provider plus two holds averaged to ~0.55 against a 0.60 floor, while
+    # unanimous holds averaged HIGH exactly when there was no direction. Across
+    # all 12 real discovery verdicts ever produced, no directional read ever
+    # cleared the floor and no floor-clearing read was ever directional.
+    #
+    # Now bias, conviction, and edge are computed over DIRECTIONAL voters only.
+    # A hold is still scored, still in per_model, still logged: it abstains, it
+    # does not dilute. Zero directional voters means flat at conviction 0.0
+    # (there is nothing to be convinced OF), which downstream reads as avoid.
+    # Agreement counts directional voters agreeing with the net direction, so a
+    # hold no longer inflates agreement on the short side (the old sign test
+    # counted bias 0.0 as -1, which is how one seller plus two holds recorded
+    # agreement 3).
+    directional = [(v, p) for v, p in zip(verdicts, prov)
+                   if abs(v.bias) > 1e-9]
+    abstentions = len(verdicts) - len(directional)
+    if directional:
+        dwsum = sum(p.weight for _, p in directional) or 1.0
+        bias = sum(v.bias * p.weight for v, p in directional) / dwsum
+        conf = sum(v.confidence * p.weight for v, p in directional) / dwsum
+        edge = sum(v.edge * p.weight for v, p in directional) / dwsum
+    else:
+        bias = conf = edge = 0.0
 
     net = 1 if bias > 0 else (-1 if bias < 0 else 0)
     agreement = sum(
-        1 for v in verdicts if net != 0 and (1 if v.bias > 0 else -1) == net
+        1 for v, _ in directional
+        if net != 0 and (1 if v.bias > 0 else -1) == net
     )
     return ConsensusResult(
         bias=bias,
@@ -234,6 +257,8 @@ def consensus(state: dict, providers: list[LLMProvider] | None = None,
         agreement_count=agreement,
         per_model=verdicts,
         gate=decision.to_dict(),
+        directional_count=len(directional),
+        abstentions=abstentions,
     )
 
 

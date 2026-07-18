@@ -68,6 +68,14 @@ class ConsensusResult:
     agreement_count: int
     per_model: list[ModelVerdict] = field(default_factory=list)
     gate: dict | None = None  # base-check gate decision (None if no gate ran)
+    # Abstention accounting (2026-07-18). A hold ABSTAINS from the directional
+    # vote: bias, confidence, and edge are computed over directional voters
+    # only, so a confident hold no longer dilutes a directional read toward
+    # neutral. directional_count is how many providers expressed a direction,
+    # abstentions how many held. per_model stays raw and complete, so nothing
+    # is hidden by the aggregation.
+    directional_count: int = 0
+    abstentions: int = 0
 
     def to_dict(self) -> dict:
         d = {
@@ -76,6 +84,8 @@ class ConsensusResult:
             "edge": round(self.edge, 4),
             "verdict": self.verdict,
             "agreement_count": self.agreement_count,
+            "directional_count": self.directional_count,
+            "abstentions": self.abstentions,
             "per_model": [vars(m) for m in self.per_model],
         }
         if self.gate is not None:

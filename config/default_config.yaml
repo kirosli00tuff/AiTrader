@@ -233,6 +233,14 @@ council:
                              # real verdict used ~324 tokens total.
   council_min_confidence: 0.6
   council_min_agreement: 2
+  # Directional votes required for a non-avoid discovery verdict. Holds abstain
+  # from the directional vote, so this counts providers that expressed a
+  # direction. 1 is DELIBERATELY PERMISSIVE, set for this evaluation period to
+  # measure whether the abstention rule produces actionable verdicts at a sane
+  # rate. 2 is the conservative setting to revisit with outcome data. The
+  # council_min_confidence floor still applies to the conviction computed among
+  # directional voters.
+  min_directional_votes: 1
   neutral_skip_strength_threshold: 0.5
   # Call timeouts. A full REAL council round trip (Haiku gate + three providers,
   # Gemini 3.1 Pro doing extended thinking at council_max_tokens) takes many

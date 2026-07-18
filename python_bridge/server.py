@@ -172,13 +172,22 @@ def _bridge_status() -> dict:
         out["council_real"] = False
         out["council_detail"] = f"council status error: {type(e).__name__}"
     # dnn_advisory: the bridge always runs real inference on the champion model.
+    # dnn_real stays REACHABILITY (strict mode reads it): a benched champion is
+    # reachable and inferring, it just contributes zero until it trains on real
+    # fills. Benched is a THIRD state, distinct from off and from unreachable.
     try:
-        from ml_factor.factor import load_champion
+        from ml_factor.factor import bench_state, load_champion
         mid = str(load_champion().model_id)
         out["dnn_real"] = True
         out["dnn_champion"] = mid
-        out["dnn_detail"] = ("champion " + mid + (" (synthetic Stage-A)"
-                             if mid.startswith("dnn-0") else " (promoted real-data)"))
+        benched, bench_detail = bench_state()
+        out["dnn_benched"] = benched
+        if benched:
+            out["dnn_detail"] = ("BENCHED pending real training: champion " +
+                                 mid + " contributes zero (" + bench_detail +
+                                 ")")
+        else:
+            out["dnn_detail"] = "champion " + mid + " (promoted real-data)"
     except Exception as e:  # noqa: BLE001
         out["dnn_real"] = False
         out["dnn_detail"] = f"dnn unavailable: {type(e).__name__}"

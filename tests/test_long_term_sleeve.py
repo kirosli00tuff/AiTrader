@@ -29,10 +29,14 @@ NOW = datetime(2026, 7, 15, 15, 0, tzinfo=timezone.utc)
 
 class FakeCouncil:
     def __init__(self, bias=0.6, confidence=0.8, edge=0.05, agreement=3,
-                 verdict="buy"):
+                 verdict="buy", directional=2, abstained=1):
         self.bias, self.confidence, self.edge = bias, confidence, edge
         self.agreement_count, self.verdict = agreement, verdict
         self.per_model = []
+        # Abstention contract (2026-07-18): build_verdict requires directional
+        # voters, and a council that cannot say how many voted is refused. The
+        # fake models a directional read by default.
+        self.directional_count, self.abstentions = directional, abstained
 
 
 class FakeClient:
