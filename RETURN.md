@@ -14,6 +14,112 @@ Commit message:
 
 ---
 
+## Prompt: Diagnose the discovery layer end to end (FABLE run, DIAGNOSTIC ONLY, no fixes)
+
+Date: 2026-07-18
+Model: Fable 5 (FABLE)
+Prompt summary: rerun of the same six-task discovery diagnosis as an independent second pass. Run a full pass in isolation with real keys and the real bridge, explain the budget exhaustion, explain the stale onboarded SOL/USD, characterize the bridge race, explain 13 restarts in 24h, report with evidence, fix nothing. Do not touch RiskGate, the live-trading gate, or the adaptive limit-weakening invariant. Live trading stays off.
+
+**THE TWO-DAY RECORD SPLITS INTO THREE EVENTS, AND THE BIGGEST ONE WAS INVISIBLE UNTIL NOW.** One: an evening build session burned the whole discovery budget with pre-fix code before the fix commit existed. Two: a five-minute failure inside the bridge process at 11:50 to 11:56Z on 07-17 silently killed BOTH live market data and the discovery flag read for the remaining 19 hours of the run, while every dashboard signal stayed green. Three: the funnel itself completes cleanly and has a verdict rule no real market reading has ever satisfied, replicated twice today. The restarts were never the problem.
+
+### TASK 1: full discovery pass in isolation (FABLE run)
+
+Ran 2026-07-18T09:11:30Z, pass_id 12, crypto, `force=True`, real Finnhub key, fresh real bridge (`/discovery/due` through it first: `{"enabled": true, "due": false}`). Same tracing-proxy harness over the production callables as the OPUS run.
+
+| Stage | Result |
+| --- | --- |
+| Universe load | 50 symbols, 50 quotes resolved |
+| Stage A free pre-screen | 50 scored, ZERO LLM tokens, 12 finalists, 6 below floor, 32 not top ranked |
+| Stage B Haiku gate | 7 calls. 5 proceed, 2 REJECTED with substantive reasons ("modest 2.65% daily return... does not warrant full council review"), 5 dropped at the survivor ceiling unpaid |
+| Stage C four-level | 5 council calls, `per_model=3` on every one, all three providers answering |
+| Verdicts | **5 of 5 `avoid`** |
+| Watchlist update | 0 added. Onboarding noop |
+| Cost | $0.20, 5 calls, 2 of today's 12 remaining after both diagnostic runs |
+
+The pass completes. Status `ok` in 113 seconds. The funnel is healthy end to end.
+
+WHERE IT STOPS, SHARPENED. The OPUS run framed the blocker as the 0.60 conviction floor. Pass 12 proves that framing incomplete: LDO/USD scored conviction **0.6937** and INJ/USD **0.6358**, both ABOVE the floor, and both were still `avoid` because all three providers said hold, so direction was flat. `build_verdict` requires direction non-flat AND conviction at or above 0.60. Across all 12 real Stage-C verdicts ever produced (passes 5, 11, 12): every directional verdict has conviction 0.4929 to 0.5938, below the floor. Every verdict at or above 0.60 is flat. **The two conditions have never co-occurred, and the ensemble math makes them anti-correlated by construction:** confidence is a weighted mean across all three providers, so a directional read (one provider convinced, two holding near 0.5) averages to about 0.55, while unanimous holds average high precisely when there is no direction. The constant negative `dnn_bias` (-0.31 to -0.34 on every symbol ever evaluated, 17 of 17 readings, never once positive) then subtracts from any long that gets close. The discovery verdict rule cannot be satisfied by the pipeline that feeds it.
+
+### TASK 2: the budget exhaustion, with a corrected timeline
+
+**THE OPUS REPORT MISREAD THE COMMIT TIMEZONE AND I AM WITHDRAWING ITS STALE-PROCESS HYPOTHESIS.** `git log` prints local time at offset -0700. e348d28, the commit that fixed Stage B and Stage C, landed 2026-07-16 23:19:28 **local**, which is 2026-07-17T**06:19:28Z**. All five budget-spending passes ran 05:57:09Z to 06:10:29Z, which is 22:57 to 23:10 **local on 07-16**. Every one predates the fix commit by 9 to 22 minutes. They were not a stale process running old code seven hours after the fix. **They were the fix session itself, running its in-progress working tree while building the fix.** The DB records the repair in real time:
+
+| Pass | UTC | Behavior | Working-tree state it proves |
+| --- | --- | --- | --- |
+| 1 (05:57) | 12 gate calls, 12 rejections | Gate drop reasons read "Zero price and returns... corrupted snapshot": the gate still received score components, no snapshot |
+| 2 (06:03) | 12 gate calls, 12 rejections | Reasons change to "Flat catalyst, zero imbalance, low volatility": real prices now flow, the trading-gate prompt still rejects on fields Finnhub cannot supply |
+| 3, 4 (06:06, 06:08) | 5 survivors each, 10 council calls, all conf 0.0, `per_model` EMPTY | Stage B fixed. Stage C still short-circuits in `consensus()` before any provider |
+| 5 (06:10) | 2 calls, REAL `per_model` verdicts | Stage C fix in place. Budget hits 0 |
+
+Commit at 06:19:28Z, nine minutes after pass 5. The budget date-key is UTC, so a 23:00-local verification session spent the entire NEXT UTC day's allowance, and all five cadence passes on 07-17 (07:20 to 11:51Z) correctly reported `budget_exhausted`.
+
+WHAT SURVIVES FROM THE OPUS ANALYSIS: the counting mechanism. `funnel.py:429-431` increments `calls` when the evaluator returns, not when a provider is called, so the 10 short-circuited calls in passes 3 and 4 charged the budget at zero provider spend. That mechanism is unchanged and remains the thing that lets discovery exhaust its budget without a productive pass. Also new: the budget check sits AFTER Stage B, so each of the five exhausted passes still paid 5 Haiku gate calls, 25 gate calls spent on passes that could never reach Stage C.
+
+### TASK 3: the stale onboarded symbol
+
+CONFIRMED from the OPUS run, all rechecked: SOL/USD has 8519 five-minute bars, zero with a non-zero seconds field, so every bar is backfill and none is a live poll. The watchlist row was hand-seeded at 06:11:28Z with reason "onboarding path verification" (22:11 local, 8 minutes before the e348d28 commit: it was that session's onboarding verification). Onboarding ran in the constructor of a short-lived verification engine that exited before polling. The C++ plumbing (`onboard_discovered_symbols` extends the whitelist, the instrument list, and the live feed) is correct and has never been reached by a real verdict, because no verdict has ever been non-`avoid`. The row was later deleted without a `watchlist_event`, most plausibly session cleanup, unproven, minor.
+
+THE PREMISE CORRECTION: "its bars went stale while all other symbols stayed current" is only half true. After 12:00Z on 07-17 the other symbols were current on SYNTHETIC prices (Task 5). SOL/USD went stale because it was never polled. The others kept "updating" because the walk fallback never stops. Neither side of the comparison was live market data after noon UTC.
+
+### TASK 4: the bridge race
+
+- The start script health-gates the BRIDGE HTTP SERVER, not the discovery stack: `wait_http /health` passes the moment the socket serves, while the `/discovery/due` handler lazy-imports `discovery.run` on first call. The engine's first trigger fires on iteration one (`last_discovery_trigger_` starts 0) with the fast 8000ms timeout (`engine_bridge_call_timeout_ms`). First call after a cold start can exceed that: the single `bridge unreachable` event at 08:49:58Z, 92 seconds after the 08:48:26Z start, then permanent recovery, matches it. Cost of the race: one warn event and a 5-minute retry (`kDiscoveryTriggerIntervalSeconds` 300). Real, small, self-healing.
+- The bridge is a `ThreadingHTTPServer` (server.py:282). A pass in flight does not block market-data or due calls. The single-threaded starvation theory is dead.
+- The `--bridge off` warnings are bare engine invocations, confirmed: every production launcher passes `--bridge`, and all five no-bridge events coincide to the second with short non-continuous startups inside the build-session window.
+- Verified live again this session: fresh bridge, `/discovery/due` returns `enabled: true` with the correct cadence reason.
+
+### TASK 5: the restarts, and the outage that actually mattered
+
+RESTARTS, CONFIRMED WITH A SHARPER FRAME: all 13 startups fall between 04:36Z and 08:48Z on 07-17, which is 21:36 to 01:48 **local**, one evening. That evening produced commits e348d28 through 61027bc. It was a build-and-verify session, operator-driven, with bash history showing repeated script starts and ps checks. No watchdog restart, no crash, no self-exit. The last start ran 2648 iterations over 22h04m to a clean stop at 2026-07-18T06:55:51Z. Restart frequency never blocked the cadence: hourly passes fired all morning.
+
+**THE FINDING THE RESTART QUESTION WAS HIDING: THE BRIDGE PROCESS FAILED INTERNALLY AT 11:50 TO 11:56Z ON 07-17 AND NOBODY AND NOTHING NOTICED FOR 19 HOURS.** Three independent symptoms inside one five-minute window, all from the same process:
+
+1. **Live market data died between 11:50:02Z and 11:55:06Z.** SPY closed flat at 750.87 (the real after-hours static price) through 11:50:02Z. The 11:55:06Z bar prints 742.13 and the series never flatlines again: 1023 by 13:00Z, 2555 by 04:00Z next day, 3081 by 06:55Z. BTC walks from its real ~63k to 129k. These are the deterministic-walk fallback prices. **916 synthetic 5-minute bars (229 each for BTC/USD, ETH/USD, SPY, QQQ) sit in the real `bars` table between 11:55Z and the 06:55Z stop, written as if real.** Their odd-second timestamps never collide with Alpaca's aligned backfill timestamps, so no backfill will ever overwrite them. They will poison warm-start seeding and any replay or training pass that reads this window.
+2. **The Python funnel's flag read went OFF at 11:56:36Z and stayed OFF to the end of the run.** Not a transient, proven by absence on both sides: zero `discovery_skip` events after 11:46:28Z (they had fired near-continuously all morning, 46 of them), zero `discovery_pass` rows after 11:51:34Z despite roughly 18 due hourly passes before the stop, and a fresh budget after the UTC midnight. The engine's own parse of the same file never flipped: `consume_discovery` re-reads controls.json every iteration and logs a `discovery_toggle` event on ANY change, and zero such events exist in the entire database. The file said ON throughout. The 07-18 07:13Z migration read it as ON through the same Python reader a fresh process uses. One long-lived process read it OFF 228 times in a row.
+3. **Pass 10 at 11:51:34Z resolved only 35 of 50 Finnhub quotes**, the only degraded universe count in the record, minutes before both failures.
+
+What kept working in that same process: HTTP serving (the engine received `enabled: false` answers, which is how the mismatch event got its reason string), and the LLM council through pooled provider connections (research theses with real conviction 0.6549 at 16:55Z and at 01:00:05Z on 07-18, mid-outage). What broke: the two paths that open fresh sockets or files per call, Alpaca market data and `controls.json` reads. That constellation, progressive quote loss immediately before, fresh-resource paths dying together, pooled paths surviving, full recovery in every fresh process since, fits resource exhaustion in the long-lived bridge process, file-descriptor class. **The process is gone and I cannot prove the mechanism. The window, the persistence, the file staying ON, and the split between fresh-resource and pooled paths are all proven from the record.**
+
+Consequences, proven: every equity discovery pass ever due fell inside this outage (07-17 RTH opened at 13:30Z, 94 minutes after the flag went dark), which is why the `discovery_pass` table has ZERO equity rows for all time. The 07-18 00:00 to 06:55Z crypto passes died the same way with a fresh budget. The only two trades of the 22-hour run (BTC/USD momentum entry 13:35:10Z at **74,335**, target exit +$16.97 at 13:50Z) executed against walk prices 18 percent above the last real quote. Paper only, but the record now contains trades against fantasy data. The watchdog's `bars_fresh` check reads `MAX(timestamp)`, and walk bars advance forever, so the watchdog reported a healthy feed through all of it. The engine has been down since 06:55:51Z with a stale `engine.lock` (pid 751735).
+
+### TASK 6: synthesis (FABLE)
+
+THREE CLUSTERS, ONE PER EVENT.
+
+**Cluster 1: the verdict rule (blocks discovery output, still live today).** The funnel completes and cannot produce a watchlist member. Directional conviction and the 0.60 floor have never co-occurred in 12 real verdicts, the averaging makes them anti-correlated, and the synthetic DNN's constant -0.32 subtracts from every long. Replicated in both diagnostic runs today.
+
+**Cluster 2: the budget burn (explained, self-limiting, counting bug still present).** The 07-16 evening build session spent the 07-17 UTC budget on pre-fix code while creating the fix. The count-on-return mechanism and the Stage-B-before-budget-check ordering remain in the code.
+
+**Cluster 3: the 19-hour silent bridge outage (worst operational finding, mechanism unproven).** One process event at 11:50 to 11:56Z took out market data and the funnel flag together, poisoned the bars table with 916 synthetic rows, executed two paper trades on fantasy prices, erased every equity pass, and was invisible to the watchdog, the GUI, and the event log beyond one deduplicated warn line.
+
+RECOMMENDED FIX ORDER, by severity and dependency:
+
+1. **Quarantine the poisoned bars before the next engine start.** 916 walk bars for BTC/ETH/SPY/QQQ between 2026-07-17T11:55Z and 2026-07-18T06:55Z. The next warm-start will seed indicators from prices up to 4x reality, and the first live poll will read as an instant crash. Data hygiene precedes everything.
+2. **Make feed liveness observable and watched.** `AlpacaFeed` already knows (`last_poll_was_live`). Surface it per poll, alarm on sustained fallback while `feed_mode` is alpaca_paper, and make the watchdog's freshness check distinguish live bars from walk bars. The outage class recurs otherwise and the next one can run for a week.
+3. **Decide the discovery verdict rule.** The floor, the flat rule, and hold-averaging together define an unsatisfiable output gate. This is a design decision, not a bug fix, and nothing downstream matters until it is made.
+4. **Constrain the synthetic DNN's vote.** 17 of 17 negative readings is a constant bearish thumb on the scale from a model PROGRESS.md already calls synthetic-trained.
+5. **Charge the discovery budget on provider calls, not evaluator returns, and check the budget before Stage B spends gate calls.**
+6. **Investigate the bridge leak class before another long unattended run.** Add fd-count telemetry to the bridge status endpoint. The evidence points at fresh-socket-and-file paths in a long-lived process, unproven.
+7. **Keep bare `mal_engine` invocations out of the production database.** Two of the four reported failure modes were this.
+
+CORRECTIONS TO THE OPUS REPORT, stated plainly:
+
+- WITHDRAWN: the stale pre-fix-process hypothesis for passes 3 and 4. Commit timestamps are local -0700. The passes predate the fix commit. They were the fix session's own verification.
+- CORRECTED: "the engine has been down since 06:55, which is why 07-18 has no pass at all." The engine ran until 06:55Z WITH a fresh budget and a working cadence, and produced nothing because the funnel flag read OFF from 11:56:36Z the previous day. The downtime only explains 06:55Z onward.
+- CORRECTED: "SOL/USD went stale while all other symbols stayed current." The other symbols were current on synthetic walk data from 12:00Z.
+- REFINED: "the floor is the finding." Two of today's five verdicts cleared the floor and were still avoid because they were flat. The finding is the anti-correlation, with the floor as one of its two jaws.
+- UPGRADED: the flag mismatch is not two unexplained transients. The 06:51:10Z event fired pre-ad586f7, when the flag-source bug that commit fixed was still live, during the session fixing it. The 11:56:36Z event opened a proven 19-hour outage inside one process.
+
+PROVEN: everything labelled proven above, each from the database record, the git record, or a live run this session. HYPOTHESIS: fd-class resource exhaustion as the outage mechanism, and session cleanup as the watchlist-row deletion. UNKNOWN: the exact leak site, unrecoverable because the process is dead, and whether the verdict rule would pass in a strongly trending market, twelve verdicts across two days being the whole population.
+
+Changes: NO BEHAVIOR CHANGES. This report in RETURN.md, a dated FABLE entry in PROGRESS.md, two new Open Flags (poisoned bars, bridge outage) and a FABLE addendum to the flag-mismatch Open Flag. Did not touch RiskGate logic, the live-trading gate, the adaptive limit-weakening invariant, or any Level-1 value. Live trading stays off.
+
+Side effects, disclosed: pass 12 wrote one discovery_pass row, 5 candidate rows, and 45 drop rows to `market_ai_lab.db`, and spent 5 discovery council calls ($0.20). Today's discovery budget now has 2 of 12 remaining after the two diagnostic runs. A bridge ran on 127.0.0.1:8765 for the pass and was stopped after.
+
+Commit message: `Diagnose the discovery layer end to end (Fable pass), findings only, no behavior changes, live trading untouched`
+
+---
+
 ## Prompt: Diagnose the discovery layer end to end (DIAGNOSTIC ONLY, no fixes)
 
 Date: 2026-07-18
