@@ -104,8 +104,12 @@ int main(int argc, char** argv) {
                    "  --help, -h                 print this usage and exit\n"
                    "  --config PATH              config file (default "
                    "config/default_config.yaml)\n"
-                   "  --db PATH                  SQLite database (default "
-                   "market_ai_lab.db)\n"
+                   "  --db PATH                  SQLite database. WITHOUT "
+                   "this flag a scratch\n"
+                   "                             mal_demo.db is used, so a "
+                   "stray run can never\n"
+                   "                             write into the production "
+                   "database\n"
                    "  --schema PATH              schema file (default "
                    "storage/schema.sql)\n"
                    "  --iterations N             finite demo iterations "
@@ -124,15 +128,24 @@ int main(int argc, char** argv) {
                    "300)\n"
                    "  --bootstrap-sim            legacy demo factor loop\n\n"
                    "WITHOUT --help this binary RUNS the engine (a finite "
-                   "demo unless --continuous), writing to the configured "
-                   "database.\n";
+                   "demo unless --continuous). Without --db it writes to a "
+                   "scratch mal_demo.db, never the production database.\n";
             return 0;
         }
     }
     try {
         std::string cfg_path =
             arg_value(argc, argv, "--config", "config/default_config.yaml");
-        std::string db_path = arg_value(argc, argv, "--db", "market_ai_lab.db");
+        // No --db means a SCRATCH demo database, never the production one.
+        // Every real launcher (scripts/start_paper_trading.sh, the GUI
+        // supervisor via api_server/stack.engine_cmd) passes --db explicitly.
+        // A bare `mal_engine` used to default to market_ai_lab.db and wrote
+        // warn events into the production diagnostic log (five
+        // discovery_blocked warnings on 2026-07-17 came from exactly such
+        // strays). Touching production now requires ASKING for it.
+        std::string db_path = arg_value(argc, argv, "--db", "");
+        const bool db_defaulted = db_path.empty();
+        if (db_defaulted) db_path = "mal_demo.db";
         std::string schema =
             arg_value(argc, argv, "--schema", "storage/schema.sql");
         int iterations = std::atoi(
@@ -186,7 +199,12 @@ int main(int argc, char** argv) {
 
         std::cout << "Market AI Lab engine starting (live DISABLED by default)\n"
                   << "  config: " << cfg_path << "\n"
-                  << "  db:     " << db_path << "\n"
+                  << "  db:     " << db_path
+                  << (db_defaulted
+                          ? "  (SCRATCH demo db: no --db given; launchers pass"
+                            " --db explicitly)"
+                          : "")
+                  << "\n"
                   << "  mode:   "
                   << (continuous ? "continuous (24/7)" : "finite demo") << "\n";
         if (continuous)
@@ -494,7 +512,8 @@ int main(int argc, char** argv) {
                 << " (only reachable regions trade; crypto 24/7 unaffected)\n"
                 << "  rl:        "
                 << (cfg.rl.rl_enabled ? "ON" : "OFF (ships off)")
-                << " — advisory cap 0.5, real-fills gate "
+                << " — advisory only (factor weight 0.0 until enabled), "
+                   "real-fills gate "
                 << cfg.rl.rl_min_real_fills
                 << ", trains on real fills only\n"
                 << "  L1 risk:   daily-loss " << (rk.max_daily_loss_total_pct * 100)

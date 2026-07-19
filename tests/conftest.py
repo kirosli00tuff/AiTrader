@@ -48,12 +48,18 @@ os.environ["MAL_CONTROL_DIR"] = tempfile.mkdtemp(prefix="mal_test_controls_")
 for _flag in ("SEC_EDGAR_ENABLED", "WHALE_LIVE_ENABLED", "WHALE_ALERT_ENABLED"):
     os.environ[_flag] = "false"
 
+# Point the evidence records (ops/evidence.py) at a temp dir, same shape as the
+# keystore and control dir above. Several code paths capture diagnostics as a
+# side effect (a watchdog cycle, a layer toggle, a flag mismatch), and a test
+# exercising them must not write records into the repo's diagnostics/ dir.
+os.environ["MAL_DIAGNOSTICS_DIR"] = tempfile.mkdtemp(prefix="mal_test_diag_")
 
-# Both temp dirs above are process-scoped, so remove them when the run ends
+
+# The temp dirs above are process-scoped, so remove them when the run ends
 # rather than leaving one of each per invocation under /tmp forever.
 @atexit.register
 def _cleanup_test_dirs() -> None:
-    for var in ("MAL_KEYSTORE_DIR", "MAL_CONTROL_DIR"):
+    for var in ("MAL_KEYSTORE_DIR", "MAL_CONTROL_DIR", "MAL_DIAGNOSTICS_DIR"):
         path = os.environ.get(var, "")
         if "mal_test_" in path:
             shutil.rmtree(path, ignore_errors=True)

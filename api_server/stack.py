@@ -80,8 +80,20 @@ def interval_seconds() -> int:
 
 
 def whitelist() -> list[str]:
-    strat = store.load_config().get("strategy", {}) or {}
+    """The whitelist the engine actually trades, profile-resolved.
+
+    config.cpp load_config overlays the active_quant block over strategy when
+    strategy.profile selects it, so reading strategy.whitelist alone reports
+    the swing set while an active_quant engine trades the wider one. Mirror
+    the overlay here so warm reports and the watchdog check the same symbols
+    the engine polls.
+    """
+    cfg = store.load_config()
+    strat = cfg.get("strategy", {}) or {}
     raw = str(strat.get("whitelist", "BTC/USD,ETH/USD,SPY,QQQ"))
+    if str(strat.get("profile", "swing")) == "active_quant":
+        aq = cfg.get("active_quant", {}) or {}
+        raw = str(aq.get("whitelist", raw) or raw)
     return [s.strip() for s in raw.split(",") if s.strip()]
 
 

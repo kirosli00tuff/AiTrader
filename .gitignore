@@ -40,6 +40,12 @@ ui/weight_overrides.json
 # --- Nightly DB backups (dated snapshots; not a deliverable) ---
 backups/
 
+# --- Automatic evidence records for unexplained failures (ops/evidence.py) ---
+diagnostics/
+
+# --- Scratch demo DB a no---db mal_engine invocation writes (never production) ---
+mal_demo.db
+
 # --- Rotated file logs (week-long run) ---
 logs/
 

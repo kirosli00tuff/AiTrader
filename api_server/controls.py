@@ -1262,6 +1262,49 @@ def set_weights(weights: dict) -> dict:
     return {"ok": True, "weights": eff}
 
 
+def _last_audited_layer_value(param: str):
+    """The last audited new-value for a control param, from the events log.
+    None when no audit row exists (a fresh DB, or a pruned log)."""
+    rows = store.query(
+        "SELECT payload_json FROM events WHERE kind='control_change' "
+        "AND payload_json LIKE ? ORDER BY id DESC LIMIT 1",
+        (f'%"param": "{param}"%',))
+    if not rows:
+        return None
+    try:
+        payload = json.loads(rows[0].get("payload_json") or "{}")
+    except Exception:  # noqa: BLE001 - diagnosis only, never block a toggle
+        return None
+    if payload.get("param") != param:
+        return None
+    return payload.get("new")
+
+
+def _capture_if_unaudited(param: str, on_disk) -> None:
+    """Evidence capture for the unexplained layer.whale True to False class.
+
+    Six 2026-07-17 events each read old=True right after the previous click
+    audited False: something restored the value with NO audit row between
+    clicks, and it was never reproduced. So the moment a toggle observes an
+    on-disk value that contradicts the last audited write, record the control
+    file bytes as read plus this process's pid and start time (the fact that
+    settles the stale-backend hypothesis) to a diagnostic record
+    (ops/evidence.py). Diagnosis only: the toggle proceeds unchanged and no
+    root cause is guessed at.
+    """
+    try:
+        last = _last_audited_layer_value(param)
+        if last is None or bool(last) == bool(on_disk):
+            return
+        from ops.evidence import capture
+        capture("layer_unaudited_change",
+                {"param": param, "on_disk_value": bool(on_disk),
+                 "last_audited_new": bool(last)},
+                min_interval_seconds=60)
+    except Exception:  # noqa: BLE001 - diagnosis only, never block a toggle
+        pass
+
+
 def set_layer(layer: str, enabled: bool) -> dict:
     if layer == "safety":
         return {"ok": False,
@@ -1270,6 +1313,7 @@ def set_layer(layer: str, enabled: bool) -> dict:
         return {"ok": False, "error": f"unknown layer: {layer}"}
     st = read_controls()
     old = st["layers"][layer]
+    _capture_if_unaudited(f"layer.{layer}", old)
     st["layers"][layer] = bool(enabled)
     _write_controls(st)
     _audit(f"layer.{layer}", old, bool(enabled))

@@ -18,7 +18,7 @@ _MODELS_DIR = os.path.join(os.path.dirname(__file__), "models")
 _CHAMPION_PATH = os.path.join(_MODELS_DIR, "champion.npz")
 _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-_DEFAULT_SCALE_CAP = 0.5  # sizing.dnn_position_scale_cap
+_DEFAULT_SCALE_CAP = 0.5  # clamp on the dnn_position_scale_hint OUTPUT (advisory; nothing sizes on it)
 
 _cached: DnnModel | None = None
 

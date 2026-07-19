@@ -217,7 +217,7 @@ def run_once(asset_class: str, *, db_path: str = _DEFAULT_DB,
 
         # Whale surfacing: free, keyless, bounded, and cached hard. Absent whale
         # data simply scores 0, which is the pre-whale ranking. The SAME whale
-        # data still evaluates survivors at its 0.35 cap in Stage C.
+        # data still evaluates survivors at its bounded advisory weight in Stage C.
         whale = None
         if settings.stage_a_whale_weight(cfg_path) > 0:
             whale = whale_surfacer.WhaleSurfacer()

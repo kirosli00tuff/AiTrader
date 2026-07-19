@@ -62,6 +62,78 @@ _QUOTE_PROBE_TTL_SECONDS = 60.0
 _quote_probe_cache: tuple[float, str] | None = None
 
 
+# --- fd telemetry (2026-07-18, after the suspected fd-class exhaustion) ------
+# The 2026-07-17 outage is CONSISTENT with fd exhaustion (fresh sockets and
+# fresh file reads died together while pooled connections lived) but unproven,
+# because no fd count was ever recorded. Now the count is in /health, logged
+# periodically, and crossing the threshold reads as degraded, so the next
+# occurrence carries its own diagnosis instead of only being survived.
+
+def _fd_count():
+    """Open fd count of this process, or an error string. The error string is
+    itself evidence: under exhaustion even listing /proc/self/fd fails."""
+    from ops.evidence import fd_count
+    return fd_count()
+
+
+def _bridge_cfg() -> dict:
+    try:
+        from llm_consensus.config_access import config_block
+        return config_block("bridge") or {}
+    except Exception:  # noqa: BLE001 - telemetry must never break health
+        return {}
+
+
+def _fd_warn_threshold() -> int:
+    """The fd count at which the bridge reports itself degraded.
+
+    config bridge.fd_warn_threshold when positive. 0 or absent means auto: 80
+    percent of the process RLIMIT_NOFILE soft limit, the headroom at which
+    exhaustion is close enough to act on and early enough to diagnose.
+    """
+    try:
+        v = int(_bridge_cfg().get("fd_warn_threshold", 0) or 0)
+    except (TypeError, ValueError):
+        v = 0
+    if v > 0:
+        return v
+    try:
+        import resource
+        soft, _ = resource.getrlimit(resource.RLIMIT_NOFILE)
+        if soft and soft > 0:
+            return max(64, int(soft * 0.8))
+    except Exception:  # noqa: BLE001
+        pass
+    return 800
+
+
+def _fd_check() -> str:
+    """fd headroom as a health capability: ok below the threshold, fail at or
+    above it (which flips /health to degraded), fail when unreadable on a
+    /proc system (unreadable IS the suspect state)."""
+    n = _fd_count()
+    threshold = _fd_warn_threshold()
+    if isinstance(n, int):
+        return ("ok" if n < threshold
+                else f"fail ({n} open fds >= threshold {threshold})")
+    if not os.path.isdir("/proc/self/fd"):
+        return "skipped (no /proc)"
+    return f"fail (fd count unreadable: {n})"
+
+
+def _fd_log_loop(interval_seconds: float) -> None:
+    """Periodic one-line fd log, so a slow leak is visible in the bridge log
+    long before the threshold. Daemon thread, never raises."""
+    import time as _time
+    while True:
+        _time.sleep(max(30.0, interval_seconds))
+        try:
+            safe_print(f"bridge fd telemetry: {_fd_count()} open "
+                       f"(degraded threshold {_fd_warn_threshold()})")
+        except Exception:  # noqa: BLE001 - telemetry must never crash serve
+            pass
+
+
 def _fresh_file_check() -> str:
     """Read a file through a brand-new descriptor. Uses the control file path,
     the exact read that silently returned nothing during the outage."""
@@ -121,15 +193,20 @@ def _quote_capability() -> str:
 def health_payload() -> dict:
     """Capability health: up means every exercised capability works right now.
     degraded means the process is alive but a capability is failing, which is
-    exactly the state the old liveness check could not see."""
+    exactly the state the old liveness check could not see. fd_headroom joins
+    the capability set: a bridge burning toward fd exhaustion is degraded
+    BEFORE the fresh-socket and fresh-file paths die."""
     checks = {
         "fresh_file": _fresh_file_check(),
         "fresh_socket": _fresh_socket_check(),
         "market_quote": _quote_capability(),
+        "fd_headroom": _fd_check(),
     }
     failing = sorted(k for k, v in checks.items() if v.startswith("fail"))
     return {"status": "degraded" if failing else "ok",
-            "checks": checks, "degraded": failing}
+            "checks": checks, "degraded": failing,
+            "fd_count": _fd_count(),
+            "fd_warn_threshold": _fd_warn_threshold()}
 
 
 def _bridge_status() -> dict:
@@ -218,6 +295,35 @@ def _bridge_status() -> dict:
     return out
 
 
+def _capture_flag_mismatch(path: str, payload: dict, out: dict) -> None:
+    """Evidence capture for the unexplained engine-ON funnel-OFF condition.
+
+    The engine only calls the discovery endpoints when ITS parse of
+    controls.json reads discovery ON, and it says so with
+    engine_reads_enabled in the request. When this process simultaneously
+    reads the flag OFF, that is the exact 2026-07-17 mismatch (19 hours, 228
+    polls, never explained). Record the control file bytes as read, this
+    process's pid and start time, and this process's fd count (the exhaustion
+    hypothesis) at the moment it happens. Diagnosis only: the response is
+    returned unchanged and the root cause is NOT guessed at.
+    """
+    try:
+        if not payload.get("engine_reads_enabled"):
+            return
+        mismatch = (out.get("enabled") is False
+                    or out.get("status") == "disabled")
+        if not mismatch:
+            return
+        from ops.evidence import capture
+        capture("discovery_flag_mismatch",
+                {"endpoint": path,
+                 "request": {k: payload.get(k)
+                             for k in ("asset_class", "engine_reads_enabled")},
+                 "response": out})
+    except Exception:  # noqa: BLE001 - evidence must never break the endpoint
+        pass
+
+
 def _handle(path: str, payload: dict) -> dict:
     if path == "/status":
         return _bridge_status()
@@ -233,9 +339,11 @@ def _handle(path: str, payload: dict) -> dict:
         # Cadence question only: one indexed SQLite read, no Finnhub or LLM call.
         # The engine asks before every trigger, so this must stay cheap.
         from discovery import run as discovery_run
-        return discovery_run.due_status(
+        out = discovery_run.due_status(
             str(payload.get("asset_class", "crypto")),
             db_path=str(payload.get("db", "market_ai_lab.db")))
+        _capture_flag_mismatch(path, payload, out)
+        return out
     if path == "/discovery/run_once":
         # Runs the funnel: Finnhub pre-screen, Haiku gate, council on survivors.
         # SLOW (tens of seconds once council calls run), which is why the engine
@@ -248,10 +356,12 @@ def _handle(path: str, payload: dict) -> dict:
         # honored on every path and force can only skip the cadence, never the
         # flag.
         from discovery import run as discovery_run
-        return discovery_run.run_once(
+        out = discovery_run.run_once(
             str(payload.get("asset_class", "crypto")),
             db_path=str(payload.get("db", "market_ai_lab.db")),
             force=bool(payload.get("force", False)))
+        _capture_flag_mismatch(path, payload, out)
+        return out
     if path == "/score/dnn":
         return score_state(payload)
     if path == "/score/rl":
@@ -397,7 +507,19 @@ def serve(host: str = "127.0.0.1", port: int = 8765) -> None:
             safe_print(f"  model check skipped: {e}")
     safe_print(
         f"  RL advisory: {'ON' if rl_enabled() else 'OFF (ships off)'} "
-        f"(real-fills gate {rl_min_real_fills()}, advisory cap 0.5)")
+        f"(real-fills gate {rl_min_real_fills()}, factor weight 0.0 until "
+        f"an operator enables it past the gate)")
+    # fd telemetry: one line now (the baseline the leak is measured against),
+    # then a periodic daemon-thread log. See the fd telemetry block above.
+    safe_print(f"  fd telemetry: {_fd_count()} open at startup "
+               f"(degraded threshold {_fd_warn_threshold()})")
+    try:
+        import threading
+        interval = float(_bridge_cfg().get("fd_log_interval_seconds", 300) or 300)
+        threading.Thread(target=_fd_log_loop, args=(interval,),
+                         daemon=True, name="fd-telemetry").start()
+    except Exception:  # noqa: BLE001 - telemetry must never block serving
+        pass
     httpd.serve_forever()
 
 

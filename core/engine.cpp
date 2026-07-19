@@ -1089,8 +1089,13 @@ void Engine::launch_discovery_pass(const std::string& asset_class,
     const std::string host = opts_.bridge_host;
     const int port = opts_.bridge_port;
     const std::string db = opts_.db_path;
+    // engine_reads_enabled tells the bridge the ENGINE's parse of controls.json
+    // reads discovery ON right now. If the funnel simultaneously reads it OFF
+    // (the unexplained 2026-07-17 mismatch), the bridge captures evidence at
+    // that instant (ops/evidence.py). A hint for diagnosis, never a decision.
     const std::string body = std::string("{\"asset_class\":\"") + asset_class +
-                             "\",\"db\":\"" + db + "\",\"force\":true}";
+                             "\",\"db\":\"" + db +
+                             "\",\"force\":true,\"engine_reads_enabled\":true}";
     // A pass runs the funnel end to end (Finnhub pre-screen, Haiku gate, then up
     // to max_council_calls_per_pass council calls), so it needs the council
     // timeout, not the fast-call one. The fast 8s budget would hang up mid-pass
@@ -1330,8 +1335,13 @@ void Engine::consume_discovery() {
         // hourly equities inside US regular hours). Asking costs one indexed
         // SQLite read, and asking is what keeps the US-hours rule from being
         // written a second time in C++ where the two could drift apart.
+        // engine_reads_enabled: this request only fires when the engine's own
+        // parse reads discovery ON, and saying so lets the bridge capture
+        // evidence if ITS read is simultaneously OFF (the unexplained
+        // 2026-07-17 flag mismatch). Diagnostic hint only.
         const std::string q = "{\"asset_class\":\"" + asset_class +
-                              "\",\"db\":\"" + opts_.db_path + "\"}";
+                              "\",\"db\":\"" + opts_.db_path +
+                              "\",\"engine_reads_enabled\":true}";
         auto resp = bridge::http_post_json(
             opts_.bridge_host, opts_.bridge_port, "/discovery/due", q,
             cfg_.council.engine_bridge_call_timeout_ms);
@@ -1840,8 +1850,8 @@ int Engine::run_iteration() {
         // --- Sizing (fixed-fractional, capped) ---
         double base = cfg_.sizing.default_risk_per_trade_pct * equity_;
         double scale = clamp01(std::abs(verdict.bias) * verdict.confidence);
-        // Advisory caps: DNN and whale sizing hints cannot raise size beyond
-        // their configured caps. We conservatively cap the overall scale.
+        // The one enforced sizing cap: the overall scale never exceeds
+        // default_position_scale_cap. Advisory hints never raise size.
         scale = std::min(scale, cfg_.sizing.default_position_scale_cap);
         double notional = base * std::max(scale, 0.2);
         double qty = notional / std::max(0.0001, ms.price);

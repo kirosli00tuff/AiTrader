@@ -111,12 +111,17 @@ risk:
 # -----------------------------------------------------------------------------
 # Sizing — fixed-fractional default
 # -----------------------------------------------------------------------------
+# NOTE (2026-07-18): dnn_position_scale_cap and whale_position_scale_cap were
+# REMOVED. They were parsed and range-validated but no consumer ever enforced
+# them, so they claimed a safety property the code did not provide. What
+# actually bounds the advisory layers: their ensemble weights (model_weights,
+# whale_signal_weight 0.10 shipped), the discovery advisory adjustment bound
+# (+/- 0.10, discovery/evaluate.py), and the enforced default_position_scale_cap
+# below, which caps the WHOLE sizing scale on every path.
 sizing:
   default_position_sizing_method: fixed_fractional
   default_risk_per_trade_pct: 0.005
   default_position_scale_cap: 1.0
-  dnn_position_scale_cap: 0.5
-  whale_position_scale_cap: 0.35
 
 # -----------------------------------------------------------------------------
 # Native strategy layer — two signal factors + a regime detector, evaluated
@@ -298,6 +303,14 @@ backups:
 dnn_schedule:
   challenger_training_enabled: true        # scheduled real-data challenger training
   interval_hours: 24                       # daily attempt; refuses cleanly below min samples
+
+# Python-only (the C++ parser ignores these keys). Bridge fd telemetry: the
+# 2026-07-17 outage is consistent with fd exhaustion but unproven because no
+# fd count was recorded. The bridge reports its open-fd count in /health, logs
+# it periodically, and reads degraded at the threshold.
+bridge:
+  fd_warn_threshold: 0                     # 0 = auto (80% of RLIMIT_NOFILE soft limit)
+  fd_log_interval_seconds: 300             # periodic fd log cadence in the bridge log
   # Promotion stays gated + MANUAL: a trained challenger waits for the operator's
   # promote action from the GUI. auto_promote stays adaptive.dnn_auto_promote_if_better.
 
@@ -366,7 +379,7 @@ discovery:
   # Whale activity as a Stage-A candidate-surfacing signal. Whale data does TWO
   # jobs, deliberately: it SURFACES candidates here (free, no LLM cost, using the
   # already-active SEC EDGAR and crypto whale sources), and it still EVALUATES
-  # survivors as the Level-4 advisory factor at its own 0.35 cap in Stage C. Same
+  # survivors as the Level-4 advisory factor at its bounded weight in Stage C. Same
   # data, two questions, not a duplication bug.
   #
   # The five fixed components sum to 1.0 (momentum 0.30, volatility 0.25, gap
@@ -463,8 +476,9 @@ adaptive_realtime:
 # the engine never scores an RL factor and it stays out of the ensemble entirely.
 # The PPO trainer (rl_advisory/) refuses to run until at least rl_min_real_fills
 # REAL closed fills exist — there is NO synthetic-data training path for RL.
-# Advisory only: the 0.5 sizing cap (sizing.dnn_position_scale_cap) applies, and
-# RL can never be a sole execution controller. Promotion stays gated + manual.
+# Advisory only: its factor weight ships 0.0, its scale hint is clamped to 0.5
+# at the source, and RL can never be a sole execution controller. Promotion
+# stays gated + manual.
 # -----------------------------------------------------------------------------
 rl:
   rl_enabled: false                      # OFF by default (ships toggled off)
@@ -583,7 +597,7 @@ whale:
   # Whale Alert crypto whale feed, wired for a one-time TRIAL evaluation. Default
   # OFF, so the system runs unchanged. When true AND WHALE_ALERT_API_KEY resolves,
   # the Whale Alert adapter joins the whale chain for crypto and feeds the same
-  # advisory factor as SEC EDGAR, under the same 0.35 cap. Exported to the bridge
+  # advisory factor as SEC EDGAR, at the same bounded weight. Exported to the bridge
   # env as WHALE_ALERT_ENABLED by scripts/start_paper_trading.sh. The key is a
   # RESERVED credential, resolved keystore-first, never committed here. This is a
   # deliberate one-time trial, not a recurring free-tier scheme.

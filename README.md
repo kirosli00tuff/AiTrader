@@ -295,7 +295,7 @@ position. A restart picks up the current list.
 Stage A (a strong signal raises an instrument's free pre-screen rank, so a name
 whales moved into can reach the finalist set even when price and volume alone
 would not have surfaced it), and it still **evaluates** survivors in Stage C as
-the Level-4 advisory factor at its unchanged **0.35 cap**. Same data, two
+the Level-4 advisory factor at its bounded advisory weight. Same data, two
 questions, not a duplication bug: surfacing asks *is this worth looking at*,
 evaluation asks *what should we do*. A surfaced name still has to clear the Haiku
 gate and the full four levels, so whale only buys a name a look.
@@ -1140,7 +1140,7 @@ bridge for a **scored** signal and never persists the activity behind it. So the
 count is whale FACTOR signals, which is real data that means something narrower
 than "Whale Alert fetches": it counts signals rather than fetches, and it is not
 attributed to a source, because the whale layer combines both feeds into one
-0.35-capped factor and records one score. Whether a feed **works** is a different
+weight-bounded factor and records one score. Whether a feed **works** is a different
 question, answered by the Health page, which makes one real call per integration.
 Ops is read-only and adds no write path.
 
@@ -1254,7 +1254,7 @@ discovery funnel's free Stage-A pre-screen (a strong signal raises an
 instrument's rank, so a name whales moved into can reach the finalist set even
 when price and volume alone would not have surfaced it), and it still
 **evaluates** survivors in Stage C as the Level-4 advisory factor at its
-unchanged **0.35 cap**. Same data, two questions, not a duplication bug:
+bounded advisory weight. Same data, two questions, not a duplication bug:
 surfacing asks *is this worth looking at*, evaluation asks *what should we do*. A
 surfaced name still clears the Haiku gate and the full four levels, so whale only
 buys a name a look. Tune surfacing with `discovery.stage_a_whale_weight`
@@ -1267,7 +1267,7 @@ Free-first by default — the app runs with **no paid keys**:
 |--------|---------|-------|
 | **ClankApp** (free crypto/on-chain) | `ClankAppAdapter` (**default**) | fully free (~10 calls/min, ~21 chains); `CLANKAPP_API_KEY` optional (email signup); mock fallback |
 | **SEC EDGAR 13F** (free) | `Sec13FAdapter` (**default**) | official `data.sec.gov` / `efts.sec.gov` REST — **no key**, just a descriptive `User-Agent`; **DELAYED**, equity-only, down-weighted; `SEC_API_KEY` optional override only |
-| Whale Alert API | `WhaleAlertAdapter` (**crypto trial**) | crypto-only, ≥ $500k; one-time **trial evaluation**, opt-in via `whale.whale_alert_enabled` + `WHALE_ALERT_API_KEY`; joins the whale chain for crypto and feeds the **same** advisory factor as SEC EDGAR under the **0.35 cap**; 429 retries with backoff then degrades to mock |
+| Whale Alert API | `WhaleAlertAdapter` (**crypto trial**) | crypto-only, ≥ $500k; one-time **trial evaluation**, opt-in via `whale.whale_alert_enabled` + `WHALE_ALERT_API_KEY`; joins the whale chain for crypto and feeds the **same** weight-bounded advisory factor as SEC EDGAR; 429 retries with backoff then degrades to mock |
 
 **Whale Alert trial feed (crypto).** Off by default. It is wired as a one-time
 trial evaluation, not a recurring free-tier scheme. To enable it, set

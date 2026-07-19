@@ -132,9 +132,11 @@ def test_non_crypto_symbol_ignored():
 
 
 def test_cap_holds_and_two_sources_combine():
-    # The 0.35 advisory cap is unchanged in config.
+    # The unenforced whale_position_scale_cap was REMOVED 2026-07-18: config
+    # must not claim a safety property no consumer provides. The real bound is
+    # the whale ensemble weight plus the bounded signal below.
     cfg = yaml.safe_load(open("config/default_config.yaml", encoding="utf-8"))
-    assert cfg["sizing"]["whale_position_scale_cap"] == 0.35
+    assert "whale_position_scale_cap" not in cfg["sizing"]
     # Both sources feed ONE whale factor: SEC (equity) + Whale Alert (crypto)
     # activities score into a single bounded advisory signal.
     wa_rows = WhaleAlertAdapter()._parse(_fixture(), "BTC/USD")

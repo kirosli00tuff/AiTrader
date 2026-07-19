@@ -212,8 +212,9 @@ Config load_config(const std::string& path) {
     s.default_position_sizing_method = get_str(root, "sizing.default_position_sizing_method", s.default_position_sizing_method);
     s.default_risk_per_trade_pct = get_double(root, "sizing.default_risk_per_trade_pct", s.default_risk_per_trade_pct);
     s.default_position_scale_cap = get_double(root, "sizing.default_position_scale_cap", s.default_position_scale_cap);
-    s.dnn_position_scale_cap = get_double(root, "sizing.dnn_position_scale_cap", s.dnn_position_scale_cap);
-    s.whale_position_scale_cap = get_double(root, "sizing.whale_position_scale_cap", s.whale_position_scale_cap);
+    // dnn_position_scale_cap / whale_position_scale_cap deliberately not
+    // parsed: removed 2026-07-18 as unenforced (see SizingConfig note). An
+    // older yaml still carrying them loads fine, the keys are ignored.
 
     // strategy (native signal layer — evaluated on closed bars only)
     auto& st = c.strategy;
@@ -535,9 +536,7 @@ std::vector<std::string> validate_config(const Config& cfg) {
             "risk.max_daily_loss_per_venue_pct must not exceed "
             "risk.max_daily_loss_total_pct");
 
-    // Sizing caps must be sane fractions; DNN/whale caps bound advisory sizing.
-    pct("sizing.dnn_position_scale_cap", cfg.sizing.dnn_position_scale_cap);
-    pct("sizing.whale_position_scale_cap", cfg.sizing.whale_position_scale_cap);
+    // The one sizing cap that exists is the one the engine enforces.
     if (cfg.sizing.default_position_scale_cap < 0.0)
         problems.push_back("sizing.default_position_scale_cap must be >= 0");
 

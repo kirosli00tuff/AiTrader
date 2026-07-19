@@ -68,8 +68,9 @@ struct EngineConfig {
 // RL advisory (Layer 3, deferred). SHIPS OFF: while rl_enabled is false the
 // engine never scores an RL factor and it stays out of the ensemble entirely.
 // The PPO trainer refuses to run until at least rl_min_real_fills REAL closed
-// fills exist (no synthetic-data training path). Advisory only; the 0.5 sizing
-// cap (sizing.dnn_position_scale_cap) applies exactly as it does to dnn_advisory.
+// fills exist (no synthetic-data training path). Advisory only: its factor
+// weight ships 0.0, its scale hint is clamped at the source (rl_advisory), and
+// it can never be a sole execution controller.
 struct RlConfig {
     bool rl_enabled = false;              // OFF by default (ships toggled off)
     int rl_min_real_fills = 500;          // training gate: real closed fills required
@@ -110,12 +111,17 @@ struct RiskConfig {
     bool manual_resume_required_after_kill_switch = true;
 };
 
+// NOTE (2026-07-18): dnn_position_scale_cap and whale_position_scale_cap were
+// REMOVED. They were parsed and range-validated but NO consumer enforced them,
+// so config claimed a safety property the code did not provide. The real
+// bounds on the advisory layers are their ensemble weights (ModelWeights,
+// whale_signal_weight 0.10 shipped), the discovery advisory adjustment bound
+// (+/- 0.10, discovery/evaluate.py), and default_position_scale_cap here,
+// which IS enforced on every sizing path (core/engine.cpp).
 struct SizingConfig {
     std::string default_position_sizing_method = "fixed_fractional";
     double default_risk_per_trade_pct = 0.005;
     double default_position_scale_cap = 1.0;
-    double dnn_position_scale_cap = 0.5;
-    double whale_position_scale_cap = 0.35;
 };
 
 struct AdaptiveConfig {
@@ -378,7 +384,8 @@ struct DiscoveryConfig {
     // Weight of whale activity in the Stage-A pre-screen rank. Whale data does
     // TWO jobs, deliberately: it SURFACES candidates here (cheap, free, no LLM
     // cost), and it still EVALUATES survivors as the Level-4 advisory factor at
-    // its own 0.35 cap in Stage C. Same data, two questions, not a duplication.
+    // its bounded advisory weight in Stage C. Same data, two questions, not a
+    // duplication.
     // The five fixed components sum to 1.0, and this adds on top before
     // normalization, so at 0.15 whale is one sixth of the total: enough to lift
     // a name whales moved into into the finalist set, never enough to dominate

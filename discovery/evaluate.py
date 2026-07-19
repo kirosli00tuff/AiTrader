@@ -12,9 +12,9 @@ can open a position, size past a cap, or weaken a limit.
 
 The council leads. The DNN and whale layers are ADVISORY: they confirm or temper
 the council's conviction within a bounded adjustment, and can never flip a
-verdict on their own. That mirrors the ensemble posture in CONTEXT.md, where the
-whale layer is capped at 0.35 and the DNN at 0.5 and neither may be a sole
-controller.
+verdict on their own. That mirrors the ensemble posture in CONTEXT.md: advisory influence
+is bounded by the ensemble weights and by the +/- 0.10 adjustment cap here,
+and no advisory layer may be a sole controller.
 
 The same machinery serves BOTH sleeves. The only difference is the horizon and
 the prompt framing: short-term-trade mode for quant_core, long-term-hold mode for
@@ -151,6 +151,12 @@ def build_verdict(*, symbol: str, council, dnn: dict, whale: dict,
         "dnn_bias": round(dnn_bias, 4),
         "whale_bias": round(whale_bias, 4),
         "advisory_adjustment": round(adj, 4),
+        # How many council providers were actually scored. 0 means the council
+        # short-circuited (gate decline, risk pre-check, market-hours skip) and
+        # no provider was contacted, which the funnel's budget counter reads as
+        # zero spend. A ConsensusResult always carries per_model: scored
+        # verdicts on a real run, [] on a short-circuit.
+        "provider_calls": len(getattr(council, "per_model", None) or []),
     }
 
 

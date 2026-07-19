@@ -620,7 +620,7 @@ def whale_feeds() -> dict:
 
       * it counts SIGNALS, not fetches, and
       * it is not attributed to a source, because the whale layer combines SEC
-        EDGAR and Whale Alert into one 0.35-capped factor and records one score,
+        EDGAR and Whale Alert into one weight-bounded factor and records one score,
       * so a signal here may have come from either feed, or from the offline C++
         mock when the engine runs without the bridge.
 

@@ -152,6 +152,8 @@ def _fresh_ts():
 
 def test_advancing_synthetic_bars_do_not_read_healthy(tmp_path, monkeypatch):
     # THE outage check: fresh timestamp, synthetic source, real feed mode.
+    monkeypatch.setattr(watchdog, "tradeable_symbols",
+                        lambda db=None: ["BTC/USD"])
     monkeypatch.setattr(watchdog, "_real_feed_mode", lambda: True)
     db = _feed_db(tmp_path, _fresh_ts(), "synthetic")
     out = watchdog.feed_ok(900, db)
@@ -161,12 +163,16 @@ def test_advancing_synthetic_bars_do_not_read_healthy(tmp_path, monkeypatch):
 
 
 def test_fresh_real_bars_read_healthy(tmp_path, monkeypatch):
+    monkeypatch.setattr(watchdog, "tradeable_symbols",
+                        lambda db=None: ["BTC/USD"])
     monkeypatch.setattr(watchdog, "_real_feed_mode", lambda: True)
     db = _feed_db(tmp_path, _fresh_ts(), "real_feed")
     assert watchdog.feed_ok(900, db)["ok"] is True
 
 
 def test_stale_real_bars_read_unhealthy(tmp_path, monkeypatch):
+    monkeypatch.setattr(watchdog, "tradeable_symbols",
+                        lambda db=None: ["BTC/USD"])
     monkeypatch.setattr(watchdog, "_real_feed_mode", lambda: True)
     db = _feed_db(tmp_path, "2026-07-01T00:00:00Z", "real_feed")
     out = watchdog.feed_ok(900, db)
@@ -175,12 +181,16 @@ def test_stale_real_bars_read_unhealthy(tmp_path, monkeypatch):
 
 def test_offline_mode_not_held_to_real_bar(tmp_path, monkeypatch):
     # synthetic_regimes runs on synthetic bars by design.
+    monkeypatch.setattr(watchdog, "tradeable_symbols",
+                        lambda db=None: ["BTC/USD"])
     monkeypatch.setattr(watchdog, "_real_feed_mode", lambda: False)
     db = _feed_db(tmp_path, _fresh_ts(), "synthetic")
     assert watchdog.feed_ok(900, db)["ok"] is True
 
 
 def test_pre_migration_db_falls_back_to_freshness(tmp_path, monkeypatch):
+    monkeypatch.setattr(watchdog, "tradeable_symbols",
+                        lambda db=None: ["BTC/USD"])
     monkeypatch.setattr(watchdog, "_real_feed_mode", lambda: True)
     db = tmp_path / "old.db"
     conn = sqlite3.connect(db)

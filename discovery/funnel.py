@@ -213,7 +213,8 @@ def prescreen_score(snap: dict, whale_weight: float = 0.0) -> tuple[float, dict]
     # Whale surfacing: accumulation with real evidence behind it. Already scored
     # by discovery.whale_surfacer and carried on the snapshot, so this stays a
     # pure function. Costs no LLM tokens. The SAME whale data still informs the
-    # Stage-C verdict at its 0.35 cap; surfacing and evaluation are two jobs.
+    # Stage-C verdict at its bounded advisory weight; surfacing and
+    # evaluation are two jobs.
     whale = _clamp01(_f("whale_component"))
     w_whale = max(0.0, float(whale_weight or 0.0))
 
@@ -398,6 +399,32 @@ def gate_finalists(finalists: list[Finalist], gate,
 
 # --- Stage C: four-level evaluation on survivors only ------------------------
 
+def _budget_cost(verdict) -> int:
+    """Budget units one evaluation spends: 1 when at least one council provider
+    was contacted, 0 when every provider was short-circuited.
+
+    The budget exists to bound PROVIDER spend. The counter used to increment on
+    every evaluator RETURN, so a short-circuit inside consensus() (base-check
+    gate decline, risk pre-check, market-hours skip) cost a full budget unit at
+    zero provider spend. On 2026-07-17 that burned 10 of 12 daily calls without
+    contacting a provider, and the persisted count outlived the process.
+
+    The evaluator reports contact via ``provider_calls`` (the council's scored
+    per_model count, see discovery/evaluate.build_verdict). An evaluator that
+    does not report is charged 1: an unknown evaluator must never spend
+    unbounded, so the conservative direction is to count it.
+    """
+    if not isinstance(verdict, dict):
+        return 1
+    n = verdict.get("provider_calls")
+    if n is None:
+        return 1
+    try:
+        return 1 if int(n) > 0 else 0
+    except (TypeError, ValueError):
+        return 1
+
+
 def evaluate_survivors(survivors: list[str], evaluator, *,
                        max_council_calls: int, budget_remaining: int,
                        finalist_scores: dict[str, float] | None = None,
@@ -412,6 +439,10 @@ def evaluate_survivors(survivors: list[str], evaluator, *,
       * max_council_calls   the per-pass ceiling
       * budget_remaining    what is left of the SEPARATE daily discovery budget
     A survivor past either ceiling is dropped with that reason, never evaluated.
+
+    ``calls`` counts evaluations that CONTACTED a provider (see _budget_cost).
+    An evaluation the council short-circuited costs nothing and does not eat
+    the ceiling: no provider was paid, so no budget was spent.
     """
     finalist_scores = finalist_scores or {}
     candidates: list[dict] = []
@@ -428,11 +459,12 @@ def evaluate_survivors(survivors: list[str], evaluator, *,
             continue
         try:
             verdict = evaluator(symbol)
-            calls += 1
         except Exception:  # noqa: BLE001 — one bad evaluation must not kill a pass
             log.debug("discovery: evaluator error on %s", symbol)
             drops.append(Drop(symbol, STAGE_C, "evaluator_error", score))
             continue
+        # Charge the budget for provider contact, never for the return itself.
+        calls += _budget_cost(verdict)
         if not isinstance(verdict, dict) or not verdict:
             drops.append(Drop(symbol, STAGE_C, "no_verdict", score))
             continue
@@ -527,10 +559,11 @@ def run_pass(asset_class: str, *, snapshots: list[dict], gate, evaluator,
     this stays pure orchestration. Returns a PassResult the engine persists:
     per-stage counts, every drop with its reason, and the cost.
 
-    Cost accounting is honest: only Stage-C council calls count against the
-    discovery budget and the estimated spend. Haiku gate calls are counted
-    separately (gate_calls) because they cost a fraction of a cent, the same way
-    the trading council accounts for its own gate.
+    Cost accounting is honest: only Stage-C evaluations that CONTACTED a
+    provider count against the discovery budget and the estimated spend. An
+    evaluation the council short-circuited costs zero (see _budget_cost). Haiku
+    gate calls are counted separately (gate_calls) because they cost a fraction
+    of a cent, the same way the trading council accounts for its own gate.
     """
     ts = ts or _utcnow_iso()
     result = PassResult(ts=ts, asset_class=asset_class,

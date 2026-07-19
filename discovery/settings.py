@@ -149,7 +149,7 @@ def stage_a_whale_weight(cfg_path: str | None = None) -> float:
     so it can lift a name into the finalist set but can never dominate the
     pre-screen on its own. Set 0.0 to turn surfacing off entirely, which restores
     the exact pre-whale ranking. This is a SURFACING weight only: the Stage-C
-    Level-4 whale evaluation keeps its own 0.35 cap, untouched.
+    Level-4 whale evaluation keeps its bounded advisory weight, untouched.
     """
     return float(_num("stage_a_whale_weight", cfg_path))
 

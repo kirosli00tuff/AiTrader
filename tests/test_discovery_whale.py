@@ -5,7 +5,8 @@ The claims that matter:
     into the finalist set when its technicals alone would not have.
   * the whale weight is CONFIGURABLE and does NOT dominate at the default: a
     whale-only name still loses to a strong technical name.
-  * whale STILL evaluates survivors in Stage C at its 0.35 cap. Surfacing did not
+  * whale STILL evaluates survivors in Stage C at its bounded advisory
+    weight. Surfacing did not
     replace evaluation. Same data, two jobs, deliberate.
   * a whale-surfaced candidate is TAGGED, and the tag is a counterfactual, not a
     threshold.
@@ -362,11 +363,17 @@ def test_stage_c_whale_stays_advisory_and_bounded():
     assert abs(v["advisory_adjustment"]) <= evaluate._ADVISORY_ADJUST_MAX
 
 
-def test_the_whale_position_scale_cap_is_still_035():
-    """The 0.35 sizing cap is a Level-4 value and this build did not touch it."""
+def test_the_unenforced_scale_caps_stay_removed():
+    """whale_position_scale_cap and dnn_position_scale_cap were parsed and
+    range-validated but NO consumer enforced them, so they were removed
+    2026-07-18. Reintroducing either without a consumer would put a claimed
+    but unprovided safety property back in config, which this pins against.
+    The real Level-4 bound is the whale ensemble weight and the discovery
+    advisory adjustment cap (_ADVISORY_ADJUST_MAX), both tested above."""
     with open("config/default_config.yaml", encoding="utf-8") as f:
         cfg = yaml.safe_load(f)
-    assert cfg["sizing"]["whale_position_scale_cap"] == 0.35
+    assert "whale_position_scale_cap" not in cfg["sizing"]
+    assert "dnn_position_scale_cap" not in cfg["sizing"]
 
 
 def test_whale_serves_both_stages_from_the_same_data():

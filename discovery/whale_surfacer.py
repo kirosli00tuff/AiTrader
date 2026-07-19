@@ -7,8 +7,8 @@ Whale data does TWO jobs, deliberately:
      even when its price and volume alone would not have surfaced it. This is a
      cheap ranking input. It costs no LLM tokens.
   2. EVALUATION (Stage C, unchanged). The existing Level-4 whale advisory layer
-     still informs the verdict and sizing on survivors, capped at 0.35, exactly
-     as before.
+     still informs the verdict and sizing on survivors at its bounded
+     advisory weight, exactly as before.
 
 That is the SAME data serving two different questions, not a duplication bug.
 Surfacing asks "is this worth looking at". Evaluation asks "what should we do".
