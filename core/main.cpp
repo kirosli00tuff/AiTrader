@@ -122,8 +122,7 @@ int main(int argc, char** argv) {
                    "  --clock-mode MODE          real | simulated\n"
                    "  --native-bar-seconds N     bar bucket size (default "
                    "300)\n"
-                   "  --bootstrap-sim            legacy demo factor loop\n"
-                   "  --seed N                   deterministic seed\n\n"
+                   "  --bootstrap-sim            legacy demo factor loop\n\n"
                    "WITHOUT --help this binary RUNS the engine (a finite "
                    "demo unless --continuous), writing to the configured "
                    "database.\n";

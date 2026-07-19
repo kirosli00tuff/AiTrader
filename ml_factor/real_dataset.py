@@ -280,19 +280,38 @@ def serve_window(db_path: str, symbol: str, timeframe: str = "5min",
     than emitting its cold value. A symbol with no real bars is UNAVAILABLE,
     never scored on invented inputs.
     """
+    n = max(int(lookback), _WARMUP + 1)
     try:
         conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True,
                                timeout=2.0)
         try:
-            bars = load_bars(conn, symbol, timeframe)
+            # Newest-first LIMIT, then reverse: a serve call needs the last
+            # `lookback` bars, not the symbol's whole history (BTC/USD holds
+            # ~10k rows, and this runs per score call). Same synthetic
+            # exclusion and tolerant fallback as load_bars.
+            try:
+                rows = conn.execute(
+                    "SELECT timestamp, open, high, low, close, volume FROM"
+                    " bars WHERE symbol=? AND timeframe=?"
+                    " AND COALESCE(source,'unknown') <> 'synthetic'"
+                    " ORDER BY timestamp DESC LIMIT ?",
+                    (symbol, timeframe, n)).fetchall()
+            except sqlite3.OperationalError:
+                rows = conn.execute(
+                    "SELECT timestamp, open, high, low, close, volume FROM"
+                    " bars WHERE symbol=? AND timeframe=?"
+                    " ORDER BY timestamp DESC LIMIT ?",
+                    (symbol, timeframe, n)).fetchall()
         finally:
             conn.close()
     except Exception as e:  # noqa: BLE001 — an unreadable DB is unavailable
         return None, f"bars unavailable ({type(e).__name__})"
+    bars = [{"ts": r[0], "open": r[1], "high": r[2], "low": r[3],
+             "close": r[4], "volume": r[5]} for r in reversed(rows)]
     if len(bars) < _WARMUP + 1:
         return None, (f"insufficient real bars for {symbol}: "
                       f"{len(bars)} < {_WARMUP + 1}")
-    return bars[-lookback:], "ok"
+    return bars, "ok"
 
 
 def build_real_dataset(db_path: str, symbols: list[str],
