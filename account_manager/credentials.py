@@ -19,6 +19,8 @@ from __future__ import annotations
 import os
 import sqlite3
 import stat
+import threading
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
@@ -167,14 +169,73 @@ def _fernet() -> Fernet:
     return Fernet(_load_key())
 
 
-def _store() -> sqlite3.Connection:
+# One long-lived keystore connection per process, never one per lookup.
+# The per-resolution `sqlite3.connect` was the bridge fd exhaustion of
+# 2026-07-17/19: each connection ends up in cycle garbage (statement cache <->
+# connection), refcounting never closes it, and a mostly idle process runs the
+# cycle collector too rarely to keep up. Measured live: 1018 of 1024 fds were
+# open handles to credentials.sqlite. A single shared connection cannot leak
+# per call, and every use is serialized under the lock, which is what makes
+# sharing it across the bridge's request threads safe.
+_STORE_LOCK = threading.RLock()
+_STORE_CONN: sqlite3.Connection | None = None
+_STORE_CONN_PATH: str | None = None
+
+
+def _store_conn() -> sqlite3.Connection:
+    """The cached connection, (re)opened when absent or when the store path
+    changed (tests repoint _STORE_PATH per test). Callers hold _STORE_LOCK."""
+    global _STORE_CONN, _STORE_CONN_PATH
+    if _STORE_CONN is not None and _STORE_CONN_PATH == _STORE_PATH:
+        return _STORE_CONN
+    _close_conn_locked()
     _ensure_keystore_dir()
-    conn = sqlite3.connect(_STORE_PATH, timeout=5.0)
+    conn = sqlite3.connect(_STORE_PATH, timeout=5.0, check_same_thread=False)
     conn.execute(
         "CREATE TABLE IF NOT EXISTS credentials ("
         "name TEXT PRIMARY KEY, value_enc BLOB NOT NULL, updated_ts TEXT)"
     )
+    _STORE_CONN = conn
+    _STORE_CONN_PATH = _STORE_PATH
     return conn
+
+
+def _close_conn_locked() -> None:
+    global _STORE_CONN, _STORE_CONN_PATH
+    if _STORE_CONN is not None:
+        try:
+            _STORE_CONN.close()
+        except Exception:
+            pass
+    _STORE_CONN = None
+    _STORE_CONN_PATH = None
+
+
+def close_store() -> None:
+    """Close the shared keystore connection (tests, orderly shutdown). The next
+    use reopens it."""
+    with _STORE_LOCK:
+        _close_conn_locked()
+
+
+@contextmanager
+def _store():
+    """Serialized transactional access to THE keystore connection.
+
+    `with _store() as conn:` keeps the old call shape, with two changes under
+    it: the connection is the shared long-lived one (no fd churn), and a
+    sqlite3 error closes and drops it so the next call reconnects instead of
+    reusing a broken handle. The inner `with conn:` keeps sqlite3's
+    commit-on-success / rollback-on-error transaction semantics.
+    """
+    with _STORE_LOCK:
+        try:
+            conn = _store_conn()
+            with conn:
+                yield conn
+        except sqlite3.Error:
+            _close_conn_locked()
+            raise
 
 
 # --- Read / write -----------------------------------------------------------

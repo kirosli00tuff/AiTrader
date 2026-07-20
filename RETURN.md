@@ -14,6 +14,57 @@ Commit message:
 
 ---
 
+## Prompt: Fix the keystore handle leak that exhausted bridge file descriptors
+
+Date: 2026-07-19
+Model: Fable 5
+Prompt summary: root cause found and measured. The bridge fd exhaustion is an unclosed SQLite handle in the credential resolver. Live evidence from bridge pid 587930: 1023 of 1024 fds used, 1018 of them open handles to .keystore/credentials.sqlite, leak rate about 30 fds per hour, socket count stayed 1. This caused the 19-hour and 20-hour silent feed substitutions and the engine-reads-ON funnel-reads-OFF condition. Seven tasks: fix the leak at every SQLite open site, prove it closed with an fd-count test that fails before and passes after, make the watchdog actually remediate a degraded bridge (it detected 60 times and never restarted), lower the fd alarm threshold and treat a rising trend as degraded, raise the soft fd limit at bridge startup as documented defence in depth, tests with mutation coverage for each fix, document and commit. No RiskGate, live-gate, or adaptive-invariant changes. Live trading stays off.
+
+Changes: TASK 1, THE LEAK AND EVERY SITE. Mechanism, reproduced in-process before fixing: `account_manager/credentials.py` opened a NEW sqlite connection per keystore access and closed none. `with conn:` on a sqlite3 connection scopes a TRANSACTION and never closes, and on Python 3.14 each abandoned connection sits in cycle garbage (statement cache <-> connection) that refcounting cannot free, so only an occasional full GC pass ever closed them. Proof: 1000 `get_credential` calls grew the process by 397 fds, 1000 `get_credential_source` calls by exactly 1000, and one `gc.collect()` dropped 402 open fds to 4. A mostly idle bridge allocates too little to trigger collection, so the fds outran the collector for 20 hours. The bridge resolves credentials on every /status (3 keys) and every /health quote probe (2 keys), which is the measured ~30/hour.
+
+LEAK SITES, all fixed:
+
+| Site | Calls | Fix |
+| --- | --- | --- |
+| `account_manager/credentials.py` `_store()` via `set_credential`, `delete_credential`, `_stored_value` (behind get_credential, get_credential_source, resolve_env, list_status, credentials_present) | THE bridge leak, also backend and Dash | ONE long-lived locked connection per process (see below) |
+| `ui/db.py` `query`, `log_event`, `set_venue_credentials_connected`, weight audit (4 sites) | long-running Dash app | `contextlib.closing` |
+| `api_server/store.py` `query`, `append_event` (2 sites) | long-running backend the GUI polls | `contextlib.closing` |
+| `ops/demo.py` whale + registry seeding (2 sites) | one-shot tool | `contextlib.closing` (uniformity + guard) |
+
+Audited and ALREADY CLOSING correctly (explicit finally, unchanged): ops/watchdog (2), ops/maintenance (2), ops/backup (3), ops/weeklog, discovery/run (2), discovery/universe, rl_advisory/service, rl_advisory/train, rl_advisory/dataset (2), ml_factor/factor, ml_factor/real_dataset (2), ml_factor/train_real, market_data/alpaca_source backfill, api_server/controls (2, callers close), api_server/stack warm report, scripts/quarantine_synthetic_bars_20260717.
+
+RESOLVER DESIGN: one long-lived keystore connection per process, chosen per the prompt's preference and because it is the safer concurrency shape here: `check_same_thread=False` with EVERY use serialized under an RLock (the bridge is a ThreadingHTTPServer), reconnect when the store path is repointed (test hermeticity), drop-and-reconnect on sqlite error (no permanently broken cached handle), `close_store()` for tests and shutdown. A decrypted-value cache was rejected: a key saved in the GUI must reach the bridge without a restart, and holding plaintext longer than a call widens exposure. Cross-process writes (backend) coexist through sqlite file locking, timeout 5s, unchanged.
+
+TASK 2, PROVEN BY MEASUREMENT. `tests/test_keystore_fd_leak.py` (13 tests). Before the fix: 1000 get_credential resolutions grew fds 5 -> 402 (+397); 1000 get_credential_source calls grew 4 -> 1004 (+1000). After: +0 on both (asserted <= 2 slack). Same harness: resolve_env x1000, missing-credential x1000, 200 write cycles, 8 threads x 200 concurrent resolutions, api_server store.query x300, append_event x300, ui.db.query x300, all +0. Mutation: reintroducing the per-call connection fails 8 of the 13. A lexical guard test pins `with sqlite3.connect(` out of all runtime code.
+
+TASK 3, WHY REMEDIATION NEVER FIRED. Three compounding defects, found by reading the path the 60 evidence files prove was taken. (1) `attempt_restart` only knew how to START: it never stopped anything, and the sick bridge was alive. (2) `stack.self_heal()` REFUSED while `stack_running()` read running, and a degraded bridge still answers HTTP 200, so it always read running. (3) The supervisor refused `/engine/start` ("already running"), the refusal body carries `ok: false` with a state echo of "running", and the old success predicate tested ONLY the state string, so every refusal read as a successful restart and the watchdog notified "Restarted via supervisor (state running)" 60 times while restarting nothing. FIX: a running-but-sick stack is stopped FIRST through the supervisor's graceful `/engine/stop` (the GUI Stop path, falls back to lock pids for a script-started stack, never the kill-request file), then self-heal, then start, and success now requires `ok: true` AND a starting/warming/running state. If the backend is unreachable the running stack is LEFT UP, deliberately: we cannot start what we cannot reach, and stopping an engine with no way to restart it turns a degraded stack into a dead one. A kill trip still short-circuits everything: notify, no stop, no start, no auto-resume, pinned by test.
+
+TASK 4, THE FD ALARM. Old auto threshold: 80 percent of the soft limit (819 of 1024). Measured wrong on 07-19: the feed had already substituted at fd_count 410 while /health read ok with an empty degraded list. New auto: min(256, half the soft limit). Reasoning: the failure axis is distance from the HEALTHY BASELINE (a few dozen fds), not distance from the limit, 256 is several times any honest burst, and the cap means Task 5's raised limit cannot drag the alarm up with it. Config override unchanged. NEW `fd_trend` capability check: samples (time, fd_count) at every health poll and fd-log tick, compares the fd FLOOR (minimum) between the halves of a sliding `fd_trend_window_seconds` (3600) window, degraded at `fd_trend_growth` (12). A leak raises the floor; honest load raises only the ceiling and falls back. The halves sit window/2 apart so a steady leak shows rate*window/2: the measured 30/hour leak reads ~15 there, hence 12 not 20 (20 would have MISSED the real leak, caught during test design). Detection within about an hour of onset, versus ~7 hours for the absolute threshold and ~20 for the old one.
+
+TASK 5, SOFT LIMIT. `_raise_fd_soft_limit()` at bridge startup raises RLIMIT_NOFILE soft to min(65536, hard), never lowers, logs one line. Documented in code, config comment, PROGRESS, and here as DEFENCE IN DEPTH, NOT THE FIX: it buys an unknown future leak time under the telemetry. It cannot disguise one, because the alarm keys off the baseline, not the limit: a leak still reads degraded at 256 fds whether the ceiling is 1024 or 65536, and the trend check fires within the hour regardless of ceiling.
+
+TASK 6, TESTS. New: tests/test_keystore_fd_leak.py (13), tests/test_watchdog_remediation.py (9: degraded triggers exactly one stop-then-start plus a notification, substitution triggers the same, refusal is not success, refused stop never starts, unreachable stop leaves the stack up, down stack start-only, kill trip never restarted, kill-request file untouched). Updated: test_evidence_capture.py (+9: new auto rule, 256 cap under a raised limit, trend ok-while-collecting / rising-floor fail / burst immunity / degrades health / sample pruning, rlimit raise / hard-bound / never-lower). No network anywhere, nothing binds, kill switch never auto-resumed. Mutations, all killed with file-copy rollback: per-call connection reintroduced -> 8 tests fail; state-echo success predicate -> 1 test fails; stop-first removed -> 6 tests fail.
+
+NOT touched: RiskGate logic, the live-trading gate, the adaptive limit-weakening invariant, Level 1 values, promotion criteria, the RL fill gate, min_directional_votes. Live trading stays off.
+
+VERIFICATION (2026-07-19):
+
+| Check | Result |
+| --- | --- |
+| pytest | 790 passed (from 759, +31) |
+| ctest | 25/25 |
+| fd growth, 1000 resolutions, BEFORE | +397 (plain), +1000 (source path) |
+| fd growth, 1000 resolutions, AFTER | 0 |
+| Mutation: per-call connection restored | KILLED, 8 tests fail |
+| Mutation: state-echo success predicate | KILLED, 1 test fails |
+| Mutation: stop-first removed | KILLED, 6 tests fail |
+| Degraded bridge remediation | stop -> start -> notify, exactly once per cycle |
+| Kill trip | notified, zero supervisor calls, file untouched |
+
+Commit message: `Fix the keystore handle leak that exhausted bridge file descriptors, make the watchdog remediate degraded state, lower the fd alarm threshold, live trading untouched`
+
+---
+
 ## Prompt: Close the open defects, add root-cause telemetry for the two unexplained failures
 
 Date: 2026-07-18
@@ -2036,3 +2087,14 @@ $ git diff --cached --stat
 | Gemini 3.1 Pro | working | - | 1386.9 ms |
 | Alpaca paper market data | working | one quote ok | 290.4 ms |
 | Alpaca paper order-auth (validation-only) | working | paper account auth ok | 285.4 ms |
+
+### Run 2026-07-19T06:57:10Z
+
+| Integration | Result | Detail | Latency |
+| --- | --- | --- | --- |
+| OpenAI GPT-5.5 | working | - | 1803.0 ms |
+| Anthropic Opus 4.8 | working | - | 802.6 ms |
+| Anthropic Haiku 4.5 (gate path) | working | - | 643.7 ms |
+| Gemini 3.1 Pro | working | - | 1324.6 ms |
+| Alpaca paper market data | working | one quote ok | 342.7 ms |
+| Alpaca paper order-auth (validation-only) | working | paper account auth ok | 706.6 ms |

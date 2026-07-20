@@ -2,8 +2,10 @@
 
 Checks the stack every few minutes: engine process alive, bridge health, backend
 health, and every tradeable symbol's bars still advancing within a staleness
-threshold. On a failure it attempts ONE clean restart through the supervisor
-(the backend /engine/start path) and sends an ntfy.sh notification either way,
+threshold. On a failure it attempts ONE clean restart through the supervisor:
+a running-but-sick stack (degraded bridge, feed substitution) is stopped first
+through the supervisor's graceful /engine/stop, then started, and a down stack
+is self-healed then started. It sends an ntfy.sh notification either way,
 restart-succeeded or stack-down. On a degraded bridge or a feed substitution it
 captures the bridge's fd and socket counts BEFORE the restart, because the
 restart destroys the evidence (2026-07-17: caught, restarted, never
@@ -322,25 +324,62 @@ def notify(message: str, cfg: dict | None = None, title: str = "AiTrader watchdo
         return False
 
 
+def _supervisor_post(path: str, timeout: float = 30) -> dict:
+    """POST to a supervisor endpoint on the backend. Raises on transport
+    failure so the caller decides what an unreachable supervisor means."""
+    req = urllib.request.Request(
+        stack.api_health_url().replace("/health", path),
+        data=b"{}", method="POST",
+        headers={"Content-Type": "application/json"})
+    with urllib.request.urlopen(req, timeout=timeout) as r:
+        return json.loads(r.read().decode())
+
+
 def attempt_restart() -> dict:
-    """One clean restart: self-heal a crashed run, then ask the supervisor to
-    start the stack (the backend /engine/start path). Never touches the
-    kill-request file. Returns the outcome."""
+    """One clean restart, for BOTH failure shapes: a down stack and a
+    running-but-sick one (degraded bridge, feed substitution).
+
+    Why remediation never fired before 2026-07-19: this function only knew how
+    to START. With the sick bridge still answering HTTP 200, stack_running()
+    read the stack as up, self_heal() refused ("a healthy stack is already
+    running"), the supervisor refused /engine/start ("already running"), and
+    the refusal's state echo ("running") satisfied the old success test, so 60
+    degraded cycles each read as a successful restart while nothing was ever
+    stopped. Now: a running stack is STOPPED first through the supervisor's
+    graceful stop (the same path the GUI Stop uses, never the kill-request
+    file), and success requires the supervisor to ACCEPT the start (ok true),
+    never a state echo alone.
+
+    The stop only happens when the supervisor answered it, deliberately: if
+    the backend is down we cannot start either, and stopping a live engine
+    with no way to restart it would turn a degraded stack into a dead one.
+    """
+    stopped: dict | None = None
+    if stack.stack_running()["running"]:
+        try:
+            stopped = _supervisor_post("/engine/stop")
+        except Exception as e:
+            return {"healed": {}, "stopped": None, "restarted": False,
+                    "detail": (f"stop unreachable ({type(e).__name__}); "
+                               "leaving the running stack up")}
+        if not stopped.get("ok"):
+            return {"healed": {}, "stopped": stopped, "restarted": False,
+                    "detail": "supervisor refused the stop"}
     healed = stack.self_heal()
     started = False
     detail = ""
     try:
-        req = urllib.request.Request(
-            stack.api_health_url().replace("/health", "/engine/start"),
-            data=b"{}", method="POST",
-            headers={"Content-Type": "application/json"})
-        with urllib.request.urlopen(req, timeout=30) as r:
-            body = json.loads(r.read().decode())
-        started = str(body.get("state", "")) in ("starting", "warming", "running")
-        detail = str(body.get("state", ""))
+        body = _supervisor_post("/engine/start")
+        started = (bool(body.get("ok"))
+                   and str(body.get("state", "")) in ("starting", "warming",
+                                                      "running"))
+        detail = str(body.get("state", "")) or str(body.get("error", ""))
+        if not started and body.get("error"):
+            detail = str(body.get("error", ""))
     except Exception as e:
         detail = f"supervisor unreachable: {type(e).__name__}"
-    return {"healed": healed, "restarted": started, "detail": detail}
+    return {"healed": healed, "stopped": stopped, "restarted": started,
+            "detail": detail}
 
 
 def capture_before_restart(h: dict) -> tuple[dict | None, str]:

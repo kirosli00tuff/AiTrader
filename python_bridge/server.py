@@ -87,9 +87,13 @@ def _bridge_cfg() -> dict:
 def _fd_warn_threshold() -> int:
     """The fd count at which the bridge reports itself degraded.
 
-    config bridge.fd_warn_threshold when positive. 0 or absent means auto: 80
-    percent of the process RLIMIT_NOFILE soft limit, the headroom at which
-    exhaustion is close enough to act on and early enough to diagnose.
+    config bridge.fd_warn_threshold when positive. 0 or absent means auto:
+    min(256, half the RLIMIT_NOFILE soft limit). The old auto (80 percent of
+    the soft limit) was measured too late on 2026-07-19: the feed had already
+    substituted at 410 open fds while health still read ok, so the alarm has
+    to key off distance from a HEALTHY BASELINE (a few dozen fds), not
+    distance from the limit. 256 is several times any honest burst and far
+    below where capability broke.
     """
     try:
         v = int(_bridge_cfg().get("fd_warn_threshold", 0) or 0)
@@ -101,10 +105,10 @@ def _fd_warn_threshold() -> int:
         import resource
         soft, _ = resource.getrlimit(resource.RLIMIT_NOFILE)
         if soft and soft > 0:
-            return max(64, int(soft * 0.8))
+            return max(64, min(256, int(soft) // 2))
     except Exception:  # noqa: BLE001
         pass
-    return 800
+    return 256
 
 
 def _fd_check() -> str:
@@ -121,6 +125,63 @@ def _fd_check() -> str:
     return f"fail (fd count unreadable: {n})"
 
 
+# A leak raises the FLOOR of the fd count over time; honest load only raises
+# the ceiling and falls back. So the trend check compares the MINIMUM over the
+# older half of a sliding window with the minimum over the newer half, and a
+# floor that rose by fd_trend_growth reads degraded. The halves sit window/2
+# apart, so the comparison sees rate * window/2 of a steady leak: the measured
+# 2026-07-19 rate of ~30/hour shows as ~15 across a 3600s window, which is why
+# the default growth threshold is 12, not 20. Catches that leak within about
+# an hour of onset, half a day before any absolute threshold.
+_FD_SAMPLES: list[tuple[float, int]] = []
+
+
+def _fd_trend_cfg() -> tuple[int, int]:
+    cfg = _bridge_cfg()
+    try:
+        window = int(cfg.get("fd_trend_window_seconds", 3600) or 3600)
+    except (TypeError, ValueError):
+        window = 3600
+    try:
+        growth = int(cfg.get("fd_trend_growth", 12) or 12)
+    except (TypeError, ValueError):
+        growth = 12
+    return max(120, window), max(1, growth)
+
+
+def _fd_sample(now: float | None = None) -> None:
+    """Record one (time, fd count) sample and prune outside the window.
+    Called from every health poll and from the periodic fd log loop."""
+    n = _fd_count()
+    if not isinstance(n, int):
+        return
+    import time as _time
+    now = _time.monotonic() if now is None else now
+    window, _ = _fd_trend_cfg()
+    _FD_SAMPLES.append((now, n))
+    while _FD_SAMPLES and _FD_SAMPLES[0][0] < now - window:
+        _FD_SAMPLES.pop(0)
+
+
+def _fd_trend_check(now: float | None = None) -> str:
+    """Rising-fd-floor detection as a health capability. Needs at least two
+    samples in each half of the window before it can judge, and reads ok while
+    collecting, so a fresh bridge is never degraded by an empty history."""
+    import time as _time
+    now = _time.monotonic() if now is None else now
+    window, growth = _fd_trend_cfg()
+    midpoint = now - window / 2
+    older = [n for t, n in _FD_SAMPLES if t <= midpoint]
+    newer = [n for t, n in _FD_SAMPLES if t > midpoint]
+    if len(older) < 2 or len(newer) < 2:
+        return "ok (collecting samples)"
+    rise = min(newer) - min(older)
+    if rise >= growth:
+        return (f"fail (fd floor rose {rise} in {window}s window, "
+                f"threshold {growth}: leak signature)")
+    return "ok"
+
+
 def _fd_log_loop(interval_seconds: float) -> None:
     """Periodic one-line fd log, so a slow leak is visible in the bridge log
     long before the threshold. Daemon thread, never raises."""
@@ -128,8 +189,10 @@ def _fd_log_loop(interval_seconds: float) -> None:
     while True:
         _time.sleep(max(30.0, interval_seconds))
         try:
+            _fd_sample()  # keep the trend window fed even with no health polls
             safe_print(f"bridge fd telemetry: {_fd_count()} open "
-                       f"(degraded threshold {_fd_warn_threshold()})")
+                       f"(degraded threshold {_fd_warn_threshold()}, "
+                       f"trend {_fd_trend_check()})")
         except Exception:  # noqa: BLE001 - telemetry must never crash serve
             pass
 
@@ -196,11 +259,13 @@ def health_payload() -> dict:
     exactly the state the old liveness check could not see. fd_headroom joins
     the capability set: a bridge burning toward fd exhaustion is degraded
     BEFORE the fresh-socket and fresh-file paths die."""
+    _fd_sample()
     checks = {
         "fresh_file": _fresh_file_check(),
         "fresh_socket": _fresh_socket_check(),
         "market_quote": _quote_capability(),
         "fd_headroom": _fd_check(),
+        "fd_trend": _fd_trend_check(),
     }
     failing = sorted(k for k, v in checks.items() if v.startswith("fail"))
     return {"status": "degraded" if failing else "ok",
@@ -464,6 +529,30 @@ class Handler(BaseHTTPRequestHandler):
         self._send(200, result)
 
 
+def _raise_fd_soft_limit(target: int = 65536) -> str:
+    """Raise the RLIMIT_NOFILE soft limit toward `target` (bounded by hard).
+
+    DEFENCE IN DEPTH, NOT THE FIX. The 2026-07-19 exhaustion was a keystore
+    handle leak, fixed at the source in account_manager/credentials.py. A
+    higher soft limit only buys time under an UNKNOWN future leak so the fd
+    telemetry, the fd_trend check, and the fd_headroom alarm (which key off a
+    healthy baseline, not the limit) can catch it while the bridge still
+    works. This must never be read as making a leak acceptable: a leak that
+    only survives because the ceiling is high is still a defect, and the
+    alarm is what surfaces it. Never lowers an already-higher soft limit.
+    """
+    try:
+        import resource
+        soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+        cap = target if hard == resource.RLIM_INFINITY else min(target, hard)
+        if soft == resource.RLIM_INFINITY or soft >= cap:
+            return f"fd soft limit already {soft} (hard {hard})"
+        resource.setrlimit(resource.RLIMIT_NOFILE, (cap, hard))
+        return f"fd soft limit raised {soft} -> {cap} (hard {hard})"
+    except Exception as e:  # noqa: BLE001 - never block serving on an rlimit
+        return f"fd soft limit unchanged ({type(e).__name__})"
+
+
 def resolve_bind_host(host: str, allow_remote: bool | None = None) -> str:
     """Return the host to bind, refusing non-loopback unless explicitly allowed.
 
@@ -509,6 +598,9 @@ def serve(host: str = "127.0.0.1", port: int = 8765) -> None:
         f"  RL advisory: {'ON' if rl_enabled() else 'OFF (ships off)'} "
         f"(real-fills gate {rl_min_real_fills()}, factor weight 0.0 until "
         f"an operator enables it past the gate)")
+    # Defence in depth only (see _raise_fd_soft_limit): the telemetry and the
+    # alarm below are the real protection against a leak.
+    safe_print(f"  {_raise_fd_soft_limit()}")
     # fd telemetry: one line now (the baseline the leak is measured against),
     # then a periodic daemon-thread log. See the fd telemetry block above.
     safe_print(f"  fd telemetry: {_fd_count()} open at startup "

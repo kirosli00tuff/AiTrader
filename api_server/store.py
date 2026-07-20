@@ -11,6 +11,7 @@ import json
 import os
 import sqlite3
 import urllib.request
+from contextlib import closing
 from datetime import datetime, timezone
 
 import yaml
@@ -89,7 +90,9 @@ def _connect() -> sqlite3.Connection:
 def query(sql: str, params: tuple = ()) -> list[dict]:
     """Run a read-only query. Returns [] if the DB or table is absent."""
     try:
-        with _connect() as conn:
+        # closing() because `with conn:` alone is a transaction scope, not a
+        # close: the unclosed connections were the fd-leak class of 2026-07-19.
+        with closing(_connect()) as conn:
             rows = conn.execute(sql, params).fetchall()
         return [dict(r) for r in rows]
     except Exception:
@@ -862,7 +865,7 @@ def append_event(kind: str, message: str, severity: str = "info",
                  venue: str | None = None, symbol: str | None = None,
                  payload_json: str | None = None) -> bool:
     try:
-        with sqlite3.connect(_db_path(), timeout=2.0) as conn:
+        with closing(sqlite3.connect(_db_path(), timeout=2.0)) as conn:
             conn.execute(
                 "INSERT INTO events(ts, kind, venue, symbol, severity, message, "
                 "payload_json) VALUES(?,?,?,?,?,?,?)",

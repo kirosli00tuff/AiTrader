@@ -309,8 +309,18 @@ dnn_schedule:
 # fd count was recorded. The bridge reports its open-fd count in /health, logs
 # it periodically, and reads degraded at the threshold.
 bridge:
-  fd_warn_threshold: 0                     # 0 = auto (80% of RLIMIT_NOFILE soft limit)
+  fd_warn_threshold: 0                     # 0 = auto: min(256, half the soft limit).
+                                           # Keys off the healthy baseline (tens of fds),
+                                           # not the limit: on 2026-07-19 the feed had
+                                           # already substituted at 410 fds while the old
+                                           # 80%-of-limit alarm (819) still read ok.
   fd_log_interval_seconds: 300             # periodic fd log cadence in the bridge log
+  fd_trend_window_seconds: 3600            # sliding window for the rising-floor check
+  fd_trend_growth: 12                      # fd floor rise between the window's halves that
+                                           # reads degraded. The halves sit window/2 apart,
+                                           # so a steady leak shows rate*window/2 here: the
+                                           # measured ~30/hour leak shows ~15, and 12 fires
+                                           # within about an hour of onset.
   # Promotion stays gated + MANUAL: a trained challenger waits for the operator's
   # promote action from the GUI. auto_promote stays adaptive.dnn_auto_promote_if_better.
 

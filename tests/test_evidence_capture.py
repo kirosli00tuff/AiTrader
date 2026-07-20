@@ -230,11 +230,24 @@ def test_health_degrades_when_fd_count_crosses_the_threshold(monkeypatch):
 
 
 def test_fd_threshold_auto_derives_from_rlimit(monkeypatch):
+    # Auto keys off the healthy baseline, not the limit: min(256, soft // 2).
+    # The old 80%-of-limit rule read ok at 410 open fds on 2026-07-19 while
+    # the feed had already substituted.
     from python_bridge import server
     import resource
     monkeypatch.setattr(server, "_bridge_cfg", lambda: {})
     soft, _ = resource.getrlimit(resource.RLIMIT_NOFILE)
-    assert server._fd_warn_threshold() == max(64, int(soft * 0.8))
+    assert server._fd_warn_threshold() == max(64, min(256, int(soft) // 2))
+
+
+def test_fd_threshold_auto_never_exceeds_256(monkeypatch):
+    # A raised soft limit (the Task-5 defence in depth) must not drag the
+    # alarm up with it: at soft 65536 the auto threshold stays 256.
+    from python_bridge import server
+    import resource
+    monkeypatch.setattr(server, "_bridge_cfg", lambda: {})
+    monkeypatch.setattr(resource, "getrlimit", lambda which: (65536, 524288))
+    assert server._fd_warn_threshold() == 256
 
 
 def test_fd_threshold_honors_explicit_config(monkeypatch):
@@ -242,3 +255,97 @@ def test_fd_threshold_honors_explicit_config(monkeypatch):
     monkeypatch.setattr(server, "_bridge_cfg",
                         lambda: {"fd_warn_threshold": 123})
     assert server._fd_warn_threshold() == 123
+
+
+# --- fd trend: a rising floor is degraded before any absolute threshold ------
+
+def _seed_trend(monkeypatch, server, samples, window=3600, growth=12):
+    monkeypatch.setattr(server, "_bridge_cfg",
+                        lambda: {"fd_trend_window_seconds": window,
+                                 "fd_trend_growth": growth})
+    monkeypatch.setattr(server, "_FD_SAMPLES", list(samples))
+
+
+def test_fd_trend_reads_ok_while_collecting(monkeypatch):
+    from python_bridge import server
+    _seed_trend(monkeypatch, server, [(0.0, 30)])
+    assert server._fd_trend_check(now=3600.0).startswith("ok")
+
+
+def test_fd_trend_flags_a_rising_floor(monkeypatch):
+    # The leak signature: the MINIMUM climbs. 30/hour, the measured 2026-07-19
+    # rate, must read degraded within the hour window.
+    from python_bridge import server
+    samples = [(t, 30 + int(t / 120)) for t in range(0, 3601, 180)]
+    _seed_trend(monkeypatch, server, samples)
+    result = server._fd_trend_check(now=3600.0)
+    assert result.startswith("fail")
+    assert "leak signature" in result
+
+
+def test_fd_trend_ignores_a_load_burst(monkeypatch):
+    # Honest load raises the ceiling and falls back; the floor stays put. A
+    # burst to 90 fds in the newer half must NOT read as a leak.
+    from python_bridge import server
+    samples = ([(t, 30) for t in range(0, 1800, 180)]
+               + [(1980.0, 90), (2160.0, 30), (2600.0, 88), (3000.0, 30)])
+    _seed_trend(monkeypatch, server, samples)
+    assert server._fd_trend_check(now=3600.0).startswith("ok")
+
+
+def test_fd_trend_degrades_health(monkeypatch):
+    from python_bridge import server
+    _pin_capabilities(monkeypatch, server)
+    monkeypatch.setattr(server, "_fd_trend_check",
+                        lambda now=None: "fail (fd floor rose 25 in 3600s "
+                                         "window, threshold 20: leak signature)")
+    payload = server.health_payload()
+    assert payload["status"] == "degraded"
+    assert "fd_trend" in payload["degraded"]
+
+
+def test_fd_sample_prunes_outside_the_window(monkeypatch):
+    from python_bridge import server
+    monkeypatch.setattr(server, "_bridge_cfg",
+                        lambda: {"fd_trend_window_seconds": 600})
+    monkeypatch.setattr(server, "_FD_SAMPLES", [(0.0, 30), (500.0, 31)])
+    monkeypatch.setattr(server, "_fd_count", lambda: 32)
+    server._fd_sample(now=700.0)
+    assert server._FD_SAMPLES == [(500.0, 31), (700.0, 32)]
+
+
+# --- soft fd limit raise: defence in depth, never the fix --------------------
+
+def test_soft_limit_raised_toward_target(monkeypatch):
+    from python_bridge import server
+    import resource
+    calls = []
+    monkeypatch.setattr(resource, "getrlimit", lambda which: (1024, 524288))
+    monkeypatch.setattr(resource, "setrlimit",
+                        lambda which, pair: calls.append(pair))
+    msg = server._raise_fd_soft_limit()
+    assert calls == [(65536, 524288)]
+    assert "1024 -> 65536" in msg
+
+
+def test_soft_limit_bounded_by_hard(monkeypatch):
+    from python_bridge import server
+    import resource
+    calls = []
+    monkeypatch.setattr(resource, "getrlimit", lambda which: (1024, 2048))
+    monkeypatch.setattr(resource, "setrlimit",
+                        lambda which, pair: calls.append(pair))
+    server._raise_fd_soft_limit()
+    assert calls == [(2048, 2048)]
+
+
+def test_soft_limit_never_lowered(monkeypatch):
+    from python_bridge import server
+    import resource
+    calls = []
+    monkeypatch.setattr(resource, "getrlimit", lambda which: (100000, 524288))
+    monkeypatch.setattr(resource, "setrlimit",
+                        lambda which, pair: calls.append(pair))
+    msg = server._raise_fd_soft_limit()
+    assert calls == []
+    assert "already" in msg

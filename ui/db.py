@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import os
 import sqlite3
+from contextlib import closing
 from typing import Any
 
 import pandas as pd
@@ -44,7 +45,9 @@ def _connect() -> sqlite3.Connection:
 def query(sql: str, params: tuple[Any, ...] = ()) -> pd.DataFrame:
     """Run a read-only query, returning an empty frame if the DB/table is absent."""
     try:
-        with _connect() as conn:
+        # closing() because `with conn:` alone is a transaction scope, not a
+        # close: the unclosed connections were the fd-leak class of 2026-07-19.
+        with closing(_connect()) as conn:
             return pd.read_sql_query(sql, conn, params=params)
     except Exception:
         return pd.DataFrame()
@@ -188,7 +191,7 @@ def append_event(kind: str, message: str, severity: str = "info",
     from datetime import datetime, timezone
     ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     try:
-        with sqlite3.connect(DB_PATH, timeout=2.0) as conn:
+        with closing(sqlite3.connect(DB_PATH, timeout=2.0)) as conn:
             conn.execute(
                 "INSERT INTO events(ts, kind, venue, symbol, severity, message, "
                 "payload_json) VALUES(?,?,?,?,?,?,?)",
@@ -208,7 +211,7 @@ def set_venue_credentials_connected(venue: str, connected: bool) -> None:
     from datetime import datetime, timezone
     ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     try:
-        with sqlite3.connect(DB_PATH, timeout=2.0) as conn:
+        with closing(sqlite3.connect(DB_PATH, timeout=2.0)) as conn:
             conn.execute(
                 "UPDATE venue_state SET credentials_connected=?, updated_ts=? "
                 "WHERE venue=?", (int(connected), ts, venue))
@@ -266,7 +269,7 @@ def save_weight_overrides(weights: dict[str, float], locks: dict[str, bool],
     from datetime import datetime, timezone
     ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     try:
-        with sqlite3.connect(DB_PATH, timeout=2.0) as conn:
+        with closing(sqlite3.connect(DB_PATH, timeout=2.0)) as conn:
             for factor, new_w in norm.items():
                 old_w = prev.get(factor, DEFAULT_WEIGHTS.get(factor, 0.0))
                 if abs(old_w - new_w) > 1e-9 or locks.get(factor):

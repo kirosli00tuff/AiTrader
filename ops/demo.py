@@ -26,6 +26,7 @@ import os
 import sqlite3
 import subprocess
 import sys
+from contextlib import closing
 from datetime import datetime, timedelta, timezone
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -107,7 +108,7 @@ def populate_whale_tables() -> None:
                         a.direction, a.value_usd,
                     ))
 
-    with sqlite3.connect(DB_PATH, timeout=5.0) as conn:
+    with closing(sqlite3.connect(DB_PATH, timeout=5.0)) as conn:
         conn.executemany(
             "INSERT INTO whale_activity(ts, source, delayed, entity, symbol, "
             "direction, value_usd) VALUES(?,?,?,?,?,?,?)", rows_activity)
@@ -130,7 +131,7 @@ def seed_model_registry() -> None:
     model_id = getattr(model, "model_id", "dnn-stageA-numpy")
     metrics = '{"trainer":"numpy_mlp","hidden":16,"sizing_cap":0.5,' \
               '"note":"shipped Stage-A advisory model"}'
-    with sqlite3.connect(DB_PATH, timeout=5.0) as conn:
+    with closing(sqlite3.connect(DB_PATH, timeout=5.0)) as conn:
         conn.execute(
             "INSERT INTO model_registry(ts, model_id, role, metrics_json, notes) "
             "VALUES(?,?,?,?,?)",
