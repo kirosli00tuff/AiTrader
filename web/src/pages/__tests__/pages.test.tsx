@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { describe, expect, it, vi } from "vitest";
 
@@ -128,6 +128,25 @@ describe("pages render", () => {
     expect(await screen.findByText("Level 1 risk limits (read-only)")).toBeInTheDocument();
     expect(await screen.findByText(/ALWAYS ON/)).toBeInTheDocument();
     expect(await screen.findByText("Feed & clock (runtime loop mode)")).toBeInTheDocument();
+    // Every layer control states what it does in one line.
+    expect(await screen.findByText(/Off freezes the weights/)).toBeInTheDocument();
+  });
+
+  it("layer toggles hit the validated endpoint, weight changes preview first", async () => {
+    const { api } = await import("../../api/client");
+    const layerSpy = vi.spyOn(api, "setLayer");
+    const weightSpy = vi.spyOn(api, "setWeights");
+    at("/controls");
+    await screen.findByText("Ensemble weights (by layer)");
+    // Toggle a decision layer: exactly one validated POST, no other path.
+    const row = (await screen.findByText("Adaptive strategy tuner")).closest(".ctrl-row")!;
+    fireEvent.click(within(row as HTMLElement).getByRole("button"));
+    await waitFor(() => expect(layerSpy).toHaveBeenCalledWith("adaptive", false));
+    // Move a weight slider: a preview appears and nothing posts until confirm.
+    const slider = document.querySelector('input[type="range"]:not([disabled])')!;
+    fireEvent.change(slider, { target: { value: "0.5" } });
+    expect(await screen.findByTestId("weight-preview")).toBeInTheDocument();
+    expect(weightSpy).not.toHaveBeenCalled();
   });
 
   it("renders the Health page with integrations", async () => {

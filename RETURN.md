@@ -14,6 +14,46 @@ Commit message:
 
 ---
 
+## Prompt: Rebuild the operator experience around the engine's written reasoning
+
+Date: 2026-07-20
+Model: Fable 5
+Prompt summary: frontend and read-only backend endpoints plus the existing validated control endpoints, no trading behavior changes. Rebuild the operator experience so a trader with no codebase knowledge can run the engine, built around the written reasoning the engine produces at every stage rather than price charts. Main screen answers in order: what is it doing now, how is it performing, what is it about to do, is it healthy. Blocks are first-class content. Group by symbol. Live updates every one to two seconds. Nine tasks: live activity grouped by symbol with expandable per-symbol event streams and a system row, full council verdict transparency (per-provider direction, conviction, rationale, abstention, composition against the floor, base-check gate, whale and DNN contributions with the benched state plain), discovery funnel visualization as a narrative, live price and position progression with native exit levels, operator diagnostics promoted from the terminal (provenance, warm/cold, tradeable/unavailable, bridge fd detail, watchdog actions, substitution vs unavailable shown distinctly), controls through existing validated endpoints only (no promotion/rollback/RL exposure, Level 1 read-only), inline one-to-two-line explanations of each AI layer where it appears, frontend render tests in populated/empty/disabled states plus backend read-endpoint tests (read-only, loopback, no key values), document and commit. No RiskGate, live-gate, or adaptive-invariant changes. Live trading stays off.
+
+Changes: TASK 1, LIVE ACTIVITY GROUPED BY SYMBOL. New primary view at `/` (Operator). Backend: `GET /activity?since_id=&limit=` returns events with ids and PARSED payloads, ascending, so the feed is incremental by construction, and the existing `/stream` WebSocket now carries `events_delta` per 1.5s tick, an id-anchored continuation of what that connection last received (the old snapshot sent the latest 15 events and silently missed bursts). Frontend: `useActivity` merges one REST backfill with the deltas, dedups by id, and repairs any reconnect gap over `GET /activity?since_id=`. `ActivityBySymbol` groups by symbol with a System row for stack-level events; collapsed rows carry a one-line summary ("trade entry (momentum) at 09:14 · blocked 12x on confidence below min_confidence_default"), expanded rows the full chronological stream with each block's payload numbers inline. Never-drop pinned twice: a backend WS test inserts an event between ticks and asserts the next frame delivers it, and a frontend test appends stream events and asserts nothing is lost.
+
+TASK 2, COUNCIL VERDICT TRANSPARENCY. `GET /council/decisions`: council-tier evaluation events (risk_block, trade_entry, council_skip, trade) joined by shared timestamp with the per-provider model_outputs rows written in the same iteration, plus the floors (council_min_confidence, required_model_agreement_count, min_directional_votes) and the DNN bench state (ml_factor.factor.bench_state). The decision card shows each provider's direction, conviction, edge, weight, marks abstentions (hold at zero confidence, the holds-abstain rule), composes "N directional · M abstained · agreement K · composed confidence C against floor F", and a failed verdict states the exact check and the shortfall. The base-check gate appears as its own outcome (gate skipped). The DNN row carries "benched, contributes zero" with the reason wherever it applies. STATED LIMIT: per-provider rationale text is not persisted for the trading council (model_outputs.extra_json is empty on the mock path), so the record shows the persisted numbers; discovery candidates keep their written rationale.
+
+TASK 3, FUNNEL VISUALIZATION. The existing Discovery page already drew the stages, drops with reasons, cost, and budget; it now opens each pass with the narrative sentence: "Started with 50, screened to 12 for free, gate passed 5, council evaluated 2 at 2 paid calls."
+
+TASK 4, PRICE AND POSITION PROGRESSION. `GET /bars/{symbol}` (recent bars oldest-first, last price, session change vs the first bar of the UTC day) and `GET /positions/exits` (open positions joined with the newest trade_entry payload for the symbol: the stop, target, factor, and regime the ENGINE logged at entry, never recomputed). MarketsPanel renders dense rows: price, session change, an inline SVG sparkline from stored closes, position side/entry/uPnL, and stop/target.
+
+TASK 5, DIAGNOSTICS PROMOTED. `GET /diagnostics/symbols`: per symbol, tradeable via THE predicate (market_data/tradeable.py, the 2026-07-20 invariant), newest-bar provenance, last real bar timestamp, age, 5min bar count, and warm/cold from the engine's own latest warm_state/discovery_onboard event. `GET /diagnostics/watchdog`: the watchdog state file (a live notify-and-hold renders as a callout naming the condition and attempts) plus the feed-story events. Bridge detail (fd count, alarm threshold, degraded checks) from the existing /health passthrough. Every condition gets one plain line of UI copy, and symbol_unavailable ("contained, never a reason to stop the stack") is rendered distinctly from feed_substitution ("the emergency: the watchdog restarts the stack for it"), pinned by test.
+
+TASK 6, CONTROLS. No new write path: the six new endpoints are GET-only (POST returns 405, pinned by test). The existing Controls page gains a one-line description per layer toggle (what turning it off does) and a weight preview showing the normalized effect of a pending change before the confirm posts to the validated endpoint (pinned: no POST until confirm). Promotion, rollback, and RL enable stay where they were, on the gated Controls surface; Level 1 stays read-only and labeled.
+
+TASK 7, AI LAYERS EXPLAINED INLINE. An `Explain` component renders one to two lines where each concept is used: the council and holds-abstain composition on every decision record, the base-check gate, whale and DNN advisory posture with the benched reason, the funnel's cheap-to-expensive design on the Discovery page, the tradeable invariant and warm gate on Diagnostics, the watchlist's relationship to the sleeves on Operator. Trading concepts are never explained.
+
+TASK 8, TESTS. Backend, tests/test_api_operator.py (7): activity shape and incremental since_id, decisions shape with providers and floors and NO credential-shaped strings, symbol diagnostics driven by the tradeable predicate (synthetic-only symbol reads unavailable with last real bar "never"), watchdog shape, bars and exits carrying the engine's logged levels, all new routes GET-only with HOST pinned 127.0.0.1, and the WS never-drop contract. Frontend (+11): grouping at 600-event volume with counts and a last-sorted System row, collapsed summary and expansion with payload numbers, append-without-loss, empty states for every new view, decision records (abstentions, benched chip, composition line, failed-by), diagnostics distinct-copy and hold callout, markets populated/empty, controls one-line copy, and the layer toggle hitting api.setLayer while a weight change previews without posting. No real network in any test, nothing binds (TestClient is in-process), bind stays loopback. pytest 836, vitest 127, tsc clean, production build green.
+
+NOT touched: RiskGate logic, the live-trading gate, the adaptive limit-weakening invariant, Level 1 values, promotion criteria, the RL fill gate, min_directional_votes, any trading behavior. Live trading stays off.
+
+VERIFICATION (2026-07-20):
+
+| Check | Result |
+| --- | --- |
+| pytest | 836 passed (from 829, +7) |
+| vitest | 127 passed (from 116, +11) |
+| tsc --noEmit | clean |
+| npm run build | green |
+| New endpoints | GET-only (POST 405), loopback HOST pinned |
+| WS stream | events_delta delivers an event written between ticks |
+| Key values | none in any new response (scanned) |
+
+Commit message: `Rebuild the operator experience around live symbol-grouped activity, full council verdict transparency, funnel visualization, and promoted diagnostics, live trading untouched`
+
+---
+
 ## Prompt: Stop fabricating bars for unserviceable symbols, separate symbol_unavailable from feed_substitution
 
 Date: 2026-07-20

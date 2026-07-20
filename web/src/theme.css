@@ -360,3 +360,56 @@ input[type=range]:disabled { opacity: 0.5; }
   color: var(--text); border-radius: 6px; padding: 6px 8px; font-family: var(--mono);
   font-size: 13px; }
 .disc-field input:focus { outline: none; border-color: var(--accent); }
+
+/* --- Operator experience (2026-07-20) ------------------------------------ */
+.explain {
+  color: var(--muted, #8b93a7);
+  font-size: 12.5px;
+  line-height: 1.5;
+  margin: 6px 0 10px;
+  max-width: 72ch;
+}
+.stat-strip { display: flex; flex-wrap: wrap; gap: 18px; align-items: center; }
+.kv { display: flex; flex-direction: column; gap: 2px; font-size: 12.5px; }
+.kv > span:first-child { color: var(--muted, #8b93a7); font-size: 11px; }
+.chip {
+  display: inline-block; border-radius: 4px; padding: 1px 7px;
+  font-size: 11px; margin-right: 6px;
+}
+.chip-ok { background: rgba(63, 182, 139, 0.15); color: #3fb68b; }
+.chip-block { background: rgba(224, 86, 91, 0.15); color: #e0565b; }
+.chip-dim { background: rgba(139, 147, 167, 0.15); color: #8b93a7; }
+.sym-group { border-bottom: 1px solid var(--line, #23283a); }
+.sym-head {
+  display: flex; align-items: center; gap: 12px; width: 100%;
+  background: none; border: none; color: inherit; cursor: pointer;
+  padding: 8px 4px; text-align: left; font-size: 13px;
+}
+.sym-head:hover { background: rgba(139, 147, 167, 0.06); }
+.sym-name { font-weight: 600; min-width: 90px; }
+.sym-summary { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sym-counts { font-size: 11px; white-space: nowrap; }
+.sym-caret { color: var(--muted, #8b93a7); }
+.sym-events { padding: 2px 4px 10px 16px; max-height: 420px; overflow-y: auto; }
+.ev-row {
+  display: flex; gap: 10px; align-items: baseline; padding: 3px 0;
+  font-size: 12px; border-bottom: 1px dotted rgba(139, 147, 167, 0.12);
+  flex-wrap: wrap;
+}
+.ev-kind { min-width: 120px; }
+.ev-msg { flex: 1 1 40ch; }
+.ev-copy { flex-basis: 100%; font-size: 11.5px; }
+.ev-block .ev-kind { color: #e0a556; }
+.ev-act .ev-kind { color: #3fb68b; }
+.ev-warn .ev-kind { color: #e0a556; }
+.ev-critical .ev-kind { color: #e0565b; }
+.payload-line { font-size: 11px; flex-basis: 100%; }
+.decision { border-bottom: 1px solid var(--line, #23283a); padding: 10px 0; }
+.decision-head { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; }
+.decision-tbl { margin-top: 6px; font-size: 12px; }
+.decision-compose { margin-top: 4px; font-size: 11.5px; }
+.fail-by { margin-top: 3px; font-size: 11.5px; color: #e0a556; }
+.markets-tbl td, .markets-tbl th { padding: 4px 10px; }
+.spark { display: block; }
+.pos { color: #3fb68b; }
+.neg { color: #e0565b; }

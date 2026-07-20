@@ -969,6 +969,44 @@ The weight control panel (on **Advanced**) is the UI's only writer: it appends t
 Adjusting weights only re-blends advisory factors — it can never weaken the
 deterministic RiskGate.
 
+## The operator experience (2026-07-20)
+
+The engine's differentiator is that it writes its reasoning down at every
+stage, so the interface is built around that reasoning, not around price
+charts. Design principles, applied throughout:
+
+- The main screen (**Operator**, the front door at `/`) answers four questions
+  in order: what is it doing right now, how is it performing, what is it about
+  to do, is it healthy.
+- **Blocks are first-class content.** The engine refuses far more often than
+  it acts, and each refusal carries the numbers it was judged on against their
+  floors. The live activity view shows every event the engine logs, grouped by
+  symbol so volume stays readable: a collapsed row is a one-line summary
+  ("blocked 12x on confidence"), an expanded row is the full stream.
+- **Full transparency, nothing hidden.** The stream never drops events: the
+  WebSocket carries an id-anchored delta each tick (1.5s) and the client
+  repairs any gap over `GET /activity?since_id=`.
+- **Council** (`/council`) renders each evaluation as a decision record: every
+  provider's direction, conviction, and weight, who abstained, how the
+  directional votes composed against the confidence floor and the agreement
+  requirement, and exactly which check a failed verdict failed, by how much.
+  The DNN's benched state is stated plainly wherever it contributes zero.
+- **Diagnostics** (`/diagnostics`) promotes the terminal answers: per-symbol
+  tradeable/unavailable (the tradeable invariant), bar provenance, warm/cold,
+  last real bar, bridge fd detail and degraded checks, and every watchdog
+  action with one plain line of copy. symbol_unavailable (contained) and
+  feed_substitution (emergency) are shown distinctly because they mean
+  different things.
+- **Discovery** reads each funnel pass as a narrative ("started with 50,
+  screened to 12 for free, gate passed 5, council evaluated 5") above the
+  stage bars, with every dropped symbol and its reason.
+- **Controls** state what each toggle does in one line, preview a weight
+  change's normalized effect before committing, and go only through the
+  existing validated control endpoints. Level 1 risk values stay read-only.
+  Promotion, rollback, and the RL enable stay on their gated surfaces.
+- Inline explainers cover each AI layer where it appears. The UI assumes
+  trading literacy and never explains trading.
+
 ## The React GUI (rebuilt, Alpaca-style, additive)
 
 `web/` is a React and TypeScript app, restyled after the Alpaca trading

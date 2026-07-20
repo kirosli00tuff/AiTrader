@@ -20,12 +20,13 @@ from pydantic import BaseModel, ConfigDict
 from api_server import store
 from api_server import controls
 from api_server import health
+from api_server import operator
 from api_server import providers_cost
 from api_server import supervisor
 
 HOST = "127.0.0.1"        # loopback only, asserted by the test suite
 PORT = int(os.environ.get("MAL_API_PORT", "8000"))
-STREAM_INTERVAL_SECONDS = 2.0
+STREAM_INTERVAL_SECONDS = 1.5  # operator views update every one to two seconds
 
 # Local dev origins only. The Vite dev server serves the React app here.
 _ALLOWED_ORIGINS = [
@@ -404,15 +405,72 @@ def post_credential_test(group: str = Query(...),
 
 # --- WebSocket live stream --------------------------------------------------
 
+# --- Operator experience: read-only reasoning surfaces (2026-07-20) --------
+# GET only, deliberately: these promote what already lives in the events
+# journal, the provider outputs, and the watchdog state into the GUI. Nothing
+# here writes, and no Level-1 value is reachable from any of them.
+
+@app.get("/activity")
+def get_activity(since_id: int = Query(0, ge=0),
+                 limit: int = Query(300, ge=1, le=1000)):
+    """Every event the engine logs, with ids and parsed payloads, ascending.
+    since_id makes it an incremental feed the client can never drop from."""
+    return operator.activity(since_id=since_id, limit=limit)
+
+
+@app.get("/council/decisions")
+def get_council_decisions(limit: int = Query(25, ge=1, le=100)):
+    """Decision records: each council-tier evaluation with its numbers, the
+    per-provider outputs recorded at the same moment, the floors they were
+    judged against, and the DNN bench state."""
+    return operator.council_decisions(limit=limit)
+
+
+@app.get("/diagnostics/symbols")
+def get_diagnostics_symbols():
+    """Per-symbol data health: tradeable/unavailable, provenance, last real
+    bar, warm/cold. The terminal answers, promoted."""
+    return operator.symbol_diagnostics()
+
+
+@app.get("/diagnostics/watchdog")
+def get_diagnostics_watchdog():
+    """Watchdog state and the feed-story events, so a stack stop is explained
+    in the GUI rather than only in terminal output."""
+    return operator.watchdog_diagnostics()
+
+
+@app.get("/bars/{symbol:path}")
+def get_bars(symbol: str, timeframe: str = Query("5min"),
+             limit: int = Query(120, ge=1, le=500)):
+    """Recent bars for one symbol plus session change. Crypto symbols carry a
+    slash, hence the path parameter."""
+    return operator.bars(symbol, timeframe=timeframe, limit=limit)
+
+
+@app.get("/positions/exits")
+def get_position_exits(mode: str = Query(store.PAPER)):
+    """Open positions with the exit levels the native strategy logged at
+    entry (ATR stop and target), the engine's own numbers."""
+    return operator.position_exits(_mode(mode))
+
+
 @app.websocket("/stream")
 async def stream(ws: WebSocket):
     """Push a positions/orders/pnl/events snapshot on a fixed tick.
 
     Read-only. The client sends its mode once (paper|live); the server replies
     with a fresh snapshot every STREAM_INTERVAL_SECONDS until disconnect.
+
+    Events are NEVER dropped (2026-07-20, the operator experience): each
+    snapshot also carries ``events_delta``, everything after the id this
+    connection last delivered, ascending, capped per tick. A burst larger
+    than the cap arrives across consecutive ticks. ``latest_event_id`` lets
+    the client detect and backfill any gap through GET /activity.
     """
     await ws.accept()
     mode = store.PAPER
+    last_event_id = 0
     try:
         try:
             first = await asyncio.wait_for(ws.receive_text(), timeout=0.5)
@@ -420,7 +478,18 @@ async def stream(ws: WebSocket):
         except (asyncio.TimeoutError, Exception):
             mode = store.PAPER
         while True:
-            await ws.send_json(store.stream_snapshot(mode))
+            snap = store.stream_snapshot(mode)
+            delta = operator.events_since(last_event_id)
+            if delta:
+                last_event_id = delta[-1]["id"]
+            elif last_event_id == 0:
+                # First tick on an empty delta: anchor to the newest id so a
+                # reconnecting client is not replayed the whole journal.
+                anchor = operator.activity(limit=1)["events"]
+                last_event_id = anchor[-1]["id"] if anchor else 0
+            snap["events_delta"] = delta
+            snap["latest_event_id"] = last_event_id
+            await ws.send_json(snap)
             await asyncio.sleep(STREAM_INTERVAL_SECONDS)
     except WebSocketDisconnect:
         return

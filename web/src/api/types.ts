@@ -595,3 +595,90 @@ export interface WhaleFeeds {
     note: string;
   };
 }
+
+// --- Operator experience (2026-07-20): reasoning-first read surfaces --------
+
+export interface ActivityEvent {
+  id: number;
+  ts: string;
+  kind: string;
+  venue: string | null;
+  symbol: string | null;
+  severity: string | null;
+  message: string;
+  payload: Record<string, unknown>;
+}
+export interface ActivityResponse {
+  events: ActivityEvent[];
+  latest_id: number;
+}
+
+export interface DecisionProvider {
+  model: string;
+  verdict: string | null;
+  confidence: number | null;
+  edge: number | null;
+  weight: number | null;
+}
+export interface CouncilDecision {
+  id: number;
+  ts: string;
+  kind: string;
+  symbol: string;
+  message: string;
+  numbers: Record<string, unknown>;
+  providers: DecisionProvider[];
+}
+export interface CouncilDecisions {
+  decisions: CouncilDecision[];
+  floors: {
+    council_min_confidence: number | null;
+    required_model_agreement_count: number | null;
+    min_directional_votes: number | null;
+  };
+  models: Record<string, string>;
+  dnn_benched: boolean;
+  dnn_bench_reason: string;
+}
+
+export interface SymbolDiagnostics {
+  symbol: string;
+  tradeable: boolean;
+  last_bar_ts: string | null;
+  last_bar_source: string | null;
+  last_real_ts: string | null;
+  age_seconds: number | null;
+  bars_5min: number;
+  warm: boolean | null;
+}
+
+export interface WatchdogDiagnostics {
+  state: Record<string, unknown>;
+  events: ActivityEvent[];
+}
+
+export interface BarRow {
+  ts: string;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  volume: number;
+  source: string;
+}
+export interface BarsResponse {
+  symbol: string;
+  timeframe: string;
+  bars: BarRow[];
+  last_price: number | null;
+  session_open: number | null;
+  session_change_pct: number | null;
+}
+
+export interface PositionExit extends Position {
+  stop: number | null;
+  target: number | null;
+  entry_factor: string | null;
+  entry_regime: string | null;
+  entry_logged_ts: string | null;
+}

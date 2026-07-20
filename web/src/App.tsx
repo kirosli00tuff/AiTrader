@@ -1,5 +1,8 @@
 import { Navigate, Route, Routes } from "react-router-dom";
 import Layout from "./components/Layout";
+import OperatorPage from "./pages/OperatorPage";
+import CouncilPage from "./pages/CouncilPage";
+import DiagnosticsPage from "./pages/DiagnosticsPage";
 import PaperSection from "./pages/PaperPage";
 import Overview from "./pages/Overview";
 import LiveSection from "./pages/LivePage";
@@ -18,7 +21,10 @@ export default function App() {
   return (
     <Routes>
       <Route element={<Layout />}>
-        <Route index element={<Navigate to="/paper" replace />} />
+        {/* The operator surface is the front door: live reasoning first. */}
+        <Route index element={<OperatorPage />} />
+        <Route path="council" element={<CouncilPage />} />
+        <Route path="diagnostics" element={<DiagnosticsPage />} />
         <Route path="paper" element={<PaperSection />}>
           <Route index element={<Overview />} />
           <Route path="stocks" element={<CategoryView mode="paper" category="stocks" />} />
@@ -40,7 +46,7 @@ export default function App() {
         <Route path="health" element={<HealthPage />} />
         <Route path="ops" element={<OpsPage />} />
         <Route path="settings" element={<SettingsPage />} />
-        <Route path="*" element={<Navigate to="/paper" replace />} />
+        <Route path="*" element={<Navigate to="/" replace />} />
       </Route>
     </Routes>
   );

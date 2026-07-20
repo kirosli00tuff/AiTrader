@@ -1,6 +1,9 @@
 import { NavLink } from "react-router-dom";
 
 const LINKS = [
+  { to: "/", label: "Operator", ico: "◉" },
+  { to: "/council", label: "Council", ico: "◭" },
+  { to: "/diagnostics", label: "Diagnostics", ico: "✚" },
   { to: "/paper", label: "Paper", ico: "▦" },
   { to: "/live", label: "Live", ico: "◆" },
   { to: "/controls", label: "Controls", ico: "▤" },
@@ -30,6 +33,7 @@ export default function Sidebar() {
           <NavLink
             key={l.to}
             to={l.to}
+            end={l.to === "/"}
             className={({ isActive }) => `nav-link${isActive ? " active" : ""}`}
           >
             <span className="nav-ico">{l.ico}</span>

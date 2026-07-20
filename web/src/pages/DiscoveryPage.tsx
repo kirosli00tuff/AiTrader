@@ -104,6 +104,13 @@ function PassCard({ pass, budget }: {
           {pass.reason ? `: ${pass.reason}` : ""}
         </div>
       )}
+      {/* The pass as one readable sentence before the bars break it down. */}
+      <p className="explain" data-testid="funnel-narrative">
+        Started with {pass.universe_count}, screened to {pass.finalists_count}{" "}
+        for free, gate passed {pass.survivors_count}, council evaluated{" "}
+        {pass.evaluated_count} at {pass.council_calls} paid{" "}
+        {pass.council_calls === 1 ? "call" : "calls"}.
+      </p>
       <FunnelBars pass={pass} />
       <div className="funnel-cost-line">
         <span>

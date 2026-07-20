@@ -22,6 +22,13 @@ const LAYER_LABEL: Record<string, string> = {
   adaptive: "Adaptive strategy tuner", council: "LLM council",
   dnn_advisory: "DNN advisory", whale: "Whale / smart money",
 };
+// One line per control: what turning it off actually does.
+const LAYER_DESC: Record<string, string> = {
+  adaptive: "Learns ensemble weights from real closed-trade PnL, only within safe bounds. Off freezes the weights.",
+  council: "Three independent models vote per evaluation. Off drops their factor from the ensemble; nothing else changes.",
+  dnn_advisory: "A supervised model's advisory read. Off drops it from the ensemble. It never decides alone.",
+  whale: "Institutional flow context (13F and on-chain). Off drops it from the ensemble. It never decides alone.",
+};
 const MODEL_LABEL: Record<string, string> = {
   "gpt-5.5": "OpenAI GPT-5.5", "claude-opus-4-8": "Anthropic Claude Opus 4.8",
   "gemini-3.1-pro-preview": "Google Gemini 3.1 Pro",
@@ -114,6 +121,22 @@ export default function ControlsPage() {
                 Weights are normalized to sum 1 server-side. RL advisory stays at
                 0 and out of normalization until it is enabled past its fill gate.
               </div>
+              {w && d.weight_factors.some((f) => (w[f] ?? 0) !== (d.weights[f] ?? 0)) && (
+                <div className="callout" data-testid="weight-preview" style={{ margin: "10px 0" }}>
+                  Preview, normalized shares after apply:{" "}
+                  {(() => {
+                    const total = d.weight_factors.reduce((s, f) => s + (w[f] ?? 0), 0) || 1;
+                    return d.weight_factors
+                      .filter((f) => (w[f] ?? 0) !== (d.weights[f] ?? 0))
+                      .map((f) => {
+                        const cur = d.weights[f] ?? 0;
+                        const nx = (w[f] ?? 0) / total;
+                        return `${FACTOR_LABEL[f] ?? f} ${cur.toFixed(2)} → ${nx.toFixed(2)}`;
+                      }).join(" · ");
+                  })()}
+                  {" "}(nothing is applied until you confirm)
+                </div>
+              )}
               <div className="flex" style={{ marginTop: 6 }}>
                 <ConfirmButton label="Apply weights" busyLabel="Applying…"
                   onConfirm={async () => { if (w) await act(() => api.setWeights(w)); setW(null); }} />
@@ -140,6 +163,7 @@ export default function ControlsPage() {
                 return (
                   <div className="ctrl-row" key={layer}>
                     <div className="ctrl-name">{LAYER_LABEL[layer]}
+                      <div className="ctrl-sub">{LAYER_DESC[layer]}</div>
                       {hasSource && (
                         <div className="ctrl-sub">State: {!on ? "off" : `on-${src}`}</div>
                       )}

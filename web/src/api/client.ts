@@ -9,6 +9,8 @@ import type {
   WatchlistEvent, LongTermPosition, Prereqs,
   AdaptiveState, AdaptiveEvent, AdaptiveInterpretation, AdaptiveAction,
   AdaptiveEngineLogRow, WhaleFeeds,
+  ActivityResponse, CouncilDecisions, SymbolDiagnostics, WatchdogDiagnostics,
+  BarsResponse, PositionExit,
 } from "./types";
 
 export const API_BASE = import.meta.env.VITE_API_BASE ?? "http://127.0.0.1:8000";
@@ -155,6 +157,19 @@ export const api = {
   watchlist: (limit = 100, events = 30) =>
     get<{ watchlist: WatchlistRow[]; events: WatchlistEvent[]; enabled: boolean }>(
       `/watchlist?limit=${limit}&events=${events}`),
+  // --- Operator experience (read-only reasoning surfaces) -------------------
+  activity: (sinceId = 0, limit = 300) =>
+    get<ActivityResponse>(`/activity?since_id=${sinceId}&limit=${limit}`),
+  councilDecisions: (limit = 25) =>
+    get<CouncilDecisions>(`/council/decisions?limit=${limit}`),
+  diagSymbols: () =>
+    get<{ symbols: SymbolDiagnostics[] }>("/diagnostics/symbols"),
+  diagWatchdog: () => get<WatchdogDiagnostics>("/diagnostics/watchdog"),
+  bars: (symbol: string, limit = 120) =>
+    get<BarsResponse>(`/bars/${encodeURIComponent(symbol).replace(/%2F/g, "/")}?limit=${limit}`),
+  positionExits: (mode: Mode) =>
+    get<{ mode: Mode; positions: PositionExit[] }>(`/positions/exits?mode=${mode}`),
+
   longtermPositions: () =>
     get<{
       positions: LongTermPosition[];
