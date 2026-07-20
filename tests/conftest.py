@@ -54,12 +54,20 @@ for _flag in ("SEC_EDGAR_ENABLED", "WHALE_LIVE_ENABLED", "WHALE_ALERT_ENABLED"):
 # exercising them must not write records into the repo's diagnostics/ dir.
 os.environ["MAL_DIAGNOSTICS_DIR"] = tempfile.mkdtemp(prefix="mal_test_diag_")
 
+# Point the runtime dir (pid file, engine lock, watchdog loop-guard state) at a
+# temp dir, same shape again. The watchdog persists its remediation state under
+# run_dir, and a test cycle must never write it into the repo's .run or read a
+# real run's restarts as its own. Tests needing a private run dir still set
+# MAL_RUN_DIR per test, which overrides this.
+os.environ["MAL_RUN_DIR"] = tempfile.mkdtemp(prefix="mal_test_run_")
+
 
 # The temp dirs above are process-scoped, so remove them when the run ends
 # rather than leaving one of each per invocation under /tmp forever.
 @atexit.register
 def _cleanup_test_dirs() -> None:
-    for var in ("MAL_KEYSTORE_DIR", "MAL_CONTROL_DIR", "MAL_DIAGNOSTICS_DIR"):
+    for var in ("MAL_KEYSTORE_DIR", "MAL_CONTROL_DIR", "MAL_DIAGNOSTICS_DIR",
+                "MAL_RUN_DIR"):
         path = os.environ.get(var, "")
         if "mal_test_" in path:
             shutil.rmtree(path, ignore_errors=True)

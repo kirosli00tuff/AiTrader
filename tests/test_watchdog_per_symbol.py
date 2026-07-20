@@ -61,14 +61,18 @@ def test_single_stale_symbol_detected_by_name_while_others_fresh(
     assert out["symbols"]["SOL/USD"]["fresh"] is False
 
 
-def test_symbol_with_no_bars_at_all_is_stale_by_name(tmp_path, monkeypatch):
-    # Never polled and never backfilled: the exact state a dead watchlist
-    # entry sits in. Detectable, named, with the reason.
+def test_symbol_with_no_bars_ever_is_onboarding_incomplete_not_stale(
+        tmp_path, monkeypatch):
+    # Never polled and never backfilled: an INCOMPLETE ONBOARDING, named with
+    # the reason, never a stale feed (2026-07-20: MANA/USD and RUNE/USD read
+    # as stale and helped kill every fresh start).
     _pin(monkeypatch, ["BTC/USD", "SOL/USD"])
     db = _mk_db(tmp_path, [("BTC/USD", _now_iso(), "real_feed")])
     out = watchdog.feed_ok(900, db)
-    assert out["stale_symbols"] == ["SOL/USD"]
-    assert out["symbols"]["SOL/USD"]["reason"] == "no_bars"
+    assert out["stale_symbols"] == []
+    assert out["onboarding_incomplete"] == ["SOL/USD"]
+    assert out["symbols"]["SOL/USD"]["reason"] == "onboarding_incomplete"
+    assert out["fresh"] is True and out["ok"] is True
 
 
 def test_all_fresh_reads_healthy(tmp_path, monkeypatch):
@@ -101,9 +105,11 @@ def test_watchlist_member_is_checked_when_discovery_on(tmp_path, monkeypatch):
     _add_watchlist(db, "LDO/USD")
     assert watchdog.tradeable_symbols(db) == ["BTC/USD", "LDO/USD"]
     out = watchdog.feed_ok(900, db)
-    # Onboarded but never polled: exactly the dead-entry condition.
-    assert out["stale_symbols"] == ["LDO/USD"]
-    assert out["ok"] is False
+    # Surfaced but never backfilled: reported as an incomplete onboarding,
+    # never as a stale feed, and never unhealthy by itself.
+    assert out["onboarding_incomplete"] == ["LDO/USD"]
+    assert out["stale_symbols"] == []
+    assert out["ok"] is True
 
 
 def test_watchlist_ignored_when_discovery_off(tmp_path, monkeypatch):

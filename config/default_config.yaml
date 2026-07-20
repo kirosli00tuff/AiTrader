@@ -290,9 +290,29 @@ watchdog:
   enabled: true
   check_interval_seconds: 180              # health check cadence
   bar_staleness_seconds: 900               # crypto bar older than this => stale
+  substitution_recency_window_seconds: 900 # feed_substitution is judged ONLY on bars at
+                                           # most this old. An older non-real bar is
+                                           # historical evidence from a prior run, logged
+                                           # out-of-window, never remediated (2026-07-20:
+                                           # leftover synthetic rows killed every fresh
+                                           # start). No bar inside the window is a
+                                           # freshness question, not a substitution.
+  startup_grace_seconds: 900               # measured from engine start: feed conditions
+                                           # (stale, substitution) are observed and logged
+                                           # but NOT remediated inside it. 3x the 5-min
+                                           # bar interval, so at least one live bar can
+                                           # close with margin. Engine/bridge/backend
+                                           # failures are never grace-suppressed.
+  remediation_hold_window_seconds: 1800    # the same condition recurring within this of a
+                                           # restart escalates to notify-and-hold: leave
+                                           # the stack as it is, notify loudly, stop
+                                           # restarting. A remediation loop guarantees no
+                                           # data and no diagnosis.
   ntfy_topic: ""                           # ntfy.sh topic; empty => notifications off
   ntfy_server: "https://ntfy.sh"
-  max_restarts_per_hour: 3                 # give up auto-restart past this (still notifies)
+  max_restarts_per_hour: 3                 # hard cap across ALL conditions; past it the
+                                           # watchdog holds and notifies instead of
+                                           # restarting (wired 2026-07-19, was unwired)
 
 backups:
   enabled: true

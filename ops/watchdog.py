@@ -14,12 +14,20 @@ trip is notified but NEVER auto-resumed (manual resume stays required).
 Notifications carry component status and symbol names only, never a key value
 or position detail.
 
+Three guards keep remediation honest (2026-07-20, the loop that killed every
+fresh start on leftover synthetic rows): substitution is judged only on bars
+inside a recency window, feed conditions inside the startup grace are logged
+but not remediated, and a condition recurring right after a restart escalates
+to notify-and-hold instead of stopping the stack again. A zero-bar symbol is
+reported as an incomplete onboarding, never as a stale feed.
+
 Run as a separate process: ``python -m ops.watchdog`` (the start script launches
 it and the teardown stops it).
 """
 from __future__ import annotations
 
 import json
+import logging
 import os
 import sqlite3
 import time
@@ -27,6 +35,8 @@ import urllib.request
 from datetime import datetime, timezone
 
 from api_server import stack
+
+log = logging.getLogger("ops.watchdog")
 
 
 def _cfg(cfg_path: str | None = None) -> dict:
@@ -117,7 +127,8 @@ def tradeable_symbols(db: str | None = None) -> list[str]:
     return symbols
 
 
-def feed_ok(threshold_seconds: int, db: str | None = None) -> dict:
+def feed_ok(threshold_seconds: int, db: str | None = None,
+            recency_window_seconds: int | None = None) -> dict:
     """Per-symbol freshness AND provenance across every tradeable symbol.
 
     The old probe read MAX(timestamp) over all crypto bars, so any one current
@@ -134,15 +145,34 @@ def feed_ok(threshold_seconds: int, db: str | None = None) -> dict:
     on the real path the newest bar of every checked symbol must also be REAL
     (real_feed or backfill). A DB from before the provenance migration has no
     source column and falls back to freshness only, stated in the result.
+
+    Provenance is judged ONLY on bars inside the recency window (default: the
+    staleness threshold). A non-real bar older than the window is historical
+    evidence from a prior run, recorded in ``out_of_window_non_real`` and the
+    per-symbol detail, never a substitution: on 2026-07-20 leftover synthetic
+    rows from the 2026-07-19 outage read as a live substitution and every
+    fresh start was stopped before it could fetch a single live bar. No bar
+    inside the window is a freshness question, not a substitution question.
+
+    A symbol with ZERO bars ever is an incomplete onboarding, not a stale
+    feed: it was surfaced by discovery but never backfilled (MANA/USD and
+    RUNE/USD: Alpaca serves no data for those pairs). It lands in
+    ``onboarding_incomplete``, reported and logged, and never by itself marks
+    the feed unhealthy.
     """
     db = db or _db_path()
     real_path = _real_feed_mode()
     now = datetime.now(timezone.utc)
     equities_open = _equity_market_open()
+    recency = (int(recency_window_seconds)
+               if recency_window_seconds is not None
+               else int(threshold_seconds))
     out: dict = {"fresh": False, "real": False, "ok": False,
                  "source": "unknown", "provenance_checked": False,
                  "real_path": real_path, "symbols": {}, "stale_symbols": [],
-                 "non_real_symbols": [], "checked_count": 0}
+                 "non_real_symbols": [], "onboarding_incomplete": [],
+                 "out_of_window_non_real": [],
+                 "recency_window_seconds": recency, "checked_count": 0}
     symbols = tradeable_symbols(db)
     try:
         conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True, timeout=2.0)
@@ -173,11 +203,12 @@ def feed_ok(threshold_seconds: int, db: str | None = None) -> dict:
             except Exception:
                 row = None
             if not row or not row[0]:
-                # Never polled and never backfilled. The exact SOL/USD state.
-                out["symbols"][sym] = {"checked": True, "fresh": False,
-                                       "source": "unknown",
-                                       "reason": "no_bars"}
-                out["stale_symbols"].append(sym)
+                # Zero bars EVER: surfaced but never backfilled. Incomplete
+                # onboarding, distinct from a feed that stopped producing.
+                out["symbols"][sym] = {"checked": True, "fresh": None,
+                                       "source": "none",
+                                       "reason": "onboarding_incomplete"}
+                out["onboarding_incomplete"].append(sym)
                 continue
             age = None
             try:
@@ -193,14 +224,22 @@ def feed_ok(threshold_seconds: int, db: str | None = None) -> dict:
             if not fresh:
                 out["stale_symbols"].append(sym)
             if provenance_checked and source not in _REAL_SOURCES:
-                out["non_real_symbols"].append(sym)
+                # Substitution needs proof the bar reflects the CURRENT run.
+                # An unparseable timestamp cannot prove recency and freshness
+                # already catches it, so it reads out-of-window here.
+                if age is not None and age <= recency:
+                    out["non_real_symbols"].append(sym)
+                else:
+                    out["symbols"][sym]["provenance"] = "out_of_window"
+                    out["out_of_window_non_real"].append(sym)
     finally:
         conn.close()
     out["checked_count"] = sum(
         1 for d in out["symbols"].values() if d.get("checked"))
     out["provenance_checked"] = provenance_checked
-    # Every checked symbol must be fresh. Zero checkable symbols (an all-equity
-    # universe overnight) is a closed market, not a stale feed.
+    # Every checked symbol WITH BARS must be fresh. Zero checkable symbols (an
+    # all-equity universe overnight) is a closed market, not a stale feed, and
+    # a zero-bar symbol is an onboarding gap, not a stale one.
     out["fresh"] = not out["stale_symbols"]
     out["real"] = not out["non_real_symbols"]
     # Aggregate source for the status line: the worst news wins.
@@ -281,14 +320,16 @@ def check_health(cfg: dict | None = None) -> dict:
     warning."""
     cfg = cfg if cfg is not None else _cfg()
     stale = int(cfg.get("bar_staleness_seconds", 900))
+    recency = int(cfg.get("substitution_recency_window_seconds", 900))
     running = stack.stack_running()
     bstate = bridge_state()
     bridge_ok = bool(bstate["reachable"] and bstate["status"] == "ok")
     backend_ok = stack.http_ok(stack.api_health_url(), tries=1, delay=0)
-    feed = feed_ok(stale)
+    feed = feed_ok(stale, recency_window_seconds=recency)
     tripped = kill_tripped()
     # Fresh but non-real on the real path is the substitution state: the walk
-    # fallback advancing in live clothing.
+    # fallback advancing in live clothing. Judged only on bars inside the
+    # recency window; an older non-real bar is historical evidence.
     substitution = bool(feed.get("real_path") and feed.get("provenance_checked")
                         and feed.get("non_real_symbols"))
     healthy = bool(running.get("running") and bridge_ok and backend_ok
@@ -300,6 +341,10 @@ def check_health(cfg: dict | None = None) -> dict:
             "feed_source": feed["source"], "feed_ok": feed["ok"],
             "feed_stale_symbols": list(feed.get("stale_symbols", [])),
             "feed_non_real_symbols": list(feed.get("non_real_symbols", [])),
+            "feed_onboarding_incomplete": list(
+                feed.get("onboarding_incomplete", [])),
+            "feed_out_of_window_non_real": list(
+                feed.get("out_of_window_non_real", [])),
             "feed_substitution": substitution,
             "kill_tripped": tripped, "healthy": healthy}
 
@@ -401,23 +446,176 @@ def capture_before_restart(h: dict) -> tuple[dict | None, str]:
     return snap, note
 
 
+def _engine_age_seconds() -> float | None:
+    """Seconds since the ENGINE process started, from /proc via the engine pid
+    in the lock, falling back to the lock's ts. None when it cannot be
+    established (no lock, dead pid), which reads as PAST the grace period: an
+    unprovable grace must never suppress detection forever."""
+    try:
+        lk = stack.lock_status()
+        pid = lk.get("engine_pid")
+        if not pid or not lk.get("alive"):
+            return None
+        from ops import evidence
+        epoch = evidence.process_start_epoch(int(pid))
+        if epoch is not None:
+            return max(0.0, time.time() - epoch)
+        ts = lk.get("ts")
+        if ts:
+            started = datetime.fromisoformat(str(ts).replace("Z", "+00:00"))
+            return max(0.0, (datetime.now(timezone.utc)
+                             - started).total_seconds())
+    except Exception:
+        return None
+    return None
+
+
+# --- remediation loop guard --------------------------------------------------
+# The watchdog must never stop a stack it has just started. On 2026-07-20
+# every fresh start was stopped seconds later on the same (historical)
+# substitution reading, a remediation loop with no exit. The guard persists
+# the last restart across cycles AND across watchdog restarts: the same
+# condition recurring within the hold window escalates to notify-and-hold,
+# and max_restarts_per_hour caps restarts across ALL conditions (catches an
+# A/B/A/B alternation the same-condition check cannot see). A holding
+# watchdog leaves the stack exactly as it is, because repeatedly stopping a
+# stack that cannot stay up guarantees no data and no diagnosis.
+
+def _state_path() -> str:
+    return os.path.join(stack.run_dir(), "watchdog_state.json")
+
+
+def _load_state() -> dict:
+    try:
+        with open(_state_path()) as fh:
+            d = json.load(fh)
+        return d if isinstance(d, dict) else {}
+    except Exception:
+        return {}
+
+
+def _save_state(d: dict) -> None:
+    try:
+        os.makedirs(stack.run_dir(), exist_ok=True)
+        with open(_state_path(), "w") as fh:
+            json.dump(d, fh, indent=2)
+    except Exception:
+        pass  # the guard is advisory state, never a crash
+
+
+def _clear_state() -> None:
+    try:
+        os.remove(_state_path())
+    except OSError:
+        pass
+
+
+def _condition_key(h: dict) -> str:
+    """One stable name for WHAT is failing, so recurrence is comparable
+    across cycles. Sick-but-running shapes first, then down shapes, then
+    plain staleness."""
+    if h.get("bridge_status") == "degraded":
+        return "bridge_degraded"
+    if h.get("feed_substitution"):
+        return "feed_substitution"
+    if not h.get("engine"):
+        return "engine_down"
+    if not h.get("bridge"):
+        return "bridge_down"
+    if not h.get("backend"):
+        return "backend_down"
+    if not h.get("feed_fresh", True):
+        return "feed_stale"
+    return "unhealthy"
+
+
 def run_once(cfg: dict | None = None) -> dict:
-    """One watchdog cycle. On a healthy stack: no action. On a kill trip: notify,
-    NEVER restart (manual resume required). On an unhealthy stack: capture
-    evidence if the failure is a degraded bridge or a feed substitution, then
-    attempt one restart and notify the outcome. Returns the cycle result."""
+    """One watchdog cycle. On a healthy stack: no action (and any remediation
+    hold is released). On a kill trip: notify, NEVER restart (manual resume
+    required). On an unhealthy stack: feed-only conditions inside the startup
+    grace are logged, not remediated; a condition recurring right after a
+    restart escalates to notify-and-hold; otherwise capture evidence (degraded
+    bridge or feed substitution), attempt one restart, and notify the
+    outcome. Returns the cycle result."""
     cfg = cfg if cfg is not None else _cfg()
     h = check_health(cfg)
+    if h.get("feed_onboarding_incomplete"):
+        # Reported and logged, never unhealthy by itself: a zero-bar symbol
+        # needs onboarding work, not a restart.
+        log.info("watchdog: onboarding incomplete (zero bars ever): %s",
+                 ", ".join(h["feed_onboarding_incomplete"]))
+    if h.get("feed_out_of_window_non_real"):
+        log.info("watchdog: non-real bars OUTSIDE the recency window for %s: "
+                 "historical evidence from a prior run, not a substitution",
+                 ", ".join(h["feed_out_of_window_non_real"]))
     if h["kill_tripped"]:
         notify("Kill switch TRIPPED. Trading halted. Manual resume required. "
                "Watchdog will NOT auto-resume.", cfg)
         return {"action": "kill_notified", "health": h}
     if h["healthy"]:
+        prior = _load_state()
+        if prior:
+            _clear_state()
+            if prior.get("holding"):
+                notify("Recovered: stack healthy again. Remediation hold "
+                       "released.", cfg)
         return {"action": "none", "health": h}
-    # Unhealthy and not a kill trip: evidence first, one clean restart attempt,
-    # then notify.
+    # Startup grace: a stack that has not lived one bar interval cannot have
+    # fetched live data, so feed conditions (stale, substitution) are observed
+    # and logged, never remediated. Engine, bridge, and backend failures are
+    # NOT grace-suppressed: a degraded bridge is sick at any age.
+    grace = int(cfg.get("startup_grace_seconds", 900))
+    feed_only = bool(h["engine"] and h["bridge"] and h["backend"])
+    age = _engine_age_seconds()
+    if feed_only and age is not None and age < grace:
+        log.warning(
+            "watchdog: %s observed %ds after engine start, inside the %ds "
+            "startup grace: logged, NOT remediated (%s)",
+            _condition_key(h), int(age), grace, _status_line(h))
+        return {"action": "grace_observed", "health": h,
+                "engine_age_seconds": int(age), "grace_seconds": grace}
+    # Loop guard: the same condition recurring within the hold window of the
+    # last restart, or the hourly restart cap, escalates to notify-and-hold.
+    cond = _condition_key(h)
+    now = time.time()
+    st = _load_state()
+    hold_window = int(cfg.get("remediation_hold_window_seconds", 1800))
+    max_per_hour = int(cfg.get("max_restarts_per_hour", 3))
+    history = [t for t in st.get("restart_history", [])
+               if isinstance(t, (int, float)) and now - t <= 3600.0]
+    holding = bool(st.get("holding") and st.get("condition") == cond)
+    same_recent = bool(
+        st.get("condition") == cond and st.get("last_restart_ts")
+        and now - float(st["last_restart_ts"]) <= hold_window)
+    rate_capped = len(history) >= max_per_hour
+    if holding or same_recent or rate_capped:
+        attempts = int(st.get("attempts", 1))
+        reason = ("remediation_loop" if (holding or same_recent)
+                  else "restart_rate_cap")
+        last_note = float(st.get("last_hold_notify_ts", 0.0) or 0.0)
+        due = (not st.get("holding")) or (now - last_note >= hold_window)
+        if due:
+            notify(f"REMEDIATION HOLD ({reason}): {cond} recurred after "
+                   f"{attempts} restart attempt(s). Leaving the stack AS IS, "
+                   f"no further automatic restarts until it recovers or an "
+                   f"operator intervenes. ({_status_line(h)})", cfg)
+        _save_state({"condition": cond, "holding": True, "attempts": attempts,
+                     "last_restart_ts": st.get("last_restart_ts"),
+                     "restart_history": history,
+                     "last_hold_notify_ts": now if due else last_note})
+        return {"action": "hold", "reason": reason, "health": h,
+                "attempts": attempts}
+    # Evidence first, one clean restart attempt, then notify. The attempt is
+    # recorded whether or not it succeeds, so a failing restart cannot loop
+    # either.
     snap, note = capture_before_restart(h)
     r = attempt_restart()
+    history.append(now)
+    _save_state({"condition": cond, "holding": False,
+                 "attempts": (int(st.get("attempts", 0)) + 1
+                              if st.get("condition") == cond else 1),
+                 "last_restart_ts": now, "restart_history": history,
+                 "last_hold_notify_ts": 0.0})
     if r["restarted"]:
         notify(f"Stack unhealthy ({_status_line(h)}). Restarted via supervisor "
                f"(state {r['detail']}).{note}", cfg)
@@ -452,10 +650,13 @@ def _status_line(h: dict) -> str:
             feed = f"NON-REAL ({h.get('feed_source', 'unknown')})"
     else:
         feed = "fresh"
+    onboarding = h.get("feed_onboarding_incomplete") or []
+    suffix = (f" onboarding_incomplete({_symbols_note(onboarding)})"
+              if onboarding else "")
     return (f"engine={'up' if h['engine'] else 'DOWN'} "
             f"bridge={bridge} "
             f"backend={'up' if h['backend'] else 'DOWN'} "
-            f"feed={feed}")
+            f"feed={feed}{suffix}")
 
 
 def main() -> None:

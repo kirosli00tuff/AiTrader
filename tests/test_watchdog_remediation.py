@@ -18,7 +18,16 @@ from __future__ import annotations
 
 import os
 
+import pytest
+
 from ops import watchdog
+
+
+@pytest.fixture(autouse=True)
+def _isolated_remediation_state(tmp_path, monkeypatch):
+    """Each test gets its own loop-guard state file: without this, a restart
+    recorded by one test reads as a remediation loop in the next."""
+    monkeypatch.setenv("MAL_RUN_DIR", str(tmp_path / "run"))
 
 
 def _health(*, degraded=False, substitution=False, kill=False, healthy=None):

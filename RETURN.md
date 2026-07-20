@@ -14,6 +14,43 @@ Commit message:
 
 ---
 
+## Prompt: Scope the substitution check to current data, stop the remediation loop
+
+Date: 2026-07-19
+Model: Fable 5
+Prompt summary: observed live on 2026-07-20. The stack starts clean, bridge healthy with all real layers true, and seconds later the watchdog captures a feed_substitution and stops the whole stack. The remediation added 2026-07-19 fires on stale historical data: the newest bars in the table are synthetic rows left over from the 2026-07-19 outage, so the watchdog reads a synthetic newest bar, concludes substitution, and kills a stack that has not fetched a single live bar. Every start dies the same way, a remediation loop with no exit. Aggravating: MANA/USD and RUNE/USD sit on the watchlist with 0 bars and count as stale. Seven tasks: scope the substitution check to a config recency window so out-of-window bars are historical evidence, add a startup grace period during which conditions log but do not stop, exclude never-onboarded symbols from freshness and surface them as onboarding incomplete, guard against remediation loops with notify-and-hold escalation, verify both directions against the observed failure, tests with mutation coverage on the window and the grace period, document and commit. No RiskGate, live-gate, or adaptive-invariant changes. Live trading stays off.
+
+Changes: TASK 1, THE RECENCY WINDOW. `feed_ok` takes `recency_window_seconds` (new config `watchdog.substitution_recency_window_seconds`, default 900) and judges provenance ONLY on bars inside it. A non-real newest bar older than the window lands in `out_of_window_non_real` with a per-symbol `provenance: out_of_window` marker, logged as historical evidence, never counted in `non_real_symbols`, so `check_health.feed_substitution` cannot fire on it. No bar inside the window stays a freshness question. An unparseable timestamp reads out-of-window because substitution needs proof the bar reflects the current run, and freshness already catches it. Default 900 equals `bar_staleness_seconds` deliberately: the staleness horizon is the definition of current the check already uses.
+
+TASK 2, THE STARTUP GRACE. New `watchdog.startup_grace_seconds`, DEFAULT 900. Reasoning: the bar interval is 300 seconds, so 900 is three full bar intervals, at least one closed live bar plus margin for the backfill-and-warm phase, and it equals the staleness threshold, so a fresh start can never be judged stale inside the horizon that defines staleness. Engine age comes from /proc via the engine pid in the lock (new `evidence.process_start_epoch`, `process_start_time` refactored onto it), falling back to the lock ts. Inside the grace, feed conditions (stale, substitution) log a warning and return `grace_observed`, no stop, no notification. Engine, bridge, and backend failures are NEVER grace-suppressed: a degraded bridge gets its single restart at any age. An unknowable age reads as PAST the grace, because an unprovable grace must never suppress detection forever.
+
+TASK 3, ONBOARDING INCOMPLETE, AND THE ZERO-BAR CAUSE. A symbol with zero bars ever lands in `onboarding_incomplete` (health key `feed_onboarding_incomplete`), named in the status line, logged each cycle, excluded from `stale_symbols`, and never by itself unhealthy. THE CAUSE, proven by one live read-only probe: discovery ranks the curated universe through Finnhub, which carries MANA and RUNE as Binance pairs, while onboarding backfills through Alpaca, and Alpaca's crypto US feed serves NO data for MANA/USD or RUNE/USD. The same request that returned 565 AAVE/USD 5-min bars over two days returned 0 for both. AAVE and LDO backfilled because Alpaca carries them. The backfill writes zero rows silently for an unserved pair (`got.get(pair, [])`), the onboard event honestly said "0 bar(s) seeded, COLD" three times, and nothing acted on it. Residual recorded as an open flag in PROGRESS.md: the engine walks the two symbols synthetically on the real path (its own feed_substitution events name them), so after the grace they will read as a GENUINE in-window substitution, restart once, and settle into a named hold until an operator removes them through the event-sourced watchlist path or discovery learns venue capability. Deliberately not fixed here: watchdog scope, and raw watchlist DELETEs are the documented SOL/USD mistake.
+
+TASK 4, THE LOOP GUARD, CHOSEN POLICY. State persists in `.run/watchdog_state.json` (condition, holding, attempts, last restart, restart history), across cycles AND across watchdog restarts. Rules: (1) the same condition recurring within `remediation_hold_window_seconds` (default 1800) of a restart attempt escalates to notify-and-hold: the stack is left exactly as it is, up or down, one loud REMEDIATION HOLD notification naming the condition and attempt count, renotified once per hold window, no further stops or starts. (2) The hold releases on the first healthy cycle, with a recovery notification. (3) A DIFFERENT condition gets its own single restart, and the now-wired `max_restarts_per_hour` (3, was parsed and used nowhere) caps restarts across ALL conditions, so A/B/A/B alternation cannot loop either. (4) Failed restart attempts count as attempts, so a refusing or unreachable supervisor cannot produce a stop-fail loop. (5) A kill trip outranks everything: notify only, never restart, never auto-resume, kill-request file never touched.
+
+TASK 5, BOTH DIRECTIONS PROVEN, hermetically against the reproduced incident. Direction 1, the observed shape: a bars table whose newest LDO/QQQ/SPY rows are synthetic and hours old, MANA/USD and RUNE/USD active on the watchlist with zero bars, engine 30 seconds old, overnight (equities unchecked). Result: `feed_substitution` False, LDO logged out-of-window, MANA/RUNE reported onboarding-incomplete, LDO honestly stale (a freshness question), action `grace_observed`, ZERO supervisor posts, /engine/stop never sent. Direction 2, the genuine condition: a synthetic bar 60 seconds old on the real path with engine age 2000 reads `feed_substitution` True and triggers the designed stop-then-start with notification, exactly as before.
+
+TASK 6, TESTS. New tests/test_watchdog_recency.py (16): out-of-window synthetic not substitution, in-window synthetic is, check_health respects the window, zero-bar not stale, onboarding named in status line, grace suppresses then expires, grace never suppresses a degraded bridge, unknown age reads past grace, same condition escalates to hold with exactly one hold notification, hold releases on healthy with recovery note, different condition gets its restart, rate cap holds across conditions, failed restarts escalate, kill trip during hold never restarted, plus the two Task 5 directions end to end. Updated: test_watchdog_per_symbol.py (2 tests retargeted to the zero-bar contract), test_watchdog_remediation.py and test_ops_week.py (per-test MAL_RUN_DIR isolation for the new state file), conftest.py (MAL_RUN_DIR joins the global isolation set). No network, nothing binds, kill switch never auto-resumed. Mutations, file-copy rollback: recency window removed fails 3 tests, grace removed fails 2 tests, both restored and re-verified green.
+
+NOT touched: RiskGate logic, the live-trading gate, the adaptive limit-weakening invariant, Level 1 values, promotion criteria, the RL fill gate, min_directional_votes. Live trading stays off.
+
+VERIFICATION (2026-07-19):
+
+| Check | Result |
+| --- | --- |
+| pytest | 806 passed (from 790, +16) |
+| ctest | 25/25 |
+| Mutation: recency window removed | KILLED, 3 tests fail |
+| Mutation: startup grace removed | KILLED, 2 tests fail |
+| Observed 2026-07-20 shape, fresh stack | grace_observed, zero supervisor posts |
+| Genuine in-window substitution past grace | stop-then-start, exactly as designed |
+| Alpaca probe (cause of zero bars) | AAVE/USD 565 bars, MANA/USD 0, RUNE/USD 0 |
+| Kill trip during hold | kill_notified, no posts, file untouched |
+
+Commit message: `Scope the substitution check to current data, add a startup grace period, separate never-onboarded from stale, and prevent remediation loops, live trading untouched`
+
+---
+
 ## Prompt: Fix the keystore handle leak that exhausted bridge file descriptors
 
 Date: 2026-07-19
@@ -2098,3 +2135,36 @@ $ git diff --cached --stat
 | Gemini 3.1 Pro | working | - | 1324.6 ms |
 | Alpaca paper market data | working | one quote ok | 342.7 ms |
 | Alpaca paper order-auth (validation-only) | working | paper account auth ok | 706.6 ms |
+
+### Run 2026-07-20T05:00:13Z
+
+| Integration | Result | Detail | Latency |
+| --- | --- | --- | --- |
+| OpenAI GPT-5.5 | working | - | 1572.5 ms |
+| Anthropic Opus 4.8 | working | - | 1250.9 ms |
+| Anthropic Haiku 4.5 (gate path) | working | - | 742.2 ms |
+| Gemini 3.1 Pro | working | - | 1234.4 ms |
+| Alpaca paper market data | working | one quote ok | 338.1 ms |
+| Alpaca paper order-auth (validation-only) | working | paper account auth ok | 257.5 ms |
+
+### Run 2026-07-20T06:03:27Z
+
+| Integration | Result | Detail | Latency |
+| --- | --- | --- | --- |
+| OpenAI GPT-5.5 | working | - | 1882.7 ms |
+| Anthropic Opus 4.8 | working | - | 1307.6 ms |
+| Anthropic Haiku 4.5 (gate path) | working | - | 1071.0 ms |
+| Gemini 3.1 Pro | failing | TimeoutError: The read operation timed out | 6076.0 ms |
+| Alpaca paper market data | working | one quote ok | 404.4 ms |
+| Alpaca paper order-auth (validation-only) | working | paper account auth ok | 372.2 ms |
+
+### Run 2026-07-20T06:04:59Z
+
+| Integration | Result | Detail | Latency |
+| --- | --- | --- | --- |
+| OpenAI GPT-5.5 | working | - | 1031.0 ms |
+| Anthropic Opus 4.8 | working | - | 1908.0 ms |
+| Anthropic Haiku 4.5 (gate path) | working | - | 712.8 ms |
+| Gemini 3.1 Pro | failing | HTTPError: HTTP Error 503: Service Unavailable | 948.0 ms |
+| Alpaca paper market data | working | one quote ok | 382.6 ms |
+| Alpaca paper order-auth (validation-only) | working | paper account auth ok | 256.7 ms |

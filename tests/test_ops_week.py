@@ -11,7 +11,16 @@ import os
 import sqlite3
 from datetime import datetime, timedelta, timezone
 
+import pytest
+
 from ops import watchdog, backup, maintenance
+
+
+@pytest.fixture(autouse=True)
+def _isolated_remediation_state(tmp_path, monkeypatch):
+    """Own loop-guard state file per test: a restart recorded by one test must
+    not read as a remediation loop in the next."""
+    monkeypatch.setenv("MAL_RUN_DIR", str(tmp_path / "run"))
 
 
 # --- Watchdog ---------------------------------------------------------------

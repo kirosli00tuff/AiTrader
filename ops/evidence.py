@@ -70,12 +70,13 @@ def _iso(epoch: float) -> str:
         "%Y-%m-%dT%H:%M:%SZ")
 
 
-def process_start_time(pid: int | None = None) -> str:
-    """ISO start time of a process, from /proc/<pid>/stat plus the boot time.
+def process_start_epoch(pid: int | None = None) -> float | None:
+    """Epoch start time of a process, from /proc/<pid>/stat plus the boot time.
 
     starttime is stat field 22, in clock ticks since boot. comm (field 2) may
-    contain spaces, so parse after the closing paren. Returns an error string
-    rather than raising: an unavailable start time is a recorded fact.
+    contain spaces, so parse after the closing paren. Returns None rather than
+    raising: callers decide what an unknowable start time means (the watchdog
+    reads it as past any grace period, the detecting direction).
     """
     try:
         pid = pid or os.getpid()
@@ -90,11 +91,20 @@ def process_start_time(pid: int | None = None) -> str:
                     btime = int(line.split()[1])
                     break
         if btime <= 0:
-            return "unavailable (no btime in /proc/stat)"
+            return None
         hz = float(os.sysconf("SC_CLK_TCK"))
-        return _iso(btime + ticks / hz)
-    except Exception as e:  # noqa: BLE001 - evidence must never raise
-        return f"unavailable ({type(e).__name__})"
+        return btime + ticks / hz
+    except Exception:  # noqa: BLE001 - evidence must never raise
+        return None
+
+
+def process_start_time(pid: int | None = None) -> str:
+    """ISO start time of a process. Returns an error string rather than
+    raising: an unavailable start time is a recorded fact."""
+    epoch = process_start_epoch(pid)
+    if epoch is None:
+        return "unavailable (no /proc start time)"
+    return _iso(epoch)
 
 
 def fd_count(pid: int | None = None):
