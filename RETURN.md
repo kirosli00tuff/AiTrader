@@ -14,6 +14,122 @@ Commit message:
 
 ---
 
+## Prompt: Diagnose the council prompts and the context provided, findings only
+
+Date: 2026-07-20
+Model: Fable 5
+Prompt summary: diagnostic session, no behavior changes. Across every real council verdict recorded, directional verdicts fall between 0.4929 and 0.5938, and every verdict at or above 0.60 is flat. The abstention fix closed the composition math. The remaining question is whether the prompt itself produces hedging: models that are either confident and flat, or directional and unconvinced. Seven tasks: dump the exact prompts sent to each council provider and the base-check gate for both the short-term trading mode and the long-term research mode, verbatim with a fully rendered example for a real symbol; inventory precisely what context the model receives and what it does not, with total prompt size in tokens; examine how confidence is elicited (wording, scale, anchoring, whether the model knows the threshold or the consequence of uncertainty) and how direction and hold are framed; examine the output schema for shape-forcing constraints (field order, enum order, reason before or after the verdict); assess whether the framing plausibly explains the observed distribution, separating evidence from hypothesis; recommend prompt changes ordered by expected impact without applying any; document and commit. Do not touch RiskGate logic, the live-trading gate, or the adaptive limit-weakening invariant. Live trading stays off.
+
+Changes: findings only, recorded below in this entry. No code, config, prompt, or threshold changed. The reproduction made three free read-only Finnhub REST calls (two quotes, one sentiment), zero LLM calls, zero DB writes.
+
+### TASK 1: THE VERBATIM PROMPTS
+
+ONE system prompt serves all three council providers, both modes, every path. The short-term trading mode and the long-term research mode produce BYTE-IDENTICAL prompts: `research_thesis` sets `mode: deep_research` and `horizon: weeks_to_months`, `long_term_thesis` passes `horizon: months`, and `build_user_prompt` (llm_consensus/providers.py) drops both keys because it renders exactly seven fields and nothing else. Proven live this session: the research-mode user message for AMD equals the short-term one byte for byte. The long-term question is never actually asked.
+
+Council system prompt, verbatim (`llm_consensus/providers.py` SYSTEM_PROMPT, sent to gpt-5.5, claude-opus-4-8, and gemini-3.1-pro-preview identically):
+
+```
+You are one member of a multi-model trading advisory council for a paper-trading research system. You receive a compact market/signal snapshot and output a single directional read. You are ADVISORY ONLY: a deterministic risk layer has final authority and may veto or ignore you. Judge only the edge in the setup described.
+
+Respond with a SINGLE JSON object and nothing else, with exactly these keys:
+  "direction":  one of "long", "short", "flat"
+  "confidence": number in [0,1] — confidence in that direction
+  "edge":       number in [0,1] — estimated expected fractional edge per trade
+  "rationale":  one short sentence (<= 140 chars)
+Do not include markdown, code fences, or any text outside the JSON object.
+```
+
+User message template, verbatim (`build_user_prompt`): `"Market snapshot:\n" + json.dumps(snapshot, sort_keys=True) + "\nReturn your directional read as the required JSON object."` where snapshot holds exactly symbol, venue, price, return_5, order_book_imbalance, catalyst_score, volatility, each defaulting to 0.0 when absent.
+
+Fully rendered, real symbol, real values (live Finnhub quote this session, LDO/USD, the system's first historical watchlist member):
+
+```
+Market snapshot:
+{"catalyst_score": 0.0, "order_book_imbalance": 0.0, "price": 0.3763, "return_5": 0.070555, "symbol": "LDO/USD", "venue": "alpaca", "volatility": 0.082647}
+Return your directional read as the required JSON object.
+```
+
+That is the whole prompt. LDO was up 7.06 percent on the day with an 8.26 percent intraday range, and the council was told, as measurements, that its catalyst is zero and its order book is balanced.
+
+Base-check gate system prompt, verbatim (`llm_consensus/gate.py` GATE_SYSTEM_PROMPT, claude-haiku-4-5, same user message as the council):
+
+```
+You are a cheap pre-screen for a multi-model trading advisory council. Given a compact market snapshot, decide whether the setup is worth a full (expensive) council review. Skip flat, rangebound, or low-signal setups. This is a COST gate, not a trade decision.
+
+Respond with a SINGLE JSON object and nothing else:
+  "proceed": boolean — true if worth a full council review
+  "reason":  one short sentence (<= 140 chars)
+No markdown, no code fences, no text outside the JSON object.
+```
+
+For contrast, the Stage-B discovery gate (`discovery/gate.py`) is the ONE prompt already fixed for the padded-zero failure. Its system prompt states: "You are screening instruments surfaced by a FREE market-data scan, so you see ONLY price, daily return, and intraday volatility. There is no order book and no news sentiment available for these instruments. Their absence is not evidence of a flat market: judge ONLY on the fields you are given, and never skip an instrument for lacking a field that was never offered." Its `build_discovery_prompt` renders only the fields that exist. The council itself never got this fix.
+
+Request wrappers (rendered this session with the key REDACTED): OpenAI `response_format {"type": "json_object"}`, `max_completion_tokens: 2048`, no temperature. Anthropic system block with `cache_control: ephemeral`, `max_tokens: 2048`, no prefill (unsupported by claude-opus-4-8). Gemini `response_mime_type: application/json`, `temperature: 0.2`, `maxOutputTokens: 2048`. Gate `max_tokens: 128`. No JSON schema is enforced anywhere. The structured-output instruction lives inline in the system prompt.
+
+### TASK 2: CONTEXT INVENTORY
+
+Received, discovery mode (both sleeves): seven values.
+
+| Field | Source | Defect |
+| --- | --- | --- |
+| symbol | watchlist symbol | none |
+| venue | literal "alpaca" | none |
+| price | Finnhub quote | none |
+| return_5 | Finnhub change_pct / 100 | carries the FULL DAY move, the name says 5 |
+| order_book_imbalance | never available (free tier) | always rendered 0.0, reads as a balanced book |
+| catalyst_score | equity news score in [0,1] when present, else absent | 0.0 for every crypto candidate, scale never stated, 0.5 is neutral on the equity scale so 0.0 is not neutral |
+| volatility | (high - low) / price | unlabeled, window unstated |
+
+Received, trading path (core/engine.cpp gather_factors payload: symbol, venue, factor, price, ret_5, volatility, imbalance, catalyst): price is real. ret_5 is the sum of the last five poll-tick returns, volatility their standard deviation. `imbalance` is uniform RANDOM in [-1,1] every tick, even on the real Alpaca feed (market_data/market_data.cpp AlpacaFeed::poll). `catalyst` is a per-symbol HASH CONSTANT in [-1,1]: MockCatalystProvider is the only catalyst provider constructed (core/engine.cpp), so on the real path the council judges one real return scalar plus two fabricated numbers presented as market signals.
+
+NOT received, all paths, that a human trader would want: any price history or bar series, volume (computed in the engine, never sent), spread, the regime label the engine computed, the native strategy signal and its indicators (EMA, RSI, ADX, ATR all exist in-engine), the whale read, the DNN read, position state, portfolio context, time of day or session context, recent trade history for the symbol, news headlines (the adaptive news layer never feeds the council), the horizon or the mode, the meaning or scale of any field, and the decision rule its answer feeds (the 0.60 floor, min_directional_votes, holds-abstain).
+
+Prompt size, measured this session (no tokenizer package installed, band estimated at 3.5 to 4 chars per token and labelled as an estimate): system 714 chars, about 180 to 205 tokens. User message 226 to 232 chars, about 55 to 66 tokens. Combined per provider call about 235 to 270 tokens. Gate combined about 175 to 205 tokens. The whole question fits in a quarter of a page.
+
+Structural note, read from code, not observed live this session: one council-tier trading evaluation calls /score/llm once per llm slot, three calls, and each call runs the full gate plus all three providers (python_bridge/server.py maps /score/llm straight to consensus()). Nine provider calls and three gate calls per council-tier evaluation, and each slot then carries a separately sampled composite of the SAME council rather than one provider's verdict, so slot diversity is sampling noise. Flagged for a future session, out of scope here.
+
+### TASK 3: HOW CONFIDENCE IS ELICITED
+
+Exact wording: `"confidence": number in [0,1] — confidence in that direction`. The scale is unanchored: nothing defines any point on it, no coin-flip anchor at 0.5, no example, no calibration reference. The model is never told the threshold its answer is measured against (the 0.60 conviction floor, min_directional_votes 1, agreement), so it cannot know 0.55 and 0.59 produce the identical outcome (avoid) while 0.61 does not. It is never told what happens if it expresses uncertainty, that a hold abstains from the vote, or that a low-confidence directional read lands below a floor.
+
+Direction: `"direction": one of "long", "short", "flat"`. Flat is listed last, a peer option, not framed as a safe default and not framed as abstention. Nothing legitimizes it as "not enough evidence to call" and nothing distinguishes it from a low-conviction directional read. The instruction "Judge only the edge in the setup described" scopes the judgment to the seven numbers, which is honest, and also caps how much conviction an honest model can produce from them.
+
+### TASK 4: THE OUTPUT SCHEMA
+
+Field order as instructed: direction, confidence, edge, rationale. The verdict comes first and the reasoning last, capped at 140 chars. The model commits to its numbers before writing a word of visible rationale. All three configured models are reasoning models (Gemini 3.1 Pro is thinking-only), which softens verdict-first ordering because internal reasoning precedes output, but the visible rationale stays a post-hoc one-liner, and per-provider rationale text is not persisted for the trading council anyway. Flat is listed LAST in the enum, so enum order does not favor it. JSON is forced on OpenAI and Gemini, instructed on Anthropic. A flat answer's confidence is "confidence in flat", which the abstention rule then discards (bias 0), consistent since 2026-07-18, but the model does not know its flat confidence is discarded. Temperature is 0.2 on Gemini and provider-default elsewhere, so the three slots do not even share a sampling regime.
+
+### TASK 5: ASSESSMENT AGAINST THE OBSERVED DISTRIBUTION
+
+EVIDENCED, from the database record and this session's reproduction:
+
+1. PER-PROVIDER ASYMMETRY ON IDENTICAL PROMPTS. Across all 38 discovery candidates whose composed rationale preserves per-model labels: gpt-5.5 was directional 27 of 38 (17 buy, 10 sell, 71 percent), claude-opus-4-8 held 38 of 38 (100 percent), gemini-3.1-pro-preview held 36 of 38 (95 percent). The observed pattern decomposes exactly: "directional and unconvinced" is gpt-5.5 at 0.49 to 0.63 confidence, "confident and flat" is Opus and Gemini holding on every read of the same snapshot. Caveat: the persisted labels do not record per-provider source (real versus mock), but a mock council cannot produce this shape, the mock's per-symbol hash noise spans both signs by construction and would scatter directions across 38 symbols.
+2. THE BAND IS STABLE WHERE MARKETS ARE NOT. All 27 directional candidate convictions span 0.4929 to 0.63 across three days and more than fifteen symbols, crypto and equities, quiet days and a 7-percent-move day. Markets varied, the band did not. A band set by market conditions should move with them. A band set by the input and the elicitation should not. It did not.
+3. THE ZEROS-READ-AS-FLAT MECHANISM IS ALREADY PROVEN IN THIS CODEBASE. The Stage-B gate rejected 12 of 12 finalists on every pass, including a synthetic +14 percent move with a 14 percent range called "flat, rangebound", BECAUSE build_user_prompt pads absent fields to 0.0 (the measurement is recorded in discovery/gate.py's own docstring). Stage B got its own prompt that names absent fields and was fixed. Stage C, the council itself, still uses build_user_prompt and still declares catalyst_score 0.0 and order_book_imbalance 0.0 on every crypto candidate, as measurements.
+4. THE CONTEXT IS THIN AS A FACT, NOT A JUDGMENT. Seven numbers, two always zero in discovery, one mislabeled (return_5 carries the day move), none with a stated scale, no history. A calibrated model given one day-return and one range number cannot honestly report directional confidence far above coin flip. The directional-and-unconvinced half of the distribution is consistent with the models answering CORRECTLY given what they receive.
+5. THE MODE FRAMING NEVER REACHES THE MODEL. Byte-identical prompts proven live. Research mode differs from short-term mode only in which values fill the same seven slots.
+6. CONFIDENT-AND-FLAT COMPOSED VERDICTS AT OR ABOVE 0.60 were artifacts of pre-abstention hold-averaging, fixed 2026-07-18. Post-fix, all-hold reads compose to 0.00 (UPS and SNX/USD this weekend confirm). The residual confident-and-flat phenomenon is per-model behavior, item 1. Post-fix, the council alone has still never cleared 0.60: both non-avoid verdicts in history (LDO/USD 0.61 pass 13, UNI/USD 0.63 pass 20) started from a single directional voter at 0.56 to 0.58 and crossed the floor only on the whale layer's bounded +0.05 confirmation.
+
+HYPOTHESIS, stated as such: that anchoring the scale or adding history would move conviction past 0.60 on real setups (plausible, untested). That Opus's 100 percent hold rate is calibration policy on thin evidence rather than an interaction with the JSON forcing (likely, unproven). That some individual reads reflect genuinely marginal markets (possible, and the record cannot distinguish a marginal market from a thin input, which is itself a finding).
+
+VERDICT ON THE QUESTION ASKED: yes, the framing plausibly produces the observed hedging, through four specific evidenced mechanisms: padded zeros presented as measurements (with an in-repo measured precedent at Stage B), an unanchored confidence scale with the decision floor never disclosed, near-empty context relative to the judgment requested, and flat never framed as abstention. The prompts are not sound-but-unlucky. This distribution is what this prompt produces.
+
+### TASK 6: RECOMMENDED CHANGES, NOT APPLIED
+
+Ordered by expected impact. Every item is a prompt or logging change only, nothing touches RiskGate, the live gate, thresholds, or composition math.
+
+1. RENDER ONLY FIELDS THAT EXIST, AND SAY SO (extend the Stage-B fix to Stage C). Drop order_book_imbalance and catalyst_score when absent, or render "not available", and say absence is not evidence. Reasoning: the in-repo Stage-B measurement proves padded zeros read as flat evidence. Expected observable: per-provider hold rates drop on high-movement candidates, Opus's 100 percent hold rate is the sharpest single indicator to watch. A/B: yes, both variants on the same fresh snapshots, scratch DB, bounded spend, no live trading.
+2. ADD REAL EVIDENCE. Recent bar summary (return path over N bars, distance from day high and low, volume trend), the engine's regime label, the native signal when one fired. Reasoning: conviction clustering at 0.5 to 0.6 is the calibrated ceiling for a near-empty snapshot, more evidence raises the honest ceiling. Expected observable: the conviction band widens in both directions, some reads above 0.65 and some below 0.45. A/B: yes, same design.
+3. ANCHOR THE SCALE AND DISCLOSE THE DECISION RULE. State: 0.5 means coin flip, report 0.60 or above only when the evidence justifies acting, verdicts below 0.60 are discarded as avoid, flat abstains from the vote and is a legitimate answer. Reasoning: unanchored scales cluster, anchoring against the known floor forces an explicit act-or-abstain choice. Named risk: disclosing the threshold invites threshold-hugging (0.58 becoming 0.61), so pair it with the abstention legitimization and watch for a spike exactly at 0.60 to 0.62. Expected observable: bimodal conviction, fewer 0.55-to-0.59 strandings. A/B: yes.
+4. FIX FIELD SEMANTICS AND STATE THE MODE. Rename return_5 to daily_return (it is one), state each field's scale and window, and render the horizon and mode so the long-term research question is actually asked. Expected observable: research verdicts diverge from short-term verdicts on the same symbol. A/B: yes.
+5. ASK FOR EVIDENCE BEFORE THE VERDICT. Rationale (or a short evidence list) first, then direction, confidence, edge. Reasoning: reasoning-first output ordering improves calibration. Weakest expected effect, all three models reason internally before output. A/B: yes, cheap.
+6. PERSIST THE STAGE-C STATE DICT AND PER-PROVIDER RATIONALE with each candidate (logging only, prerequisite for honest replay). Today no raw snapshot and no per-provider rationale text is persisted (model_outputs.extra_json is empty), so historical A/B replay is impossible and every comparison needs fresh snapshots. This is why the A/B answers above say "same fresh snapshots" rather than "recorded history".
+
+A/B comparability summary: items 1 through 5 can be compared offline, both prompt variants against the same live snapshots in a scratch DB with the existing budget caps and zero live trading. True replay against RECORDED evaluations needs item 6 first, because the historical record holds composed aggregates only.
+
+Commit message: `Diagnose the council prompts and the context provided, findings only, no behavior changes, live trading untouched`
+
+---
+
 ## Prompt: Rebuild the operator experience around the engine's written reasoning
 
 Date: 2026-07-20
