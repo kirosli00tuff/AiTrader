@@ -173,6 +173,16 @@ public:
                                       const std::string& start_ts,
                                       const std::string& end_ts);
 
+    // THE TRADEABLE INVARIANT'S DATA QUESTION (2026-07-20): does this symbol
+    // have any REAL bar history (source real_feed or backfill), any timeframe?
+    // Engine::symbol_is_tradeable is the C++ enforcement point and this is its
+    // storage read; the Python mirror is market_data/tradeable.py, and a test
+    // pins that the two source sets cannot drift. A DB whose bars table has no
+    // source column (pre-provenance) reads any bar as history, matching the
+    // Python fallback: an unprovable provenance keeps the old semantics rather
+    // than grounding every symbol.
+    bool has_real_bars(const std::string& symbol);
+
     // Active dynamic-watchlist symbols, optionally for one sleeve (quant_core |
     // research_satellite; empty means both). READ-ONLY: the Python discovery
     // package is the writer of the watchlist, the same way it writes `bars`.

@@ -180,7 +180,11 @@ def test_missing_key_returns_labeled_mock(provider_cls, env, mid):
     p = provider_cls(name="slot", weight=0.2, model_id=mid)
     v = p.score({"symbol": "BTC-USD", "ret_5": 0.03})
     assert v.source == "mock"
-    assert "MOCK" in v.rationale and env in v.rationale
+    # Labeled by PROVIDER, never by env var name: rationales travel into
+    # thesis output and the GUI, and credential identifiers stay out of both
+    # (test_research_satellite pins the output side).
+    assert "MOCK" in v.rationale and p.LABEL in v.rationale
+    assert env not in v.rationale
     assert -1.0 <= v.bias <= 1.0
     assert v.model_id == mid
 

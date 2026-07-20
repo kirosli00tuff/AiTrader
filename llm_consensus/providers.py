@@ -189,7 +189,10 @@ class _RealLLMProvider:
     def score(self, state: dict) -> ModelVerdict:
         key = self._api_key()
         if not key:
-            return self._mock_verdict(state, f"no {self.ENV_VAR}")
+            # The provider LABEL, never the env var name: rationales travel
+            # into thesis output and the GUI, and credential identifiers do
+            # not belong there (test_research_satellite pins this).
+            return self._mock_verdict(state, f"no {self.LABEL} key")
         try:
             text = self._call(state, key)
         except Exception as e:  # network / status / decode errors

@@ -342,6 +342,27 @@ std::vector<BarRow> Storage::recent_bars(const std::string& symbol,
     return rows;
 }
 
+bool Storage::has_real_bars(const std::string& symbol) {
+    // One indexed probe, LIMIT 1: called per symbol per run (the engine caches
+    // the answer and flips it on the first live real tick).
+    try {
+        Stmt s(db_,
+               "SELECT 1 FROM bars WHERE symbol=?"
+               " AND source IN ('real_feed','backfill') LIMIT 1");
+        s.bind(1, symbol);
+        return sqlite3_step(s.raw()) == SQLITE_ROW;
+    } catch (const std::exception&) {
+        // Pre-provenance DB (no source column): fall back to any-bar history.
+        try {
+            Stmt s(db_, "SELECT 1 FROM bars WHERE symbol=? LIMIT 1");
+            s.bind(1, symbol);
+            return sqlite3_step(s.raw()) == SQLITE_ROW;
+        } catch (const std::exception&) {
+            return false;  // no bars table at all: no history
+        }
+    }
+}
+
 std::vector<BarRow> Storage::bars_in_range(const std::string& symbol,
                                            const std::string& timeframe,
                                            const std::string& start_ts,

@@ -6,6 +6,7 @@
 #pragma once
 
 #include <cstdint>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -82,11 +83,15 @@ private:
 // the resolved paper/data credentials. This needs only a paper/data key — NOT a
 // live brokerage account — so it works for a Canada-based user.
 //
-// Resilience: if the bridge is unreachable or a symbol has no quote (offline /
-// no key / network error), the feed advances that symbol with a small
-// deterministic random walk from its last price so the engine keeps ticking. A
-// one-time notice is emitted on the first such fallback. `last_poll_was_live()`
-// reports whether the most recent poll contained any real Alpaca data.
+// THIS FEED NEVER FABRICATES (2026-07-20). If the bridge is unreachable or a
+// symbol has no quote, that symbol yields NO tick this poll. The old
+// deterministic-walk fallback fabricated prices in live clothing: it produced
+// the 2026-07-17 19-hour silent substitution and the 2026-07-20 synthetic bars
+// for venue-unserved symbols (MANA/USD, RUNE/USD). No data is recorded as no
+// data: one notice per symbol on first unavailability, one on a dead bridge.
+// Every tick this feed emits is a real venue quote (`data_source` real_feed).
+// `last_poll_was_live()` reports whether the most recent poll contained any
+// real Alpaca data.
 class AlpacaFeed : public Feed {
 public:
     using Instrument = mal::market_data::Instrument;
@@ -108,7 +113,10 @@ private:
     int bridge_port_;
     uint64_t rng_;
     bool last_poll_live_ = false;
-    bool warned_fallback_ = false;
+    bool warned_no_bridge_ = false;
+    // Symbols already warned unavailable, so the notice fires once per symbol
+    // per outage rather than once per poll. Cleared when data returns.
+    std::set<std::string> unavailable_warned_;
 };
 
 }  // namespace mal::market_data

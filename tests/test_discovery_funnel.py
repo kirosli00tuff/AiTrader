@@ -736,7 +736,21 @@ def test_a_pass_onboards_what_it_surfaces(tmp_path, monkeypatch):
 
     import market_data.alpaca_source as src
     def fake_backfill(db_path, symbols):
+        # Writes REAL rows like the real backfill: serviceability verification
+        # (2026-07-20) checks the bars table, not the return value alone.
         got["symbols"] = list(symbols)
+        conn = sqlite3.connect(db_path)
+        try:
+            src.ensure_bars_schema(conn)
+            for s in symbols:
+                conn.execute(
+                    "INSERT INTO bars(venue,symbol,timeframe,timestamp,open,"
+                    "high,low,close,volume,source) VALUES('alpaca',?,?,"
+                    "'2026-07-01T00:00:00Z',1,2,0.5,1.5,10,'backfill')",
+                    (s, "5min"))
+            conn.commit()
+        finally:
+            conn.close()
         return {"status": "ok", "written": {f"{s}:5min": 1440 for s in symbols}}
     monkeypatch.setattr(src, "backfill", fake_backfill)
 
@@ -757,6 +771,55 @@ def test_a_pass_onboards_what_it_surfaces(tmp_path, monkeypatch):
     assert got["symbols"] == ["SOL/USD"]
     assert out["onboard_status"] == "ok"
     assert out["onboarded"] == ["SOL/USD"]
+    assert out["onboard_refused"] == []
+
+
+def test_a_pass_refuses_a_candidate_whose_backfill_returns_nothing(
+        tmp_path, monkeypatch):
+    """Serviceability verification (2026-07-20): the MANA/USD, RUNE/USD hole.
+
+    Discovery ranks through Finnhub while onboarding backfills through Alpaca,
+    and the venues do not carry the same pairs. A candidate whose backfill ran
+    and returned NOTHING is not added to the watchlist: it could only ever sit
+    symbol_unavailable. The refusal is journalled (applied=0) with the reason.
+    """
+    cfg = _write_cfg(tmp_path)
+    db = os.path.join(str(tmp_path), "refuse.db")
+
+    import market_data.alpaca_source as src
+    def fake_backfill(db_path, symbols):
+        # The backfill RAN (status ok) and the venue served zero bars.
+        conn = sqlite3.connect(db_path)
+        try:
+            src.ensure_bars_schema(conn)
+            conn.commit()
+        finally:
+            conn.close()
+        return {"status": "ok", "written": {f"{s}:5min": 0 for s in symbols}}
+    monkeypatch.setattr(src, "backfill", fake_backfill)
+
+    snaps = [_snap("MANA/USD", change_pct=0.08, high=105.0, low=100.0)]
+    monkeypatch.setattr(funnel, "build_snapshots",
+                        lambda symbols, client, whale=None: snaps)
+
+    out = run.run_once("crypto", db_path=db, cfg_path=cfg, now=NOW,
+                       client=object(), gate=SpyGate(),
+                       evaluator=SpyEvaluator(), force=True)
+
+    assert out["status"] == "ok"
+    assert out["watchlist_added"] == []
+    assert out["onboard_refused"] == ["MANA/USD"]
+    conn = sqlite3.connect(db)
+    try:
+        from discovery import watchlist as wl
+        assert wl.active_symbols(conn) == []
+        events = wl.recent_events(conn, limit=10)
+        refusal = [e for e in events if e["symbol"] == "MANA/USD"
+                   and not e["applied"]]
+        assert refusal, events
+        assert "backfill returned no bars" in refusal[0]["reason"]
+    finally:
+        conn.close()
 
 
 # --- The payload bugs: the stages must hand the models real market data -------

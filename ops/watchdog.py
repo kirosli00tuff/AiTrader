@@ -18,8 +18,17 @@ Three guards keep remediation honest (2026-07-20, the loop that killed every
 fresh start on leftover synthetic rows): substitution is judged only on bars
 inside a recency window, feed conditions inside the startup grace are logged
 but not remediated, and a condition recurring right after a restart escalates
-to notify-and-hold instead of stopping the stack again. A zero-bar symbol is
-reported as an incomplete onboarding, never as a stale feed.
+to notify-and-hold instead of stopping the stack again.
+
+THE TRADEABLE INVARIANT AND SCOPED STOP AUTHORITY (2026-07-20, after two
+unserviceable symbols stopped a stack where six were trading correctly): a
+symbol with no real bar history fails ``symbol_is_tradeable``
+(market_data/tradeable.py) and can only ever raise ``symbol_unavailable``,
+contained and per-symbol, never staleness and never substitution. The feed is
+broken only when a substitution is live on a tradeable symbol or when nothing
+is being served (``any_tradeable_serving``): while any tradeable symbol
+receives real bars on time, staleness elsewhere is named but never stops the
+stack.
 
 Run as a separate process: ``python -m ops.watchdog`` (the start script launches
 it and the teardown stops it).
@@ -53,8 +62,11 @@ def _cfg(cfg_path: str | None = None) -> dict:
 
 _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-# Provenances that count as REAL market data on the alpaca_paper path.
-_REAL_SOURCES = ("real_feed", "backfill")
+# THE tradeable invariant (2026-07-20): the one predicate and the one real
+# source set, defined in market_data/tradeable.py. The watchdog consumes it,
+# it does not re-derive it.
+from market_data.tradeable import (REAL_SOURCES,  # noqa: E402
+                                   symbol_is_tradeable)
 
 
 def _db_path() -> str:
@@ -154,11 +166,21 @@ def feed_ok(threshold_seconds: int, db: str | None = None,
     fresh start was stopped before it could fetch a single live bar. No bar
     inside the window is a freshness question, not a substitution question.
 
-    A symbol with ZERO bars ever is an incomplete onboarding, not a stale
-    feed: it was surfaced by discovery but never backfilled (MANA/USD and
-    RUNE/USD: Alpaca serves no data for those pairs). It lands in
-    ``onboarding_incomplete``, reported and logged, and never by itself marks
-    the feed unhealthy.
+    THE TRADEABLE INVARIANT (2026-07-20): a symbol with no real bar history
+    (the ``symbol_is_tradeable`` predicate, market_data/tradeable.py) is
+    UNAVAILABLE, never stale and never substituted. It lands in
+    ``unavailable_symbols`` with per-symbol reason ``symbol_unavailable``,
+    reported and logged, and never contributes to any stack-level alarm. This
+    covers both the zero-bar shape and the fabricated-synthetic-bars shape:
+    on 2026-07-20 MANA/USD and RUNE/USD carried nothing but in-window
+    synthetic bars, read as a live substitution, and two unserviceable
+    symbols stopped a stack where six were trading correctly.
+
+    STOP AUTHORITY IS SCOPED (Task 4, 2026-07-20): the feed is broken only
+    when a substitution is live on a tradeable symbol, or when tradeable
+    symbols are stale and NONE is being served (``any_tradeable_serving``).
+    Staleness on some symbols while others receive real bars on time is a
+    contained, named condition, not grounds to stop the stack.
     """
     db = db or _db_path()
     real_path = _real_feed_mode()
@@ -170,8 +192,8 @@ def feed_ok(threshold_seconds: int, db: str | None = None,
     out: dict = {"fresh": False, "real": False, "ok": False,
                  "source": "unknown", "provenance_checked": False,
                  "real_path": real_path, "symbols": {}, "stale_symbols": [],
-                 "non_real_symbols": [], "onboarding_incomplete": [],
-                 "out_of_window_non_real": [],
+                 "non_real_symbols": [], "unavailable_symbols": [],
+                 "serving_symbols": [], "out_of_window_non_real": [],
                  "recency_window_seconds": recency, "checked_count": 0}
     symbols = tradeable_symbols(db)
     try:
@@ -202,13 +224,22 @@ def feed_ok(threshold_seconds: int, db: str | None = None,
                     row = None
             except Exception:
                 row = None
+            # THE predicate, consulted for every symbol before any freshness
+            # or provenance judgment. On a pre-migration DB it degrades to
+            # any-bar history inside the predicate itself.
+            if not symbol_is_tradeable(conn, sym):
+                out["symbols"][sym] = {
+                    "checked": True, "tradeable": False, "fresh": None,
+                    "source": str(row[1]) if row and row[1] else "none",
+                    "reason": "symbol_unavailable"}
+                out["unavailable_symbols"].append(sym)
+                continue
             if not row or not row[0]:
-                # Zero bars EVER: surfaced but never backfilled. Incomplete
-                # onboarding, distinct from a feed that stopped producing.
-                out["symbols"][sym] = {"checked": True, "fresh": None,
-                                       "source": "none",
-                                       "reason": "onboarding_incomplete"}
-                out["onboarding_incomplete"].append(sym)
+                # Tradeable per predicate but no newest row resolves: an
+                # unreadable read. Report without judging.
+                out["symbols"][sym] = {"checked": True, "tradeable": True,
+                                       "fresh": None, "source": "none",
+                                       "reason": "unreadable"}
                 continue
             age = None
             try:
@@ -219,11 +250,14 @@ def feed_ok(threshold_seconds: int, db: str | None = None,
             fresh = age is not None and age <= threshold_seconds
             source = str(row[1] or "unknown")
             out["symbols"][sym] = {
-                "checked": True, "fresh": fresh, "source": source,
+                "checked": True, "tradeable": True, "fresh": fresh,
+                "source": source,
                 "age_seconds": None if age is None else int(age)}
             if not fresh:
                 out["stale_symbols"].append(sym)
-            if provenance_checked and source not in _REAL_SOURCES:
+            if fresh and source in REAL_SOURCES:
+                out["serving_symbols"].append(sym)
+            if provenance_checked and source not in REAL_SOURCES:
                 # Substitution needs proof the bar reflects the CURRENT run.
                 # An unparseable timestamp cannot prove recency and freshness
                 # already catches it, so it reads out-of-window here.
@@ -237,9 +271,9 @@ def feed_ok(threshold_seconds: int, db: str | None = None,
     out["checked_count"] = sum(
         1 for d in out["symbols"].values() if d.get("checked"))
     out["provenance_checked"] = provenance_checked
-    # Every checked symbol WITH BARS must be fresh. Zero checkable symbols (an
-    # all-equity universe overnight) is a closed market, not a stale feed, and
-    # a zero-bar symbol is an onboarding gap, not a stale one.
+    # Freshness reports over TRADEABLE symbols only. Zero checkable symbols
+    # (an all-equity universe overnight) is a closed market, not a stale feed,
+    # and an unavailable symbol is not a stale one: it was never fresh.
     out["fresh"] = not out["stale_symbols"]
     out["real"] = not out["non_real_symbols"]
     # Aggregate source for the status line: the worst news wins.
@@ -248,14 +282,33 @@ def feed_ok(threshold_seconds: int, db: str | None = None,
             "source", "unknown")
     else:
         for d in out["symbols"].values():
-            if d.get("checked"):
+            if d.get("checked") and d.get("tradeable"):
                 out["source"] = d.get("source", "unknown")
                 break
     if real_path and provenance_checked:
-        out["ok"] = out["fresh"] and out["real"]
+        # Substitution is ALWAYS broken (the emergency, kept at full
+        # strength). Staleness is broken only when nothing is being served:
+        # if any tradeable symbol receives real bars on time the feed is not
+        # broken, however many unserviceable symbols exist.
+        broken = bool(out["non_real_symbols"]) or (
+            bool(out["stale_symbols"]) and not any_tradeable_serving(out))
+        out["ok"] = not broken
     else:
         out["ok"] = out["fresh"]
     return out
+
+
+def any_tradeable_serving(feed: dict) -> bool:
+    """THE stop-authority predicate (Task 4, 2026-07-20).
+
+    True when any tradeable symbol is currently receiving real bars on time
+    (fresh AND real provenance). While this holds, the feed is not broken and
+    stack-wide remediation is not warranted by staleness or by any number of
+    unserviceable symbols. A live substitution on a tradeable symbol OUTRANKS
+    this predicate deliberately: a symbol with real history receiving non-real
+    bars is the emergency, and its remediation is not weakened here.
+    """
+    return bool(feed.get("serving_symbols"))
 
 
 def bars_fresh(threshold_seconds: int, db: str | None = None) -> bool:
@@ -341,8 +394,15 @@ def check_health(cfg: dict | None = None) -> dict:
             "feed_source": feed["source"], "feed_ok": feed["ok"],
             "feed_stale_symbols": list(feed.get("stale_symbols", [])),
             "feed_non_real_symbols": list(feed.get("non_real_symbols", [])),
-            "feed_onboarding_incomplete": list(
-                feed.get("onboarding_incomplete", [])),
+            # symbol_unavailable (never served, contained) and
+            # feed_substitution (served, now non-real, emergency) are DISTINCT
+            # conditions and never share an alarm: unavailable symbols cannot
+            # reach non_real_symbols by construction (feed_ok consults the
+            # tradeable predicate first).
+            "feed_symbol_unavailable": list(
+                feed.get("unavailable_symbols", [])),
+            "feed_serving": any_tradeable_serving(feed),
+            "feed_serving_symbols": list(feed.get("serving_symbols", [])),
             "feed_out_of_window_non_real": list(
                 feed.get("out_of_window_non_real", [])),
             "feed_substitution": substitution,
@@ -529,6 +589,11 @@ def _condition_key(h: dict) -> str:
     return "unhealthy"
 
 
+# Last-logged unavailable set, so run_once logs the condition once per change
+# rather than once per poll. A one-element list so run_once can rebind it.
+_unavailable_logged: list = [set()]
+
+
 def run_once(cfg: dict | None = None) -> dict:
     """One watchdog cycle. On a healthy stack: no action (and any remediation
     hold is released). On a kill trip: notify, NEVER restart (manual resume
@@ -539,11 +604,17 @@ def run_once(cfg: dict | None = None) -> dict:
     outcome. Returns the cycle result."""
     cfg = cfg if cfg is not None else _cfg()
     h = check_health(cfg)
-    if h.get("feed_onboarding_incomplete"):
-        # Reported and logged, never unhealthy by itself: a zero-bar symbol
-        # needs onboarding work, not a restart.
-        log.info("watchdog: onboarding incomplete (zero bars ever): %s",
-                 ", ".join(h["feed_onboarding_incomplete"]))
+    unavailable = set(h.get("feed_symbol_unavailable") or [])
+    if unavailable != _unavailable_logged[0]:
+        # Logged on CHANGE, not every cycle: contained, per-symbol, warrants
+        # pruning, never remediation.
+        if unavailable:
+            log.warning(
+                "watchdog: symbol_unavailable (never received a real bar, "
+                "not tradeable, contained): %s", ", ".join(sorted(unavailable)))
+        else:
+            log.info("watchdog: all previously unavailable symbols resolved")
+        _unavailable_logged[0] = unavailable
     if h.get("feed_out_of_window_non_real"):
         log.info("watchdog: non-real bars OUTSIDE the recency window for %s: "
                  "historical evidence from a prior run, not a substitution",
@@ -639,20 +710,24 @@ def _status_line(h: dict) -> str:
     if not h.get("feed_ok", h["feed_fresh"]):
         stale = h.get("feed_stale_symbols") or []
         non_real = h.get("feed_non_real_symbols") or []
-        if not h["feed_fresh"] and stale:
+        if non_real:
+            feed = (f"NON-REAL ({h.get('feed_source', 'unknown')}: "
+                    f"{_symbols_note(non_real)})")
+        elif not h["feed_fresh"] and stale:
             feed = f"STALE ({_symbols_note(stale)})"
         elif not h["feed_fresh"]:
             feed = "STALE"
-        elif non_real:
-            feed = (f"NON-REAL ({h.get('feed_source', 'unknown')}: "
-                    f"{_symbols_note(non_real)})")
         else:
             feed = f"NON-REAL ({h.get('feed_source', 'unknown')})"
+    elif h.get("feed_stale_symbols"):
+        # Contained staleness: some symbols lag while others are served real
+        # bars on time. Named, never grounds to stop the stack.
+        feed = f"serving (stale contained: {_symbols_note(h['feed_stale_symbols'])})"
     else:
         feed = "fresh"
-    onboarding = h.get("feed_onboarding_incomplete") or []
-    suffix = (f" onboarding_incomplete({_symbols_note(onboarding)})"
-              if onboarding else "")
+    unavailable = h.get("feed_symbol_unavailable") or []
+    suffix = (f" symbol_unavailable({_symbols_note(unavailable)})"
+              if unavailable else "")
     return (f"engine={'up' if h['engine'] else 'DOWN'} "
             f"bridge={bridge} "
             f"backend={'up' if h['backend'] else 'DOWN'} "

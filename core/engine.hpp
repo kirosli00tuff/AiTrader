@@ -352,6 +352,32 @@ private:
     // provenance_block event fires once per transition, not once per bar.
     std::map<std::string, std::string> provenance_block_state_;
 
+    // --- THE TRADEABLE INVARIANT (2026-07-20) ------------------------------
+    // On the real path (feed_mode alpaca_paper) a symbol with NO real bar
+    // history (source real_feed or backfill, any timeframe) is NOT TRADEABLE:
+    // it is not evaluated for entry, no bar is ever fabricated for it, and it
+    // never contributes to a stack-level alarm. Its only condition is
+    // symbol_unavailable: contained, per-symbol, prune-worthy, never
+    // remediation. This is the ONE C++ enforcement point; every consumer
+    // (entry evaluation, the substitution alarm, availability reporting,
+    // discovery onboarding) calls this predicate rather than re-checking.
+    // Offline feed modes are synthetic by design and always tradeable.
+    // The Python mirror is market_data/tradeable.py (same source set, pinned
+    // by tests/test_tradeable_invariant.py against drift).
+    bool symbol_is_tradeable(const std::string& symbol);
+    // Cache over storage_->has_real_bars: seeded lazily per symbol, flipped
+    // true by the first live real tick, refreshed after a discovery onboard
+    // (a backfill may have just landed).
+    std::map<std::string, bool> has_real_bars_;
+    // symbol_unavailable / symbol_available events fire once per transition,
+    // not once per poll. symbol -> currently-logged-unavailable.
+    std::map<std::string, bool> symbol_unavailable_logged_;
+    // Per poll on the real path: flip the cache on real ticks and log the
+    // once-per-transition availability events for whitelisted symbols.
+    void note_symbol_availability(
+        const std::vector<market_data::MarketState>& states,
+        const std::string& ts);
+
     // An open native position plus the advisory context captured at ENTRY, so
     // realized PnL can be attributed back to the factors when it closes.
     struct ActivePosition {

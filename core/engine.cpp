@@ -9,6 +9,7 @@
 #include <fstream>
 #include <functional>
 #include <iterator>
+#include <set>
 #include <stdexcept>
 #include <thread>
 
@@ -336,6 +337,63 @@ bool Engine::is_whitelisted(const std::string& symbol) const {
     return std::find(wl.begin(), wl.end(), symbol) != wl.end();
 }
 
+bool Engine::symbol_is_tradeable(const std::string& symbol) {
+    // THE single C++ enforcement point of the tradeable invariant
+    // (2026-07-20): on the real path a symbol with no real bar history is not
+    // tradeable. Every consumer calls this; nothing re-derives it. Offline
+    // feed modes trade synthetic data by design, so the invariant is a
+    // real-path rule only. See engine.hpp for the full statement and
+    // market_data/tradeable.py for the Python mirror.
+    if (feed_mode_ != "alpaca_paper") return true;
+    auto it = has_real_bars_.find(symbol);
+    if (it == has_real_bars_.end())
+        it = has_real_bars_.emplace(symbol,
+                                    storage_->has_real_bars(symbol)).first;
+    return it->second;
+}
+
+void Engine::note_symbol_availability(
+    const std::vector<market_data::MarketState>& states,
+    const std::string& ts) {
+    // symbol_unavailable is the CONTAINED condition (2026-07-20): a symbol the
+    // venue has never served. Logged once per transition, per symbol. It is
+    // deliberately distinct from feed_substitution (a previously served symbol
+    // going non-real, the emergency): the two never share an alarm. A real
+    // tick arriving is what makes a symbol tradeable, so the flip happens here
+    // and recovery is logged.
+    if (feed_mode_ != "alpaca_paper") return;
+    std::set<std::string> real_now;
+    for (const auto& ms : states)
+        if (ms.data_source == provenance::kRealFeed) real_now.insert(ms.symbol);
+    for (const auto& sym : cfg_.strategy.whitelist) {
+        if (real_now.count(sym)) {
+            has_real_bars_[sym] = true;
+            auto it = symbol_unavailable_logged_.find(sym);
+            if (it != symbol_unavailable_logged_.end() && it->second) {
+                it->second = false;
+                storage_->append_event(
+                    {ts, "symbol_available", "alpaca", sym, "info",
+                     "Symbol " + sym +
+                         " is now receiving real data and is tradeable",
+                     util::to_json({{"symbol", sym}}, {})});
+            }
+            continue;
+        }
+        if (symbol_is_tradeable(sym)) continue;  // absence = freshness question
+        bool& logged = symbol_unavailable_logged_[sym];
+        if (logged) continue;
+        logged = true;
+        storage_->append_event(
+            {ts, "symbol_unavailable", "alpaca", sym, "warn",
+             "SYMBOL UNAVAILABLE: " + sym +
+                 " has never received a real bar on the real path. Not "
+                 "evaluated, no bar fabricated, never a stack-level alarm. "
+                 "Contained per-symbol; warrants pruning from the watchlist.",
+             util::to_json({{"symbol", sym},
+                            {"condition", "symbol_unavailable"}}, {})});
+    }
+}
+
 void Engine::check_feed_substitution(
     const std::vector<market_data::MarketState>& states,
     const std::string& ts) {
@@ -349,6 +407,10 @@ void Engine::check_feed_substitution(
     std::string detail;
     for (const auto& ms : states) {
         if (!is_whitelisted(ms.symbol)) continue;
+        // The tradeable invariant: a never-served symbol can only ever raise
+        // symbol_unavailable (note_symbol_availability), NEVER substitution.
+        // Substitution means a symbol WITH real history went non-real.
+        if (!symbol_is_tradeable(ms.symbol)) continue;
         if (ms.data_source == provenance::kRealFeed) continue;
         any_nonreal = true;
         if (!detail.empty()) detail += ", ";
@@ -681,6 +743,14 @@ void Engine::handle_bar_close(const market_data::MarketState& ms,
     }
 
     // ---------- ENTRY path: consider a new native strategy entry ----------
+    // THE TRADEABLE INVARIANT (2026-07-20): on the real path a symbol with no
+    // real bar history is not evaluated at all. Belt-and-braces here: with
+    // fabrication removed such a symbol closes no bars, so this path should
+    // never see one, but a new bar-producing path must still hit the one
+    // predicate rather than rely on that. symbol_unavailable is logged once
+    // per transition in note_symbol_availability, not here.
+    if (!symbol_is_tradeable(ms.symbol)) return;
+
     // Provenance gate (2026-07-17 outage): on the real path an entry may only
     // open against a real bar (live feed or real backfill). A synthetic or
     // unknown bar skips entry evaluation for this symbol, logged once per
@@ -1221,22 +1291,34 @@ void Engine::onboard_discovered_symbols(const std::string& ts) {
         const int n = static_cast<int>(hist.size());
         bar_history_["alpaca|" + sym] = std::move(hist);
 
-        // 3. Say whether it can actually trade yet. A cold symbol is NOT a
-        //    failure: the warm gate holds it back until it has the bars, exactly
-        //    as it holds a cold configured symbol, and it warms as bars close.
-        //    Reporting the count is what lets the operator tell "warming" from
-        //    "the backfill found nothing, so this will never warm".
+        // 3. Say whether it can actually trade yet, consulting THE tradeable
+        //    predicate. Refresh the cache first: the pass's backfill may have
+        //    just landed real bars. A cold-but-tradeable symbol is NOT a
+        //    failure: the warm gate holds it back until it has the bars, and
+        //    it warms as bars close. A symbol failing the predicate is
+        //    symbol_unavailable: the venue has never served it a real bar, it
+        //    will never warm, and discovery should not have onboarded it
+        //    (verified Python-side since 2026-07-20; this names any that slip
+        //    through on an old watchlist).
+        has_real_bars_[sym] = storage_->has_real_bars(sym);
+        const bool tradeable = symbol_is_tradeable(sym);
         const bool warm = strategy::indicators_warm(n, cfg_.strategy);
+        std::string state = !tradeable ? "symbol_unavailable"
+                                       : (warm ? "warm" : "cold");
         storage_->append_event(
-            {ts, "discovery_onboard", "alpaca", sym, warm ? "info" : "warn",
+            {ts, "discovery_onboard", "alpaca", sym,
+             (warm && tradeable) ? "info" : "warn",
              "Discovery onboarded " + sym + ": " + std::to_string(n) +
                  " bar(s) seeded, indicators " + (warm ? "WARM" : "COLD") +
-                 (warm ? " (tradeable)"
-                       : " (entries wait until warm, needs " +
-                             std::to_string(
-                                 strategy::min_bars_to_warm(cfg_.strategy)) +
-                             ")"),
-             util::to_json({{"symbol", sym}, {"state", warm ? "warm" : "cold"}},
+                 (!tradeable
+                      ? ", NO REAL BAR HISTORY (symbol_unavailable: not "
+                        "tradeable until the venue serves real data)"
+                      : (warm ? " (tradeable)"
+                              : " (entries wait until warm, needs " +
+                                    std::to_string(strategy::min_bars_to_warm(
+                                        cfg_.strategy)) +
+                                    ")")),
+             util::to_json({{"symbol", sym}, {"state", state}},
                            {{"bars", static_cast<double>(n)},
                             {"whitelist_size",
                              static_cast<double>(wl.size())}})});
@@ -1798,6 +1880,12 @@ int Engine::run_iteration() {
         last_poll_live_ =
             static_cast<market_data::AlpacaFeed*>(feed_.get())->last_poll_was_live();
     }
+    // The tradeable invariant, per poll: flip a symbol tradeable on its first
+    // real tick and log symbol_unavailable / symbol_available transitions.
+    // BEFORE the substitution check, so a symbol becoming tradeable this poll
+    // is judged by its ticks, and a never-served symbol never reaches the
+    // substitution alarm at all.
+    note_symbol_availability(states, util::now_iso8601());
     // Detect silent feed substitution at the tick, before any bar closes: the
     // fastest signal the engine has (one poll interval, not one bar).
     check_feed_substitution(states, util::now_iso8601());

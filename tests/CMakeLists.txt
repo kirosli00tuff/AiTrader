@@ -199,3 +199,12 @@ target_link_libraries(test_provenance PRIVATE mal_storage mal_util
                       ${MAL_SQLITE_LIB})
 add_test(NAME provenance COMMAND test_provenance
          WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+# The real path never fabricates (2026-07-20): AlpacaFeed with the bridge down
+# yields NO ticks instead of a synthetic walk. Mutation killer for the
+# fabrication removal. Loopback only, nothing binds, no network.
+add_executable(test_feed_no_fabrication test_feed_no_fabrication.cpp)
+target_link_libraries(test_feed_no_fabrication PRIVATE mal_market_data
+                      mal_bridge mal_util)
+add_test(NAME feed_no_fabrication COMMAND test_feed_no_fabrication
+         WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})

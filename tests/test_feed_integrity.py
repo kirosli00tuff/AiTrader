@@ -151,11 +151,20 @@ def _fresh_ts():
 
 
 def test_advancing_synthetic_bars_do_not_read_healthy(tmp_path, monkeypatch):
-    # THE outage check: fresh timestamp, synthetic source, real feed mode.
+    # THE outage check: fresh timestamp, synthetic source, real feed mode, on
+    # a symbol with real history (a never-served symbol is symbol_unavailable
+    # instead, tested in test_tradeable_invariant.py).
     monkeypatch.setattr(watchdog, "tradeable_symbols",
                         lambda db=None: ["BTC/USD"])
     monkeypatch.setattr(watchdog, "_real_feed_mode", lambda: True)
     db = _feed_db(tmp_path, _fresh_ts(), "synthetic")
+    conn = sqlite3.connect(db)
+    conn.execute(
+        "INSERT INTO bars(venue,symbol,timeframe,timestamp,open,high,low,"
+        "close,volume,source) VALUES('alpaca','BTC/USD','5min',"
+        "'2026-07-01T00:00:00Z',1,2,0.5,1.5,10,'backfill')")
+    conn.commit()
+    conn.close()
     out = watchdog.feed_ok(900, db)
     assert out["fresh"] is True
     assert out["ok"] is False

@@ -247,6 +247,24 @@ def apply_event(conn: sqlite3.Connection, ev: WatchlistEvent) -> dict:
             "reason": "removed" if applied else "not_on_watchlist"}
 
 
+def journal_onboarding_refusal(conn: sqlite3.Connection, symbol: str, *,
+                               reason: str, ts: str | None = None) -> dict:
+    """Journal a REFUSED onboarding without touching the watchlist table.
+
+    Serviceability verification (2026-07-20): a Stage-C survivor whose
+    backfill returned nothing is NOT added, because the venue serves no data
+    for it and it could only ever sit unavailable (the MANA/USD and RUNE/USD
+    shape). The refusal still lands in the event journal, applied=0, so the
+    audit trail shows discovery looked, the venue could not serve the symbol,
+    and the symbol was not added.
+    """
+    ensure_schema(conn)
+    ev = WatchlistEvent(action="add", symbol=symbol, source="discovery",
+                        reason=reason)
+    _journal(conn, ev, ts or _utcnow_iso(), False)
+    return {"applied": False, "reason": "venue_unserviceable"}
+
+
 def add_from_discovery(conn: sqlite3.Connection, symbol: str, *, reason: str,
                        sleeve_target: str = "quant_core", score: float = 0.0,
                        asset_class: str = "", ts: str | None = None) -> dict:

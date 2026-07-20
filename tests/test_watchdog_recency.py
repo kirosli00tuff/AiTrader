@@ -90,7 +90,7 @@ def _health(*, degraded=False, substitution=False, stale=False, kill=False,
             "feed_ok": not substitution and not stale,
             "feed_stale_symbols": ["LDO/USD"] if stale else [],
             "feed_non_real_symbols": ["BTC/USD"] if substitution else [],
-            "feed_onboarding_incomplete": [], "feed_out_of_window_non_real": [],
+            "feed_symbol_unavailable": [], "feed_out_of_window_non_real": [],
             "feed_substitution": substitution, "kill_tripped": kill,
             "healthy": healthy}
 
@@ -128,11 +128,13 @@ def _wire(monkeypatch, *, health, running=True, age=None, posts=None,
 def test_out_of_window_synthetic_bar_is_not_substitution(tmp_path,
                                                          monkeypatch):
     # The exact 2026-07-20 shape: the newest LDO/USD row is a synthetic
-    # leftover from a PRIOR run, two hours old. Historical evidence, logged
+    # leftover from a PRIOR run, two hours old (older backfill rows make it
+    # tradeable, matching the real LDO). Historical evidence, logged
     # out-of-window. The symbol is still STALE, which is the correct question
     # to raise about it: freshness, not substitution.
     _pin(monkeypatch, ["BTC/USD", "LDO/USD"])
     db = _mk_db(tmp_path, [("BTC/USD", _ago(60), "backfill"),
+                           ("LDO/USD", _ago(86400), "backfill"),
                            ("LDO/USD", _ago(7200), "synthetic")])
     out = watchdog.feed_ok(900, db, recency_window_seconds=900)
     assert out["non_real_symbols"] == []
@@ -143,10 +145,12 @@ def test_out_of_window_synthetic_bar_is_not_substitution(tmp_path,
 
 
 def test_in_window_synthetic_bar_is_substitution(tmp_path, monkeypatch):
-    # A synthetic bar RECENT enough to reflect the running process is the
-    # genuine substitution state and must still be detected.
+    # A synthetic bar RECENT enough to reflect the running process, on a
+    # symbol WITH real history, is the genuine substitution state and must
+    # still be detected, even while BTC is served on time.
     _pin(monkeypatch, ["BTC/USD", "LDO/USD"])
     db = _mk_db(tmp_path, [("BTC/USD", _ago(60), "backfill"),
+                           ("LDO/USD", _ago(86400), "backfill"),
                            ("LDO/USD", _ago(60), "synthetic")])
     out = watchdog.feed_ok(900, db, recency_window_seconds=900)
     assert out["non_real_symbols"] == ["LDO/USD"]
@@ -156,7 +160,8 @@ def test_in_window_synthetic_bar_is_substitution(tmp_path, monkeypatch):
 
 def test_check_health_substitution_respects_the_window(tmp_path, monkeypatch):
     _pin(monkeypatch, ["LDO/USD"])
-    old = _mk_db(tmp_path, [("LDO/USD", _ago(7200), "synthetic")])
+    old = _mk_db(tmp_path, [("LDO/USD", _ago(86400), "backfill"),
+                            ("LDO/USD", _ago(7200), "synthetic")])
     monkeypatch.setattr(watchdog, "_db_path", lambda: old)
     monkeypatch.setattr(watchdog, "bridge_state",
                         lambda: {"reachable": True, "status": "ok",
@@ -171,25 +176,25 @@ def test_check_health_substitution_respects_the_window(tmp_path, monkeypatch):
     assert h["feed_out_of_window_non_real"] == ["LDO/USD"]
 
 
-# --- TASK 3: zero bars ever is onboarding-incomplete, never stale ------------
+# --- TASK 3: no real bar history is symbol_unavailable, never stale ----------
 
 def test_zero_bar_symbol_is_not_counted_stale(tmp_path, monkeypatch):
     _pin(monkeypatch, ["BTC/USD", "MANA/USD"])
     db = _mk_db(tmp_path, [("BTC/USD", _ago(60), "backfill")])
     out = watchdog.feed_ok(900, db)
     assert out["stale_symbols"] == []
-    assert out["onboarding_incomplete"] == ["MANA/USD"]
+    assert out["unavailable_symbols"] == ["MANA/USD"]
     assert out["fresh"] is True and out["ok"] is True
 
 
-def test_onboarding_incomplete_named_in_status_line():
+def test_symbol_unavailable_named_in_status_line():
     h = {"engine": True, "bridge": True, "backend": True, "feed_fresh": True,
          "feed_ok": True, "feed_source": "real_feed",
          "feed_stale_symbols": [], "feed_non_real_symbols": [],
-         "feed_onboarding_incomplete": ["MANA/USD", "RUNE/USD"],
+         "feed_symbol_unavailable": ["MANA/USD", "RUNE/USD"],
          "kill_tripped": False, "healthy": True}
     line = watchdog._status_line(h)
-    assert "onboarding_incomplete" in line and "MANA/USD" in line
+    assert "symbol_unavailable" in line and "MANA/USD" in line
 
 
 # --- TASK 2: the startup grace suppresses feed remediation, then expires -----
@@ -333,40 +338,51 @@ def _wire_end_to_end(monkeypatch, db, *, age):
 
 def test_observed_20260720_shape_does_not_stop_a_fresh_stack(tmp_path,
                                                              monkeypatch):
-    # Reproduction: newest LDO/QQQ/SPY rows are synthetic leftovers from the
-    # prior run (out of window), MANA/USD and RUNE/USD sit on the watchlist
-    # with zero bars, the stack started seconds ago, overnight (equities
-    # unchecked). The watchdog must NOT stop it.
-    _pin(monkeypatch, ["BTC/USD", "ETH/USD", "SPY", "QQQ"], discovery=True,
-         rth=False)
-    db = _mk_db(tmp_path, [("BTC/USD", _ago(60), "backfill"),
-                           ("ETH/USD", _ago(60), "backfill"),
-                           ("LDO/USD", _ago(7200), "synthetic"),
-                           ("SPY", _ago(7200), "synthetic"),
-                           ("QQQ", _ago(7200), "synthetic")])
+    # Reproduction of the live 2026-07-20 kill: six symbols receive real bars
+    # on time, MANA/USD and RUNE/USD sit on the watchlist with nothing but
+    # IN-WINDOW fabricated synthetic bars (the engine walked them at the same
+    # timestamps as the real bars). The stack-level substitution condition
+    # must NOT fire: those symbols have no real history, so they are
+    # symbol_unavailable, contained, and the stack keeps trading. Well past
+    # the startup grace, deliberately: containment must hold on its own, not
+    # lean on the grace.
+    _pin(monkeypatch,
+         ["BTC/USD", "ETH/USD", "SPY", "QQQ"], discovery=True, rth=False)
+    db = _mk_db(tmp_path, [("BTC/USD", _ago(60), "real_feed"),
+                           ("ETH/USD", _ago(60), "real_feed"),
+                           ("LDO/USD", _ago(86400), "backfill"),
+                           ("LDO/USD", _ago(60), "real_feed"),
+                           ("MANA/USD", _ago(60), "synthetic"),
+                           ("RUNE/USD", _ago(60), "synthetic")])
     for sym in ("LDO/USD", "MANA/USD", "RUNE/USD"):
         _add_watchlist(db, sym)
-    posts, notes = _wire_end_to_end(monkeypatch, db, age=30)
+    posts, notes = _wire_end_to_end(monkeypatch, db, age=5000)
     res = watchdog.run_once({})
     h = res["health"]
     assert h["feed_substitution"] is False       # the incident's wrong verdict
-    assert h["feed_out_of_window_non_real"] == ["LDO/USD"]
-    assert h["feed_onboarding_incomplete"] == ["MANA/USD", "RUNE/USD"]
-    assert h["feed_stale_symbols"] == ["LDO/USD"]  # a freshness question
-    assert res["action"] == "grace_observed"     # logged, not remediated
+    assert h["feed_symbol_unavailable"] == ["MANA/USD", "RUNE/USD"]
+    assert h["feed_non_real_symbols"] == []      # never share the alarm
+    assert h["feed_serving"] is True
+    assert h["healthy"] is True
+    assert res["action"] == "none"               # the stack keeps trading
     assert posts == []                           # /engine/stop never sent
     assert notes == []
 
 
 def test_genuine_live_substitution_after_grace_still_remediates(tmp_path,
                                                                 monkeypatch):
-    # The other direction: a synthetic bar INSIDE the window after the grace
-    # is a real substitution and triggers the designed stop-then-start.
-    _pin(monkeypatch, ["BTC/USD"])
-    db = _mk_db(tmp_path, [("BTC/USD", _ago(60), "synthetic")])
+    # The other direction: a symbol WITH real history whose in-window newest
+    # bar is synthetic, past the grace, is a real substitution and triggers
+    # the designed stop-then-start. ETH serving on time does NOT weaken it:
+    # substitution outranks the serving predicate.
+    _pin(monkeypatch, ["BTC/USD", "ETH/USD"])
+    db = _mk_db(tmp_path, [("BTC/USD", _ago(86400), "backfill"),
+                           ("BTC/USD", _ago(60), "synthetic"),
+                           ("ETH/USD", _ago(60), "real_feed")])
     posts, notes = _wire_end_to_end(monkeypatch, db, age=2000)
     res = watchdog.run_once({})
     assert res["health"]["feed_substitution"] is True
+    assert res["health"]["feed_serving"] is True  # served, and still broken
     assert res["action"] == "restarted"
     assert posts == ["/engine/stop", "/engine/start"]
     assert any("Restarted" in n for n in notes)

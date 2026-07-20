@@ -49,29 +49,46 @@ def _pin(monkeypatch, symbols, *, real=True, discovery=False, rth=True):
 def test_single_stale_symbol_detected_by_name_while_others_fresh(
         tmp_path, monkeypatch):
     # THE SOL/USD shape: BTC current, SOL a day old. The old probe read the
-    # newest crypto bar (BTC) and reported fresh.
+    # newest crypto bar (BTC) and reported fresh. Detection stays per-symbol
+    # and named. Stop authority changed 2026-07-20: BTC is being SERVED real
+    # bars on time, so the feed is not broken and the condition is contained
+    # (named, never grounds to stop the stack).
     _pin(monkeypatch, ["BTC/USD", "SOL/USD"])
     db = _mk_db(tmp_path, [("BTC/USD", _now_iso(), "real_feed"),
                            ("SOL/USD", "2026-07-17T06:10:00Z", "backfill")])
     out = watchdog.feed_ok(900, db)
     assert out["fresh"] is False
-    assert out["ok"] is False
     assert out["stale_symbols"] == ["SOL/USD"]
     assert out["symbols"]["BTC/USD"]["fresh"] is True
     assert out["symbols"]["SOL/USD"]["fresh"] is False
+    assert out["serving_symbols"] == ["BTC/USD"]
+    assert out["ok"] is True             # contained, not broken
 
 
-def test_symbol_with_no_bars_ever_is_onboarding_incomplete_not_stale(
+def test_all_tradeable_stale_is_a_broken_feed(tmp_path, monkeypatch):
+    # Nothing is being served: the feed IS broken and remediation is
+    # warranted. The scoped stop authority must not blind the watchdog to a
+    # genuinely dead feed.
+    _pin(monkeypatch, ["BTC/USD", "SOL/USD"])
+    db = _mk_db(tmp_path, [("BTC/USD", "2026-07-17T06:10:00Z", "real_feed"),
+                           ("SOL/USD", "2026-07-17T06:10:00Z", "backfill")])
+    out = watchdog.feed_ok(900, db)
+    assert out["serving_symbols"] == []
+    assert out["ok"] is False
+
+
+def test_symbol_with_no_bars_ever_is_unavailable_not_stale(
         tmp_path, monkeypatch):
-    # Never polled and never backfilled: an INCOMPLETE ONBOARDING, named with
-    # the reason, never a stale feed (2026-07-20: MANA/USD and RUNE/USD read
-    # as stale and helped kill every fresh start).
+    # Never polled and never backfilled: SYMBOL UNAVAILABLE per the tradeable
+    # predicate, named with the reason, never a stale feed (2026-07-20:
+    # MANA/USD and RUNE/USD read as stale and helped kill every fresh start).
     _pin(monkeypatch, ["BTC/USD", "SOL/USD"])
     db = _mk_db(tmp_path, [("BTC/USD", _now_iso(), "real_feed")])
     out = watchdog.feed_ok(900, db)
     assert out["stale_symbols"] == []
-    assert out["onboarding_incomplete"] == ["SOL/USD"]
-    assert out["symbols"]["SOL/USD"]["reason"] == "onboarding_incomplete"
+    assert out["unavailable_symbols"] == ["SOL/USD"]
+    assert out["symbols"]["SOL/USD"]["reason"] == "symbol_unavailable"
+    assert out["symbols"]["SOL/USD"]["tradeable"] is False
     assert out["fresh"] is True and out["ok"] is True
 
 
@@ -105,9 +122,9 @@ def test_watchlist_member_is_checked_when_discovery_on(tmp_path, monkeypatch):
     _add_watchlist(db, "LDO/USD")
     assert watchdog.tradeable_symbols(db) == ["BTC/USD", "LDO/USD"]
     out = watchdog.feed_ok(900, db)
-    # Surfaced but never backfilled: reported as an incomplete onboarding,
-    # never as a stale feed, and never unhealthy by itself.
-    assert out["onboarding_incomplete"] == ["LDO/USD"]
+    # Surfaced but never backfilled: symbol_unavailable per the tradeable
+    # predicate, never a stale feed, and never unhealthy by itself.
+    assert out["unavailable_symbols"] == ["LDO/USD"]
     assert out["stale_symbols"] == []
     assert out["ok"] is True
 
@@ -149,14 +166,21 @@ def test_stale_equity_detected_during_rth(tmp_path, monkeypatch):
                            ("SPY", "2026-07-17T19:55:00Z", "real_feed")])
     out = watchdog.feed_ok(900, db)
     assert "SPY" in out["stale_symbols"]
-    assert out["ok"] is False
+    # BTC is still served: named and contained, not a broken feed (2026-07-20
+    # scoped stop authority).
+    assert out["ok"] is True
 
 
 # --- Provenance stays per-symbol ---------------------------------------------
 
 def test_fresh_but_synthetic_symbol_named_on_real_path(tmp_path, monkeypatch):
+    # ETH has real HISTORY (tradeable) and its newest bar is synthetic and
+    # in-window: the genuine substitution shape. It stays a broken feed even
+    # while BTC is served, deliberately: substitution outranks the serving
+    # predicate.
     _pin(monkeypatch, ["BTC/USD", "ETH/USD"], real=True)
     db = _mk_db(tmp_path, [("BTC/USD", _now_iso(), "real_feed"),
+                           ("ETH/USD", "2026-07-17T06:10:00Z", "backfill"),
                            ("ETH/USD", _now_iso(), "synthetic")])
     out = watchdog.feed_ok(900, db)
     assert out["fresh"] is True

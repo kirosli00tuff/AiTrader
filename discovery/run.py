@@ -259,13 +259,33 @@ def run_once(asset_class: str, *, db_path: str = _DEFAULT_DB,
         whale_reasons = {f.symbol: f.whale_reason for f in result.finalists
                          if f.whale_surfaced}
 
-        # Stage-C survivors join the watchlist. An "avoid" verdict is NOT added:
-        # the watchlist is a CANDIDATE list, not an archive of rejections. The
-        # pass record still shows the funnel looked and declined.
-        added = []
-        for c in payload.get("candidates", []):
-            if c.get("verdict") == "avoid":
-                continue
+        # Stage-C survivors join the watchlist. An "avoid" verdict is NOT
+        # added: the watchlist is a CANDIDATE list, not an archive of
+        # rejections. The pass record still shows the funnel looked and
+        # declined.
+        #
+        # SERVICEABILITY IS VERIFIED FIRST (2026-07-20). Discovery ranks its
+        # universe through Finnhub while onboarding backfills through Alpaca,
+        # and the venues do not carry the same pairs: MANA/USD and RUNE/USD
+        # surfaced, backfilled ZERO bars, and sat active with nothing but
+        # fabricated data until two unserviceable symbols stopped the stack.
+        # So the backfill now runs BEFORE the add, and a candidate joins the
+        # watchlist only if the tradeable predicate confirms real bar history
+        # afterward. A refused candidate is journalled (applied=0) and logged.
+        # When the backfill cannot run at all (no data credentials, the
+        # offline environment), nothing can be verified and the add proceeds
+        # as before: offline modes are exempt from the real-path invariant,
+        # and on the real path every consumer of the predicate still refuses
+        # the symbol.
+        candidates = [c for c in payload.get("candidates", [])
+                      if c.get("verdict") != "avoid"]
+        conn.commit()  # release the write lock before backfill's own writes
+        onboarded = onboard([str(c.get("symbol", "")) for c in candidates],
+                            db_path)
+        verified = onboarded.get("status") == "ok"
+        from market_data.tradeable import symbol_is_tradeable
+        added, refused = [], []
+        for c in candidates:
             # Say WHY it is on the list, including when whale surfaced it, so
             # the operator can tell a whale-found name from a technical one.
             sym = str(c.get("symbol", ""))
@@ -273,6 +293,16 @@ def run_once(asset_class: str, *, db_path: str = _DEFAULT_DB,
                       f"{c.get('conviction')}")
             if sym in whale_surfaced:
                 reason += f" · surfaced by {whale_reasons.get(sym, 'whale activity')}"
+            if verified and not symbol_is_tradeable(conn, sym):
+                watchlist.journal_onboarding_refusal(
+                    conn, sym, ts=ts,
+                    reason="onboarding refused: backfill returned no bars, "
+                           "the venue does not serve this symbol")
+                log.warning(
+                    "discovery: refused to onboard %s: backfill returned "
+                    "nothing (venue unserviceable)", sym)
+                refused.append(sym)
+                continue
             r = watchlist.add_from_discovery(
                 conn, sym,
                 reason=reason,
@@ -280,7 +310,7 @@ def run_once(asset_class: str, *, db_path: str = _DEFAULT_DB,
                 score=float(c.get("conviction") or 0.0),
                 asset_class=asset_class, ts=ts)
             if r["applied"]:
-                added.append(c.get("symbol"))
+                added.append(sym)
 
         pruned = watchlist.prune_stale(
             conn, settings.watchlist_stale_hours(cfg_path), now)
@@ -288,18 +318,13 @@ def run_once(asset_class: str, *, db_path: str = _DEFAULT_DB,
             conn, settings.watchlist_max_size(cfg_path), ts)
         conn.commit()
 
-        # A surfaced symbol with no bars can never warm, so it could never trade
-        # and the pass would only have NAMED it. Backfill before returning, so
-        # by the time the engine reads the watchlist the history is already
-        # there and the symbol warms through the normal path.
-        onboarded = onboard(added, db_path)
-
         return {
             "status": payload.get("status", "ok"),
             "asset_class": asset_class,
             "pass_id": pass_id,
             "onboarded": onboarded.get("onboarded", []),
             "onboard_status": onboarded.get("status", "noop"),
+            "onboard_refused": refused,
             "universe_count": payload["universe_count"],
             "finalists": payload["finalists_count"],
             "survivors": payload["survivors_count"],
