@@ -92,11 +92,16 @@ def _real_feed_mode() -> bool:
 
 def _discovery_enabled() -> bool:
     """Whether discovery is on, resolved the way the engine resolves it
-    (controls.json over config). Unprovable reads as off."""
+    (controls.json over config). Unprovable reads as off.
+
+    A thin delegate to market_data.universe.discovery_enabled, not a copy: one
+    implementation, and this stays the watchdog's own seam so a test can pin
+    the flag without reaching into the resolver.
+    """
     try:
-        from discovery import settings as discovery_settings
-        return bool(discovery_settings.discovery_enabled(None))
-    except Exception:
+        from market_data.universe import discovery_enabled
+        return bool(discovery_enabled(None))
+    except Exception:  # noqa: BLE001
         return False
 
 
@@ -111,32 +116,30 @@ def _equity_market_open() -> bool:
 
 
 def tradeable_symbols(db: str | None = None) -> list[str]:
-    """Every symbol the engine is actually trading: the profile-resolved static
-    whitelist plus the active watchlist members when discovery is enabled.
+    """Every symbol the engine POLLS: the declared core plus the active
+    watchlist members when discovery is enabled.
 
-    Watchlist members are read directly (status active, the only status the
-    engine merges), read-only, and a missing table degrades to no members: the
-    watchdog must never create schema or block on an advisory table.
+    Resolved through ``market_data.universe.declared_symbols``, THE one
+    resolution point (2026-07-21). The watchdog used to build this union
+    itself, which made it a third construction of a list the stack and the
+    engine each built their own way.
+
+    DECLARED, not verified, deliberately: feed_ok classifies each symbol
+    against the tradeable predicate below, so a declared symbol that fails it
+    is NAMED as ``symbol_unavailable`` instead of quietly vanishing from the
+    report. An unreadable watchlist degrades to no members: the watchdog must
+    never create schema or block on an advisory table.
     """
-    symbols = list(stack.whitelist())
-    if not _discovery_enabled():
-        return symbols
     try:
-        from discovery.watchlist import STATUS_ACTIVE
+        from market_data.universe import declared_symbols
         conn = sqlite3.connect(f"file:{db or _db_path()}?mode=ro", uri=True,
                                timeout=2.0)
         try:
-            rows = conn.execute(
-                "SELECT symbol FROM watchlist WHERE status=? ORDER BY symbol",
-                (STATUS_ACTIVE,)).fetchall()
+            return declared_symbols(conn, discovery_on=_discovery_enabled())
         finally:
             conn.close()
-        for r in rows:
-            if r and r[0] and r[0] not in symbols:
-                symbols.append(str(r[0]))
-    except Exception:
-        pass  # advisory read: unreadable watchlist means no members
-    return symbols
+    except Exception:  # noqa: BLE001 - advisory read, never fatal
+        return list(stack.whitelist())
 
 
 def feed_ok(threshold_seconds: int, db: str | None = None,
@@ -385,6 +388,12 @@ def check_health(cfg: dict | None = None) -> dict:
     # recency window; an older non-real bar is historical evidence.
     substitution = bool(feed.get("real_path") and feed.get("provenance_checked")
                         and feed.get("non_real_symbols"))
+    # The universe is a LOUD but NON-REMEDIATING condition (2026-07-21). An
+    # empty or nearly empty universe is real and must be notified, and a
+    # restart cannot conjure symbols the venue does not serve, so it is
+    # reported like a kill trip: said out loud, never acted on by a restart.
+    # It is deliberately kept out of `healthy` for that reason.
+    uni = universe_state()
     healthy = bool(running.get("running") and bridge_ok and backend_ok
                    and feed["ok"])
     return {"engine": bool(running.get("running")), "bridge": bridge_ok,
@@ -406,7 +415,22 @@ def check_health(cfg: dict | None = None) -> dict:
             "feed_out_of_window_non_real": list(
                 feed.get("out_of_window_non_real", [])),
             "feed_substitution": substitution,
+            "universe_symbols": list(uni.get("symbols", [])),
+            "universe_core": list(uni.get("core", [])),
+            "universe_periphery": list(uni.get("periphery", [])),
+            "universe_unserviceable": list(uni.get("unserviceable", [])),
+            "universe_degraded": bool(uni.get("degraded")),
+            "universe_degraded_reason": str(uni.get("degraded_reason", "")),
             "kill_tripped": tripped, "healthy": healthy}
+
+
+def universe_state(db: str | None = None) -> dict:
+    """The resolved tradeable universe, from THE one resolution point."""
+    try:
+        from market_data import universe
+        return universe.resolve(db_path=db or _db_path()).to_dict()
+    except Exception:  # noqa: BLE001 - advisory read, never fatal
+        return {}
 
 
 def notify(message: str, cfg: dict | None = None, title: str = "AiTrader watchdog") -> bool:
@@ -593,6 +617,45 @@ def _condition_key(h: dict) -> str:
 # rather than once per poll. A one-element list so run_once can rebind it.
 _unavailable_logged: list = [set()]
 
+# Last universe-degraded notification: whether it was degraded on the previous
+# cycle and when it was last announced, so a persistent empty universe is loud
+# once per hold window rather than once per poll. A dict mutated in place, so a
+# test can pin one key through monkeypatch.setitem and have it restored.
+_universe_notified: dict = {"degraded": False, "ts": 0.0}
+
+
+def _note_universe(h: dict, cfg: dict) -> bool:
+    """Announce an empty or nearly empty universe. LOUD, never remediating.
+
+    The stack must never run with a silently empty universe (2026-07-21). A
+    restart cannot make a venue serve a symbol, so this notifies and holds its
+    peace exactly like a kill trip: said out loud, never acted on. Returns
+    True when a notification was sent.
+    """
+    state = _universe_notified
+    degraded = bool(h.get("universe_degraded"))
+    now = time.time()
+    if not degraded:
+        if state["degraded"]:
+            log.info("watchdog: tradeable universe recovered (%d symbols)",
+                     len(h.get("universe_symbols") or []))
+            notify("Recovered: the tradeable universe is populated again "
+                   f"({len(h.get('universe_symbols') or [])} symbols).", cfg)
+            state.update({"degraded": False, "ts": now})
+            return True
+        return False
+    window = float(cfg.get("remediation_hold_window_seconds", 1800))
+    due = (not state["degraded"]) or (now - float(state["ts"]) >= window)
+    log.error("watchdog: %s", h.get("universe_degraded_reason", ""))
+    if not due:
+        return False
+    state.update({"degraded": True, "ts": now})
+    notify(str(h.get("universe_degraded_reason", "")) +
+           " Nothing is remediated: a restart cannot make the venue serve a "
+           "symbol. An operator has to fix the core or the credentials.", cfg,
+           title="AiTrader universe")
+    return True
+
 
 def run_once(cfg: dict | None = None) -> dict:
     """One watchdog cycle. On a healthy stack: no action (and any remediation
@@ -619,6 +682,11 @@ def run_once(cfg: dict | None = None) -> dict:
         log.info("watchdog: non-real bars OUTSIDE the recency window for %s: "
                  "historical evidence from a prior run, not a substitution",
                  ", ".join(h["feed_out_of_window_non_real"]))
+    # An empty or nearly empty universe is announced on every cycle shape,
+    # including a healthy one: the stack can be perfectly healthy and have
+    # nothing it may trade, which is precisely the state that must never be
+    # silent. It never changes the action taken.
+    _note_universe(h, cfg)
     if h["kill_tripped"]:
         notify("Kill switch TRIPPED. Trading halted. Manual resume required. "
                "Watchdog will NOT auto-resume.", cfg)

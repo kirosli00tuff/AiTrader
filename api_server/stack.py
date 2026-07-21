@@ -80,21 +80,27 @@ def interval_seconds() -> int:
 
 
 def whitelist() -> list[str]:
-    """The whitelist the engine actually trades, profile-resolved.
+    """The DECLARED core: the config-declared, profile-resolved whitelist.
 
-    config.cpp load_config overlays the active_quant block over strategy when
-    strategy.profile selects it, so reading strategy.whitelist alone reports
-    the swing set while an active_quant engine trades the wider one. Mirror
-    the overlay here so warm reports and the watchdog check the same symbols
-    the engine polls.
+    Delegates to ``market_data.universe.declared_core``, THE one resolution
+    point (2026-07-21). It used to build the profile overlay here, which made
+    this a second copy of a list ``api_server.controls`` and ``ops.watchdog``
+    also built their own way. Declared is not verified: call
+    ``market_data.universe.resolve`` (or ``tradeable_universe`` below) for the
+    universe the engine may actually trade.
     """
-    cfg = store.load_config()
-    strat = cfg.get("strategy", {}) or {}
-    raw = str(strat.get("whitelist", "BTC/USD,ETH/USD,SPY,QQQ"))
-    if str(strat.get("profile", "swing")) == "active_quant":
-        aq = cfg.get("active_quant", {}) or {}
-        raw = str(aq.get("whitelist", raw) or raw)
-    return [s.strip() for s in raw.split(",") if s.strip()]
+    from market_data.universe import declared_core
+    return declared_core()
+
+
+def tradeable_universe(db: str | None = None) -> dict:
+    """The resolved tradeable universe: verified core union verified periphery.
+
+    One call, so the warm report, the supervisor, the start script, and the
+    watchdog can never disagree about what the engine may trade.
+    """
+    from market_data import universe
+    return universe.resolve(db_path=db or db_path()).to_dict()
 
 
 def _strat_int(cfg: dict, key: str, default: int) -> int:
@@ -151,8 +157,17 @@ def materialize_week_config(out_path: str) -> str:
 # --- command builders --------------------------------------------------------
 
 def backfill_cmd(db: str | None = None) -> list[str]:
+    """Backfill EVERY core symbol, derived from the active profile's core.
+
+    It used to pass no --symbols at all, which fell through to a hardcoded
+    four-name literal inside market_data.alpaca_source: under the active_quant
+    profile SOL/USD, AAPL, MSFT, and NVDA were declared in the core and never
+    requested, so three liquid equities the venue certainly serves sat at zero
+    bars. The list now comes from the one resolution point, so a symbol added
+    to the profile is fetched without a second edit anywhere.
+    """
     return [python_bin(), "-m", "market_data.alpaca_source",
-            "--db", db or db_path()]
+            "--db", db or db_path(), "--symbols", ",".join(whitelist())]
 
 
 def bridge_cmd() -> list[str]:
@@ -243,37 +258,84 @@ def api_health_url() -> str:
 # --- warm report (no network) -----------------------------------------------
 
 def warm_report(db: str | None = None) -> dict:
-    """Per-symbol warm state from the bars table. Read-only, no network.
+    """Per-symbol warm state over the resolved universe. Read-only, no network.
 
-    Mirrors the script's PYWARM block: a symbol is warm when it holds at least
-    `warm_need` bars at the configured timeframe. A cold symbol is only a
-    warning, the engine's warm-state gate holds it back and never trades on
-    partial data.
+    THE WARM CHECK CONSULTS THE TRADEABLE PREDICATE, NOT BAR COUNT ALONE
+    (2026-07-21). Counting bars alone reported SOL/USD WARM on 8,519 bars that
+    every one carried source ``unknown``: real Alpaca history from before the
+    provenance migration, but unprovable, so the predicate refuses it and the
+    engine would never have traded it. A warm check that disagrees with the
+    predicate tells the operator a symbol is ready when the engine has already
+    ruled it out. A symbol is warm only when it is TRADEABLE and holds at least
+    ``warm_need`` bars at the configured timeframe.
+
+    Every DECLARED core symbol is reported, so one held out of the universe
+    stays visible rather than quietly vanishing from the report, and the
+    verified periphery is reported beside it. A cold symbol is a warning: the
+    engine's warm gate holds it back and never trades on partial data.
     """
     db = db or db_path()
     need = warm_need()
     tf = bar_timeframe()
-    symbols = []
+    from market_data import universe as _universe
+    symbols: list[dict] = []
     all_warm = True
+    uni = _universe.Universe()
     try:
         con = sqlite3.connect(db)
         try:
-            for sym in whitelist():
+            uni = _universe.resolve(con)
+            tradeable = set(uni.symbols)
+            reported = list(uni.declared_core) + [
+                s for s in uni.periphery if s not in uni.declared_core]
+            for sym in reported:
                 try:
                     n = con.execute(
                         "SELECT COUNT(*) FROM bars WHERE symbol=? AND timeframe=?",
                         (sym, tf)).fetchone()[0]
                 except Exception:
                     n = 0
-                warm = n >= need
+                is_tradeable = sym in tradeable
+                warm = is_tradeable and n >= need
+                state = ("unserviceable" if not is_tradeable
+                         else ("warm" if warm else "cold"))
                 all_warm = all_warm and warm
-                symbols.append({"symbol": sym, "bars": int(n), "warm": warm})
+                symbols.append({"symbol": sym, "bars": int(n), "warm": warm,
+                                "tradeable": is_tradeable, "state": state,
+                                "part": ("core" if sym in uni.declared_core
+                                         else "periphery")})
         finally:
             con.close()
     except Exception:
         all_warm = False
     return {"need": need, "timeframe": tf, "symbols": symbols,
-            "all_warm": all_warm and bool(symbols)}
+            "all_warm": all_warm and bool(symbols),
+            "universe": uni.to_dict(),
+            "degraded": uni.degraded,
+            "degraded_reason": uni.degraded_reason}
+
+
+def verify_core(db: str | None = None) -> dict:
+    """Verify every CORE symbol at startup instead of assuming it.
+
+    Runs the SAME serviceability verification discovery runs before onboarding
+    a candidate: attempt the backfill, then check the tradeable predicate. A
+    core symbol that verifies is warmed and tradeable. One that fails is
+    reported unserviceable and held out of the resolved universe, exactly as
+    discovery refuses an unserviceable candidate.
+
+    This REPLACES the blind backfill in the start sequence: it fetches the
+    same bars, through the same bounded subprocess, and then says per symbol
+    whether the venue actually served them. Best-effort like the old backfill,
+    a missing key is a warning and verifies nothing.
+    """
+    from market_data import universe as _universe
+    try:
+        return _universe.verify_core(db or db_path(), fetch=run_backfill)
+    except Exception as e:  # noqa: BLE001 - a start must not die on a probe
+        return {"core": [], "verified": False, "serviceable": [],
+                "unserviceable": [], "bars_written": {}, "status": "error",
+                "reason": type(e).__name__, "enforced": False}
 
 
 # --- process control (mockable in tests) ------------------------------------
@@ -296,15 +358,33 @@ def spawn(cmd: list[str], env: dict | None = None,
                             start_new_session=True)
 
 
-def run_backfill(db: str | None = None) -> None:
-    """Backfill real Alpaca bars into the bars table. Best-effort, like the
+def run_backfill(db: str | None = None) -> dict | None:
+    """Backfill real Alpaca bars for EVERY core symbol. Best-effort, like the
     script's `|| true`: a missing key is a warning, the warm gate holds cold
-    symbols back."""
+    symbols back.
+
+    Returns bars written per symbol, or None when the backfill did not run at
+    all (no credentials, a crashed child, a timeout). None means NOTHING was
+    proven, which is what keeps a missing credential from reading as an
+    unserviceable universe.
+    """
     try:
-        subprocess.run(backfill_cmd(db), cwd=_REPO_ROOT, timeout=600,
-                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        out = subprocess.run(backfill_cmd(db), cwd=_REPO_ROOT, timeout=600,
+                             capture_output=True, text=True)
     except Exception:
-        pass
+        return None
+    try:
+        res = json.loads((out.stdout or "").strip().splitlines()[-1])
+    except Exception:
+        return None
+    if res.get("status") != "ok":
+        return None
+    written = res.get("written", {}) or {}
+    per_symbol: dict[str, int] = {}
+    for k, n in written.items():
+        sym = k.rsplit(":", 1)[0]
+        per_symbol[sym] = per_symbol.get(sym, 0) + int(n)
+    return per_symbol
 
 
 def http_ok(url: str, tries: int = 40, delay: float = 0.5) -> bool:
@@ -589,9 +669,46 @@ def _cli(argv: list[str]) -> int:
         rep = warm_report()
         print(f"warm needs >= {rep['need']} {rep['timeframe']} bars per symbol")
         for s in rep["symbols"]:
-            print(f"  {s['symbol']}: {s['bars']} bars -> "
-                  f"{'WARM' if s['warm'] else 'COLD'}")
+            label = {"warm": "WARM", "cold": "COLD",
+                     "unserviceable": "UNSERVICEABLE"}[s["state"]]
+            extra = ("  (no real bar history: held out of the universe)"
+                     if s["state"] == "unserviceable" else "")
+            print(f"  {s['symbol']} [{s['part']}]: {s['bars']} bars -> "
+                  f"{label}{extra}")
+        uni = rep.get("universe", {})
+        print(f"  universe: {len(uni.get('symbols', []))} tradeable "
+              f"({len(uni.get('core', []))} core + "
+              f"{len(uni.get('periphery', []))} periphery)")
+        if rep.get("degraded"):
+            print(f"  DEGRADED: {rep['degraded_reason']}")
         return 0 if rep["all_warm"] else 3
+    if cmd == "verify-core":
+        # Verify the core at startup instead of assuming it: attempt the
+        # backfill, then ask THE tradeable predicate, per symbol.
+        rep = verify_core()
+        if not rep["verified"]:
+            print(f"core verification did not run ({rep['status']}"
+                  f"{': ' + rep['reason'] if rep['reason'] else ''}); "
+                  f"nothing verified, the declared core stands")
+            for sym in rep["core"]:
+                print(f"  {sym}: UNVERIFIED")
+            return 0
+        for sym in rep["core"]:
+            n = rep["bars_written"].get(sym, 0)
+            ok = sym in rep["serviceable"]
+            print(f"  {sym}: {'SERVICEABLE' if ok else 'UNSERVICEABLE'} "
+                  f"({n} bar(s) written)"
+                  + ("" if ok else "  <- venue serves no data, held out of "
+                                   "the universe"))
+        if rep["unserviceable"]:
+            print("  unserviceable core symbols: "
+                  + ", ".join(rep["unserviceable"]))
+            return 3
+        print(f"  every core symbol verified ({len(rep['serviceable'])})")
+        return 0
+    if cmd == "universe":
+        print(json.dumps(tradeable_universe(), indent=2))
+        return 0
     if cmd == "lock-status":
         print(json.dumps(lock_status()))
         return 0

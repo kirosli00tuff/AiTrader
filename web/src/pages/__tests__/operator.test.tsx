@@ -140,6 +140,41 @@ describe("council decision records", () => {
 });
 
 describe("diagnostics", () => {
+  const SYMS = [
+    { symbol: "BTC/USD", tradeable: true, part: "core" as const,
+      last_bar_ts: "x", last_bar_source: "real_feed", last_real_ts: "x",
+      age_seconds: 30, bars_5min: 300, warm: true },
+  ];
+
+  it("states the universe composition beside the per-symbol health", () => {
+    render(<SymbolHealthTable symbols={SYMS} universe={{
+      symbols: ["BTC/USD", "LDO/USD"], core: ["BTC/USD"],
+      periphery: ["LDO/USD"], declared_core: ["BTC/USD", "SOL/USD"],
+      unserviceable: ["SOL/USD"], enforced: true, degraded: false,
+      degraded_reason: "",
+    }} />);
+    const line = screen.getByTestId("diag-universe").textContent ?? "";
+    expect(line).toContain("2 tradeable");
+    expect(line).toContain("1 core + 1 periphery");
+    expect(line).toContain("SOL/USD");          // named, not dropped
+    expect(screen.queryByTestId("universe-degraded")).toBeNull();
+  });
+
+  it("shows the loud condition when the universe collapses", () => {
+    // The stack can be perfectly healthy and have nothing it may trade. That
+    // state must never be silent.
+    render(<SymbolHealthTable symbols={SYMS} universe={{
+      symbols: [], core: [], periphery: [],
+      declared_core: ["BTC/USD", "SOL/USD"],
+      unserviceable: ["BTC/USD", "SOL/USD"], enforced: true, degraded: true,
+      degraded_reason: "TRADEABLE UNIVERSE EMPTY: 2 core symbol(s) declared, "
+                       + "0 verified.",
+    }} />);
+    const loud = screen.getByTestId("universe-degraded").textContent ?? "";
+    expect(loud).toContain("TRADEABLE UNIVERSE EMPTY");
+    expect(loud).toContain("Fix the core");
+  });
+
   it("shows unavailable distinctly from a substitution event", () => {
     render(<SymbolHealthTable symbols={[
       { symbol: "BTC/USD", tradeable: true, last_bar_ts: "x",

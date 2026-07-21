@@ -63,6 +63,9 @@ class Supervisor:
         self._bridge = None
         self._error: str | None = None
         self._warm: list[dict] = []
+        # The resolved tradeable universe and the startup core verification.
+        self._universe: dict = {}
+        self._core: dict = {}
         self._thread: threading.Thread | None = None
         self._started_ts: str | None = None
         self._history: list[dict] = []
@@ -94,6 +97,13 @@ class Supervisor:
             "error": self._error,
             "warm": self._warm,
             "all_warm": all(s.get("warm") for s in self._warm) if self._warm else False,
+            # The universe the engine may actually trade, and the startup
+            # verification behind it. Surfaced so the GUI can show a degraded
+            # or empty universe rather than a silently short symbol list.
+            "universe": self._universe,
+            "core_verification": self._core,
+            "universe_degraded": bool(self._universe.get("degraded")),
+            "universe_degraded_reason": self._universe.get("degraded_reason", ""),
             "engine_pid": (self._engine.pid if self._engine else lk.get("engine_pid")),
             "bridge_pid": (self._bridge.pid if self._bridge else lk.get("bridge_pid")),
             "bridge_port": stack.bridge_port(),
@@ -136,6 +146,8 @@ class Supervisor:
                 self._note(f"cleared stale lock (dead pid {lk['engine_pid']})")
             self._error = None
             self._warm = []
+            self._universe = {}
+            self._core = {}
             self._started_ts = None
             self._set_state(STARTING)
         if background:
@@ -150,14 +162,30 @@ class Supervisor:
         db = stack.db_path()
         logdir = stack.run_dir()
         try:
-            # 1. Backfill real bars (best-effort, warm gate holds cold symbols).
-            stack.run_backfill(db)
+            # 1. VERIFY THE CORE, do not assume it (2026-07-21): attempt the
+            # backfill for every core symbol, then ask the tradeable predicate,
+            # the same serviceability check discovery runs before onboarding a
+            # candidate. An unserviceable core symbol is reported and held out
+            # of the universe; it is never a start failure, because the engine
+            # contains it per-symbol and six good symbols must not be stopped
+            # by one bad one (the 2026-07-20 lesson).
+            self._core = stack.verify_core(db)
+            if self._core.get("unserviceable"):
+                self._note("core symbols unserviceable: "
+                           + ", ".join(self._core["unserviceable"]))
             # 2. Warm report + seed feed/clock. Cold is a warning, not a failure.
-            self._warm = stack.warm_report(db)["symbols"]
+            rep = stack.warm_report(db)
+            self._warm = rep["symbols"]
+            self._universe = rep.get("universe", {})
+            if rep.get("degraded"):
+                # Never run with a silently empty universe.
+                self._note(rep["degraded_reason"])
             with self._lock:
                 self._set_state(WARMING)
             stack.seed_feed_clock()
-            self._warm = stack.warm_report(db)["symbols"]
+            rep = stack.warm_report(db)
+            self._warm = rep["symbols"]
+            self._universe = rep.get("universe", {})
             # 3. Pre-flight: free ONLY the bridge port of a stale holder from a
             # crashed prior run. Never the api port (this backend runs on it) or
             # the vite port. free_port protects our own pid regardless.
@@ -275,6 +303,8 @@ class Supervisor:
             self._bridge = None
             self._error = None
             self._warm = []
+            self._universe = {}
+            self._core = {}
             self._thread = None
             self._started_ts = None
             self._history = []

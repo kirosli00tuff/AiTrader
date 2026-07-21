@@ -112,8 +112,9 @@ def _crypto_pair(symbol: str) -> str:
 def fetch_prices(symbols: list[str]) -> dict:
     """Return {symbol: latest_price, ..., "source": ...} for resolvable symbols.
 
-    Symbols with no live quote are simply omitted; the C++ feed random-walks
-    those from their last price. ``source`` is "alpaca" if any live price was
+    Symbols with no live quote are simply omitted, and the C++ feed then emits
+    NO tick for them: the walk fallback was removed 2026-07-20 and the real
+    path never fabricates a bar. ``source`` is "alpaca" if any live price was
     returned, else "unavailable".
     """
     out: dict[str, object] = {}
@@ -209,12 +210,20 @@ def submit_paper_order(symbol: str, side: str, qty: float,
 
 
 # --- Historical bar backfill (Task 1) ---------------------------------------
-# Populates the shared ``bars`` table for the native-strategy whitelist so the
-# C++ engine, DNN training, and backtests have real history. Timeframe labels
+# Populates the shared ``bars`` table for the native-strategy core so the C++
+# engine, DNN training, and backtests have real history. Timeframe labels
 # ("1day", "5min") match the engine's ``strategy.bar_timeframe``. Idempotent
 # (upsert). Offline / no key => no-op marker.
-_WHITELIST_CRYPTO = ("BTC/USD", "ETH/USD")
-_WHITELIST_EQUITY = ("SPY", "QQQ")
+#
+# THE SYMBOL LIST IS DERIVED, NEVER A LITERAL (2026-07-21). It used to default
+# to the module constants _WHITELIST_CRYPTO ("BTC/USD","ETH/USD") and
+# _WHITELIST_EQUITY ("SPY","QQQ"), written when the swing profile's whitelist
+# was exactly those four. The active_quant profile then widened the core to
+# eight names and this literal never heard about it, so SOL/USD, AAPL, MSFT,
+# and NVDA were declared in the core and never once requested: three liquid
+# equities the venue certainly serves sat at zero bars for as long as the
+# profile has been active. A second copy of a list is a copy that goes stale,
+# so there is no copy any more.
 
 _BARS_DDL = (
     "CREATE TABLE IF NOT EXISTS bars ("
@@ -291,9 +300,31 @@ def _upsert_bars(conn: sqlite3.Connection, venue: str, symbol: str,
     return written
 
 
+def core_symbols() -> list[str]:
+    """The core this backfill serves, from THE one resolution point.
+
+    Kept as a function rather than a constant so the list is read at call
+    time: a symbol added to the active profile is fetched with no second edit
+    here. Falls back to the shipped swing four only when the resolver cannot
+    be reached at all (a minimal environment without the config), which is the
+    same set the old literal held.
+    """
+    try:
+        from market_data.universe import declared_core
+        core = declared_core()
+        if core:
+            return core
+    except Exception:  # noqa: BLE001 - a backfill must not die on a config read
+        pass
+    return ["BTC/USD", "ETH/USD", "SPY", "QQQ"]
+
+
 def backfill(db_path: str = "market_ai_lab.db",
              symbols: list[str] | None = None) -> dict:
-    """Backfill 1yr daily + 30d 5-min bars for the whitelist into ``bars``.
+    """Backfill 1yr daily + 30d 5-min bars for the core into ``bars``.
+
+    ``symbols`` defaults to the active profile's core (``core_symbols``), so
+    every declared core symbol is requested and none is silently skipped.
 
     Idempotent (upsert on venue,symbol,timeframe,timestamp). With no data key
     resolvable it is a no-op returning ``{"status": "unavailable"}`` so it is
@@ -305,10 +336,9 @@ def backfill(db_path: str = "market_ai_lab.db",
     headers = _auth_headers(key, secret)
 
     if symbols is None:
-        crypto, equity = list(_WHITELIST_CRYPTO), list(_WHITELIST_EQUITY)
-    else:
-        crypto = [s for s in symbols if _is_crypto(s)]
-        equity = [s for s in symbols if not _is_crypto(s)]
+        symbols = core_symbols()
+    crypto = [s for s in symbols if _is_crypto(s)]
+    equity = [s for s in symbols if not _is_crypto(s)]
 
     # (Alpaca timeframe param, DB timeframe label, lookback start).
     plan = (("1Day", "1day", _iso_days_ago(365)),
@@ -345,7 +375,7 @@ if __name__ == "__main__":
         description="Backfill Alpaca historical bars into the bars table.")
     ap.add_argument("--db", default="market_ai_lab.db")
     ap.add_argument("--symbols", default="",
-                    help="comma-separated; default = strategy whitelist")
+                    help="comma-separated; default = the active profile's core")
     args = ap.parse_args()
     syms = [s.strip() for s in args.symbols.split(",") if s.strip()] or None
     print(json.dumps(backfill(db_path=args.db, symbols=syms)))

@@ -644,12 +644,27 @@ export interface CouncilDecisions {
 export interface SymbolDiagnostics {
   symbol: string;
   tradeable: boolean;
+  part?: "core" | "periphery";
   last_bar_ts: string | null;
   last_bar_source: string | null;
   last_real_ts: string | null;
   age_seconds: number | null;
   bars_5min: number;
   warm: boolean | null;
+}
+
+/** The tradeable universe, resolved once: verified core union verified
+ *  periphery (market_data/universe.py). `degraded` is the loud condition: the
+ *  stack must never run with a silently empty universe. */
+export interface UniverseState {
+  symbols: string[];
+  core: string[];
+  periphery: string[];
+  declared_core: string[];
+  unserviceable: string[];
+  enforced: boolean;
+  degraded: boolean;
+  degraded_reason: string;
 }
 
 export interface WatchdogDiagnostics {

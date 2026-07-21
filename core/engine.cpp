@@ -87,14 +87,21 @@ Engine::Engine(config::Config cfg, EngineOptions opts)
                                           : cfg_.simulation.feed_mode;
 
     // Instrument universe. Alpaca is the only trading venue in the loop and its
-    // instruments are the native-strategy whitelist (crypto + equities). Alpaca
+    // instruments are the native-strategy core (crypto + equities). Alpaca
     // is paper and market data only. IBKR is live only and is not traded here.
-    std::vector<market_data::Instrument> instruments = {
-        {"alpaca", "BTC/USD", "BTC/USD", "crypto", 64000.0},
-        {"alpaca", "ETH/USD", "ETH/USD", "crypto", 3400.0},
-        {"alpaca", "SPY", "SPY", "equity", 545.0},
-        {"alpaca", "QQQ", "QQQ", "equity", 470.0},
-    };
+    //
+    // BUILT FROM THE DECLARED CORE, never a literal (2026-07-21). This was a
+    // hardcoded four-name vector written when the swing whitelist was exactly
+    // those four. The active_quant profile widened the core to eight and this
+    // list never heard about it, so SOL/USD, AAPL, MSFT, and NVDA were
+    // declared, configured, and NEVER POLLED: no quote was ever requested for
+    // them, no bar ever closed, and they could not have warmed even with a
+    // full backfill. That is the second half of the same defect as the
+    // backfill's own literal, in the other language.
+    std::vector<market_data::Instrument> instruments;
+    instruments.reserve(cfg_.strategy.whitelist.size());
+    for (const auto& sym : cfg_.strategy.whitelist)
+        instruments.push_back(make_instrument(sym));
     // Keep the universe so a runtime feed switch (Task 3) can rebuild the tick
     // feed or the bar-driven generators without reconstructing the engine.
     all_instruments_ = instruments;
@@ -128,6 +135,7 @@ Engine::Engine(config::Config cfg, EngineOptions opts)
         bar_history_["alpaca|" + sym] = std::move(hist);
     }
 
+
     // --- Discovery: watchlist -> traded universe (resume path) ----------------
     // BOTH sleeves draw entry candidates from the watchlist, which they do by
     // the watchlist's active symbols joining the native whitelist, so every
@@ -151,6 +159,17 @@ Engine::Engine(config::Config cfg, EngineOptions opts)
     discovery_ = read_discovery_controls(controls_path_, cfg_.discovery);
     prev_discovery_ = discovery_;
     if (discovery_.enabled) onboard_discovered_symbols(util::now_iso8601());
+
+    // Report the universe the engine will actually trade, and refuse to be
+    // quiet about a declared symbol the venue has never served. AFTER the
+    // watchlist merge, so the report is the whole universe (verified core
+    // union verified periphery) rather than the core alone. This is the C++
+    // half of verifying the core rather than assuming it: the Python start
+    // sequence attempts the backfill and judges serviceability BEFORE the
+    // engine launches, and the engine states the resulting verdict from its
+    // own read of the same table, so the two can be compared rather than
+    // trusted.
+    report_universe(util::now_iso8601());
 
     // Sleeve enable, seeded from the control file before the first bar so the
     // sleeve does not spend one bar on the config default before the first
@@ -371,6 +390,81 @@ double Engine::simulate_outcome(const signal_engine::CombinedVerdict& v,
     // realistic mix of wins and losses for the learning loop + dashboards.
     double realized_ret = v.edge * v.confidence * 1.0 + (u - 0.5) * 0.10;
     return realized_ret * notional;
+}
+
+void Engine::report_universe(const std::string& ts) {
+    // DEGRADE VISIBLY (2026-07-21). The stack must never run with a silently
+    // empty universe. An unserviceable core symbol is a warn; an empty or
+    // nearly empty universe is critical, because the engine is then running
+    // with nothing it may trade while every per-symbol alarm stays correctly
+    // silent. Neither one stops anything: containment is the whole point of
+    // the invariant, and a stop would repeat the 2026-07-20 failure where two
+    // unserviceable symbols killed a run that had six trading correctly.
+    const UniverseReport rep = universe_report();
+    if (!rep.enforced) return;  // offline modes trade generated data by design
+    std::string syms, bad;
+    for (const auto& s : rep.symbols) syms += (syms.empty() ? "" : ", ") + s;
+    for (const auto& s : rep.unserviceable) bad += (bad.empty() ? "" : ", ") + s;
+    storage_->append_event(
+        {ts, "universe_resolved", "alpaca", "",
+         rep.degraded ? "critical" : (rep.unserviceable.empty() ? "info"
+                                                                : "warn"),
+         "Tradeable universe: " + std::to_string(rep.symbols.size()) + " of " +
+             std::to_string(cfg_.strategy.whitelist.size()) + " declared" +
+             (syms.empty() ? "" : " (" + syms + ")") +
+             (bad.empty() ? ""
+                          : ". UNSERVICEABLE, held out of the universe: " + bad +
+                                " (no real bar history: the venue has never "
+                                "served them)") +
+             (rep.degraded
+                  ? ". UNIVERSE EMPTY OR NEARLY EMPTY: the engine has nothing "
+                    "it may trade. Nothing is stopped and nothing is "
+                    "fabricated; an operator has to fix the core or the data "
+                    "credentials."
+                  : ""),
+         util::to_json({{"symbols", syms}, {"unserviceable", bad},
+                        {"degraded", rep.degraded ? "true" : "false"}},
+                       {{"tradeable_count",
+                         static_cast<double>(rep.symbols.size())},
+                        {"declared_count",
+                         static_cast<double>(cfg_.strategy.whitelist.size())}})});
+}
+
+market_data::Instrument Engine::make_instrument(const std::string& symbol) {
+    // Category from the symbol shape, the same rule onboard_discovered_symbols
+    // uses: an Alpaca crypto pair carries a slash, everything else is equity.
+    const bool is_crypto = symbol.find('/') != std::string::npos;
+    // The seed price only matters to the OFFLINE MockFeed walk, which starts
+    // each instrument here. The live Alpaca feed overwrites it with the first
+    // real quote and never invents one. Known seeds keep the offline runs and
+    // their fixtures behaving exactly as before; anything else starts at 100,
+    // a neutral scale for a generated series that trades nothing real.
+    double base = 100.0;
+    if (symbol == "BTC/USD") base = 64000.0;
+    else if (symbol == "ETH/USD") base = 3400.0;
+    else if (symbol == "SPY") base = 545.0;
+    else if (symbol == "QQQ") base = 470.0;
+    return {"alpaca", symbol, symbol, is_crypto ? "crypto" : "equity", base};
+}
+
+std::vector<std::string> Engine::tradeable_universe() {
+    return universe_report().symbols;
+}
+
+Engine::UniverseReport Engine::universe_report() {
+    // THE C++ resolution point (2026-07-21). cfg_.strategy.whitelist already
+    // holds the declared core PLUS whatever discovery has onboarded
+    // (onboard_discovered_symbols merges add-only), so the union is here and
+    // the only remaining question is which members pass the predicate.
+    UniverseReport rep;
+    rep.enforced = (feed_mode_ == "alpaca_paper");
+    for (const auto& sym : cfg_.strategy.whitelist) {
+        if (symbol_is_tradeable(sym)) rep.symbols.push_back(sym);
+        else rep.unserviceable.push_back(sym);
+    }
+    rep.degraded = rep.enforced &&
+                   rep.symbols.size() < kMinTradeableUniverse;
+    return rep;
 }
 
 bool Engine::is_whitelisted(const std::string& symbol) const {
@@ -1803,14 +1897,20 @@ bool Engine::symbol_is_warm(const std::string& key) const {
     return strategy::indicators_warm(n, cfg_.strategy);
 }
 
-std::vector<Engine::SymbolWarm> Engine::warm_states() const {
+std::vector<Engine::SymbolWarm> Engine::warm_states() {
+    // THE WARM REPORT CONSULTS THE PREDICATE (2026-07-21). Bar count alone
+    // reported SOL/USD WARM on 8,519 bars whose provenance could not be
+    // proven, so the startup banner told the operator a symbol was ready that
+    // the entry path had already ruled out. Non-tradeable is reported as its
+    // own state, not as warm and not as merely cold.
     std::vector<SymbolWarm> out;
     for (const auto& sym : cfg_.strategy.whitelist) {
         const std::string key = "alpaca|" + sym;
         auto it = bar_history_.find(key);
         const int n =
             it == bar_history_.end() ? 0 : static_cast<int>(it->second.size());
-        out.push_back({sym, strategy::indicator_warm_state(n, cfg_.strategy)});
+        out.push_back({sym, strategy::indicator_warm_state(n, cfg_.strategy),
+                       symbol_is_tradeable(sym)});
     }
     return out;
 }

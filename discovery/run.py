@@ -283,10 +283,16 @@ def run_once(asset_class: str, *, db_path: str = _DEFAULT_DB,
         candidates = [c for c in payload.get("candidates", [])
                       if c.get("verdict") != "avoid"]
         conn.commit()  # release the write lock before backfill's own writes
-        onboarded = onboard([str(c.get("symbol", "")) for c in candidates],
-                            db_path)
+        cand_symbols = [str(c.get("symbol", "")) for c in candidates]
+        onboarded = onboard(cand_symbols, db_path)
         verified = onboarded.get("status") == "ok"
-        from market_data.tradeable import symbol_is_tradeable
+        # THE serviceability judgment, shared with the startup core check
+        # (market_data.universe.judge_serviceable, 2026-07-21). Backfill
+        # first, judge after, one function so a configured core symbol and a
+        # discovered candidate are held to exactly the same bar.
+        from market_data.universe import judge_serviceable
+        unserviceable = set(judge_serviceable(
+            conn, cand_symbols, onboarded.get("bars_written", {})).unserviceable)
         added, refused = [], []
         for c in candidates:
             # Say WHY it is on the list, including when whale surfaced it, so
@@ -296,7 +302,7 @@ def run_once(asset_class: str, *, db_path: str = _DEFAULT_DB,
                       f"{c.get('conviction')}")
             if sym in whale_surfaced:
                 reason += f" · surfaced by {whale_reasons.get(sym, 'whale activity')}"
-            if verified and not symbol_is_tradeable(conn, sym):
+            if verified and sym in unserviceable:
                 watchlist.journal_onboarding_refusal(
                     conn, sym, ts=ts,
                     reason="onboarding refused: backfill returned no bars, "

@@ -15,6 +15,7 @@ import sqlite3
 from datetime import datetime, timezone
 
 from market_data import alpaca_source
+from market_data import universe
 from ops import watchdog
 
 
@@ -38,6 +39,10 @@ def _mk_db(tmp_path, bars):
 
 
 def _pin(monkeypatch, symbols, *, real=True, discovery=False, rth=True):
+    # Pin the DECLARED CORE at its one definition (2026-07-21). stack.whitelist
+    # is now a delegate to market_data.universe.declared_core, so patching the
+    # delegate would leave the resolver reading the real config.
+    monkeypatch.setattr(universe, "declared_core", lambda *a, **k: list(symbols))
     monkeypatch.setattr(watchdog.stack, "whitelist", lambda: list(symbols))
     monkeypatch.setattr(watchdog, "_real_feed_mode", lambda: real)
     monkeypatch.setattr(watchdog, "_discovery_enabled", lambda: discovery)

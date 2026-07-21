@@ -17,7 +17,8 @@ import sqlite3
 from datetime import datetime, timezone
 
 from api_server import stack, store
-from market_data.tradeable import symbol_is_tradeable
+from market_data import universe
+from market_data.tradeable import real_bar_rows, symbol_is_tradeable
 
 _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -121,47 +122,48 @@ def council_decisions(limit: int = 25) -> dict:
     }
 
 
-def _watchlist_active(conn: sqlite3.Connection) -> list[str]:
-    try:
-        rows = conn.execute(
-            "SELECT symbol FROM watchlist WHERE status='active' "
-            "ORDER BY symbol").fetchall()
-        return [r[0] for r in rows if r and r[0]]
-    except sqlite3.OperationalError:
-        return []
-
-
 def symbol_diagnostics() -> dict:
     """Per-symbol data health: tradeable or unavailable (THE predicate),
     provenance of the newest bar, last real bar time, and the engine's own
     warm/cold word (its latest warm_state event). The terminal answer,
-    promoted to the GUI."""
+    promoted to the GUI.
+
+    The symbol set and the universe verdict both come from
+    ``market_data.universe`` (2026-07-21). This used to merge stack.whitelist()
+    with its own watchlist SELECT, a third independent construction of the
+    union, and it named the two real provenances in a SQL predicate of its
+    own, a second copy of the invariant's source set that the lexical guard
+    missed only because the string was split across two source lines.
+
+    Diagnostics deliberately reports watchlist members even while discovery is
+    OFF: the engine does not trade them then, but a stale active member is
+    exactly what an operator needs to see in order to prune it.
+    """
     now = datetime.now(timezone.utc)
     out: list[dict] = []
     db = store._db_path()
     try:
         conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True, timeout=2.0)
     except Exception:
-        return {"symbols": []}
+        return {"symbols": [], "universe": {}}
     try:
-        symbols = list(stack.whitelist())
-        for sym in _watchlist_active(conn):
-            if sym not in symbols:
-                symbols.append(sym)
-        for sym in symbols:
+        uni = universe.resolve(conn, discovery_on=True)
+        for sym in universe.declared_symbols(conn, discovery_on=True):
             d: dict = {"symbol": sym,
-                       "tradeable": symbol_is_tradeable(conn, sym)}
+                       "tradeable": symbol_is_tradeable(conn, sym),
+                       "part": ("core" if sym in uni.declared_core
+                                else "periphery")}
             newest = conn.execute(
                 "SELECT timestamp, COALESCE(source,'unknown') FROM bars "
                 "WHERE symbol=? ORDER BY timestamp DESC LIMIT 1",
                 (sym,)).fetchone()
             d["last_bar_ts"] = newest[0] if newest else None
             d["last_bar_source"] = newest[1] if newest else None
-            real = conn.execute(
-                "SELECT timestamp FROM bars WHERE symbol=? AND source IN "
-                "('real_feed','backfill') ORDER BY timestamp DESC LIMIT 1",
-                (sym,)).fetchone()
-            d["last_real_ts"] = real[0] if real else None
+            # Provenance comes from the invariant's own module, never a local
+            # copy of the source set (the tradeable guard's rule).
+            real = real_bar_rows(conn, sym, timeframe=stack.bar_timeframe(),
+                                 limit=1)
+            d["last_real_ts"] = real[0][0] if real else None
             age = None
             if newest and newest[0]:
                 try:
@@ -183,7 +185,10 @@ def symbol_diagnostics() -> dict:
             out.append(d)
     finally:
         conn.close()
-    return {"symbols": out}
+    # The universe verdict rides along so the GUI can say "3 tradeable of 8
+    # declared" and show the loud condition when it collapses, rather than
+    # rendering a quietly short list.
+    return {"symbols": out, "universe": uni.to_dict()}
 
 
 def watchdog_diagnostics() -> dict:

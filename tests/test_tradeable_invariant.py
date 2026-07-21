@@ -27,6 +27,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 from market_data import alpaca_source, tradeable
+from market_data import universe
 from ops import watchdog
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -57,6 +58,9 @@ def _mk_db(tmp_path, bars, name="feed.db"):
 
 
 def _pin(monkeypatch, symbols, *, real=True, discovery=False, rth=True):
+    # Pin the DECLARED CORE at its one definition (2026-07-21): stack.whitelist
+    # is a delegate now, and patching a delegate cannot move the resolver.
+    monkeypatch.setattr(universe, "declared_core", lambda *a, **k: list(symbols))
     monkeypatch.setattr(watchdog.stack, "whitelist", lambda: list(symbols))
     monkeypatch.setattr(watchdog, "_real_feed_mode", lambda: real)
     monkeypatch.setattr(watchdog, "_discovery_enabled", lambda: discovery)
@@ -152,8 +156,13 @@ def test_watchdog_imports_the_predicate_not_a_copy():
 
 
 def test_discovery_onboarding_calls_the_predicate():
+    # The judgment moved into market_data.universe.judge_serviceable
+    # (2026-07-21) so discovery and the startup core check run ONE function.
+    # Either name satisfies the pin; what must never happen is discovery
+    # deciding serviceability with a query of its own.
     src = _read("discovery/run.py")
-    assert "symbol_is_tradeable" in src
+    assert "judge_serviceable" in src or "symbol_is_tradeable" in src
+    assert "source IN" not in src
 
 
 def test_no_runtime_file_rederives_the_history_check():

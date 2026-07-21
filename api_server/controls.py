@@ -608,9 +608,16 @@ def _audit(param: str, old, new, source: str = "gui") -> None:
 # --- read helpers ------------------------------------------------------------
 
 def whitelist() -> list[str]:
-    strat = store.load_config().get("strategy", {}) or {}
-    raw = str(strat.get("whitelist", "BTC/USD,ETH/USD,SPY,QQQ"))
-    return [s.strip() for s in raw.split(",") if s.strip()]
+    """The declared core, from THE one resolution point (2026-07-21).
+
+    It used to read strategy.whitelist directly with NO active_quant overlay,
+    so under the active profile it reported the four swing names while the
+    engine traded eight. Every consumer here (regime-pin validation, the
+    /controls payload, set_regime) therefore refused four symbols the engine
+    was actually trading.
+    """
+    from market_data.universe import declared_core
+    return declared_core()
 
 
 def level1() -> dict:

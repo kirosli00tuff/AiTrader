@@ -107,9 +107,14 @@ echo ""
 # backfill). Then verifies each whitelisted symbol has enough bars for the
 # longest indicator lookback. A cold symbol is only a warning: the engine's
 # warm-state gate holds it back and never trades on partial data.
-echo "[0/4] warm-start: backfilling real historical bars into the bars table ..."
-"$PY" -m market_data.alpaca_source --db "$DB" 2>&1 | sed 's/^/       /' || true
-echo "[0/4] verifying every whitelisted symbol is warm ..."
+echo "[0/4] warm-start: verifying every CORE symbol against the venue ..."
+# VERIFY, do not assume (2026-07-21). This used to call the backfill directly
+# with no symbol list, which fell through to a hardcoded four-name literal, so
+# four of the eight active_quant core symbols were never requested. It now runs
+# the same serviceability check discovery runs before onboarding a candidate:
+# attempt the backfill for every core symbol, then ask the tradeable predicate.
+"$PY" -m api_server.stack verify-core 2>&1 | sed 's/^/       /' || true
+echo "[0/4] verifying every core symbol is warm ..."
 # Shared warm-report logic: the SAME api_server.stack callable the GUI supervisor
 # uses, so the script and the GUI never drift (exit 0 all warm, 3 otherwise).
 "$PY" -m api_server.stack warm-report 2>&1 | sed 's/^/       /'

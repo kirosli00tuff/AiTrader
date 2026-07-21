@@ -9,7 +9,7 @@ import type {
   WatchlistEvent, LongTermPosition, Prereqs,
   AdaptiveState, AdaptiveEvent, AdaptiveInterpretation, AdaptiveAction,
   AdaptiveEngineLogRow, WhaleFeeds,
-  ActivityResponse, CouncilDecisions, SymbolDiagnostics, WatchdogDiagnostics,
+  ActivityResponse, CouncilDecisions, SymbolDiagnostics, UniverseState, WatchdogDiagnostics,
   BarsResponse, PositionExit,
 } from "./types";
 
@@ -163,7 +163,8 @@ export const api = {
   councilDecisions: (limit = 25) =>
     get<CouncilDecisions>(`/council/decisions?limit=${limit}`),
   diagSymbols: () =>
-    get<{ symbols: SymbolDiagnostics[] }>("/diagnostics/symbols"),
+    get<{ symbols: SymbolDiagnostics[]; universe?: UniverseState }>(
+      "/diagnostics/symbols"),
   diagWatchdog: () => get<WatchdogDiagnostics>("/diagnostics/watchdog"),
   bars: (symbol: string, limit = 120) =>
     get<BarsResponse>(`/bars/${encodeURIComponent(symbol).replace(/%2F/g, "/")}?limit=${limit}`),

@@ -106,8 +106,31 @@ public:
     struct SymbolWarm {
         std::string symbol;
         strategy::WarmState state;
+        // THE tradeable predicate's answer for this symbol. A symbol with no
+        // real bar history is NOT warm however many bars it holds: SOL/USD
+        // read WARM on 8,519 bars that all carried source 'unknown', which is
+        // a warm check disagreeing with the gate the engine actually applies.
+        bool tradeable = true;
     };
-    std::vector<SymbolWarm> warm_states() const;
+    std::vector<SymbolWarm> warm_states();
+
+    // THE tradeable universe, resolved once (2026-07-21): the verified core
+    // union the verified periphery. Declared core plus discovered watchlist
+    // members, each put to symbol_is_tradeable. Mirrors the Python resolution
+    // point market_data/universe.py; a drift-guard test pins them equal.
+    struct UniverseReport {
+        std::vector<std::string> symbols;        // what the engine may trade
+        std::vector<std::string> unserviceable;  // declared, held out
+        bool enforced = false;   // real path (the invariant applies)
+        bool degraded = false;   // empty or nearly empty: a LOUD condition
+    };
+    std::vector<std::string> tradeable_universe();
+    UniverseReport universe_report();
+
+    // Below this many verified symbols the universe is a LOUD condition.
+    // Mirrors market_data.universe.MIN_TRADEABLE_UNIVERSE; a drift-guard test
+    // pins the two equal.
+    static constexpr std::size_t kMinTradeableUniverse = 2;
 
 private:
     std::vector<signal_engine::FactorSignal> gather_factors(
@@ -150,6 +173,11 @@ private:
     // Advance one step of the bar-driven feed. Returns the number of bars
     // ingested this step (0 => replay exhausted; synthetic never returns 0).
     int step_bar_mode();
+    // One Instrument from a core symbol: category from the symbol shape, a
+    // known seed price for the four the offline MockFeed fixtures depend on.
+    static market_data::Instrument make_instrument(const std::string& symbol);
+    // Log the resolved universe, loudly when it is empty or nearly empty.
+    void report_universe(const std::string& ts);
     bool is_whitelisted(const std::string& symbol) const;
     // Native trading on a CLOSED bar for a whitelisted symbol: manage the open
     // position's native exit first, else consider a new strategy entry (council

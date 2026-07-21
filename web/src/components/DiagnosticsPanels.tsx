@@ -1,4 +1,4 @@
-import type { ActivityEvent, SymbolDiagnostics, WatchdogDiagnostics } from "../api/types";
+import type { ActivityEvent, SymbolDiagnostics, UniverseState, WatchdogDiagnostics } from "../api/types";
 import Explain from "./Explain";
 
 // One plain line per condition, trading literacy assumed, codebase not.
@@ -28,21 +28,52 @@ function ago(s: number | null): string {
   return `${(s / 3600).toFixed(1)}h ago`;
 }
 
-export function SymbolHealthTable({ symbols }: { symbols: SymbolDiagnostics[] }) {
+/** The universe line, and the loud condition when it collapses. The stack can
+ *  be perfectly healthy and have nothing it may trade, which is exactly the
+ *  state that must never be silent. */
+export function UniverseSummary({ universe }: { universe?: UniverseState }) {
+  if (!universe || !universe.declared_core?.length) return null;
+  return (
+    <div data-testid="diag-universe">
+      <div className="dim">
+        Universe: {universe.symbols.length} tradeable
+        {" "}({universe.core.length} core + {universe.periphery.length} periphery)
+        {universe.unserviceable.length > 0 && (
+          <> · unserviceable: <span className="mono">
+            {universe.unserviceable.join(", ")}</span></>
+        )}
+      </div>
+      {universe.degraded && (
+        <div className="chip chip-block" data-testid="universe-degraded">
+          {universe.degraded_reason} Nothing is fabricated and nothing is
+          stopped. Fix the core or the data credentials.
+        </div>
+      )}
+    </div>
+  );
+}
+
+export function SymbolHealthTable(
+  { symbols, universe }: { symbols: SymbolDiagnostics[];
+                           universe?: UniverseState }) {
   if (!symbols.length)
     return <div className="empty" data-testid="diag-symbols-empty">
       No symbols known yet. This fills once the database has bars.
     </div>;
   return (
+    <>
+    <UniverseSummary universe={universe} />
     <table className="tbl" data-testid="diag-symbols">
       <thead>
-        <tr><th>symbol</th><th>tradeable</th><th>warm</th><th>last bar</th>
+        <tr><th>symbol</th><th>part</th><th>tradeable</th><th>warm</th>
+          <th>last bar</th>
           <th>provenance</th><th>last real bar</th><th>5min bars</th></tr>
       </thead>
       <tbody>
         {symbols.map((s) => (
           <tr key={s.symbol}>
             <td className="mono">{s.symbol}</td>
+            <td className="dim">{s.part ?? "—"}</td>
             <td>{s.tradeable
               ? <span className="chip chip-ok">tradeable</span>
               : <span className="chip chip-block" data-testid={`unavailable-${s.symbol}`}>unavailable</span>}
@@ -59,6 +90,7 @@ export function SymbolHealthTable({ symbols }: { symbols: SymbolDiagnostics[] })
         ))}
       </tbody>
     </table>
+    </>
   );
 }
 

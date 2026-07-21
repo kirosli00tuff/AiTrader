@@ -1,6 +1,6 @@
 import { api } from "../api/client";
 import { useApi } from "../api/useApi";
-import type { Health, SymbolDiagnostics, WatchdogDiagnostics } from "../api/types";
+import type { Health, SymbolDiagnostics, UniverseState, WatchdogDiagnostics } from "../api/types";
 import { BridgeDetail, SymbolHealthTable, WatchdogTimeline } from "../components/DiagnosticsPanels";
 import Explain from "../components/Explain";
 import { DataState, Panel } from "../components/ui";
@@ -8,7 +8,7 @@ import { DataState, Panel } from "../components/ui";
 // What used to need a terminal: per-symbol data health, bridge capability
 // detail, and the watchdog's actions with their reasons.
 export default function DiagnosticsPage() {
-  const sym = useApi<{ symbols: SymbolDiagnostics[] }>(
+  const sym = useApi<{ symbols: SymbolDiagnostics[]; universe?: UniverseState }>(
     () => api.diagSymbols(), 5000, []);
   const wd = useApi<WatchdogDiagnostics>(() => api.diagWatchdog(), 5000, []);
   const health = useApi<Health>(() => api.health(), 5000, []);
@@ -28,7 +28,8 @@ export default function DiagnosticsPage() {
           enough closed bars for the native indicators.
         </Explain>
         <DataState loading={sym.loading && !sym.data} error={sym.error}>
-          {sym.data && <SymbolHealthTable symbols={sym.data.symbols} />}
+          {sym.data && <SymbolHealthTable symbols={sym.data.symbols}
+                                          universe={sym.data.universe} />}
         </DataState>
       </Panel>
       <Panel title="Bridge">

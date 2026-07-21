@@ -557,11 +557,51 @@ int main(int argc, char** argv) {
             for (const auto& ws : engine.warm_states()) {
                 const auto& s = ws.state;
                 auto f = [](bool b) { return b ? '+' : '-'; };
+                // A symbol with no real bar history is NOT warm, however many
+                // bars it holds. Reported as its own word so the banner can
+                // never tell the operator a symbol is ready that the entry
+                // path has already ruled out.
                 std::cout << "    " << ws.symbol << ": " << s.bars << " bars -> "
-                          << (s.all ? "WARM" : "COLD") << "  [ema100" << f(s.ema_slow)
+                          << (!ws.tradeable ? "UNSERVICEABLE"
+                                            : (s.all ? "WARM" : "COLD"))
+                          << "  [ema100" << f(s.ema_slow)
                           << " adx" << f(s.adx) << " atr" << f(s.atr) << " bb"
                           << f(s.bollinger) << " rsi" << f(s.rsi) << " vol"
-                          << f(s.volume) << " rvol" << f(s.rvol) << "]\n";
+                          << f(s.volume) << " rvol" << f(s.rvol) << "]"
+                          << (ws.tradeable ? ""
+                                           : "  <- no real bar history, held "
+                                             "out of the tradeable universe")
+                          << "\n";
+            }
+            // THE universe, resolved once: verified core union verified
+            // periphery. Printed from the engine's own resolution point, so
+            // the banner states what the engine will actually trade rather
+            // than the configured list it was handed.
+            {
+                const auto uni = engine.universe_report();
+                std::string syms;
+                for (const auto& s : uni.symbols)
+                    syms += (syms.empty() ? "" : ", ") + s;
+                std::cout << "  universe:  " << uni.symbols.size()
+                          << " tradeable"
+                          << (uni.enforced ? "" : " (offline mode: the "
+                                                  "real-path invariant does "
+                                                  "not apply)")
+                          << (syms.empty() ? "" : "  " + syms) << "\n";
+                if (!uni.unserviceable.empty()) {
+                    std::string bad;
+                    for (const auto& s : uni.unserviceable)
+                        bad += (bad.empty() ? "" : ", ") + s;
+                    std::cout << "             UNSERVICEABLE: " << bad
+                              << "  (declared but never served real data; "
+                                 "contained per-symbol, never a stack stop)\n";
+                }
+                if (uni.degraded) {
+                    std::cout << "  ** UNIVERSE EMPTY OR NEARLY EMPTY: the "
+                                 "engine has nothing it may trade. Nothing is "
+                                 "fabricated and nothing is stopped. Fix the "
+                                 "core or the data credentials. **\n";
+                }
             }
             std::cout << "  feed/clock: " << eff_feed << " / " << eff_clock
                       << " (runtime-switchable via controls.json + GUI; a switch "
