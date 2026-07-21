@@ -14,6 +14,43 @@ Commit message:
 
 ---
 
+## Prompt: Reduce council token usage without weakening evidence, exploit prompt caching, verify the verdicts did not regress
+
+Date: 2026-07-20
+Model: Fable 5
+Prompt summary: cost optimization constrained by the evidence-and-anchoring session's measured result. Constraint first: never trim evidence the measurement showed load-bearing, report any field considered for cutting and kept. Seven tasks: measure the baseline (system, user, response tokens per provider, both modes, per-call cost at current pricing, monthly projection at current volume), find the waste (boilerplate, verbose labels, redundant instruction, excess precision, fields models demonstrably ignore), confirm prompt caching is enabled and correctly structured per provider with the stable portion cacheable and the variable evidence after it, apply reductions preferring compact representation over removal while keeping every anchor, the threshold disclosure, and the abstention framing intact, rerun the council on the same symbols and revert any reduction that regresses the distribution (the measurement is the acceptance test, not the token count), tests, document and commit. No RiskGate, live-gate, or adaptive-invariant changes. Live trading stays off.
+
+**HEADLINE: the units legend moved into the cached system prefix and the per-call user message halved (1,050 to ~560 chars). Anthropic prompt caching is now ACTIVE and provider-proven: the second probe call read all 1,121 prefix tokens from cache at the 10x discount. The verdict distribution did not regress: Opus went directional 4 of 5 on the re-run.**
+
+Changes: TASK 1, BASELINE (the evidence-v2 template from the prior session). System 2,423 chars, user 1,038 to 1,093 chars, combined about 870 to 1,000 tokens estimated (no local tokenizer). Response: Opus and GPT about 200 to 310 tokens measured this session, Gemini up to the 2,048 cap (thinking-only, unmeasurable today, quota). Per-call cost at config/provider_prices.yaml rates (gpt-5.5 $5/$15, opus $15/$75, gemini $3.5/$10.5, haiku $0.8/$4 per 1M in/out): about $0.010 GPT, $0.035 Opus, $0.012 Gemini est, $0.001 gate, about $0.057 per full council round. Projected monthly at the configured worst case (12 discovery calls/day): about $21/month, well under the ceilings. Observed volume runs far lower (most passes short-circuit before Stage C).
+
+TASK 2, THE WASTE FOUND. (1) Unit and scale text repeated on EVERY user line, about 480 chars per call, static across calls: moved to a legend in the system prefix, paid once per cache window. (2) Close prices at up to 6 decimals: trimmed to 5 significant digits (about 60 chars). (3) Verbose footer and bullets: trimmed (about 40 chars). (4) Fields models demonstrably ignore: NONE found in the 11 recorded rationales, nothing cut on that basis. CONSIDERED FOR CUTTING AND KEPT, per the constraint: the closes_5min list (it is what let both models catch the frozen LDO/ETH tape in the prior measurement, the decisive evidence in 2 of 5 reads, precision trimmed instead), the open_position line (decision-relevant whenever a position exists), the timestamps on closes and regime (staleness is information, the models cited recency), day high and low (Opus cited day-high proximity in 3 of its rationales), and the Gemini 2,048 output cap (thinking-only model truncates below it, the 2026-07-12 lesson, and output bills by usage not by cap, so lowering caps saves nothing).
+
+TASK 3, CACHING, PROVIDER-PROVEN. Structure is correct for all three: the stable system prefix is byte-identical across calls per (mode, threshold) and the variable evidence rides the user message after it, pinned by test. Activity, measured from the providers' own usage fields with two back-to-back probes: ANTHROPIC ACTIVE, probe 1 input=285 cache_creation=1121 cache_read=0, probe 2 input=285 cache_creation=0 cache_read=1121, the whole prefix served from cache at the 10 percent read rate. OPENAI INACTIVE, prompt=1019 cached=0 on both probes: automatic caching needs a 1,024-token prefix and the whole prompt sits at 1,019 GPT tokens, so there is nothing to enable and padding to cross the line would cost more than it saves. GEMINI unverifiable today (HTTP 429 account quota), implicit caching per its docs wants a larger prefix than ours, structurally correct regardless. The Haiku gate prefix (about 180 tokens) is far below Haiku's 2,048 minimum, inactive, cost negligible. Practical effect: within a discovery pass the Anthropic prefix caches on the first survivor and every later survivor's Opus call bills 285 fresh tokens plus 1,121 at 10 percent, about 35 percent off the Opus input per subsequent call inside the 5-minute window. An isolated call pays the one-time 25 percent cache-write premium on the prefix, reported plainly.
+
+TASK 4, THE NUMBERS. System 2,423 to 3,229 chars (the legend moved IN, exactly 1,121 Anthropic tokens, measured), user 1,038-1,093 to 557-569 chars (285 Anthropic tokens including message overhead, measured). Raw uncached input is roughly even with baseline (the static text moved rather than vanished), the per-call VARIABLE part fell by about half, and the stable part now caches where the provider allows it. Anchors, threshold disclosure, and abstention framing are byte-level intact, pinned by test. PROMPT_VERSION bumped to evidence-v2.1, so persisted evaluations distinguish templates.
+
+TASK 5, VERDICTS DID NOT REGRESS. Same six symbols, 26 minutes after the v2 run (2026-07-21T06:12Z), about 12 real provider calls plus 4 probe calls: AAVE gpt long 0.60 + opus flat 0.55, composed strong_buy 0.60. LDO both long (0.60, 0.55), composed buy 0.58, the tape that was frozen in the prior run had moved, and the models followed the data. UNI both long, composed 0.598. BTC both long, composed 0.556. ETH both long (0.60, 0.56), composed buy 0.584, same unfreezing. SPY market-hours skip, correct. Opus: 4 of 5 directional (3 of 5 in the v2 run, 0 of 38 on the old prompt). No provider resumed blanket holding, every flat carries a written reason, and the composed band sits 0.556 to 0.60 with real agreement. Differences from the v2 run track the market moving between runs, stated plainly. Gemini stayed 429 on every call, still unmeasurable. NOTHING was reverted because nothing regressed, and no threshold changed.
+
+TASK 6, TESTS. Three added to tests/test_council_evidence.py: the legend carries every section's units in both modes, anchors and threshold and abstention survive optimization byte-for-byte, and the cache structure per provider (Anthropic cache_control ephemeral on a byte-stable system block with the user varying, OpenAI stable system message first, Gemini stable systemInstruction). The A-session pins were updated where units moved from user lines to the legend. Omission-rule and mode-split guards unchanged and green. pytest 861 (from 858).
+
+NOT touched: RiskGate logic, the live-trading gate, the adaptive limit-weakening invariant, Level 1 values, promotion criteria, the RL fill gate, min_directional_votes, thresholds, any C++ code. Live trading stays off.
+
+VERIFICATION (2026-07-20):
+
+| Check | Result |
+| --- | --- |
+| pytest | 861 passed (from 858, +3) |
+| Anthropic cache probe | ACTIVE: create 1121 then read 1121, input 285/call |
+| OpenAI cache probe | inactive, prompt 1019 < 1024 minimum, cached 0 |
+| User message | 1,038-1,093 chars to 557-569 chars |
+| Re-measurement | same 6 symbols, Opus 4 of 5 directional, no regression, nothing reverted |
+| Anchors, threshold, abstention | intact, pinned by test |
+
+Commit message: `Reduce council token usage without weakening evidence, exploit prompt caching, verdict distribution verified unchanged, live trading untouched`
+
+---
+
 ## Prompt: Give the council real evidence, stop rendering fabricated fields, anchor the scale, make the long-term mode real, persist for replay
 
 Date: 2026-07-20

@@ -134,6 +134,15 @@ New flags from the feed-work session (2026-07-05, `369b6a6`):
 
 ## Session Log
 
+### 2026-07-20 (Fable 5) — Council token cost cut where it caches, evidence untouched, verdicts verified unchanged
+
+- **The units legend moved into the cached system prefix and the per-call user message halved** (1,038-1,093 to 557-569 chars, 285 Anthropic tokens measured). Close precision trimmed to 5 significant digits. Anchors, threshold disclosure, and abstention framing byte-level intact, pinned by test. PROMPT_VERSION evidence-v2.1.
+- **Caching, provider-proven from usage fields:** Anthropic ACTIVE (probe 1 cache_creation 1121, probe 2 cache_read 1121, input 285 per call, about 35 percent off Opus input per subsequent call inside a pass window). OpenAI inactive (prompt 1019 GPT tokens, below its 1,024 automatic minimum, padding would cost more than it saves). Gemini unverifiable (HTTP 429 account quota persists). Gate prefix far below Haiku's minimum, negligible.
+- **Nothing load-bearing was cut.** Kept with reasons recorded: the closes list (it caught the frozen tape), position line, timestamps, day high/low, the Gemini 2,048 output cap. No field was demonstrably ignored in the 11 recorded rationales.
+- **The acceptance test was the verdicts, and they did not regress:** same six symbols re-run under v2.1, Opus 4 of 5 directional (0 of 38 on the old prompt), composed band 0.556-0.60 with real agreement, every flat reasoned. Differences from the v2 run track the market moving between runs. Nothing reverted, no threshold changed.
+- Cost at config prices: about $0.057 per full council round, about $21/month at the configured 12-calls-per-day worst case, less with cache hits, far less at observed volume.
+- pytest 861 (from 858). NOT touched: RiskGate logic, the live-trading gate, the adaptive limit-weakening invariant, thresholds, any C++ code. Live trading stays off.
+
 ### 2026-07-20 (Fable 5) — The council gets real evidence, an anchored scale, a real long-term mode, and a replay record. Opus went directional for the first time.
 
 - **The diagnostic's recommendations are implemented and measured.** New allowlist renderer (`llm_consensus/evidence.py`): a field with no real measurement is OMITTED, never zeroed, and the fabricated fields (random order_book_imbalance, hash-constant catalyst_score) never reach a model. Real evidence added from the shared DB, every line with units: last 12 real-provenance closes, returns over 12/48/288 bars, volume only from backfill bars (live bars aggregate fabricated tick volume, reported), the engine's regime read (label, ADX, realized vol, active factor), and position state. Prompt grew from ~235-270 to ~870-1,000 tokens per provider call.

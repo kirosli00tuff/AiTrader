@@ -24,8 +24,9 @@ from functools import lru_cache
 from .config_access import council_min_confidence, research_conviction_threshold
 
 # Stamped into every persisted evaluation so a replay knows which template
-# produced a historical prompt.
-PROMPT_VERSION = "evidence-v2"
+# produced a historical prompt. v2.1: units moved into this cached prefix as a
+# legend, user lines terse, precision trimmed (2026-07-20 token optimization).
+PROMPT_VERSION = "evidence-v2.1"
 
 _EVIDENCE_RULES = (
     "How to read the evidence:\n"
@@ -60,6 +61,13 @@ _ANSWER_RULES = (
 )
 
 
+def _legend(long_term: bool) -> str:
+    """The per-mode field legend, rendered into this CACHED prefix so units
+    are paid once per cache window, not on every user line."""
+    from .evidence import field_legend
+    return field_legend(long_term=long_term)
+
+
 @lru_cache(maxsize=8)
 def short_term_system(threshold: float) -> str:
     """The short-term council system prompt, cached per threshold."""
@@ -70,6 +78,7 @@ def short_term_system(threshold: float) -> str:
         "5-minute bars. You are ADVISORY ONLY: a deterministic risk layer has "
         "final authority and may veto or ignore you.\n\n"
         + _EVIDENCE_RULES + "\n"
+        + _legend(False) + "\n\n"
         + _ANSWER_RULES.format(threshold=threshold) + "\n"
         "Respond with a SINGLE JSON object and nothing else, keys in exactly "
         "this order, reasoning FIRST so your verdict follows from it:\n"
@@ -98,6 +107,7 @@ def long_term_system(threshold: float) -> str:
         "caps apply downstream, and your target and invalidation are recorded "
         "as reasoning, never executed as levels.\n\n"
         + _EVIDENCE_RULES + "\n"
+        + _legend(True) + "\n\n"
         + _ANSWER_RULES.format(threshold=threshold) + "\n"
         "Respond with a SINGLE JSON object and nothing else, keys in exactly "
         "this order, reasoning FIRST so your verdict follows from it:\n"

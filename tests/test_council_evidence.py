@@ -84,7 +84,8 @@ def test_absent_field_omitted_never_zeroed():
                                 "sentiment_score": 0.62})
     prompt2 = render_user_prompt({"symbol": "AMD", **equity})
     assert "news_sentiment: 0.62" in prompt2
-    assert "0.5 is neutral" in prompt2
+    # Units live in the system prefix legend (cached), not on every user line.
+    assert "0.5 is neutral" in short_term_system(0.60)
 
 
 def test_unknown_field_never_renders_guard():
@@ -115,11 +116,16 @@ def test_bar_regime_position_evidence_rendered_with_units(tmp_path):
     ev = gather_evidence("BTC/USD", db)
     prompt = render_user_prompt({"symbol": "BTC/USD", "price": 103.0,
                                  "_evidence": ev})
-    assert "closes_5min" in prompt and "five-minute closes" in prompt
-    assert "return_24h" in prompt and "percent over the last 288" in prompt
-    assert "regime: trending" in prompt and "ADX" in prompt
+    assert "closes_5min" in prompt and "newest 2026-07-20" in prompt
+    assert "return_24h:" in prompt
+    assert "regime: trending" in prompt and "adx 31.2" in prompt
     assert "momentum" in prompt
-    assert "open_position: buy" in prompt and "USD" in prompt
+    assert "open_position: buy" in prompt
+    # Every rendered section's units live in the system prefix legend.
+    legend = short_term_system(0.60)
+    for phrase in ("five-minute closes", "percent over the last 288",
+                   "trend-strength index", "open position"):
+        assert phrase in legend, phrase
 
 
 def test_volume_only_from_backfill_provenance(tmp_path):
@@ -184,8 +190,8 @@ def test_field_names_match_contents():
     assert out["daily_return_pct"] == 4.0
     assert out["intraday_range_pct"] == 15.0
     prompt = render_user_prompt({"symbol": "X", **out})
-    assert "daily_return: +4.00 (percent" in prompt
-    assert "intraday_range: 15 (percent of price" in prompt
+    assert "daily_return: +4.00" in prompt
+    assert "intraday_range: 15 (low 95, high 110)" in prompt
 
 
 # --- TASK 5: the mode split -----------------------------------------------------
@@ -250,6 +256,57 @@ def test_parser_reads_reasoning_and_extras():
     old = verdict_from_payload("llm_primary", {
         "direction": "short", "confidence": 0.6, "rationale": "old shape"})
     assert old.rationale == "old shape" and old.extra == {}
+
+
+# --- Token optimization (2026-07-20): legend cached, caching structured ----------
+
+def test_legend_carries_every_section_unit_in_both_modes():
+    from llm_consensus.evidence import (EVIDENCE_SECTION_LEGEND,
+                                        LONG_SECTION_LEGEND)
+    short = short_term_system(0.60)
+    for key in EVIDENCE_SECTION_LEGEND:
+        assert f"  {key}:" in short, key
+    long = long_term_system(0.70)
+    for key in LONG_SECTION_LEGEND:
+        assert f"  {key}:" in long, key
+    for label, units in ALLOWED_FIELDS.values():
+        assert f"  {label}: {units}" in short
+
+
+def test_anchors_threshold_abstention_survive_optimization():
+    for s in (short_term_system(0.60), long_term_system(0.70)):
+        assert "0.50 means a coin flip" in s
+        assert "deliberate abstention" in s
+        assert "Threshold, disclosed for calibration" in s
+
+
+def test_system_prefix_stable_and_cache_structured_per_provider():
+    """The stable portion must be byte-identical across calls (that is what
+    caches) with the variable evidence after it: Anthropic explicit
+    cache_control on the system block, OpenAI system message first, Gemini
+    systemInstruction, user content varying last."""
+    from llm_consensus.providers import (AnthropicProvider, GeminiProvider,
+                                         OpenAIProvider)
+    s1 = {**ENGINE_STATE, "price": 1.0}
+    s2 = {**ENGINE_STATE, "symbol": "ETH/USD", "price": 2.0}
+    a = AnthropicProvider(name="llm_secondary", model_id="claude-opus-4-8",
+                          cfg_path=CFG)
+    _, _, p1 = a._request(s1, "REDACTED")
+    _, _, p2 = a._request(s2, "REDACTED")
+    assert p1["system"][0]["cache_control"] == {"type": "ephemeral"}
+    assert p1["system"][0]["text"] == p2["system"][0]["text"]
+    assert p1["messages"][0]["content"] != p2["messages"][0]["content"]
+    o = OpenAIProvider(name="llm_primary", model_id="gpt-5.5", cfg_path=CFG)
+    _, _, q1 = o._request(s1, "REDACTED")
+    _, _, q2 = o._request(s2, "REDACTED")
+    assert q1["messages"][0]["role"] == "system"
+    assert q1["messages"][0]["content"] == q2["messages"][0]["content"]
+    g = GeminiProvider(name="llm_tertiary", model_id="gemini-3.1-pro-preview",
+                       cfg_path=CFG)
+    _, _, r1 = g._request(s1, "REDACTED")
+    _, _, r2 = g._request(s2, "REDACTED")
+    assert (r1["systemInstruction"]["parts"][0]["text"]
+            == r2["systemInstruction"]["parts"][0]["text"])
 
 
 # --- TASK 7: persistence and replay ----------------------------------------------

@@ -24,7 +24,6 @@ state["db"], so unit tests stay hermetic.
 """
 from __future__ import annotations
 
-import json
 import os
 import sqlite3
 
@@ -55,12 +54,52 @@ def _pct(x) -> str:
 # The allowlist: state key -> (rendered label, units and scale text). Every
 # entry MUST carry a non-empty units text, pinned by test. A state key not
 # listed here (and not part of a gathered evidence section) never renders.
+# The units text renders ONCE, in the system prompt's legend (the cacheable
+# stable prefix), not on every user line (2026-07-20 token optimization).
 ALLOWED_FIELDS: dict[str, tuple[str, str]] = {
     "price": ("price", "USD, last trade"),
     "daily_return_pct": ("daily_return", "percent, today vs prior close"),
-    "intraday_range_pct": ("intraday_range", "percent of price, day low to day high"),
+    "intraday_range_pct": ("intraday_range", "percent of price, day low to day high in USD"),
     "news_sentiment": ("news_sentiment", "[0,1], 0.5 is neutral, Finnhub company news score"),
 }
+
+# The legend for the gathered-evidence sections. Same contract: every entry
+# declares units, rendered once in the system prefix.
+EVIDENCE_SECTION_LEGEND: dict[str, str] = {
+    "closes_5min": "USD, five-minute closes, oldest first, real venue bars, "
+                   "newest timestamp attached",
+    "return_1h": "percent over the last 12 five-minute bars",
+    "return_4h": "percent over the last 48 five-minute bars",
+    "return_24h": "percent over the last 288 five-minute bars",
+    "volume_24h": "base units summed over 24h of venue-reported bars",
+    "regime": "engine regime detector: label, adx trend-strength index, rvol "
+              "stddev of 5-minute returns, the active strategy factor, and "
+              "when it was written",
+    "open_position": "this system's open position for the instrument, or none",
+}
+
+# Long-mode extras, same contract.
+LONG_SECTION_LEGEND: dict[str, str] = {
+    "fundamentals": "quality [0,1] composite, roe_ttm and net_margin_ttm and "
+                    "revenue_growth_yoy in percent, pe_ttm ratio, week52 "
+                    "high and low in USD, only reported components shown",
+    "catalyst": "the live catalyst the free screen found: kind and detail",
+}
+
+
+def field_legend(long_term: bool = False) -> str:
+    """The one-per-mode legend block embedded in the system prompt.
+
+    Units render here ONCE per conversation prefix instead of on every user
+    line, so they ride the provider prompt cache instead of being paid per
+    call.
+    """
+    entries = [(label, units) for label, units in ALLOWED_FIELDS.values()]
+    entries += list(EVIDENCE_SECTION_LEGEND.items())
+    if long_term:
+        entries += list(LONG_SECTION_LEGEND.items())
+    return "Evidence field legend, units apply to every call:\n" + "\n".join(
+        f"  {label}: {units}" for label, units in entries)
 
 
 def _resolve_db(db: str) -> str:
@@ -157,9 +196,18 @@ def _position_evidence(conn: sqlite3.Connection, symbol: str) -> dict:
     }}
 
 
+def _sig(x, digits: int = 5) -> str:
+    """Compact significant-digit formatting: precision beyond what a model
+    can use is pure token cost."""
+    try:
+        return f"{float(x):.{digits}g}"
+    except (TypeError, ValueError):
+        return str(x)
+
+
 def _quote_lines(state: dict) -> list[str]:
     lines: list[str] = []
-    for key, (label, units) in ALLOWED_FIELDS.items():
+    for key, (label, _units) in ALLOWED_FIELDS.items():
         if key not in state or state.get(key) is None:
             continue
         val = state[key]
@@ -169,16 +217,16 @@ def _quote_lines(state: dict) -> list[str]:
                     continue
             except (TypeError, ValueError):
                 continue
-            lines.append(f"- {label}: {_num(val, 6)} ({units})")
+            lines.append(f"{label}: {_sig(val, 6)}")
         elif key == "daily_return_pct":
-            lines.append(f"- {label}: {_pct(val)} ({units})")
+            lines.append(f"{label}: {_pct(val)}")
         elif key == "intraday_range_pct":
             hi, lo = state.get("day_high"), state.get("day_low")
-            span = (f", day low {_num(lo, 6)} to day high {_num(hi, 6)}"
+            span = (f" (low {_sig(lo, 6)}, high {_sig(hi, 6)})"
                     if hi is not None and lo is not None else "")
-            lines.append(f"- {label}: {_num(val, 2)} ({units}{span})")
+            lines.append(f"{label}: {_num(val, 2)}{span}")
         else:
-            lines.append(f"- {label}: {_num(val, 4)} ({units})")
+            lines.append(f"{label}: {_num(val, 4)}")
     return lines
 
 
@@ -186,18 +234,14 @@ def _bar_lines(ev: dict) -> list[str]:
     lines: list[str] = []
     closes = ev.get("closes_5min")
     if closes:
-        lines.append(
-            f"- closes_5min: {json.dumps(closes)} (USD, last "
-            f"{len(closes)} five-minute closes, oldest first, real venue "
-            f"bars, newest at {ev.get('closes_5min_last_ts', '?')})")
-    for key, desc in (("return_1h_pct", "percent over the last 12 five-minute bars"),
-                      ("return_4h_pct", "percent over the last 48 five-minute bars"),
-                      ("return_24h_pct", "percent over the last 288 five-minute bars")):
+        compact = "[" + ", ".join(_sig(c, 5) for c in closes) + "]"
+        lines.append(f"closes_5min: {compact} newest "
+                     f"{ev.get('closes_5min_last_ts', '?')}")
+    for key in ("return_1h_pct", "return_4h_pct", "return_24h_pct"):
         if key in ev:
-            lines.append(f"- {key.replace('_pct', '')}: {_pct(ev[key])} ({desc})")
+            lines.append(f"{key.replace('_pct', '')}: {_pct(ev[key])}")
     if "volume_24h_base" in ev:
-        lines.append(f"- volume_24h: {_num(ev['volume_24h_base'], 2)} "
-                     "(base units summed over 24h of venue-reported bars)")
+        lines.append(f"volume_24h: {_num(ev['volume_24h_base'], 2)}")
     return lines
 
 
@@ -205,46 +249,35 @@ def _engine_lines(ev: dict) -> list[str]:
     lines: list[str] = []
     reg = ev.get("regime")
     if reg:
-        lines.append(
-            f"- regime: {reg['label']} (engine regime detector, ADX "
-            f"{reg['adx']} trend-strength index, realized_vol "
-            f"{reg['realized_vol']} stddev of 5-minute returns, active "
-            f"strategy factor {reg['active_factor'] or 'unset'}, as of "
-            f"{reg['as_of']})")
+        lines.append(f"regime: {reg['label']}, adx {_sig(reg['adx'], 3)}, "
+                     f"rvol {_sig(reg['realized_vol'], 3)}, active "
+                     f"{reg['active_factor'] or 'unset'}, as of {reg['as_of']}")
     if "position" in ev:
         pos = ev["position"]
         if pos is None:
-            lines.append("- open_position: none (no open position in this "
-                         "system for this symbol)")
+            lines.append("open_position: none")
         else:
             lines.append(
-                f"- open_position: {pos['side']} qty {_num(pos['qty'], 8)} at "
-                f"avg {_num(pos['avg_price'], 6)} USD since {pos['opened_ts']}, "
-                f"unrealized_pnl {_num(pos['unrealized_pnl'], 2)} USD")
+                f"open_position: {pos['side']} qty {_sig(pos['qty'], 6)} at "
+                f"avg {_sig(pos['avg_price'], 6)} since {pos['opened_ts']}, "
+                f"upnl {_num(pos['unrealized_pnl'], 2)}")
     return lines
 
 
 def _fundamental_lines(state: dict) -> list[str]:
     """Long-term evidence: quality, fundamentals, and the live catalyst, only
-    the components that were actually reported."""
+    the components that were actually reported. Units live in the legend."""
     lines: list[str] = []
     fin = state.get("fundamentals")
     if isinstance(fin, dict) and fin:
-        parts = []
-        for key, desc in (("quality", "[0,1] composite quality score"),
-                          ("roe_ttm", "percent return on equity, trailing 12m"),
-                          ("net_margin_ttm", "percent net margin, trailing 12m"),
-                          ("revenue_growth_yoy", "percent revenue growth, year over year"),
-                          ("pe_ttm", "price to earnings, trailing 12m"),
-                          ("week52_high", "USD 52-week high"),
-                          ("week52_low", "USD 52-week low")):
-            if fin.get(key) is not None:
-                parts.append(f"{key} {_num(fin[key], 4)} ({desc})")
+        parts = [f"{key} {_num(fin[key], 4)}" for key in (
+            "quality", "roe_ttm", "net_margin_ttm", "revenue_growth_yoy",
+            "pe_ttm", "week52_high", "week52_low") if fin.get(key) is not None]
         if parts:
-            lines.append("- fundamentals: " + ", ".join(parts))
+            lines.append("fundamentals: " + ", ".join(parts))
     cat = state.get("catalyst_detail")
     if cat:
-        lines.append(f"- catalyst: {cat}")
+        lines.append(f"catalyst: {cat}")
     return lines
 
 
@@ -272,10 +305,10 @@ def render_user_prompt(state: dict) -> str:
     if prompt_mode(state) == "long_term":
         lines += _fundamental_lines(state)
     if not lines:
-        lines = ["- (no measured fields are available for this instrument)"]
+        lines = ["(no measured fields are available for this instrument)"]
 
     return (f"{header}\n"
             f"Question: {question}\n\n"
             "Evidence (absent fields were not measured):\n"
             + "\n".join(lines) + "\n"
-            "Answer as instructed with the required JSON object.")
+            "Answer with the required JSON object.")
