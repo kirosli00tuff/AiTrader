@@ -393,12 +393,19 @@ def _handle(path: str, payload: dict) -> dict:
     if path == "/status":
         return _bridge_status()
     if path == "/score/llm":
+        # db turns on evidence enrichment (real bars, regime, position) and
+        # per-provider persistence for replay (2026-07-20). The engine's
+        # payload never carries db, so the bridge supplies the shared default.
+        payload = {**payload}
+        payload.setdefault("db", "market_ai_lab.db")
         return consensus(payload).to_dict()
     if path == "/research/thesis":
         # Deep-research thesis for the research_satellite sleeve. The Haiku gate
         # screens the candidate inside consensus before the full council runs.
         # Returns direction/conviction/horizon/rationale; the engine enforces the
         # hard cap, the conviction threshold, and the RiskGate on any order.
+        payload = {**payload}
+        payload.setdefault("db", "market_ai_lab.db")
         return research_thesis(payload)
     if path == "/discovery/due":
         # Cadence question only: one indexed SQLite read, no Finnhub or LLM call.

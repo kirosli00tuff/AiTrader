@@ -33,15 +33,21 @@ GATE_ENV_VAR = "ANTHROPIC_API_KEY"
 # keeps each call cheap without truncating the reason.
 GATE_MAX_TOKENS = 128
 
-# Stable (cacheable) instruction prefix for the gate.
+# Stable (cacheable) instruction prefix for the gate. Same evidence rules as
+# the council (2026-07-20): absence is not evidence, and the reason comes
+# before the decision.
 GATE_SYSTEM_PROMPT = (
     "You are a cheap pre-screen for a multi-model trading advisory council. "
-    "Given a compact market snapshot, decide whether the setup is worth a full "
-    "(expensive) council review. Skip flat, rangebound, or low-signal setups. "
-    "This is a COST gate, not a trade decision.\n\n"
-    "Respond with a SINGLE JSON object and nothing else:\n"
-    '  "proceed": boolean — true if worth a full council review\n'
+    "Given an evidence block, decide whether the setup is worth a full "
+    "(expensive) council review. Skip genuinely quiet setups: small moves with "
+    "low volatility. This is a COST gate, not a trade decision.\n\n"
+    "A field that is absent was NOT measured. Absence is not evidence: never "
+    "treat a missing field as zero or calm, and never skip an instrument for "
+    "lacking a field that was never offered.\n\n"
+    "Respond with a SINGLE JSON object and nothing else, keys in this order, "
+    "reason first:\n"
     '  "reason":  one short sentence (<= 140 chars)\n'
+    '  "proceed": boolean, true if worth a full council review\n'
     "No markdown, no code fences, no text outside the JSON object."
 )
 

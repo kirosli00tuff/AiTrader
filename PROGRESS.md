@@ -134,6 +134,16 @@ New flags from the feed-work session (2026-07-05, `369b6a6`):
 
 ## Session Log
 
+### 2026-07-20 (Fable 5) — The council gets real evidence, an anchored scale, a real long-term mode, and a replay record. Opus went directional for the first time.
+
+- **The diagnostic's recommendations are implemented and measured.** New allowlist renderer (`llm_consensus/evidence.py`): a field with no real measurement is OMITTED, never zeroed, and the fabricated fields (random order_book_imbalance, hash-constant catalyst_score) never reach a model. Real evidence added from the shared DB, every line with units: last 12 real-provenance closes, returns over 12/48/288 bars, volume only from backfill bars (live bars aggregate fabricated tick volume, reported), the engine's regime read (label, ADX, realized vol, active factor), and position state. Prompt grew from ~235-270 to ~870-1,000 tokens per provider call.
+- **The confidence scale is anchored (0.50 coin flip through 1.00), the acting threshold is disclosed with an anti-gaming instruction, and flat is framed as a deliberate, recorded abstention.** Reasoning comes BEFORE the verdict in the schema. The long-term mode now actually reaches the prompt and asks a different question (multi-week thesis with target_view, horizon_weeks, invalidation, fed by real fundamentals and catalysts), with model-stated levels recorded as reasoning, never executed.
+- **Every scored council round now persists per provider** (direction, conviction, abstention, rationale, extras) with the full state and the exact prompts, in new Python-owned `council_eval` tables, keyed for replay under changed templates. The A/B harness exists.
+- **Measured live (2026-07-21T05:46Z, 6 symbols): claude-opus-4-8 went directional 3 of 5 after holding 38 of 38 historically, citing the new evidence. Two composed verdicts hit the 0.60 floor from the council alone with agreement 2, never seen before. The two flats carry written reasons (frozen last-hour closes). Gemini unmeasurable: HTTP 429 account quota, error-flat, not hold.** No threshold changed.
+- pytest 858 (from 836). Two mutations killed (padded zeros, mode split). The tradeable invariant guard caught and correctly forced the provenance query into market_data.tradeable.
+- Open flags: Gemini quota exhausted at the account level (remeasure when it returns), whale endpoint consumes the hash-constant catalyst as market_bias fallback (found, not fixed, out of scope).
+- NOT touched: RiskGate logic, the live-trading gate, the adaptive limit-weakening invariant, Level 1 values, promotion criteria, the RL fill gate, min_directional_votes, any C++ code. Live trading stays off.
+
 ### 2026-07-20 (Fable 5) — DIAGNOSTIC: the council prompts and the context provided, findings only, nothing changed
 
 - **The question: does the prompt itself produce the hedging pattern (directional verdicts 0.49 to 0.59, everything at or above 0.60 flat)? Answer: yes, plausibly, on four evidenced mechanisms.** Full verbatim prompts, context inventory, token counts, assessment, and recommendations are in RETURN.md. No code, config, prompt, or threshold changed. Three free read-only Finnhub calls, zero LLM calls.

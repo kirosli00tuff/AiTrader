@@ -61,3 +61,25 @@ def untradeable_symbols(conn: sqlite3.Connection,
                         symbols: list[str]) -> list[str]:
     """The subset of ``symbols`` failing the predicate, order preserved."""
     return [s for s in symbols if not symbol_is_tradeable(conn, s)]
+
+
+def real_bar_rows(conn: sqlite3.Connection, symbol: str,
+                  timeframe: str = "5min", limit: int = 288) -> list[tuple]:
+    """Newest-first (timestamp, close, volume, source) rows with REAL
+    provenance, for consumers that must show only real market data (the
+    council evidence renderer). Lives here so the provenance source set stays
+    in this one module, per the tradeable invariant's guard.
+
+    A pre-provenance DB (no source column) returns NO rows: evidence labelled
+    "real venue bars" must never rest on unprovable provenance. That is
+    deliberately stricter than symbol_is_tradeable's fallback, which answers a
+    different question.
+    """
+    try:
+        return conn.execute(
+            "SELECT timestamp, close, volume, source FROM bars "
+            "WHERE symbol=? AND timeframe=? AND source IN (?,?) "
+            "ORDER BY timestamp DESC LIMIT ?",
+            (symbol, timeframe, *REAL_SOURCES, int(limit))).fetchall()
+    except sqlite3.OperationalError:
+        return []

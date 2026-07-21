@@ -287,14 +287,28 @@ def long_term_thesis(payload: dict, client=None, providers=None,
     if not screened["passes"]:
         return _flat(f"screened out: {screened['reason']}")
 
-    # Step 2: the full four levels, framed for a LONG horizon.
+    # Step 2: the full four levels, framed for a LONG horizon. The long_term
+    # mode selects the multi-week thesis prompt, and the screen's REAL
+    # fundamentals and catalyst travel into the evidence block (2026-07-20).
+    # Only components Finnhub actually reported are passed: the renderer omits
+    # absent ones rather than zeroing them.
     from discovery.evaluate import four_level_evaluator
     price = float((screened.get("quote") or {}).get("price") or
                   payload.get("price") or 0.0)
+    fin = screened.get("financials") or {}
+    fundamentals = {k: fin.get(k) for k in (
+        "roe_ttm", "net_margin_ttm", "revenue_growth_yoy", "pe_ttm",
+        "week52_high", "week52_low") if fin.get(k) is not None}
+    fundamentals["quality"] = screened["quality"]
+    catalyst = screened["catalyst"]
     evaluator = four_level_evaluator(
         price_for=lambda _s: price,
         category_for=lambda _s: str(payload.get("category", "equity")),
-        horizon="months", cfg_path=cfg_path, providers=providers)
+        horizon="months", cfg_path=cfg_path, providers=providers,
+        mode="long_term", db_path=payload.get("db"),
+        extra_state={"fundamentals": fundamentals,
+                     "catalyst_detail": f"{catalyst['kind']}: "
+                                        f"{catalyst['detail']}"})
     try:
         verdict = evaluator(symbol)
     except Exception:  # noqa: BLE001

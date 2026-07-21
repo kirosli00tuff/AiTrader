@@ -161,20 +161,18 @@ def build_verdict(*, symbol: str, council, dnn: dict, whale: dict,
 
 
 def market_state_from(snapshot: dict) -> dict:
-    """The market signals llm_consensus.providers.build_user_prompt reads.
+    """The market fields the council renderer reads, honestly named.
 
-    THE KEY NAMES ARE THE CONTRACT. build_user_prompt renders exactly symbol,
-    venue, price, ret_5, imbalance, catalyst, volatility, and defaults anything
-    absent to 0.0. Stage C used to pass only symbol, price, category, mode, and
-    horizon, so the council was asked to judge an instrument whose return,
-    volatility, catalyst, and order-book imbalance were all zero. It answered
-    "avoid" with conviction 0.0 every time, which was the only honest reading of
-    that payload, at a full council call per survivor. The Stage-A snapshot held
-    the real numbers the whole time; they were dropped on the way in.
+    Renamed 2026-07-20 after the field-semantics audit: the old ret_5 carried
+    the FULL DAY move and the old volatility was the intraday range fraction.
+    The renderer (llm_consensus/evidence.py) reads the *_pct names, each
+    rendered with its units. A field whose input is absent is OMITTED, never
+    zeroed: the renderer's omission rule depends on that.
 
-    ret_5 is a fraction: Finnhub's change_pct is a percent, so it is scaled.
-    imbalance stays absent because the free tier serves no order book, and an
-    invented number would be worse than a missing one.
+    The legacy keys (ret_5, volatility, catalyst) are still emitted for the
+    OFFLINE deterministic mocks and the Stage-B gate prompt, which read them by
+    name. They never render in a council prompt: the renderer's allowlist does
+    not contain them.
     """
     def _f(key: str) -> float:
         try:
@@ -184,20 +182,31 @@ def market_state_from(snapshot: dict) -> dict:
 
     price = _f("price")
     high, low = _f("high"), _f("low")
-    out = {
-        "price": price,
-        "ret_5": _f("change_pct") / 100.0,
-        "volatility": round(((high - low) / price) if price > 0 and high > low
-                            else 0.0, 6),
-    }
+    out: dict = {}
+    if price > 0:
+        out["price"] = price
+    if snapshot.get("change_pct") is not None:
+        out["daily_return_pct"] = round(_f("change_pct"), 4)
+    if price > 0 and high > low > 0:
+        out["intraday_range_pct"] = round((high - low) / price * 100.0, 4)
+        out["day_high"] = high
+        out["day_low"] = low
     if snapshot.get("sentiment_score") is not None:
-        out["catalyst"] = _f("sentiment_score")
+        out["news_sentiment"] = _f("sentiment_score")
+        out["catalyst"] = _f("sentiment_score")  # legacy, mocks only
+    # Legacy keys for the offline mocks and the Stage-B gate. Never rendered.
+    out["ret_5"] = _f("change_pct") / 100.0
+    out["volatility"] = round(((high - low) / price)
+                              if price > 0 and high > low else 0.0, 6)
     return out
 
 
 def four_level_evaluator(*, price_for=None, category_for=None,
                          snapshot_for=None, horizon: str = "short_term",
-                         cfg_path: str | None = None, providers=None):
+                         cfg_path: str | None = None, providers=None,
+                         db_path: str | None = None,
+                         mode: str = "short_term",
+                         extra_state: dict | None = None):
     """Build the Stage-C evaluator callable the funnel invokes per survivor.
 
     Returns callable(symbol) -> verdict dict. Imports the layer modules lazily so
@@ -209,6 +218,12 @@ def four_level_evaluator(*, price_for=None, category_for=None,
     and nothing else. Optional so existing callers keep working, but the funnel
     always supplies it: a council call against a blank snapshot is money spent to
     be told nothing.
+
+    ``mode`` selects the question the council is asked (2026-07-20):
+    short_term for the immediate setup, long_term for the multi-week thesis.
+    ``db_path`` turns on evidence enrichment and per-provider persistence
+    inside consensus. ``extra_state`` carries mode-specific real evidence
+    (fundamentals, catalyst detail) into the renderer.
     """
     from llm_consensus.config_access import (council_min_confidence,
                                              min_directional_votes)
@@ -221,14 +236,18 @@ def four_level_evaluator(*, price_for=None, category_for=None,
             "venue": "alpaca",
             "price": price,
             "category": category,
-            "mode": "discovery",
+            "mode": mode,
             "horizon": horizon,
         }
+        if db_path:
+            state["db"] = db_path
         if snapshot_for:
             # Overlay the real signals, then restore price: the snapshot and
             # price_for agree, and price_for stays the one authority for it.
             state.update(market_state_from(snapshot_for(symbol) or {}))
             state["price"] = price
+        if extra_state:
+            state.update(extra_state)
 
         # Level 2: the council. STAGE B ALREADY GATED THIS SYMBOL, so consensus
         # must not gate it again.

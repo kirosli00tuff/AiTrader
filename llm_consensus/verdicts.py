@@ -54,9 +54,12 @@ class ModelVerdict:
     confidence: float     # [0, 1]
     edge: float           # expected edge
     verdict: str          # bucketed label (strong_sell..strong_buy)
-    rationale: str = ""   # one-line reason
+    rationale: str = ""   # the model's written reasoning
     source: str = "mock"  # "real" | "mock" | "error" — provenance of this read
     model_id: str = ""    # concrete model id (e.g. "gpt-5.5"), from config
+    # Long-term mode extras (target_view, horizon_weeks, invalidation).
+    # Recorded and persisted as reasoning, never executed as levels.
+    extra: dict = field(default_factory=dict)
 
 
 @dataclass
@@ -97,14 +100,20 @@ def verdict_from_payload(model: str, obj: dict, *, source: str = "real",
                          model_id: str = "") -> ModelVerdict:
     """Build a ModelVerdict from a parsed provider JSON payload.
 
-    Providers return ``{direction, confidence, edge, rationale}``. We fold
-    direction + confidence into a signed bias so the ensemble math (which weights
-    by signed bias) is identical regardless of whether the read was real or mock.
+    Providers answer reasoning FIRST (the 2026-07-20 schema), then
+    ``{direction, confidence, edge}``. Older shapes with ``rationale`` or
+    ``reason`` still parse. Direction + confidence fold into a signed bias so
+    the ensemble math is identical whether the read was real or mock. The
+    long-term extras (target_view, horizon_weeks, invalidation) are carried on
+    ``extra`` for the persisted record and are never executed as levels.
     """
     direction = str(obj.get("direction", obj.get("verdict", "flat")))
     conf = clamp01(float(obj.get("confidence", 0.0)))
     edge = max(0.0, float(obj.get("edge", obj.get("edge_estimate", 0.0))))
-    rationale = str(obj.get("rationale", obj.get("reason", "")))[:200]
+    rationale = str(obj.get("reasoning", obj.get("rationale",
+                                                 obj.get("reason", ""))))[:500]
+    extra = {k: obj[k] for k in ("target_view", "horizon_weeks", "invalidation")
+             if k in obj}
     bias = max(-1.0, min(1.0, direction_sign(direction) * conf))
     return ModelVerdict(
         model=model,
@@ -115,6 +124,7 @@ def verdict_from_payload(model: str, obj: dict, *, source: str = "real",
         rationale=rationale,
         source=source,
         model_id=model_id,
+        extra=extra,
     )
 
 

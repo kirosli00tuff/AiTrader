@@ -40,9 +40,13 @@ def research_thesis(payload: dict, providers: list | None = None,
                           research_conviction_threshold(cfg_path))
         return thesis
 
-    # Frame the state for DEEP research: a longer horizon than the quick council.
+    # Frame the state for DEEP research: the long-term question. The mode now
+    # REACHES the prompt (2026-07-20): long_term selects the multi-week thesis
+    # system prompt with target, horizon, and invalidation asks. Before this,
+    # mode and horizon were set here and dropped by the renderer, so the
+    # research prompt was byte-identical to the short-term one.
     state: dict[str, Any] = dict(payload)
-    state["mode"] = "deep_research"
+    state["mode"] = "long_term"
     state.setdefault("horizon", "weeks_to_months")
 
     try:

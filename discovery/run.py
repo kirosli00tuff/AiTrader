@@ -244,7 +244,10 @@ def run_once(asset_class: str, *, db_path: str = _DEFAULT_DB,
                 # price and zeros, and returns avoid at conviction 0.0 for every
                 # survivor, every pass, at a full council call each.
                 snapshot_for=lambda s: by_symbol.get(s, {}),
-                category_for=_category_for, cfg_path=cfg_path)
+                category_for=_category_for, cfg_path=cfg_path,
+                # db turns on evidence enrichment (real bars, regime, position)
+                # and per-provider persistence for replay (2026-07-20).
+                db_path=db_path)
 
         ts = now.strftime("%Y-%m-%dT%H:%M:%SZ")
         result = funnel.run_pass(

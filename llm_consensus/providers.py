@@ -15,7 +15,6 @@ bypass Layer-1 risk.
 """
 from __future__ import annotations
 
-import json
 import logging
 import math
 import os
@@ -31,38 +30,34 @@ from .verdicts import (
 log = logging.getLogger("llm_consensus")
 
 
-# --- Stable, cacheable instruction prefix (shared by every provider) ---------
-# Keeping this constant is what makes prompt caching effective: the fixed prefix
-# is cached by each provider (explicitly for Anthropic, implicitly/automatically
-# for OpenAI and Gemini), so only the small per-tick user message is new.
-SYSTEM_PROMPT = (
-    "You are one member of a multi-model trading advisory council for a "
-    "paper-trading research system. You receive a compact market/signal "
-    "snapshot and output a single directional read. You are ADVISORY ONLY: a "
-    "deterministic risk layer has final authority and may veto or ignore you. "
-    "Judge only the edge in the setup described.\n\n"
-    "Respond with a SINGLE JSON object and nothing else, with exactly these keys:\n"
-    '  "direction":  one of "long", "short", "flat"\n'
-    '  "confidence": number in [0,1] — confidence in that direction\n'
-    '  "edge":       number in [0,1] — estimated expected fractional edge per trade\n'
-    '  "rationale":  one short sentence (<= 140 chars)\n'
-    "Do not include markdown, code fences, or any text outside the JSON object."
-)
+# --- Stable, cacheable instruction prefix (per mode) -------------------------
+# Keeping the prefix constant is what makes prompt caching effective: the fixed
+# prefix is cached by each provider (explicitly for Anthropic, implicitly for
+# OpenAI and Gemini), so only the per-call evidence block is new. The prompts
+# live in prompts.py: anchored confidence scale, disclosed threshold, flat as
+# abstention, reasoning before verdict. SYSTEM_PROMPT stays exported as the
+# short-term default for existing importers.
+from .prompts import short_term_system, system_prompt_for  # noqa: E402
+
+
+def _default_system_prompt() -> str:
+    from .config_access import council_min_confidence
+    return short_term_system(council_min_confidence(None))
+
+
+SYSTEM_PROMPT = _default_system_prompt()
 
 
 def build_user_prompt(state: dict) -> str:
-    """The variable, per-tick portion of the prompt (kept out of the cached prefix)."""
-    snapshot = {
-        "symbol": state.get("symbol", "?"),
-        "venue": state.get("venue", ""),
-        "price": state.get("price", 0.0),
-        "return_5": state.get("ret_5", 0.0),
-        "order_book_imbalance": state.get("imbalance", 0.0),
-        "catalyst_score": state.get("catalyst", 0.0),
-        "volatility": state.get("volatility", 0.0),
-    }
-    return ("Market snapshot:\n" + json.dumps(snapshot, sort_keys=True) +
-            "\nReturn your directional read as the required JSON object.")
+    """The variable, per-call evidence block (kept out of the cached prefix).
+
+    Delegates to the allowlist renderer (evidence.py): only fields with a real
+    source render, absent fields are omitted, never zeroed. The fabricated
+    engine fields (imbalance, catalyst) and the unlabelled tick-window numbers
+    (ret_5, volatility) never render.
+    """
+    from .evidence import render_user_prompt
+    return render_user_prompt(state)
 
 
 def _debug_raw(name: str, model_id: str, text: str) -> None:
@@ -157,8 +152,15 @@ class _RealLLMProvider:
     # council config default; the builder passes the configured value.
     max_tokens: int = 400
 
+    # Config path pin for tests. The system prompt embeds the mode's acting
+    # threshold, read from this config.
+    cfg_path: str | None = None
+
     ENV_VAR: ClassVar[str] = ""
     LABEL: ClassVar[str] = "provider"
+
+    def _system_prompt(self, state: dict) -> str:
+        return system_prompt_for(state, self.cfg_path)
 
     def __post_init__(self) -> None:
         self._fallback = MockLLMProvider(
@@ -304,7 +306,7 @@ class OpenAIProvider(_RealLLMProvider):
             "messages": [
                 # Prompt caching: OpenAI automatically reuses the cached stable
                 # prefix (this system message) across repeated calls; no param.
-                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "system", "content": self._system_prompt(state)},
                 {"role": "user", "content": build_user_prompt(state)},
             ],
             "response_format": {"type": "json_object"},  # force JSON output
@@ -332,7 +334,8 @@ class AnthropicProvider(_RealLLMProvider):
 
     def _request(self, state: dict, key: str) -> tuple[str, dict, dict]:
         return anthropic_request(self.model_id or "claude-opus-4-8", key,
-                                 SYSTEM_PROMPT, build_user_prompt(state),
+                                 self._system_prompt(state),
+                                 build_user_prompt(state),
                                  max_tokens=self.max_tokens)
 
     def _text_from_response(self, resp: dict) -> str:
@@ -348,7 +351,8 @@ class GeminiProvider(_RealLLMProvider):
 
     def _request(self, state: dict, key: str) -> tuple[str, dict, dict]:
         return gemini_request(self.model_id or "gemini-3.1-pro-preview", key,
-                              SYSTEM_PROMPT, build_user_prompt(state),
+                              self._system_prompt(state),
+                              build_user_prompt(state),
                               max_tokens=self.max_tokens)
 
     def _text_from_response(self, resp: dict) -> str:

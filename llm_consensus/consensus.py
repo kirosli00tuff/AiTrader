@@ -71,17 +71,17 @@ def real_providers(cfg_path: str | None = None) -> list[LLMProvider]:
                        weight=slot_weight("llm_primary", cfg_path),
                        model_id=names.get("llm_primary", "gpt-5.5"),
                        skew=_SLOT_SKEW["llm_primary"], max_tokens=max_tok,
-                       timeout=ptimeout),
+                       timeout=ptimeout, cfg_path=cfg_path),
         AnthropicProvider(name="llm_secondary",
                           weight=slot_weight("llm_secondary", cfg_path),
                           model_id=names.get("llm_secondary", "claude-opus-4-8"),
                           skew=_SLOT_SKEW["llm_secondary"], max_tokens=max_tok,
-                          timeout=ptimeout),
+                          timeout=ptimeout, cfg_path=cfg_path),
         GeminiProvider(name="llm_tertiary",
                        weight=slot_weight("llm_tertiary", cfg_path),
                        model_id=names.get("llm_tertiary", "gemini-3.1-pro-preview"),
                        skew=_SLOT_SKEW["llm_tertiary"], max_tokens=max_tok,
-                       timeout=ptimeout),
+                       timeout=ptimeout, cfg_path=cfg_path),
     ]
 
 
@@ -204,6 +204,17 @@ def consensus(state: dict, providers: list[LLMProvider] | None = None,
     if mh_skip is not None:
         return _flat_consensus(mh_skip)
 
+    # Evidence enrichment (2026-07-20): when the caller passed an explicit db
+    # path, gather the recorded evidence (real-provenance bars, the engine's
+    # regime read, position state) ONCE and hand it to the gate and every
+    # provider through the state. No db key means no enrichment and no
+    # persistence, which is what keeps unit tests hermetic. A new dict is
+    # built rather than mutating the caller's.
+    if state.get("db") and state.get("symbol") and "_evidence" not in state:
+        from .evidence import gather_evidence
+        state = {**state, "_evidence": gather_evidence(str(state["symbol"]),
+                                                       str(state["db"]))}
+
     g = gate if gate is not None else build_gate(cfg_path)
     decision = g.should_review(state)
     if not decision.proceed:
@@ -249,7 +260,7 @@ def consensus(state: dict, providers: list[LLMProvider] | None = None,
         1 for v, _ in directional
         if net != 0 and (1 if v.bias > 0 else -1) == net
     )
-    return ConsensusResult(
+    result = ConsensusResult(
         bias=bias,
         confidence=conf,
         edge=edge,
@@ -260,6 +271,14 @@ def consensus(state: dict, providers: list[LLMProvider] | None = None,
         directional_count=len(directional),
         abstentions=abstentions,
     )
+    # Per-provider persistence for replay (2026-07-20): every scored round is
+    # recorded with its full state, exact prompts, and one row per provider,
+    # when the caller passed a db path. Fail-safe: a persistence error never
+    # touches the verdict.
+    if state.get("db"):
+        from .persist import record_evaluation
+        record_evaluation(str(state["db"]), state, result, cfg_path=cfg_path)
+    return result
 
 
 def council_status_line(cfg_path: str | None = None) -> str:
