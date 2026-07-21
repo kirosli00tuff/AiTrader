@@ -14,6 +14,42 @@ Commit message:
 
 ---
 
+## Prompt: Run the council once per evaluation instead of once per llm slot
+
+Date: 2026-07-20
+Model: Fable 5
+Prompt summary: fix the amplification the diagnostic read from code and flagged out of scope. One council-tier trading evaluation calls /score/llm once per llm slot, and each call runs the FULL council: nine provider calls and three gate calls per evaluation, each slot carrying a separately sampled composite of the same council. Six tasks: confirm and measure from code and a live instrumented evaluation (actual call counts, wasted spend, how long present, whether discovery Stage C shares the shape), restructure to one council run per evaluation with per-provider transparency preserved for the composition and the persisted record, confirm the composed verdict is unchanged in character under the abstention rule with a live before and after, audit whether the budget accounting charged the amplification correctly, tests with a mutation test so a regression to per-slot amplification fails the suite, document and commit. No RiskGate, live-gate, or adaptive-invariant changes. Live trading stays off.
+
+**HEADLINE: measured live, the old shape spent 3 gate calls and 9 provider calls per council-tier evaluation to produce three near-identical composites (conviction spread 0.600 to 0.630, same verdict all three). The new shape spends 1 gate call and 3 provider calls and composes 0.616, inside the old spread. The verdict is equivalent in character and the spend is a third.**
+
+Changes: TASK 1, CONFIRMED AND MEASURED. From code: `core/engine.cpp gather_factors` iterated the factor list and each of the three llm slots independently satisfied may_call and POSTed /score/llm, and `python_bridge/server.py` maps /score/llm straight to `consensus()`, the full council (base-check gate plus all providers). Three slots, three full rounds: 9 provider calls, 3 gate calls per council-tier evaluation, each slot a separately sampled composite. From a live instrumented evaluation (counting wrappers around the real gate and providers, AAVE/USD, real data): OLD shape totals gate 3, provider 9, composites strong_buy at conviction 0.6300 / 0.6000 / 0.6200. PRESENT SINCE THE INITIAL COMMIT (a9d1adc): the per-slot loop is the original design. WHETHER IT EVER FIRED ON THE LIVE TRADING PATH IS UNKNOWN from the record: model_outputs has no source column, per-provider persistence is one day old, and council-tier entries required conditions (a fresh crossover on the real path with the bridge on-real) the record suggests were rare to never. The waste is a property of the code path, proven by instrument, not of the historical bill. DISCOVERY STAGE C IS CORRECT and always was: `four_level_evaluator._evaluate` calls consensus exactly once per survivor, now pinned by test.
+
+TASK 2, ONE ROUND PER EVALUATION. The council fetch is HOISTED out of the per-factor loop: new private `Engine::fetch_council_verdict` (the ONLY /score/llm call site, long timeout preserved) runs once, before the loop, when any llm slot is enabled, the bridge is on, the council tier is allowed, and the council source is real. Every llm slot then carries the composed verdict (bias, conviction among directional voters, edge). A failed round leaves the slots on their mocks, exactly as a failed per-slot call did. The dnn, whale, and rl per-factor calls are untouched. PER-PROVIDER TRANSPARENCY PRESERVED BY CONSTRUCTION: the composition the abstention rule defines happens INSIDE the one consensus round, per_model stays raw and complete, and every scored round persists per provider (direction, conviction, abstention, rationale) in the council_eval tables. New call counts, measured live: gate 1, providers 3 per evaluation.
+
+TASK 3, VERDICT UNCHANGED IN CHARACTER. The choice, stated: each slot now carries THE composed verdict rather than its own sampled composite. The alternative (mapping each slot to its own provider's raw verdict) was deliberately NOT taken: it would change what feeds the C++ ensemble's agreement and confidence composition, which sits directly upstream of the RiskGate's required_model_agreement_count and min_confidence checks, a behavior change this prompt's constraints exclude. Collapsing three near-identical samples to one is the variance-reducing identity move: live comparison on the same state shows the three old-style composites spanning conviction 0.600 to 0.630 (all strong_buy, the sampling noise bought nothing) and the new single round composing 0.616 inside that band, same verdict, directional 2 with 1 abstention, correct under the abstention rule (conviction among directional voters, holds abstain, agreement counts direction, pinned by an executable test with exact expected weights).
+
+TASK 4, BUDGET ACCOUNTING AUDITED. The engine's council budget (`signal_engine/council_gate.cpp`) increments `calls_today` ONCE per allowed evaluation, and `council_est_cost_per_call_usd` prices ONE full round, so on the old trading path every counted call spent up to THREE rounds: the daily budget (30, active_quant 40) and the spend ceilings were enforced against a third of true council spend. Worst-case exposure was 3x the believed ceiling (a $5/day ceiling could pass $15 of true spend) although the record suggests the path rarely or never fired live. After the fix one counted call equals one round, so the existing counter, estimate, and ceilings are correct without changing any of them. DISCOVERY was never amplified: its budget charges on actual provider contact (provider_calls from per_model, one round per survivor), the 2026-07-18 fix, unchanged. Corrected projection: trading council-tier worst case at budget 30/day is 30 rounds (about $1.70/day at the $0.057 measured round cost), not the 90 rounds the old shape could silently reach.
+
+TASK 5, TESTS. New tests/test_council_single_run.py (5): /score/llm appears exactly once in engine.cpp and only inside fetch_council_verdict, the fetch has exactly one call site and it precedes the factor loop, discovery Stage C is a single round, the budget increment is a single unit per evaluation, and an executable counting-stub measurement of both shapes (old: 3 gate + 9 provider calls, new: 1 + 3) with the composed verdict checked against the abstention rule at exact weights. MUTATION, file-copy rollback, KILLED: reintroducing a per-slot fetch inside the loop fails the hoist test (call-site count and position). Per-provider persistence and composition transparency stay pinned by test_council_evidence. pytest 866 (from 861), ctest 26/26 after rebuild, no network in tests, nothing binds.
+
+NOT touched: RiskGate logic, the live-trading gate, the adaptive limit-weakening invariant, Level 1 values, promotion criteria, the RL fill gate, min_directional_votes, the ensemble weights, the budget values themselves. Live trading stays off.
+
+VERIFICATION (2026-07-20):
+
+| Check | Result |
+| --- | --- |
+| pytest | 866 passed (from 861, +5) |
+| ctest | 26/26 after rebuild |
+| Live OLD shape (instrumented) | 3 gate + 9 provider calls, composites 0.600 to 0.630, same verdict |
+| Live NEW shape | 1 gate + 3 provider calls, composed 0.616, inside the old spread |
+| Mutation: per-slot fetch reintroduced | KILLED, hoist test fails |
+| Budget unit | one counted call now equals one HTTP round |
+| Discovery Stage C | single round per survivor, was already correct, now pinned |
+
+Commit message: `Run the council once per evaluation instead of once per llm slot, cutting provider calls threefold, per-provider transparency preserved, live trading untouched`
+
+---
+
 ## Prompt: Reduce council token usage without weakening evidence, exploit prompt caching, verify the verdicts did not regress
 
 Date: 2026-07-20

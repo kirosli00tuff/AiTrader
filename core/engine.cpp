@@ -214,6 +214,31 @@ signal_engine::FactorSignal Engine::mock_factor(
     return s;
 }
 
+std::optional<Engine::CouncilScore> Engine::fetch_council_verdict(
+    const market_data::MarketState& ms, const news::CatalystScore& cat) {
+    // THE ONLY /score/llm call site. One round per evaluation: the bridge
+    // runs the base-check gate and every provider, composes under the
+    // abstention rule, and persists per-provider detail. The long timeout is
+    // deliberate: the round fans out to real providers, and hanging up
+    // mid-round-trip is the no-trade stall (see the 2026-07-12 entry).
+    std::string body = util::to_json(
+        {{"symbol", ms.symbol}, {"venue", ms.venue}, {"factor", "council"}},
+        {{"price", ms.price},
+         {"ret_5", ms.ret_5},
+         {"volatility", ms.volatility},
+         {"imbalance", ms.order_book_imbalance},
+         {"catalyst", cat.score}});
+    auto resp = bridge::http_post_json(
+        opts_.bridge_host, opts_.bridge_port, "/score/llm", body,
+        cfg_.council.engine_council_call_timeout_ms);
+    if (!resp) return std::nullopt;
+    CouncilScore cs;
+    cs.bias = bridge::json_get_number(*resp, "bias", 0.0);
+    cs.confidence = bridge::json_get_number(*resp, "confidence", 0.0);
+    cs.edge = bridge::json_get_number(*resp, "edge", 0.0);
+    return cs;
+}
+
 std::vector<signal_engine::FactorSignal> Engine::gather_factors(
     const market_data::MarketState& ms, const news::CatalystScore& cat,
     bool council_allowed, const strategy::StrategySignal* native) {
@@ -243,10 +268,31 @@ std::vector<signal_engine::FactorSignal> Engine::gather_factors(
         factors.push_back(f);
     }
 
+    // ONE council round per evaluation (2026-07-20). The three llm slots are
+    // the COUNCIL, and /score/llm already fans out to the full council (the
+    // base-check gate plus every provider) and returns the COMPOSED verdict
+    // (holds abstain, conviction among directional voters). Each slot used to
+    // trigger its OWN full round inside the loop below: nine provider calls
+    // and three gate calls per council-tier evaluation, every slot carrying a
+    // separately sampled composite of the same council. The round now runs
+    // once, before the loop, and every llm slot carries its composed verdict.
+    // Per-provider direction, conviction, abstention, and rationale persist
+    // bridge-side in the council_eval tables for every scored round.
+    const bool any_llm = std::any_of(
+        factors.begin(), factors.end(), [](const std::string& f) {
+            return f == "llm_primary" || f == "llm_secondary" ||
+                   f == "llm_tertiary";
+        });
+    std::optional<CouncilScore> council;
+    if (any_llm && opts_.use_bridge && council_allowed &&
+        factor_source_real("llm_primary", layer_toggles_))
+        council = fetch_council_verdict(ms, cat);
+
     // Rule-based is always computed in C++.
-    // LLM/DNN/whale come from the bridge if enabled, else mocks. The three LLM
-    // slots are the COUNCIL: when council_allowed is false (cost-control skip)
-    // they stay on the in-process mock rather than making the expensive call.
+    // LLM/DNN/whale come from the bridge if enabled, else mocks. When
+    // council_allowed is false (cost-control skip) or the round failed, the
+    // llm slots stay on the in-process mock, exactly as a failed per-slot
+    // call used to leave them.
     for (const auto& f : factors) {
         signal_engine::FactorSignal s = mock_factor(f, ms, cat);
 
@@ -271,12 +317,15 @@ std::vector<signal_engine::FactorSignal> Engine::gather_factors(
         // this factor even though the bridge is up, so the operator can isolate
         // one layer without stopping the run. rule_based is always native C++.
         const bool source_real = factor_source_real(f, layer_toggles_);
-        const bool may_call = opts_.use_bridge && f != "rule_based" &&
-                              (council_allowed || !is_llm) && source_real;
-        if (may_call) {
-            std::string endpoint = "/score/llm";
-            if (f == "dnn_advisory") endpoint = "/score/dnn";
-            else if (f == "whale_signal") endpoint = "/score/whale";
+        if (is_llm) {
+            if (council) {
+                s.bias = std::clamp(council->bias, -1.0, 1.0);
+                s.confidence = clamp01(council->confidence);
+                s.edge = std::max(0.0, council->edge);
+            }
+        } else if (opts_.use_bridge && f != "rule_based" && source_real) {
+            std::string endpoint = "/score/dnn";
+            if (f == "whale_signal") endpoint = "/score/whale";
             else if (f == "rl_advisory") endpoint = "/score/rl";
             std::string body = util::to_json(
                 {{"symbol", ms.symbol}, {"venue", ms.venue}, {"factor", f}},
@@ -285,17 +334,9 @@ std::vector<signal_engine::FactorSignal> Engine::gather_factors(
                  {"volatility", ms.volatility},
                  {"imbalance", ms.order_book_imbalance},
                  {"catalyst", cat.score}});
-            // The /score/llm call fans out to the full real council (gate + three
-            // providers), so it needs the long timeout, or the engine hangs up
-            // mid-round-trip and the council returns no verdict (the no-trade
-            // stall). Fast local scores use the short timeout. Both from config.
-            const int timeout_ms =
-                (endpoint == "/score/llm")
-                    ? cfg_.council.engine_council_call_timeout_ms
-                    : cfg_.council.engine_bridge_call_timeout_ms;
-            auto resp = bridge::http_post_json(opts_.bridge_host,
-                                               opts_.bridge_port, endpoint, body,
-                                               timeout_ms);
+            auto resp = bridge::http_post_json(
+                opts_.bridge_host, opts_.bridge_port, endpoint, body,
+                cfg_.council.engine_bridge_call_timeout_ms);
             if (resp) {
                 s.bias = std::clamp(bridge::json_get_number(*resp, "bias", s.bias),
                                     -1.0, 1.0);

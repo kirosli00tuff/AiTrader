@@ -114,6 +114,13 @@ private:
         const market_data::MarketState& ms, const news::CatalystScore& cat,
         bool council_allowed = true,
         const strategy::StrategySignal* native = nullptr);
+    // ONE council round per evaluation (2026-07-20). The bridge composes the
+    // full council (gate + providers, holds abstain) and every llm slot
+    // carries the composed verdict. The /score/llm string lives ONLY in this
+    // method's body, pinned by tests/test_council_single_run.py.
+    struct CouncilScore { double bias; double confidence; double edge; };
+    std::optional<CouncilScore> fetch_council_verdict(
+        const market_data::MarketState& ms, const news::CatalystScore& cat);
     signal_engine::FactorSignal mock_factor(const std::string& name,
                                             const market_data::MarketState& ms,
                                             const news::CatalystScore& cat);

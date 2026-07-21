@@ -134,6 +134,15 @@ New flags from the feed-work session (2026-07-05, `369b6a6`):
 
 ## Session Log
 
+### 2026-07-20 (Fable 5) — One council run per evaluation: the per-slot amplification is gone, spend cut threefold, verdict equivalent
+
+- **Confirmed from code and a live instrumented evaluation:** each of the three llm slots used to trigger its OWN full council round through /score/llm, 9 provider calls and 3 gate calls per council-tier evaluation, each slot a separately sampled composite of the same council. Present since the initial commit. Whether it ever fired on the live trading path is unknown from the record (no per-provider persistence existed until today, and council-tier entries were rare to never). Discovery Stage C was always a single round per survivor, now pinned by test.
+- **The round is hoisted:** new private `Engine::fetch_council_verdict`, the only /score/llm call site, runs once before the factor loop, and every llm slot carries the composed verdict. A failed round leaves the slots on their mocks as before. Per-provider transparency preserved by construction: the abstention-rule composition happens inside the one round and persists per provider in council_eval.
+- **Live before and after on the same state:** old shape composites spanned conviction 0.600 to 0.630, all the same verdict, pure sampling noise. New shape composed 0.616 inside that band, directional 2 with 1 abstention, correct under the abstention rule. Equivalent in character, a third of the calls.
+- **Budget audit:** the engine counted ONE call per evaluation while spending up to three rounds, so spend ceilings were enforced against a third of true trading-path spend. One counted call now equals one round, and no budget value changed. Per-slot mapping of raw provider verdicts into the ensemble slots was deliberately NOT done: it would change what feeds the agreement and confidence composition upstream of the RiskGate.
+- pytest 866 (from 861), ctest 26/26 after rebuild, mutation (per-slot fetch reintroduced) killed.
+- NOT touched: RiskGate logic, the live-trading gate, the adaptive limit-weakening invariant, budgets, weights, min_directional_votes. Live trading stays off.
+
 ### 2026-07-20 (Fable 5) — Council token cost cut where it caches, evidence untouched, verdicts verified unchanged
 
 - **The units legend moved into the cached system prefix and the per-call user message halved** (1,038-1,093 to 557-569 chars, 285 Anthropic tokens measured). Close precision trimmed to 5 significant digits. Anchors, threshold disclosure, and abstention framing byte-level intact, pinned by test. PROMPT_VERSION evidence-v2.1.
