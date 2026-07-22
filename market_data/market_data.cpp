@@ -183,7 +183,36 @@ std::vector<MarketState> AlpacaFeed::poll() {
         ms.ret_5 = ret5;
         ms.volatility = vol;
         ms.spread = price * (0.0005 + 0.001 * next_uniform());
-        ms.volume = 1000.0 + 9000.0 * next_uniform();
+        // VOLUME IS ABSENT ON THIS PATH, AND ABSENT IS WHAT IT REPORTS
+        // (2026-07-21). This line used to read
+        // `ms.volume = 1000.0 + 9000.0 * next_uniform()`, a uniform draw per
+        // tick, which the bar aggregator summed into every live bar and the
+        // engine then persisted as a real_feed row. Measured consequence: on
+        // BTC/USD, backfill bars average 0.0056 in venue units while
+        // real_feed bars averaged 55,906, and the live figure was
+        // statistically identical across BTC/USD, SPY, and AAPL, which is a
+        // generator rather than a market. The strategy's volume filter
+        // consumed it and decided 3,235 live-bar comparisons at a 49.2
+        // percent pass rate, a coin flip by construction.
+        //
+        // Why 0 and not a real number: the bridge's /marketdata/alpaca
+        // returns `fetch_prices`, which carries PRICE only, and the endpoints
+        // behind it (/v2/stocks/trades/latest and the crypto latest-trades
+        // endpoint) return a single trade SIZE, not a bar aggregate. Summing
+        // per-poll trade sizes would double count the same trade across polls
+        // and miss every trade between them, so no honest bar volume exists
+        // here to use. Alpaca's latest-BAR endpoints do carry a real `v`, and
+        // adopting them is a feed change, recorded as a follow-up rather than
+        // smuggled into a correctness fix.
+        //
+        // 0 means NO VOLUME REPORTED, and the consumers treat it that way:
+        // the strategy volume filters skip the check when the current bar
+        // reports no volume rather than reading it as "below average". A
+        // genuine zero-volume bar is handled identically, which is correct:
+        // you cannot judge volume you do not have. Same rule as the
+        // fabricated price walk removed on 2026-07-20, applied to the one
+        // field that removal left behind.
+        ms.volume = 0.0;
         ms.order_book_imbalance = (next_uniform() - 0.5) * 2.0;
         ms.ts = ts;
         // Every tick this feed emits carries a real venue quote.

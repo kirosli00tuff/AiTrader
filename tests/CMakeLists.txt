@@ -205,6 +205,6 @@ add_test(NAME provenance COMMAND test_provenance
 # fabrication removal. Loopback only, nothing binds, no network.
 add_executable(test_feed_no_fabrication test_feed_no_fabrication.cpp)
 target_link_libraries(test_feed_no_fabrication PRIVATE mal_market_data
-                      mal_bridge mal_util)
+                      mal_signal_engine mal_bridge mal_util)
 add_test(NAME feed_no_fabrication COMMAND test_feed_no_fabrication
          WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})

@@ -14,6 +14,88 @@ Commit message:
 
 ---
 
+## Prompt: Remove the live volume fabrication
+
+Date: 2026-07-21
+Model: Opus 4.8 (1M context)
+Prompt summary: a correctness fix, not a tuning session. `market_data/market_data.cpp:186` sets `ms.volume = 1000.0 + 9000.0 * next_uniform()` on every AlpacaFeed tick, so the live volume series is invented, and the strategy volume filter consumes it on the live decision path where it drops 32 to 84 percent of setups. Six tasks: trace every consumer of MarketState.volume on the real path by file and line and establish whether live-closed real_feed bars persist the fabricated value; determine what real volume Alpaca actually exposes per asset class and whether the backfill path already stores real per-bar volume the live path should read instead; quantify how many live-path setups the fabricated gate passed and failed and what real or absent volume would produce on the same bars, saying so plainly where a number is not establishable; remove the fabrication so the real path uses real volume where Alpaca returns it and marks volume absent where it does not, with the volume filter treating unknown as a value it does not gate on rather than a random pass, never persisting a fabricated volume into a real_feed bar, changing no thresholds and leaving MockFeed and the offline modes unchanged; add a mutation-tested guard in the shape of test_feed_no_fabrication with both a lexical and a behavioral half, proven by restoring the fabrication under file-copy rollback, plus one offline synthetic run confirmed behaviorally identical to the pre-fix baseline; verify against the 892 pytest and 26 of 26 ctest baselines and report, leaving the operator's strategy.profile edit exactly as found. No RiskGate, live-gate, adaptive-invariant, or Level 1 changes. Live trading stays off.
+
+**HEADLINE: the fabricated volume reached the bars table. Every live bar the engine has ever closed persisted an invented volume as a `real_feed` row, 3,465 of them, carrying $1.6 trillion of fictional dollar volume. On the decision path the gate it fed was a coin flip: 1,591 passes against 1,644 failures across 3,235 live-bar comparisons, 49.2 percent, which is what a uniform draw compared against the mean of twenty draws of the same distribution produces. The fix reports absence instead of inventing a number, and the filters no longer gate on a value the venue never gave them.**
+
+Changes: TASK 1, THE CONSUMER TRACE. The fabricated value does NOT stop at the decision path. It is persisted, so the bars table itself is contaminated and every reader of bar volume inherits it. The chain, by file and line:
+
+| step | site | what happens |
+| --- | --- | --- |
+| 1 | `market_data/market_data.cpp:186` | `AlpacaFeed::poll` sets `ms.volume = 1000.0 + 9000.0 * next_uniform()` per tick |
+| 2 | `core/engine.cpp:605` | `bar_agg_.add(key, epoch, ms.price, ms.volume)` feeds it to the aggregator |
+| 3 | `signal_engine/strategy.cpp:19,28,35` | `BarAggregator` SUMS the per-tick draws into `p.bar.volume` |
+| 4 | `core/engine.cpp:625-628` | **the closed bar is persisted with `source = real_feed`**, so the fabrication lands in the `bars` table |
+| 5 | `core/engine.cpp:137,1428` | history seeding reads those rows back into the in-memory bars |
+| 6 | `signal_engine/strategy.cpp:212` | `avg_volume` averages them |
+| 7 | `signal_engine/strategy.cpp:391` | the Bollinger reversion volume gate (`> vol_multiple * vavg`) |
+| 8 | `signal_engine/strategy.cpp:477` | the RSI-2 volume gate (`< vavg` rejects) |
+| 9 | `discovery/universe.py:63` | `SELECT symbol, SUM(close * volume) FROM bars`, the daily crypto liquidity refresh |
+
+WHICH CASE HOLDS: the second one. `core/engine.cpp:625-628` proves it, and the data confirms it: 3,465 `real_feed` rows exist and BTC/USD's `real_feed` bars average 55,906 against 0.0056 for its backfill bars. NOT affected, checked rather than assumed: `signal_engine/strategy.cpp:266` (`w.volume` is a BAR COUNT test, `bar_count >= vol_lookback`, so warm state never depended on volume VALUES), `ml_factor` (grep finds no volume in the `bars-v2` feature set), and the council evidence renderer (already restricted to backfill provenance on 2026-07-20).
+
+TASK 2, WHAT ALPACA ACTUALLY EXPOSES. Probed live, all four endpoints, this session.
+
+| endpoint | class | volume field | usable as bar volume |
+| --- | --- | --- | --- |
+| `/v2/stocks/trades/latest` | equity | `s: 200` (SPY), `s: 40` (AAPL) | NO, a single trade SIZE |
+| crypto latest trades | crypto | `s: 0.002933707` | NO, a single trade SIZE |
+| `/v2/stocks/bars/latest` | equity | `v: 1196` plus `n: 25` | YES, a real aggregate |
+| crypto latest bars | crypto | `v: 0` on that minute | YES, real, and legitimately zero |
+
+The live path uses the TRADE endpoints, and a trade size is not a bar aggregate: summing it per poll would count the same trade repeatedly across a 30-second interval and miss every trade between polls. Worse, the bridge never forwards it: `python_bridge/server.py:449` maps `/marketdata/alpaca` to `alpaca_source.fetch_prices`, which returns `{symbol: price, "source": ...}` and NO volume field at all. So no honest volume reaches the C++ feed today, which is the hole the generator was filling. THE BACKFILL PATH ALREADY STORES REAL PER-BAR VOLUME (`_upsert_bars` writes Alpaca's `v` with `source='backfill'`), which is why the historical analysis in the previous prompt was sound while the live series was not. Alpaca's latest-BAR endpoints are the honest live source and adopting them is a feed change, recorded as a follow-up rather than smuggled into a correctness fix.
+
+TASK 3, THE IMPACT, MEASURED. Over every stored `real_feed` 5-min bar, applying the RSI-2 gate's own comparison (current bar volume against its trailing 20-bar average):
+
+| symbol | live bars | gate PASS | gate FAIL | pass rate |
+| --- | --- | --- | --- | --- |
+| BTC/USD | 415 | 194 | 201 | 49.1% |
+| ETH/USD | 415 | 195 | 200 | 49.4% |
+| SOL/USD | 186 | 84 | 82 | 50.6% |
+| SPY | 420 | 200 | 200 | 50.0% |
+| QQQ | 420 | 193 | 207 | 48.2% |
+| AAPL | 185 | 87 | 78 | 52.7% |
+| MSFT | 185 | 80 | 85 | 48.5% |
+| NVDA | 185 | 81 | 84 | 49.1% |
+| LDO/USD | 421 | 211 | 190 | 52.6% |
+| UNI/USD | 365 | 161 | 184 | 46.7% |
+| AAVE/USD | 258 | 105 | 133 | 44.1% |
+| **total** | **3,455** | **1,591** | **1,644** | **49.2%** |
+
+THE DELTA: under absent volume the gate does not run, so all 1,644 rejections stop being rejections. NOT ESTABLISHABLE FROM THE DATA, and stated rather than estimated: how many of those 1,644 were bars where the trend filter, the RSI-2 cross-back, and the ATR band had ALL already passed, which is the only place the volume gate actually decides an entry. The strategy returns silently when a filter rejects and writes no event, so the record cannot say how many setups the volume gate personally killed. The five live candidates observed on 2026-07-21 all PASSED it, which is consistent with a coin flip and proves nothing either way. What IS established: the gate was deciding on a random number, roughly half the time against.
+
+TASK 4, THE FABRICATION REMOVED. `market_data/market_data.cpp` now sets `ms.volume = 0.0` on the real path, meaning NO VOLUME REPORTED, with the reasoning recorded at the site. Both filters treat that as unmeasured rather than as low: `signal_engine/strategy.cpp:391` gates only when `bars[n-1].volume > 0.0`, and the RSI-2 filter at :477 does the same. A genuine zero-volume bar (Alpaca returns `v: 0` for a quiet crypto minute) is handled identically, which is correct: you cannot judge volume you do not have. NO THRESHOLD CHANGED. `vol_multiple` is still 1.0 and `vol_lookback` is still 20. MockFeed (`market_data.cpp:72`) and the synthetic and replay bar modes are untouched, and both keep producing positive volume, so offline behavior is unchanged by construction rather than by luck. FOUND ON THE SAME LINES AND DELIBERATELY NOT FIXED, because this prompt is scoped to volume: `ms.spread` and `ms.order_book_imbalance` are also uniform draws on the real path (`market_data.cpp:185,188`). The imbalance was already cut out of the council prompt on 2026-07-20 and still reaches `Engine::mock_factor`. Reported here rather than changed.
+
+TASK 5, GUARD AND REGRESSION. Two guards, both mutation-tested with file-copy rollback. LEXICAL, in `tests/test_feed_no_fabrication.cpp`: scoped to the `AlpacaFeed::poll` body, it finds the `ms.volume` assignment and asserts it contains neither `next_uniform` nor `9000.0`. It scans CODE LINES ONLY, skipping comments, and that detail was earned: the first version failed against my own comment, which quotes the generator it replaced. A guard a comment can satisfy proves nothing. BEHAVIORAL, same file: volume-less ticks through a real `BarAggregator` close a bar with volume exactly 0, so nothing between the feed and the bars table invents one. A second behavioral pin in `tests/test_strategy.cpp` uses the file's existing `rsi2_bars(bounce_vol)` fixture to hold both directions: `rsi2_bars(50)` is a real below-average reading and still gates, `rsi2_bars(0)` is absent and must NOT. MUTATIONS KILLED: (A) restoring `ms.volume = 1000.0 + 9000.0 * next_uniform()` fails both lexical assertions; (B) reverting the RSI-2 filter to gate on absent volume fails the strategy assertion. Both reverted by file copy and re-verified green. OFFLINE REGRESSION, the exact pre-fix baselines from earlier this session on the identical deterministic feed: active_quant `Trades=6 Blocked=2 Events=35` before and after, swing `Trades=108 Blocked=204 Events=1222` before and after. Identical, so no drift.
+
+TASK 6, VERIFICATION. pytest **892 passed**, matching the baseline exactly (this is a C++ change, so no movement is the right answer). ctest **26 of 26 against the shipped config**. Against the working tree with the operator's `strategy.profile: active_quant` edit it is 23 of 26, the SAME three known failures (`config`, `tuner_floor`, `market_hours_entry`) documented in the verification session. That edit was left exactly as found, neither committed nor reverted. No UI file was touched, so vitest and tsc were not run.
+
+RESIDUE, reported and NOT migrated. The 3,465 existing `real_feed` rows keep their fabricated volume: there is no volume-provenance column to mark them with, and rewriting production history is not something this prompt asked for. It has NO effect on the live decision path going forward, because both filters now test the CURRENT bar's volume first and every new live bar reports 0, so the trailing average is never consulted. It DOES still affect `discovery/universe.py`, whose daily crypto refresh ranks the active 50 by `SUM(close * volume)`: 38.9 percent of the recent crypto dollar-volume input is fabricated, $1.6 trillion of fictional turnover in total. Recommended follow-up, not done here: either zero the `real_feed` volumes (0 is the semantically correct "none reported" and would remove every invented number from the table) or restrict that ranking to backfill provenance the way the council evidence renderer already does.
+
+NOT touched: RiskGate logic, the live-trading gate, the adaptive limit-weakening invariant, Level 1 values, any threshold, `vol_multiple`, `vol_lookback`, MockFeed, or the offline feed modes. Live trading stays off.
+
+VERIFICATION (2026-07-21):
+
+| Check | Result |
+| --- | --- |
+| pytest | 892 passed, unchanged from baseline |
+| ctest (shipped config) | 26/26 |
+| ctest (operator's edit) | 23/26, the same three known failures |
+| Offline synthetic, active_quant | Trades=6 Blocked=2 Events=35, identical to pre-fix |
+| Offline synthetic, swing | Trades=108 Blocked=204 Events=1222, identical to pre-fix |
+| Mutation A (fabrication restored) | KILLED, 2 lexical assertions fail |
+| Mutation B (gate on absent volume) | KILLED, strategy assertion fails |
+| Live gate before the fix | 1,591 pass / 1,644 fail, 49.2%, a coin flip |
+| Contaminated rows remaining | 3,465 real_feed bars, reported not migrated |
+
+Commit message: `Remove live volume fabrication, real path uses real or absent volume, live trading untouched`
+
+---
+
 ## Prompt: Cost audit from measured spend, and the gate-disabled cause
 
 Date: 2026-07-21

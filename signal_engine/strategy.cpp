@@ -388,7 +388,13 @@ StrategySignal evaluate_reversion(const std::vector<Bar>& bars,
     double rsi_now = rs[n - 1], rsi_prev = rs[n - 2];
     double price = closes[n - 1], prev_price = closes[n - 2];
     double vavg = avg_volume(bars, cfg.vol_lookback);
-    bool vol_ok = vavg > 0 && bars[n - 1].volume > cfg.vol_multiple * vavg;
+    // A bar reporting NO volume is not a low-volume bar, it is a bar whose
+    // volume the venue did not give us (2026-07-21). The live Alpaca path
+    // reports none, so gating on it would be gating on absence. Unknown
+    // volume passes this check and the other filters still decide.
+    const bool volume_known = bars[n - 1].volume > 0.0;
+    bool vol_ok = !volume_known ||
+                  (vavg > 0 && bars[n - 1].volume > cfg.vol_multiple * vavg);
     double atr_v = atr(bars, cfg.atr_period);
     // Long reentry: prior bar stretched below the lower band, now back inside,
     // RSI leaving oversold. Short reentry is the mirror at the upper band.
@@ -472,9 +478,15 @@ StrategySignal evaluate_rsi2_reversion(const std::vector<Bar>& bars,
         if (sd > 0.0 && std::fabs(atr_v - mean) > cfg.atr_band_std * sd) return sig;
     }
 
-    // Volume filter: skip below-average volume.
+    // Volume filter: skip below-average volume. A bar reporting NO volume is
+    // NOT below average, it is unmeasured (2026-07-21): the live Alpaca path
+    // has no venue volume to report, and this check used to run against a
+    // uniform random draw, deciding 3,235 live-bar comparisons at a 49.2
+    // percent pass rate. Unknown volume does not gate. The trend filter, the
+    // RSI-2 trigger, and the ATR band still decide.
     double vavg = avg_volume(bars, cfg.vol_lookback);
-    if (vavg > 0 && bars[n - 1].volume < vavg) return sig;
+    if (bars[n - 1].volume > 0.0 && vavg > 0 && bars[n - 1].volume < vavg)
+        return sig;
 
     sig.has_signal = true;
     sig.direction = Direction::Long;

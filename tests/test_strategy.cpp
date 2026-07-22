@@ -332,6 +332,17 @@ int main() {
         auto low_vol = strategy::evaluate_rsi2_reversion(rsi2_bars(50), cfg, true);
         check(!low_vol.has_signal, "RSI-2 gated on below-average volume");
 
+        // UNKNOWN volume does NOT gate (2026-07-21). A bar reporting no
+        // volume is unmeasured, not low: the live Alpaca path has no venue
+        // volume, and this check used to run against a uniform random draw.
+        // The distinction is the whole fix, so both directions are pinned
+        // here: 50 is a real below-average reading and still gates, 0 is an
+        // absent reading and must not.
+        auto unknown_vol = strategy::evaluate_rsi2_reversion(rsi2_bars(0), cfg, true);
+        check(unknown_vol.has_signal,
+              "RSI-2 fires when the bar reports NO volume: absent is not "
+              "below-average, and gating on absence is gating on nothing");
+
         // Cross-back confirmation: with confirm OFF, entry may fire on the deep
         // pullback bar itself (RSI-2 already below the threshold), a different
         // trigger than the confirmed cross-back.
