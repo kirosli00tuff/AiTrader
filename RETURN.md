@@ -14,6 +14,111 @@ Commit message:
 
 ---
 
+## Prompt: Diagnose RSI-2 and momentum signal reachability, findings only
+
+Date: 2026-07-21
+Model: Opus 4.8 (1M context)
+Prompt summary: a DIAGNOSTIC session, change no thresholds and no behavior, prefer a clear unknown over an unverified cause. The active_quant profile went live 2026-07-21 at 07:00Z with RSI-2 reversion and dual-MA momentum and produced zero entry candidates, zero council calls, and zero blocks across eight warm symbols receiving real bars. The council, the feed, and the composition rules are all verified working, so the question is whether the strategy layer produces signals at all. Five tasks: report the actual current indicator values the entry logic evaluates for every symbol in the tradeable universe (RSI-2, the 200-period trend MA and whether price is above it, ADX, realized volatility, the dual-MA momentum state, volume against its average, the regime label), state per symbol which specific condition blocks an entry and by how much and rank the symbols by closeness, confirm from instrumentation rather than inference whether the entry evaluation runs each iteration for each warm tradeable symbol and if it runs and declines why no skip or decline event is recorded, count over the stored bar history how often each entry condition would have been satisfied per symbol under the current thresholds to distinguish a selective strategy from an unsatisfiable one, and report with per-symbol tables separating evidence from hypothesis plus concrete threshold changes worth testing ordered by expected impact with the observable that would indicate each worked, applying none of them. No RiskGate, live-gate, or adaptive-invariant changes. Live trading stays off.
+
+**HEADLINE, and it contradicts the prompt's premise: THE STRATEGY LAYER DOES PRODUCE SIGNALS. Between 13:10Z and 13:55Z the engine generated five native entry candidates (three RSI-2 reversion, two momentum), executed one, and recorded a `council_skip` plus a `risk_block` for each of the other four. The 07:00Z to 08:00Z window the prompt observed was about one hour, and the measured base rate predicts well under one candidate per hour across the universe, so zero was the expected reading of a window too short to say anything. The real bottleneck is NOT the strategy: four of five candidates died at the RiskGate's 0.65 confidence floor, at 0.427, 0.488, 0.509, and 0.299. SEPARATELY AND MORE SERIOUSLY, one of RSI-2's four gates is fed by a random number on the live path: `AlpacaFeed::poll` sets `ms.volume = 1000.0 + 9000.0 * next_uniform()` per tick, so every live bar's volume is fabricated.**
+
+Changes: NONE to behavior, thresholds, or config. This was a diagnostic. One throwaway analysis script in the session scratchpad transcribed the C++ indicator math (Wilder RSI, Wilder ATR, Wilder ADX, SMA, EMA, realized vol, average volume) from `signal_engine/strategy.cpp` and ran it read-only over the stored bars.
+
+TASK 1, WHAT THE INDICATORS ACTUALLY READ. Every symbol in the tradeable universe, computed over the newest 300 real-provenance 5-min bars, which is exactly the window `kBarHistoryCap` gives the engine. Measured 2026-07-21, newest bar 14:25Z.
+
+| symbol | regime | ADX | realized vol | RSI-2 now/prev | entry | price / MA200 | vs MA200 | EMA20 / EMA100 | RSI-2 blocked at | momentum blocked at |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| BTC/USD | neutral | 24.2 | 0.131% | 11.7 / 46.3 | 10 | 66702 / 65884 | +1.24% | 66618 / 66258 (+0.54%) | rsi2_trigger | no_crossover |
+| ETH/USD | neutral | 18.7 | 0.160% | 6.0 / 27.4 | 10 | 1931.7 / 1930 | +0.09% | 1936.7 / 1935 (+0.09%) | rsi2_trigger | adx |
+| SOL/USD | neutral | 17.4 | 0.176% | 99.3 / 1.5 | 10 | 78.29 / 78.148 | +0.18% | 78.277 / 78.266 (+0.01%) | **atr_band** | adx |
+| SPY | trending | 46.1 | 0.114% | 90.3 / 96.3 | 5 | 745.97 / 742.04 | +0.53% | 744.21 / 742.54 (+0.23%) | rsi2_trigger | no_crossover |
+| QQQ | trending | 53.4 | 0.092% | 75.5 / 82.6 | 5 | 704.85 / 697.00 | +1.13% | 704.13 / 699.69 (+0.63%) | rsi2_trigger | no_crossover |
+| AAPL | trending | 30.7 | 0.192% | 94.4 / 93.9 | 5 | 326.13 / 326.20 | -0.02% | 325.19 / 326.02 (-0.25%) | **trend_filter** | no_crossover |
+| MSFT | trending | 36.3 | 0.127% | 68.1 / 47.3 | 5 | 400.06 / 399.97 | +0.02% | 399.52 / 399.86 (-0.08%) | rsi2_trigger | no_crossover |
+| NVDA | trending | 44.1 | 0.376% | 48.5 / 77.7 | 5 | 204.82 / 203.87 | +0.47% | 205.07 / 204.03 (+0.51%) | rsi2_trigger | no_crossover |
+| LDO/USD | trending | 73.0 | 0.167% | 0.0 / 0.0 | 10 | 0.40078 / 0.39450 | +1.59% | 0.40218 / 0.39863 (+0.89%) | rsi2_trigger | no_crossover |
+| UNI/USD | trending | 32.2 | 0.180% | 80.9 / 80.9 | 10 | 3.6990 / 3.6732 | +0.70% | 3.6936 / 3.6862 (+0.20%) | rsi2_trigger | no_crossover |
+
+Nine of ten are above their 200-period trend MA, so the long-only trend filter is NOT the binding constraint (AAPL is the one exception, 0.02% below). Regime splits 3 neutral, 7 trending. Realized vol is uniformly low (0.09% to 0.38% per 5-min bar).
+
+TASK 2, HOW FAR FROM FIRING, ranked closest first.
+
+1. **SOL/USD, ONE GATE AWAY.** RSI-2 went 1.5 to 99.3, so the cross-back trigger IS satisfied and the trend filter passes (+0.18%). It is blocked by the ATR volatility band alone.
+2. **LDO/USD, armed and waiting.** RSI-2 is pinned at 0.0, far below its 10 threshold, price is +1.59% above the MA200. It needs only the cross-back tick above 10 to trigger, and it has the highest ADX in the universe at 73.
+3. **ETH/USD**, RSI-2 6.0 and already below the 10 entry, prev 27.4, so it needs one more bar below then a tick back up. Trend margin is thin at +0.09%.
+4. **BTC/USD**, RSI-2 11.7, needs to dip 1.7 more points below 10 and cross back.
+5. **MSFT**, RSI-2 68.1 against a 5 threshold, 63 points away. **NVDA** 48.5, **QQQ** 75.5, **SPY** 90.3, **AAPL** 94.4 and below its trend MA. The equity threshold of 5 is very far from current readings.
+
+Momentum is blocked on "no crossover this bar" for eight of ten, which is not a threshold question: an EMA20/EMA100 crossover is a discrete event. Two (ETH, SOL) fail the ADX floor as well, at 18.7 and 17.4 against 20.
+
+THE ACTUAL LIVE BLOCKS, which are the better answer to "how far from firing", from `risk_block` payloads:
+
+| time | symbol | factor | tier | confidence | floor | short by | edge | agreement |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 13:10:23Z | UNI/USD | reversion | fast | 0.509 | 0.65 | 0.141 | 0.0324 | 3 of 2 |
+| 13:55:02Z | ETH/USD | reversion | fast | 0.488 | 0.65 | 0.162 | 0.0430 | 1 of 2 |
+| 13:10:23Z | SOL/USD | reversion | fast | 0.427 | 0.65 | 0.223 | 0.0338 | 3 of 2 |
+| 13:35:39Z | SPY | momentum | fast | 0.299 | 0.65 | 0.351 | 0.0229 | 4 of 2 |
+
+Every one cleared the edge floor (0.02). Three of four cleared the agreement requirement. All four died on confidence, and all four took the FAST tier, so no council was consulted and no council spend occurred.
+
+TASK 3, DOES THE EVALUATION PATH RUN. YES, and this is from the event log, not inference. Bars: all ten symbols closed `real_feed` 5-min bars continuously (BTC/USD alone holds 308 since the invariant landed), which only happens by way of `on_closed_bar`. Candidates: five distinct native entry candidates were produced and recorded in the observed window, three by the RSI-2 reversion factor (SOL/USD, UNI/USD, ETH/USD) and two by momentum (SPY, UNI/USD). Decisions: each candidate wrote BOTH a `council_skip` ("fast tier, small low-conviction native entry") and a `risk_block` with full numbers. One candidate cleared: `trade_entry` UNI/USD momentum buy at 3.700000, strength 0.7, regime trending, stop 3.69586, target 3.70621, followed at 13:25:26Z by `trade_exit` on target, pnl +0.5526, executed against a `real_feed` bar. So the path runs, it declines, and it DOES record why. The prompt's "complete silence in the event log" described a one-hour window, and the measured rate makes silence the expected observation there rather than evidence of a dead path.
+
+TASK 4, HISTORICAL REACHABILITY. Every stored real-provenance 5-min bar, every symbol, every gate under the CURRENT thresholds. `evaluated` counts bars with at least 200 bars of history behind them.
+
+| symbol | bars | evaluated | above MA200 | RSI-2 <= entry | cross-backs | trend AND cross-back | ATR band ok | volume ok | FULL RSI-2 | momentum crossovers | FULL momentum |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| BTC/USD | 9535 | 9335 | 5253 | 1157 | 587 | 260 | 135 | 51 | **26** | 68 | **29** |
+| ETH/USD | 9140 | 8940 | 5348 | 967 | 519 | 249 | 143 | 54 | **34** | 51 | **22** |
+| SOL/USD | 8547 | 8347 | 4437 | 1052 | 548 | 242 | 140 | 47 | **29** | 72 | **18** |
+| SPY | 4150 | 3950 | 2019 | 228 | 114 | 51 | 29 | 22 | **15** | 19 | **9** |
+| QQQ | 4153 | 3953 | 1744 | 253 | 132 | 37 | 14 | 18 | **8** | 15 | **10** |
+| AAPL | 3888 | 3688 | 2249 | 220 | 116 | 53 | 33 | 22 | **13** | 23 | **11** |
+| MSFT | 3918 | 3718 | 2017 | 213 | 115 | 46 | 27 | 20 | **11** | 22 | **8** |
+| NVDA | 3918 | 3718 | 1673 | 227 | 128 | 43 | 21 | 12 | **7** | 22 | **12** |
+| LDO/USD | 9492 | 9292 | 5101 | 1151 | 544 | 247 | 137 | 168 | **97** | 72 | **32** |
+| UNI/USD | 8839 | 8639 | 4448 | 1169 | 558 | 236 | 117 | 39 | **18** | 66 | **30** |
+
+**THE STRATEGY IS SELECTIVE, NOT UNSATISFIABLE, and that is the direct answer to the question the prompt asks.** RSI-2 under 10 for crypto and under 5 for equities is reached constantly: 1,157 times for BTC/USD, and the minimum RSI-2 observed is 0.00 for six of ten symbols. Above the 200-MA holds on 44 to 61 percent of bars. The full conjunction fires 7 to 97 times per symbol over the stored history (crypto covers about 32 days, equities about 50 trading days). Adding momentum, the whole universe would produce roughly 12 signals per day: about 10.5 from the five crypto names over 32 days and about 2.1 from the five equities over 50 sessions. That is a working cadence, not a dead one.
+
+ATTRITION, where the setups go. Of the 260 BTC bars where the trend filter and the cross-back both held, the ATR volatility band kills 125 (48%) and the volume filter kills 209 (80%), leaving 26. Across the universe the band kills 38 to 62 percent and volume kills 32 to 84 percent. THE MECHANISM, stated as hypothesis rather than measurement: the cross-back bar is by construction a small bounce off an oversold low, and a small bounce bar tends to carry below-average volume, so `volume >= avg_volume(20)` is in structural tension with the trigger it is filtering.
+
+**THE DEFECT THAT MATTERS MOST, and it is evidence, not hypothesis: THE LIVE VOLUME SERIES IS FABRICATED.** `market_data/market_data.cpp:186`, inside `AlpacaFeed::poll`, sets `ms.volume = 1000.0 + 9000.0 * next_uniform()` on every tick. The 2026-07-20 session removed the walk fallback so PRICES are real, and recorded that live bars still aggregate fabricated tick volume, but the consequence for the strategy was not followed through: RSI-2's volume gate and `avg_volume` consume that number. Measured on BTC/USD 5-min bars: backfill bars average volume 0.0056 (max 1.0059, real venue units), `real_feed` bars average 55,906 (min 14,977, max 131,130). Seven orders of magnitude apart, and the live figure is statistically identical across BTC/USD, SPY, and AAPL (30,000 to 65,000 for every instrument), which is the signature of a generator rather than a market. TWO CONSEQUENCES. (1) The historical reachability table above is computed on REAL backfill volume and therefore does NOT transfer to the live path. (2) On the live path the volume gate is not measuring volume at all: while the 20-bar window still holds seeded backfill bars it passes trivially (a live bar of ~55,000 against an average near 0.006), and once the window is all live it becomes a coin flip between two draws of the same uniform distribution. Either way it is noise, and it is one of the four gates guarding every RSI-2 entry.
+
+TASK 5, ASSESSMENT AND RECOMMENDATIONS.
+
+**PLAINLY: the strategy is correctly selective in current conditions, and it is not structurally unable to fire.** Evidence: five live candidates and one executed round trip in the observed window; 7 to 97 full RSI-2 setups per symbol in the stored history; SOL/USD currently one gate from an entry and LDO/USD armed at RSI-2 0.0. HYPOTHESIS, separated as the prompt requires: that the low live cadence is dominated by the volume gate consuming a random number, and that the four confidence blocks indicate the fast-tier gate composition is the real cap on fills rather than the strategy. Neither is proven here.
+
+CONCRETE CHANGES WORTH TESTING, ordered by expected impact. NONE WAS APPLIED.
+
+1. **Stop fabricating live volume.** Carry the venue's reported volume on the tick, or carry no volume and make the filter abstain when volume provenance is not real, the same rule the council evidence renderer already follows. OBSERVABLE: live `real_feed` bar volumes fall to the same scale as backfill bars (BTC/USD ~0.006, not ~55,000), and the per-symbol volume distributions stop being identical across instruments. This is a correctness fix, not a tuning change, and it should precede every other item because it decides whether the numbers below mean anything.
+2. **Reconsider the volume filter for a cross-back trigger.** It removes 32 to 84 percent of otherwise-valid setups, and it is the single largest source of attrition. OBSERVABLE: full RSI-2 counts in the table above roughly triple for crypto; watch whether the added entries are profitable in paper rather than merely more numerous.
+3. **Widen the ATR band from 1.0 SD.** It removes a further 38 to 62 percent. OBSERVABLE: `atr_band` stops appearing as a blocking reason (it is SOL/USD's blocker right now).
+4. **Raise the equity RSI-2 entry from 5.** Equities reach RSI-2 <= 5 on only 213 to 253 of about 3,700 bars, roughly a third the crypto rate, and every equity is currently 43 to 89 points away. OBSERVABLE: equity full-RSI-2 counts rise from 7 to 15 toward the crypto range.
+5. **Investigate the fast-tier confidence composition before touching any threshold.** Four of five candidates were refused at 0.427, 0.488, 0.509, and 0.299 against the 0.65 floor while clearing edge and mostly clearing agreement. CONTEXT.md's 2026-07-15 entry says a fast-tier entry recomposes confidence from the factors that actually produced a signal; these numbers deserve the same measurement that entry was based on. OBSERVABLE: the composed confidence for a genuine native setup lands at or above 0.65 without the RiskGate floor moving. **The floor itself is a Level-1 value and must not be lowered.**
+
+WHAT REMAINS UNKNOWN, stated rather than guessed. Whether the four confidence blocks are correct refusals of genuinely weak setups or an artifact of the composition is NOT settled here. Whether the added entries from items 2 through 4 would be profitable is NOT settled: this diagnostic counts opportunities, it does not score them. And the historical counts describe the stored tape, not the future.
+
+NOT touched: RiskGate logic, the live-trading gate, the adaptive limit-weakening invariant, Level 1 values, any threshold, any config, any behavior. Live trading stays off.
+
+VERIFICATION (2026-07-21):
+
+| Check | Result |
+| --- | --- |
+| Indicator math | transcribed from signal_engine/strategy.cpp, read-only |
+| Universe measured | 10 symbols, newest bar 14:25Z |
+| Live candidates observed | 5 (3 RSI-2, 2 momentum), 1 executed, 4 blocked |
+| Executed round trip | UNI/USD momentum, entry 3.700000, exit on target, pnl +0.5526 |
+| Blocking condition | RiskGate min_confidence 0.65, at 0.299 to 0.509 |
+| Full RSI-2 setups in history | 7 to 97 per symbol, minimum RSI-2 observed 0.00 |
+| Strategy reachable | YES, roughly 12 signals/day universe-wide on stored data |
+| Live volume | FABRICATED, market_data.cpp:186, uniform [1000, 10000] per tick |
+| Changes applied | none |
+
+Commit message: `Diagnose RSI-2 and momentum signal reachability, findings only, live trading untouched`
+
+---
+
 ## Prompt: Full system verification and the startup label bug
 
 Date: 2026-07-21
