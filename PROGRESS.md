@@ -134,6 +134,11 @@ New flags from the feed-work session (2026-07-05, `369b6a6`):
 
 ## Session Log
 
+### 2026-07-21 (Opus 4.8) — Run record and one correction to the entries below
+
+- **The 08:01Z stack ran 6 hours 27 minutes** (760 iterations, 2 trades, 5 entry candidates) and stopped cleanly at 14:28:55Z on a graceful `POST /engine/stop`. **WHO SENT IT IS NOT ESTABLISHED.** No `watchdog_restart`, no `engine_supervisor` event, no `.run/watchdog_state.json`, and no kill trip. The watchdog is the only automated caller of that endpoint, so it is the likely initiator, but nothing in the record proves it and it is recorded here as unexplained rather than attributed. The stack was restarted afterwards and is running.
+- **Correction to the universe entry below:** it says the stack was left running "with eleven verified symbols". On restart the universe resolves to TEN (8 verified core + 2 verified periphery). AAVE/USD left the watchlist between the two runs, which is the 48-hour staleness prune doing its job, not a regression. The core is unchanged at 8 of 8 serviceable.
+
 ### 2026-07-21 (Opus 4.8) — AUDIT: real spend is $2.18 per 72 hours, and every spend ceiling is 40 percent looser than it reads
 
 - **Measured 72-hour spend: about $2.18 of production LLM cost** (38 discovery Stage C rounds plus 1 trading council round plus 39 gate calls), and about $0.78 more from the 2026-07-20 prompt-measurement harness, which is diagnostic rather than production. Adaptive interpretation spent NOTHING (the table is empty, the free filter dropped everything) and the research satellite spent NOTHING across 13 passes (every thesis reads "screened out: no catalyst" at conviction 0.0, so the free Finnhub screen refused before any council call).
