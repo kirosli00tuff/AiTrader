@@ -14,6 +14,94 @@ Commit message:
 
 ---
 
+## Prompt: Full system verification and the startup label bug
+
+Date: 2026-07-21
+Model: Opus 4.8 (1M context)
+Prompt summary: verification, not repair, unless a fix is trivially safe and clearly required. Four tasks: run scripts/test_full_system.sh in full and record every section's result with counts, stating for each SKIP why it skipped and whether it hides an untested path; reconcile what PROGRESS.md and CONTEXT.md claim works against what the tests actually exercise and report every subsystem whose claimed behavior has no test; find and fix the startup label bug where the engine block prints "source: mock" while the loop event records "source=alpaca", since a startup line that lies about the data source is how a mock run gets mistaken for a real one; write a state-of-the-system report into RETURN.md separating verified working, claimed but untested, and known broken. No RiskGate, live-gate, or adaptive-invariant changes. Live trading stays off.
+
+**HEADLINE: 15 of 17 sections PASS, 0 SKIP. The two failures share ONE root cause and it is not a code defect: the operator's uncommitted `strategy.profile: active_quant` edit to the shipped config. Two of those failing assertions are not about shipped defaults at all, and they are the most important finding of the session: on an identical deterministic synthetic feed over 5,000 iterations, swing produces 108 trades and active_quant produces 6. The live profile is roughly eighteen times less active than the one every regression test was written against.**
+
+Changes: TASK 1, EVERY SECTION RUN. `scripts/test_full_system.sh` in full, twice (before and after the two harness fixes below). FINAL RUN: 15 PASS, 2 FAIL, 0 SKIP.
+
+| Section | Result | Count / note |
+| --- | --- | --- |
+| Build (zero warnings) | PASS | 0 warnings on a CLEAN compile after the fix below; it passed before only on an already-built tree |
+| C++ unit tests (ctest) | FAIL | 23/26 targets. `config` (5 assertions), `tuner_floor` (1), `market_hours_entry` (2). 26/26 with the shipped config |
+| Python unit tests (pytest) | PASS | 892 passed |
+| Config validation | FAIL | the same `config` target, the same cause |
+| RiskGate and kill switch | PASS | `risk_gate` + `kill_switch` targets |
+| Strategy and regime | PASS | `strategy` + `feed_modes` (feed_modes now 16 assertions, +4) |
+| Real-fill feedback | PASS | `tuner_minsample`, `weights`, `native_conviction_gate` |
+| Council offline | PASS | keys unset AND an empty keystore, mock fallback labelled |
+| Council live keys | PASS | one real minimal call per provider |
+| Council cost controls | PASS | budget, cooldown, ceilings, both cost cuts |
+| DNN advisory | PASS | `train_real` against a copy of the production DB |
+| RL gating | PASS | `rl_advisory`, still 241/500 real fills, shipped off |
+| Whale layer (SEC EDGAR) | PASS | 21 tests; the section's own stale assertion fixed, below |
+| Alpaca paper | PASS | real market data + paper order auth |
+| API backend | PASS | 171 tests, loopback bind, seeded-DB shape check |
+| Frontend (types/test/build) | PASS | tsc clean, vitest 129, production build |
+| Live exclusion | PASS | live unreachable by design |
+
+ZERO SKIPS, so no path was hidden by an absent key: every optional section (council live keys, Alpaca paper, whale, Finnhub) had its credential resolve and ran for real. Confirmed independently against the live backend: all 9 configured integrations report `working` (openai 4.4s, anthropic_opus 1.3s, anthropic_haiku_gate 0.6s, gemini 5.5s, alpaca_data 0.26s, alpaca_trading_auth 0.29s, finnhub 0.15s, sec_edgar 0.10s, whale_alert 0.16s; ibkr and unusual_whales `not_configured` by design). GEMINI HAS RECOVERED: it was HTTP 429 account-quota-exhausted through the 2026-07-20 sessions and now answers, slowly. On one call it timed out and the summary read `any_failing`, so it is working but marginal.
+
+TWO SECTION DEFECTS FOUND AND FIXED, both trivially safe, both about the harness lying rather than the system failing. (1) `sec_whale` asserted `whale_position_scale_cap: 0.35` is PRESENT in config. That key was deliberately REMOVED on 2026-07-18 (commit 47c9ae8) because it was parsed and range-validated with no consumer, and a pytest guard pins its ABSENCE. Two guards in direct contradiction, so this section had been failing for three days on a stale assertion. It now asserts the removed keys stay removed and that `default_position_scale_cap`, the one enforced sizing cap, is present. (2) `sec_build` fails on ANY compiler warning, and `core/engine.cpp` carried a pre-existing `-Wmissing-field-initializers` on the `ResearchThesisRow` aggregate initializer. It passed only because an up-to-date build tree recompiles nothing and therefore prints nothing: a CLEAN build FAILED the section. Verified both ways by touching the file. The initializer is now field-by-field (behavior-identical: the omitted members were value-initialized and then assigned on the very next lines), and a clean compile emits zero warnings.
+
+TASK 2, CLAIMS AGAINST REALITY. Seven parallel subsystem audits read every behavioral claim in PROGRESS.md and CONTEXT.md and searched the suite for a test that actually drives it. 315 claims are genuinely COVERED. 97 were flagged partial or untested. An adversarial pass was then run to REFUTE each flag; IT DID NOT FINISH: 82 of 97 verifiers died on a session limit. The honest accounting is therefore 13 CONFIRMED gaps, 2 refuted, and 82 UNVERIFIED candidates that must not be quoted as findings. Per subsystem, covered / flagged: safety 42 / 14, strategy 24 / 11, advisory 52 / 16, data 37 / 14, discovery 88 / 10, ops 44 / 16, surface 28 / 16.
+
+THE 13 CONFIRMED GAPS, adversarially verified as genuinely untested.
+
+SAFETY SPINE, which matters most because this layer is the final authority:
+1. **Eight of the RiskGate's documented hard checks have no test at all.** `risk/risk_gate.cpp` has 18 distinct refusal sites and the suite drives 10. Untested: cooldown after a loss breach, `max_daily_loss_per_venue_pct`, `max_total_open_risk_pct`, `max_open_positions_total`, `max_open_positions_per_venue`, and three more. Any one could be commented out or have its comparison flipped and the whole suite stays green. PROGRESS.md:11 says "14 hard checks, final authority on every order, tested"; the word "tested" carries more weight than the suite supports.
+2. **The four-block live-trading gate is never driven.** No test calls `try_enable_live` or asserts that each block independently refuses. A block could be deleted or its early return inverted and nothing fails. This is the most consequential untested path in the repo.
+3. **A daily-loss breach tripping the kill switch is untested** end to end (the trip, the per-venue live revocation, the `kill_switch` critical event). The OPERATOR kill path is well covered; the LOSS-triggered one is not.
+4. **`snapshot_balances` persisting `venue_state.kill_switch_tripped` is untested**, so a halt could become invisible to the GUI and to `/approval` while the engine is correctly halted.
+5. `config/config.cpp` THROWING on an unsafe config is only partially pinned: the validator's problem list is tested, the throw that acts on it is not.
+6. The kill-request read inside `run_iteration` (the tick path real paper trading uses) is pinned only for the bar path.
+7. The four live-gate mechanisms `/approval` reports are asserted as a group, never per mechanism, so a wrong column mapping reads the same.
+8. "The RiskGate still evaluates every order with all four advisory layers off" is asserted by toggle tests, not by an order-path test.
+9. `kill_switch_enabled: false` making `KillSwitch::trip` a no-op is unpinned: an operator flipping that Level-1 bool disables both the loss trip and the operator halt, silently.
+
+NATIVE STRATEGY, and all four are active_quant features, which is what is running:
+10. **The crypto 2x ATR stop is untested.** `is_crypto` could be dropped or inverted and every crypto position would run the tight equity stop.
+11. **The RSI-2 crypto-10 / equity-5 threshold split is untested.** The two could be swapped and nothing fails.
+12. **The ATR volatility band is untested.** It could be inverted and RSI-2 would enter on exactly the violent tape it exists to skip.
+13. The dual-MA momentum filter's positive-lookback-return half is only partially covered.
+
+One shape explains nearly all of these: THE PURE PREDICATES ARE WELL TESTED AND THE ENGINE WIRING THAT CONSUMES THEM IS NOT. `decide_tier`, `check_exit`, `rsi2_exit_triggered`, `spend_ceiling_reached`, and `equity_entry_blocked_by_market_hours` all have direct unit tests; the branches in `Engine::on_closed_bar` that call them mostly do not. A second shape compounds it: every C++ engine test loads `config/default_config.yaml`, which SHIPS `profile: swing`, so the RSI-2 engine exit path, the fast-tier branch, and the dual-MA lookback-return branch are dead code in every committed ctest run.
+
+TASK 3, THE STARTUP LABEL BUG. CAUSE: the rule "feed_mode alpaca_paper forces the alpaca source" lived in TWO places and only one applied it. `Engine`'s constructor did `if (feed_mode_ == "alpaca_paper") source = "alpaca";` after reading the CLI-or-config value; the banner in `core/main.cpp` computed `!data_source.empty() ? data_source : cfg.market_data.source` and stopped there. Config ships `market_data.source: mock`, so on the real path the banner printed "source: mock" and the engine then wrote `continuous_start ... (source=alpaca, feed=alpaca_paper)` into its own event log seconds later. Confirmed against the production event log: three `continuous_start` rows, every one recording `source=alpaca`. FIX: one pure function, `market_data::resolve_source(cli_override, config_source, feed_mode)`, called by both, with the reason recorded at the definition. Verified both directions on a scratch DB: `--feed-mode alpaca_paper` now prints "source: alpaca", `--feed-mode flat_random_walk` still prints "source: mock". Four assertions added to `tests/test_feed_modes.cpp`, including that alpaca_paper outranks a `--data-source mock` override exactly as the Engine does.
+
+TASK 4, STATE OF THE SYSTEM.
+
+**VERIFIED WORKING, measured this session rather than claimed.** The C++ safety spine builds clean with zero warnings and 26/26 ctest targets pass against the shipped config. pytest 892, vitest 129, tsc and the production build clean. All 9 configured integrations answer a real round trip. The real paper loop runs on 11 verified symbols, every one closing real venue bars and warm. Provenance holds: zero synthetic bars written since the fabrication path was removed, zero `feed_substitution`, zero `symbol_unavailable`. The council path is live and reachable (Opus, GPT-5.5, and Gemini again) with its gate, budgets, and ceilings enforced. Discovery is enabled and passing, and the watchlist holds three verified members. RL is off at 241/500 real fills. Live trading is off and the exclusion test proves it unreachable.
+
+**CLAIMED BUT UNTESTED.** The 13 confirmed gaps above, headed by the four-block live gate, eight RiskGate checks, and the loss-triggered kill trip. Beyond those, 82 further candidates were flagged and NOT verified because the verification pass ran out of session; they are recorded as candidates, not findings, and re-running that pass is the honest next step. Also unexercised by any committed test run: every active_quant-only strategy branch, because the shipped config selects swing.
+
+**KNOWN BROKEN.** (1) THE STRATEGY LAYER IS NOT PRODUCING SIGNALS UNDER active_quant. Two independent C++ fixtures that reliably generate native entries under swing produce none under active_quant, and a direct 5,000-iteration run on the identical deterministic synthetic feed gives swing 108 trades against active_quant 6. Live agrees: since the 08:01Z restart the engine has produced 0 trades, 0 entry candidates, and 0 council calls across 11 warm symbols on real bars. The synthetic feed is a generated tape, so this bounds reachability on THAT tape and not on the live one, but the direction is unambiguous and it is exactly what the next prompt exists to diagnose. (2) The `market_hours_entry` end-to-end regression, the ONLY test proving an equity exit is never trapped off-hours, does not pass in the working tree for the same reason. (3) There is no runtime lever for `strategy.profile`, so selecting active_quant requires editing the shipped config, which is precisely what breaks the three shipped-default tests. CONTEXT.md already names this pattern ("a runtime flag needs a runtime LEVER, or the operator edits the shipped default"); the profile is the remaining instance. Recommended and NOT done here: read the profile through `controls.json` the way every other runtime flag is read.
+
+NOT touched: RiskGate logic, the live-trading gate, the adaptive limit-weakening invariant, Level 1 values, promotion criteria, the RL fill gate, `min_directional_votes`, any threshold. The operator's `profile: active_quant` config edit was left exactly as found and is NOT part of this commit. Live trading stays off.
+
+VERIFICATION (2026-07-21):
+
+| Check | Result |
+| --- | --- |
+| test_full_system.sh | 15 PASS / 2 FAIL / 0 SKIP |
+| Both failures | the operator's uncommitted profile edit, proven by stashing that one line |
+| ctest (shipped config) | 26/26, clean compile, zero warnings |
+| pytest / vitest / tsc / build | 892 / 129 / clean / green |
+| Startup label, real path | "source: alpaca" (was "source: mock") |
+| Startup label, offline | "source: mock" (unchanged) |
+| Integrations | 9 of 9 configured working, Gemini recovered |
+| Synthetic 5,000 iterations | swing 108 trades, active_quant 6 |
+| Live since the 08:01Z restart | 0 trades, 0 candidates, 0 council calls |
+| Claims audited | 315 covered, 13 gaps confirmed, 82 candidates unverified |
+
+Commit message: `Full system verification and startup label fix, live trading untouched`
+
+---
+
 ## Prompt: The universe fix, a verified core plus a discovered periphery, resolved once
 
 Date: 2026-07-21

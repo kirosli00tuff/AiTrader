@@ -108,9 +108,12 @@ Engine::Engine(config::Config cfg, EngineOptions opts)
 
     // Select the market-data source: CLI override else config. feed_mode
     // alpaca_paper forces the online Alpaca feed (the primary online loop).
-    std::string source =
-        !opts_.data_source.empty() ? opts_.data_source : cfg_.market_data.source;
-    if (feed_mode_ == "alpaca_paper") source = "alpaca";
+    // THE effective source, from the one resolver the startup banner also uses
+    // (market_data::resolve_source). Two copies of this rule is exactly how the
+    // banner came to print "source: mock" for a run the engine was driving off
+    // the real Alpaca feed.
+    const std::string source = market_data::resolve_source(
+        opts_.data_source, cfg_.market_data.source, feed_mode_);
     if (source == "alpaca") {
         feed_ = std::make_unique<market_data::AlpacaFeed>(
             instruments, opts_.bridge_host, opts_.bridge_port, opts_.seed);
@@ -2625,9 +2628,20 @@ void Engine::maybe_run_research_pass(const market_data::MarketState& ms,
     std::string invalidation = bridge::json_get_string(*resp, "invalidation", "");
 
     // Persist the thesis regardless (research feed), so the operator sees passes.
-    storage::ResearchThesisRow thesis_row{ts,        ms.symbol, dir,
-                                          conviction, horizon,  rationale,
-                                          "open"};
+    // Field-by-field, not an aggregate initializer: the row has grown three
+    // long-term fields since this line was written and the positional form
+    // left them out, which -Wmissing-field-initializers reported on every
+    // clean build. That warning is what made `sec_build` (zero warnings) pass
+    // only on an already-built tree. No behavior changes: the omitted members
+    // were value-initialized and then assigned on the lines below anyway.
+    storage::ResearchThesisRow thesis_row;
+    thesis_row.ts = ts;
+    thesis_row.symbol = ms.symbol;
+    thesis_row.direction = dir;
+    thesis_row.conviction = conviction;
+    thesis_row.horizon = horizon;
+    thesis_row.rationale = rationale;
+    thesis_row.status = "open";
     thesis_row.target = thesis_target;
     thesis_row.invalidation_price = invalidation_px;
     thesis_row.invalidation = invalidation;

@@ -187,13 +187,17 @@ int main(int argc, char** argv) {
             opts.use_bridge = true;
         }
 
-        std::string source =
-            !data_source.empty() ? data_source : cfg.market_data.source;
         int eff_interval =
             interval_seconds > 0 ? interval_seconds
                                  : cfg.engine.loop_interval_seconds;
         std::string eff_feed =
             !feed_mode.empty() ? feed_mode : cfg.simulation.feed_mode;
+        // THE effective source, from the one resolver the Engine uses. This
+        // line printed the CONFIG value and skipped the alpaca_paper override,
+        // so a real-path run under `market_data.source: mock` announced
+        // "source: mock" and then wrote "source=alpaca" into its own event log.
+        std::string source = mal::market_data::resolve_source(
+            data_source, cfg.market_data.source, eff_feed);
         std::string eff_clock =
             !clock_mode.empty() ? clock_mode : cfg.simulation.clock_mode;
 

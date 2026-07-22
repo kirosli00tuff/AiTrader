@@ -59,7 +59,17 @@ sec_cost_controls() { "$PY" -m pytest tests/test_council_cost_controls.py tests/
 sec_rl() { "$PY" -m pytest tests/test_rl_advisory.py -q > "$TMP/rl.log" 2>&1; }
 sec_whale() {
   "$PY" -m pytest tests/test_whale_fixtures.py tests/test_whale_signal.py -q > "$TMP/wh.log" 2>&1 || return 1
-  grep -q 'whale_position_scale_cap: 0.35' config/default_config.yaml || { echo "0.35 cap missing"; return 1; }
+  # The 0.35 cap was REMOVED 2026-07-18, not enforced: it was parsed and
+  # range-validated with no consumer, so config claimed a safety property the
+  # code did not provide. This section asserted its PRESENCE and had therefore
+  # been failing ever since, while a pytest guard pins its ABSENCE. Two guards
+  # in direct contradiction. The check now matches the decision: the key stays
+  # gone, and the real bound is default_position_scale_cap.
+  if grep -qE '^\s*(whale|dnn)_position_scale_cap\s*:' config/default_config.yaml; then
+    echo "a removed position_scale_cap key is back in config"; return 1
+  fi
+  grep -q 'default_position_scale_cap' config/default_config.yaml \
+    || { echo "default_position_scale_cap missing (the enforced sizing cap)"; return 1; }
   if grep -rniI "clankapp" whale_signal/ account_manager/ api_server/ ui/app.py config/ \
        | grep -viE "removed|dead host" | grep -q .; then
     echo "functional ClankApp reference survives"; return 1

@@ -34,6 +34,23 @@ struct MarketState {
     std::string data_source;
 };
 
+// THE effective market-data source, resolved in ONE place (2026-07-21).
+//
+// CLI override wins, else config, and feed_mode alpaca_paper FORCES the online
+// Alpaca feed because that mode IS the real path. The Engine applied that last
+// rule and the startup banner did not, so a run whose config says
+// `market_data.source: mock` printed "source: mock" while the very next
+// `continuous_start` event it wrote recorded "source=alpaca". A startup line
+// that lies about the data source is how a mock run gets mistaken for a real
+// one, so the rule is a pure function both callers use rather than a
+// convention each has to remember.
+inline std::string resolve_source(const std::string& cli_override,
+                                  const std::string& config_source,
+                                  const std::string& feed_mode) {
+    if (feed_mode == "alpaca_paper") return "alpaca";
+    return !cli_override.empty() ? cli_override : config_source;
+}
+
 // Shared instrument descriptor used by the feeds.
 struct Instrument {
     std::string venue, symbol, market, category;

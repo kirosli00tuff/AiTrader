@@ -126,5 +126,25 @@ int main() {
         rm_db(db);
     }
 
+    // D. The startup banner and the Engine resolve the SAME effective source.
+    // The banner used to compute it without the alpaca_paper override, so a
+    // real-path run under `market_data.source: mock` printed "source: mock"
+    // and then wrote "source=alpaca" into its own continuous_start event.
+    {
+        using market_data::resolve_source;
+        maltest::check(resolve_source("", "mock", "alpaca_paper") == "alpaca",
+                       "alpaca_paper forces the alpaca source even when config "
+                       "says mock (the label bug)");
+        maltest::check(resolve_source("", "mock", "flat_random_walk") == "mock",
+                       "an offline feed mode keeps the configured source");
+        maltest::check(resolve_source("alpaca", "mock", "synthetic_regimes")
+                           == "alpaca",
+                       "an explicit --data-source override wins over config");
+        maltest::check(resolve_source("mock", "alpaca", "alpaca_paper")
+                           == "alpaca",
+                       "alpaca_paper outranks a mock CLI override, exactly as "
+                       "the Engine does");
+    }
+
     return maltest::report("feed_modes");
 }
