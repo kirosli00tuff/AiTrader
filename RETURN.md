@@ -14,6 +14,84 @@ Commit message:
 
 ---
 
+## Prompt: Cost audit from measured spend, and the gate-disabled cause
+
+Date: 2026-07-21
+Model: Opus 4.8 (1M context). The prompt specified Sonnet; the session was already running on Opus and a model cannot be switched mid-session, so it ran on Opus and this line records that rather than leaving the header wrong.
+Prompt summary: five tasks. Measure actual provider calls over the last 72 hours from persisted call records, by path (trading council, discovery Stage C, the base-check gate, adaptive interpretation, research), with tokens in and out per path and real cost at current pricing. Determine why several persisted council rounds record gate_json as "gate disabled, source: disabled" while others used the real Haiku gate, whether it is disabled now, and what running the full council without gate screening costs. Project daily and monthly cost at current volume and at the volume the system would produce trading at its configured caps, compared against the configured budgets and the 100 dollar monthly ceiling, and state whether the ceilings are set correctly for actual behavior. Identify any path still spending without producing a usable result: short-circuits that still charge, retries, duplicate calls, calls on symbols that cannot trade. Report into RETURN.md, update PROGRESS.md, commit and push. No RiskGate, live-gate, or adaptive-invariant changes. Live trading stays off.
+
+**HEADLINE: real 72-hour spend is about $2.18 of production LLM cost plus about $0.78 of diagnostic harness spend, against a $100 monthly ceiling. Nothing is running away. But the ceilings are calibrated on a per-call estimate 40 percent below measured cost ($0.04 configured against $0.056 measured), so every spend ceiling in the system is 40 percent looser than it reads: the $5/day ceiling actually permits about $7.00/day. And the gate-disabled rounds were not a misconfiguration at all, they were the previous session's own measurement harness.**
+
+Changes: NONE to behavior, thresholds, or config. This was an audit.
+
+TASK 1, MEASURED SPEND, 72 hours (2026-07-18T14:00Z to 2026-07-21T14:00Z), by path.
+
+| path | rounds | provider calls | gate calls | measured cost | source of the number |
+| --- | --- | --- | --- | --- | --- |
+| Discovery Stage C | 38 | 114 | 38 | $2.13 | `discovery_pass.council_calls`, charged only on real provider contact |
+| Trading council | 1 | 3 | 1 | $0.056 | `council_eval` id 15, 13:20:19Z, UNI/USD |
+| Base-check gate | see above | - | 39 | $0.012 | one Haiku call per non-disabled round |
+| Adaptive interpretation | 0 | 0 | 0 | $0.00 | `adaptive_interpretation` is EMPTY: the free filter dropped everything |
+| Research satellite | 0 | 0 | 0 | $0.00 | 13 `research_thesis` rows, every one "screened out: no catalyst" at conviction 0.0, so the free Finnhub quality-and-catalyst screen refused before any council call |
+| **Production total** | **39** | **117** | **39** | **~$2.18** | |
+| Diagnostic harness (not production) | 14 | 42 | 4 | $0.78 | `council_eval` ids 1-14, the 2026-07-20 prompt measurement re-runs |
+
+PER-MODEL, over the 15 rounds with full per-provider persistence (the only rounds where tokens are recoverable):
+
+| model | calls | errored | input tokens | output tokens | cost |
+| --- | --- | --- | --- | --- | --- |
+| claude-opus-4-8 | 15 | 0 | 20,942 | 3,825 | $0.6010 |
+| gpt-5.5 | 15 | 0 | 20,942 | 3,825 | $0.1621 |
+| gemini-3.1-pro-preview | 15 | 14 | 20,942 | 255 | $0.0760 |
+| claude-haiku-4-5 (gate) | 5 | 0 | 900 | 200 | $0.0015 |
+| **total** | **50** | **14** | **62,827** | **7,905** | **$0.8406** |
+
+$0.0560 per full round (three providers plus the gate), which corroborates the $0.057 the 2026-07-20 optimization session projected from provider usage fields. Opus is 71 percent of the bill on 33 percent of the calls, entirely because of its $75/1M output rate.
+
+TWO HONEST LIMITS ON THESE NUMBERS. (1) Per-provider persistence only began on 2026-07-20, so for the earlier two thirds of the window I have `discovery_pass` COUNTS but no token record; the $2.13 for discovery is those counts priced at the measured $0.056 per round, not a token measurement. (2) The Gemini line charges input tokens for 14 errored calls. A provider-side HTTP 429 is normally rejected before processing and NOT billed, in which case the true totals are about $0.076 lower. Both directions are stated rather than picked.
+
+TASK 2, THE GATE-DISABLED FINDING. CAUSE, established from the record rather than inferred: the ten rounds carrying `{"proceed": true, "reason": "gate disabled", "source": "disabled"}` are `council_eval` ids 1-10, timestamped 05:46:39Z to 06:00:54Z on 2026-07-21. Those timestamps, those symbols (AAVE/USD, LDO/USD, UNI/USD, BTC/USD, ETH/USD, with SPY correctly absent on a market-hours skip), and those `prompt_version` values (evidence-v2 for ids 1-5, evidence-v2.1 for ids 6-10) match EXACTLY the two prompt-measurement re-runs the 2026-07-20 sessions recorded in this file at 05:46Z and 06:12Z. They are that harness, which called `consensus()` with the gate switched off deliberately so the measurement compared prompts rather than gate behavior. The string comes from `llm_consensus/consensus.py:98`, `AlwaysProceedGate(reason="gate disabled by config", source="disabled")`, which is what `consensus()` substitutes when `config_access.gate_enabled` resolves false. Ids 11-15 carry real Haiku reasons ("Strong daily momentum (+4.10%)...", "Strong trending regime (ADX 51...)"), so the gate was back on from 06:13Z. IS IT DISABLED NOW: NO. Verified live at all three levels: shipped config `llm.gate_enabled` true, `.control/controls.json` `gate_enabled` true, resolved `gate_enabled(None)` true. COST OF RUNNING THE COUNCIL WITHOUT GATE SCREENING: the gate itself is negligible at $0.0003 per call (about 180 input and 40 output Haiku tokens), so skipping it SAVES nothing; what it costs is the screening. Each candidate the gate would have declined instead reaches three providers at $0.056, roughly 187 times the gate's own price. On the discovery path Stage B already screens 12 finalists down to 5, so the trading gate's marginal value is the candidates it declines there; at the observed trading-path volume of one round in 72 hours the absolute exposure is small, but the ratio is the reason the gate exists and there is no cost argument for turning it off.
+
+TASK 3, PROJECTION.
+
+| scenario | rounds/day | measured cost/day | measured cost/month | against the ceiling |
+| --- | --- | --- | --- | --- |
+| Current observed volume | 13 (12 discovery + about 1 trading) | $0.73 | **$21.8** | 22% of the $100 ceiling |
+| Configured caps, council only | 52 (trading 40 + discovery 12) | $2.91 | **$87.4** | 87% |
+| Configured caps, plus research at its budget | 52 rounds + 6 research | $3.39 | **$101.8** | **just OVER $100** |
+
+**ARE THE CEILINGS SET CORRECTLY FOR ACTUAL BEHAVIOR? NO, and the defect is calibration, not the values.** Every ceiling is enforced by multiplying a call COUNT by `council_est_cost_per_call_usd`, which is 0.04 under active_quant while the measured cost is $0.056, a 40 percent understatement. Consequences, arithmetic not opinion: the `council_daily_spend_ceiling_usd` of $5.00 lets the engine make 125 calls, which really cost $7.00; the `council_monthly_spend_ceiling_usd` of $100 permits 2,500 calls, which really cost $140. The config comment beside `discovery_daily_council_budget` projects "52 * $0.04 * 30 = ~$62/month worst case", and at measured prices that same worst case is $87. The ceilings are not wrong in intent, they are 40 percent loose in effect, and the cheapest fix is to raise the estimate to the measured $0.056 (which TIGHTENS every ceiling and can only reduce spend). Two things make this less alarming than it sounds: observed volume is 22 percent of the ceiling, and the combined monthly ceiling still pauses both sleeves when the estimate reaches it, just later than intended.
+
+TASK 4, REMAINING WASTE. Four paths, in descending order of what they cost.
+
+1. **DISCOVERY EVALUATES BEFORE IT VERIFIES SERVICEABILITY, so a full council round can still be spent on a symbol the venue cannot trade.** In `discovery/run.py`, `funnel.run_pass` (Stage C, the paid stage) runs at line 253 and the backfill-plus-predicate verification runs at line 287, AFTER. The 2026-07-20 session fixed the WATCHLIST consequence (an unserviceable symbol no longer joins) but left the SPEND ordering, so ZEC/USD and APT/USD were each evaluated at a full round before being found unserved. At $0.056 a round this is the most expensive shape of waste available, and the fix is an ordering change: verify, then evaluate. Not applied here, this session is an audit.
+2. **The whole daily discovery budget is consumed by crypto before the equity session opens.** Crypto passes run hourly around the clock from 00:00Z and equity passes only inside 13:30-20:00Z, and the 12-call budget is shared. Measured: 2026-07-21 crypto 12 / equity 0; 07-19 crypto 12 / equity 0; 07-18 crypto 12 / equity 0; 07-17 crypto 12 / equity 0; only 07-20 gave equity 2. Lifetime 58 crypto calls across 42 passes against 2 equity calls across 5 passes. On 2026-07-21 the budget was exhausted by 02:57Z. This is not wasted money, every call was real, but it means one entire asset class is structurally never evaluated by Stage C, which is a silent allocation decision nobody made.
+3. **Budget-exhausted passes still pay for Stage B.** Seventeen of the twenty most recent passes record 5 survivors and 0 evaluated: Stage A (free) and Stage B (12 Haiku gate calls) both ran, produced five survivors, and then Stage C could not proceed. About 204 Haiku calls at roughly $0.0003 each, so about $0.06 total. Small in absolute terms and exactly the "short-circuit that still charges" shape the prompt asks about: the budget check happens after the screening it should precede.
+4. **Gemini errored on 14 of 15 recorded rounds** and the composed verdict ran on two voters instead of three throughout. A 429 is normally unbilled so the direct cost is probably zero, but each round still paid the latency and lost a third of its intended diversity. RECOVERED: round 15 (13:20:19Z) has Gemini `source: real`, direction long, confidence 0.65, and the live health check now returns working at 5.5s.
+
+NOT waste, verified and worth recording because it is where the design is working: the research satellite made ZERO paid calls across 13 passes because the free Finnhub quality-and-catalyst screen refused every one; the adaptive layer made ZERO paid Haiku reads because its free materiality filter dropped everything; and the four fast-tier trading candidates on 2026-07-21 each logged `council_skip` and spent nothing.
+
+NOT touched: RiskGate logic, the live-trading gate, the adaptive limit-weakening invariant, Level 1 values, any budget, any ceiling, any config. Live trading stays off.
+
+VERIFICATION (2026-07-21):
+
+| Check | Result |
+| --- | --- |
+| 72h production spend | ~$2.18 (39 rounds), plus $0.78 diagnostic harness |
+| Measured cost per round | $0.0560 (config assumes $0.0400) |
+| Ceiling calibration | 40% loose: $5/day permits $7.00, $100/month permits $140 |
+| Projection at current volume | $21.8/month, 22% of the ceiling |
+| Projection at configured caps | $101.8/month including research, marginally over |
+| Gate disabled cause | the 2026-07-20 measurement harness, ids 1-10, not production |
+| Gate now | ENABLED at config, controls.json, and resolved |
+| Adaptive paid reads | 0 |
+| Research paid calls | 0 of 13 passes, all free-screened |
+| Waste found | evaluate-before-verify, crypto consuming the shared budget, Stage B on budget-exhausted passes, 14 Gemini errors |
+
+Commit message: `Cost audit from measured spend, gate-disabled cause identified, live trading untouched`
+
+---
+
 ## Prompt: Diagnose RSI-2 and momentum signal reachability, findings only
 
 Date: 2026-07-21
