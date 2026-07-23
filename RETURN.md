@@ -14,6 +14,61 @@ Commit message:
 
 ---
 
+## Prompt: Diagnose the unaudited whale layer toggle events
+
+Date: 2026-07-21
+Model: Opus 4.8 (1M context)
+Prompt summary: a diagnostic. Six layer.whale True to False events on 2026-07-17 between 08:39Z and 08:44Z remain unexplained, each reading old=True right after the previous click wrote False, so something restored True unaudited between clicks. Ruled out 2026-07-18: all 17 write sites audit, every setter persists in isolation, seed_feed_clock preserves layers, only api_server/controls.py writes the key, the C++ never writes, the events postdate the atomic-write fix by 76 minutes, one control file at mode 0644 untouched since 08:48Z. Leading hypothesis a backend running pre-fix code, asserted and reproduced by nobody. Evidence capture is automated in ops/evidence.py. Five tasks: report whether any diagnostics/layer_unaudited_change file exists since the capture landed and its full contents if so, stating which way the process start time settles the stale-process hypothesis; determine whether the whale events fall inside a window of fd exhaustion in any process reading or writing the key and report the fd evidence for 2026-07-17 08:00Z to 09:00Z or state plainly it was never captured; confirm whether the six events are consistent with the fixed key-collision sticking-on failure mode or contradict it, and whether the pre-fix bare-key reader was live in any running process during the window; attempt a controlled reproduction against a scratch control file and scratch database (a pre-fix reader alongside a post-fix writer, and a writer whose process cannot open the file) and report whether either reproduces the shape, a failed reproduction being a valid result; report whether the root cause is established, still open, or closed by an earlier fix, updating the Open Flags entry accordingly, and if still open state what evidence the next occurrence needs beyond what it captures today. No RiskGate, live-gate, or adaptive-invariant changes. Live trading stays off.
+
+**HEADLINE: the mechanism is established and reproduced, and it is not a phantom writer. Nothing restored True between clicks. The FILE stayed False the whole time. What produced old=True is a READ failure: `api_server/controls.read_controls` falls back to `_defaults()` on any read error, and the layer default is True (all layers on). So a click whose `read_controls` could not open the file reports old=True while the file on disk says False, exactly the observed shape, reproduced three ways against a scratch file this session. This is the SAME phenomenon as the 2026-07-19 "engine reads discovery ON, funnel reads OFF" finding, which was closed by the keystore fd-leak root cause, in a different key with a different default (discovery default OFF, layers default ON). The 2026-07-18 investigation searched for a WRITER restoring True and correctly found none, because the cause was never a writer.**
+
+Changes: NONE. This was a diagnostic.
+
+TASK 1, HAS IT RECURRED. NO. No `diagnostics/layer_unaudited_change*` file exists. The `diagnostics/` directory holds only `bridge_degraded-*` captures, the earliest dated 2026-07-19, none from 2026-07-17. The capture landed 2026-07-18 and has not fired since, so the condition has not recurred in five days of running. WHICH WAY THE START TIME WOULD SETTLE IT: `_capture_if_unaudited` (`api_server/controls.py:1290`) records through `ops.evidence.capture`, which records the reading process pid, its start time from `/proc/<pid>/stat` (`ops/evidence.py:73`), its fd count (`:110`, which itself reports an error string under fd exhaustion rather than crashing), and the control file bytes as read. If a recurrence fired, a backend start time BEFORE the atomic-write fix would confirm a stale pre-fix process, and a start time AFTER it would rule that out; an fd count near the limit would confirm exhaustion. The capture is adequate to distinguish the causes, but there is nothing to report because it has not fired.
+
+TASK 2, THE FD LINK. The fd evidence for 2026-07-17 08:00Z to 09:00Z WAS NEVER CAPTURED, stated plainly. The fd instrumentation (`ops/evidence.py` fd counting, the `bridge_degraded` captures, the fd_trend check) all landed 2026-07-18 and later, so no fd count exists for any process for the 2026-07-17 window. What IS known: the keystore fd leak (`account_manager/credentials.py` opening a connection per lookup and never closing, fixed 2026-07-19) was present since the initial commit, and the api_server backend resolves credentials through that same leaking resolver. So the backend serving these clicks was subject to the same leak that later exhausted the bridge, and fd exhaustion is a viable cause of the `read_controls` open failure. But viable is not proven: without the fd count for that hour, I cannot show the backend was actually out of descriptors at 08:39Z. The honest statement is that the fd link is plausible and consistent, and unprovable from the record for that specific window.
+
+TASK 3, THE READ PATH. The six events are CONSISTENT with the sticking-on direction and are the Python-side instance of it, not the C++ key-collision instance. The known one-directional failure is "value stuck at its default", and both the fixed C++ collision and this Python read-failure share that direction: the C++ `json_get_bool(body, "whale", true)` returned its default True on a collision, and `read_controls` returns its default True on a read failure. THEY ARE DIFFERENT READERS. These `control_change` events are written by `api_server/controls.py` (Python), which reads the layer by PATH (`saved["layers"]["whale"]`, `:376-379`), never by the flat bare-key search the C++ engine used, so the key-collision bug is NOT the direct cause here. WAS THE PRE-FIX BARE-KEY READER LIVE IN ANY WRITING PROCESS DURING THE WINDOW: no. The bare-key reader is the C++ engine's, and the C++ engine never writes `control_change` events (they are GUI-sourced, `source: gui`). The reader that produced old=True is `read_controls`, whose failure-to-default behavior is by design (the documented "unreadable means config" rule) and is present both before and after the atomic-write fix. The atomic-write fix removed one CAUSE of read failure (the torn-read window of a truncating writer); it did not change the fallback, because the fallback is the safe direction.
+
+TASK 4, THE REPRODUCTION, against a scratch control dir (`MAL_CONTROL_DIR` pointed at a fresh tempdir, production untouched). BOTH failure paths reproduce the exact shape.
+
+| scenario | file on disk | read_controls reports | matches observed? |
+| --- | --- | --- | --- |
+| healthy read | whale=False | whale=False | no (correct) |
+| TORN READ (empty file, a truncating writer mid-write) | whale=False then 0 bytes | **whale=True** | YES, default restored |
+| OPEN FAILURE (unreadable / fd-exhausted) | whale=False | **whale=True** | YES, default restored |
+| repeated click sequence, reader failing each time | whale=False (stays) | old=True every click | **YES, old=True new=False repeated** |
+
+The repeated-click loop reproduces the headline shape precisely: on disk False throughout, `read_controls` returns old=True on every click, so `set_layer` audits `old=True new=False` each time while nothing ever restored True. NEITHER a torn read NOR an open failure could be distinguished from the other by the event alone: both land on the same default. That is why the 2026-07-18 investigation, which had only the events and the (correct) finding that no writer restored True, could not resolve it.
+
+TASK 5, THE STATUS. The root cause is CLOSED IN CLASS by an earlier fix, with a residual that is unprovable rather than open. The mechanism is established and reproduced: a `read_controls` failure falls back to the layer default True. Both candidate triggers for that failure were fixed:
+- the TORN READ by the atomic-write fix (temp file, fsync, `os.replace`), landed 2026-07-17 ~07:23, and
+- the FD EXHAUSTION by the keystore single-connection fix, landed 2026-07-19.
+The events have not recurred since either fix, and the capture that would catch a recurrence is wired and adequate. WHAT REMAINS UNPROVABLE, stated rather than papered over: which of the two triggers fired at 08:39Z on 2026-07-17. The events are 76 minutes after the atomic-write fix, which argues against a torn write UNLESS a stale backend from before 07:23 was still serving (Python does not hot-reload), and fd evidence for that hour does not exist. So the specific trigger is indeterminate from the record, while the mechanism and both fixes are certain.
+
+RECOMMENDED FLAG UPDATE (applied to PROGRESS.md this session, no code change): move the flag from "ROOT CAUSE STILL OPEN" to "MECHANISM ESTABLISHED AND REPRODUCED, closed in class by the atomic-write and keystore-fd fixes, specific 2026-07-17 trigger unprovable from the uncaptured window, not recurred". The next occurrence needs NOTHING BEYOND what the capture records today: the fd count settles exhaustion, the start time settles a stale backend, and the file bytes settle read-failure-versus-phantom-writer. The capture is complete for this class; it simply has not had to fire.
+
+NOT touched: RiskGate logic, the live-trading gate, the adaptive limit-weakening invariant, Level 1 values, any behavior, any control file (the reproduction used a scratch dir). Live trading stays off.
+
+VERIFICATION (2026-07-21):
+
+| Check | Result |
+| --- | --- |
+| layer_unaudited_change capture files | NONE, not recurred since 2026-07-18 |
+| fd evidence for 2026-07-17 08-09Z | never captured, instrumentation postdates it |
+| Cause direction | sticking-ON, Python read-failure to default True |
+| Key-collision (C++ bare key) the cause | no, these are path-read Python events |
+| Torn-read reproduction | YES, empty file returns default True |
+| Open-failure reproduction | YES, unreadable file returns default True |
+| Repeated-click shape | reproduced, old=True new=False with disk staying False |
+| Both triggers fixed | atomic write 07-17, keystore fd 07-19 |
+| Specific 07-17 trigger | unprovable from the record |
+| Changes applied | none |
+
+Commit message: `Diagnose unaudited whale layer toggle events, findings only, live trading untouched`
+
+---
+
 ## Prompt: Diagnose fast-tier confidence composition against the Level 1 floor
 
 Date: 2026-07-21
