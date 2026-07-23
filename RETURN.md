@@ -135,6 +135,75 @@ Commit message: `Diagnose unaudited whale layer toggle events, findings only, li
 
 ---
 
+## Prompt: Measure the volume filter on real volume for the first time
+
+Date: 2026-07-21
+Model: Opus 4.8 (1M context)
+Prompt summary: a diagnostic. The strategy volume filter previously consumed a fabricated live series and killed 32 to 84 percent of setups on noise; the fabrication is removed and the real path now carries real or absent volume. Every earlier volume measurement was on backfill bars and does not transfer to the live path, so the filter has never been measured on the data it actually gates. Five tasks: report per symbol and per asset class how many post-fix bars carry real volume and how many carry absent or unknown, stating whether the sample is large enough and stopping before Task 3 if not; on post-fix real-volume bars count how often the filter passes and fails under the current vol_multiple and compare against the backfill-derived kill rates recorded 2026-07-21, reporting the delta between assumed and measured; over the full stored history with real or backfill volume compare outcomes for passed against rejected setups per strategy family (win rate, average return, count), stating whether the filter improves outcomes, is neutral, or removes profitable setups, a too-small sample being a valid finding; measure a cross-back confirmation trigger as an alternative or companion on the same bars, reporting setup count and outcomes for volume alone, cross-back alone, both, and neither, and how volume-unknown bars behave under each; report with per-symbol and per-family tables whether the volume filter should stay, change its multiple, be replaced by a cross-back trigger, or be removed, applying nothing. No RiskGate, live-gate, or adaptive-invariant changes. Live trading stays off.
+
+**HEADLINE: the volume filter cannot be measured on live data, because after the fabrication fix the live path carries NO volume. Every post-fix live bar has volume 0, which the corrected filter treats as unknown and passes, so the filter's live kill rate is now exactly 0 percent, down from the fabricated 32 to 84 percent. It is INERT on every live decision. The only real volume in the system is backfill, which is what the 2026-07-21 diagnostic already used and correctly said does not transfer to live. On backfill the filter removes 28 percent of cross-back setups overall, but asymmetrically: 50 to 73 percent on equities (which have 100 percent real backfill volume) and near zero on the crypto names whose backfill volume is mostly zero-trade bars that auto-pass. Outcomes cannot be attributed: the filter decision is not recorded per trade and only four real-path native exits exist. The recommendation is to feed it real live volume via the deferred Alpaca latest-bar adoption before tuning or trusting it, and to change nothing now.**
+
+Changes: NONE. This was a diagnostic.
+
+TASK 1, HOW MUCH REAL VOLUME EXISTS. Post-fix, essentially none on the live path. By source and volume presence:
+
+| source | bars | volume > 0 | volume = 0 (absent) |
+| --- | --- | --- | --- |
+| real_feed | 6,197 | 3,443 (all PRE-fix, fabricated) | 2,754 (post-fix, absent) |
+| backfill | 74,960 | 39,917 | 35,043 |
+| synthetic (offline) | 1,857 | 1,857 | 0 |
+
+Of real_feed bars since the fix landed (after 2026-07-22T19:00Z): 40 carry volume > 0 (the restart transition window) and 2,754 carry volume 0. So the post-fix LIVE real-volume sample is effectively zero: the live path has no venue volume by design now. THE SAMPLE IS NOT LARGE ENOUGH to measure the filter on live data, because it does not exist. Per the prompt this stops the LIVE measurement, but Task 3 and Task 4 are explicitly scoped to "real or backfill volume", so the analysis continues on backfill, the only real volume held. Backfill volume presence is itself split by asset class: EQUITY backfill is 100 percent present (20,791 of 20,791), CRYPTO backfill is only 35.3 percent present (19,126 of 54,169), because a quiet crypto 5-min bar legitimately reports zero trades, and Alpaca returns v: 0 for it.
+
+TASK 2, WHAT THE FILTER NOW KILLS. On the live path, NOTHING. Every live bar carries volume 0, the corrected filter tests `volume > 0` first (`signal_engine/strategy.cpp:477`, `:391`), so an absent-volume current bar is unknown and passes regardless of the trailing average. The live kill rate is 0 percent. THE DELTA between what was assumed and what is measured: the 2026-07-21 diagnostic recorded a 32 to 84 percent kill rate, but that was computed on the FABRICATED live series (a uniform random draw against the mean of twenty draws, a coin flip). The true live kill rate was never 32 to 84 percent of real setups; it was a coin flip on noise, and it is now 0 percent on absence. The filter went from deciding live entries on a random number to deciding nothing at all. Both are the wrong kind of "working": the fabricated version was noise, the fixed version is inert, and neither is the filter doing its job on real volume.
+
+TASK 3, DOES IT EARN ITS KEEP. UNMEASURABLE FROM STORED DATA, a valid finding. Two independent reasons. (1) The filter's pass/reject decision is NOT recorded per trade: the `trades` table stores the fill, not whether the volume gate passed, so a trade cannot be attributed to a filter state after the fact. (2) The real-path native fill sample is tiny: 4 `trade_exit` events on the real path, against 242 closed fills in the table that are overwhelmingly offline synthetic/bootstrap fills not gated by the real volume filter. Comparing win rate or average return for "filter passed" vs "filter rejected" requires either a recorded per-trade filter state (absent) or a backtest that toggles the filter (a behavior change this diagnostic will not make). So the outcome comparison the task asks for cannot be produced from the data held, and manufacturing it from the synthetic fills would measure the mock, not the strategy.
+
+TASK 4, THE CROSS-BACK ALTERNATIVE. Setup counts over all backfill history, per symbol, under the fixed filter (unknown passes). Cross-back confirmation is ALREADY ON (`rsi2_crossback_confirm: true`), so "cross-back alone" is the current trigger and "both" is the current full gate:
+
+| symbol | trend + RSI-2 below | + cross-back | + volume (both) | volume removes |
+| --- | --- | --- | --- | --- |
+| AAPL | 108 | 55 | 24 | 56% |
+| MSFT | 75 | 48 | 21 | 56% |
+| NVDA | 62 | 44 | 12 | 73% |
+| QQQ | 65 | 41 | 21 | 49% |
+| SPY | 79 | 54 | 22 | 59% |
+| BTC/USD | 508 | 276 | 127 | 54% |
+| ETH/USD | 460 | 269 | 174 | 35% |
+| SOL/USD | 426 | 252 | 195 | 23% |
+| AAVE/USD | 375 | 212 | 196 | 8% |
+| LDO/USD | 448 | 252 | 250 | 1% |
+| UNI/USD | 406 | 225 | 203 | 10% |
+| **total** | **3,012** | **1,728** | **1,245** | **28%** |
+
+TWO things this shows. First, cross-back alone roughly HALVES the raw oversold setups (3,012 to 1,728) and does it without any volume data, so it is the selectivity that survives on the live path where volume is absent. Second, the volume filter's removal rate is entirely driven by DATA AVAILABILITY, not by a volatility judgment: it removes 49 to 73 percent on equities (100 percent real backfill volume) and 1 to 54 percent on crypto, with the crypto names that have the most zero-trade bars (LDO 1 percent, UNI 10 percent, AAVE 8 percent) barely filtered because a zero-volume bar auto-passes. HOW VOLUME-UNKNOWN BARS BEHAVE UNDER EACH: under the fixed volume filter they pass (correct, absence is not below-average); under cross-back alone they are judged on the RSI-2 trigger with no volume input at all. So on the live path (all volume unknown) the two collapse to the same thing: cross-back decides, volume abstains.
+
+TASK 5, THE RECOMMENDATION. KEEP IT AS IS FOR NOW, do not change the multiple, and do not remove it. The evidence:
+- It is INERT on live decisions (0 percent kill on absent volume), so it is not currently harming anything, and its earlier "32 to 84 percent kill" was fabricated noise, not a real effect to preserve or fear.
+- It CANNOT be tuned, because there is no live volume to tune `vol_multiple` against, and the backfill measurement is asymmetric by data availability rather than by market structure, so a value chosen on backfill would not transfer.
+- Cross-back, already active, is the selectivity that works without volume and survives on the live path, so removing the volume filter would not leave the strategy unguarded.
+
+THE ONE CONCRETE STEP, and it is the prerequisite for ever answering this question: adopt Alpaca's latest-BAR endpoints for the live feed (the deferred change recorded in the 2026-07-21 fabrication fix), which carry a real `v`. Only then does a live bar carry real volume, and only then can Task 2 and Task 3 be run on the data the filter actually gates. OBSERVABLE that this worked: live `real_feed` bars begin carrying non-zero venue volume at the same scale as backfill, and the live volume kill rate becomes measurable and stable rather than 0. Until then the filter is a dormant guard on a field the live feed does not provide, and the honest state is "unmeasured on live, inert by absence, do not tune". Removing it is a defensible alternative (it does nothing live), but feeding it real volume is the better path because the guard is sound in principle and only starved of data.
+
+NOT touched: RiskGate logic, the live-trading gate, the adaptive limit-weakening invariant, Level 1 values, `vol_multiple`, `vol_lookback`, any threshold, any behavior. Live trading stays off.
+
+VERIFICATION (2026-07-21):
+
+| Check | Result |
+| --- | --- |
+| Post-fix live real-volume bars | ~0 (2,754 absent vs 40 transition-window) |
+| Live volume kill rate now | 0%, filter inert on absent volume |
+| Prior "32-84%" kill | was on the fabricated series, a coin flip on noise |
+| Backfill volume presence | equity 100%, crypto 35.3% |
+| Volume removes on backfill cross-back setups | 28% overall, 49-73% equity, 1-54% crypto |
+| Outcome attribution | impossible, decision not recorded, 4 real fills |
+| Recommendation | keep as is, do not tune, adopt latest-bar volume first |
+| Changes applied | none |
+
+Commit message: `Measure the volume filter on real volume for the first time, findings only, live trading untouched`
+
+---
+
 ## Prompt: Diagnose fast-tier confidence composition against the Level 1 floor
 
 Date: 2026-07-21

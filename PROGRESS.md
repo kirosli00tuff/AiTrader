@@ -134,6 +134,16 @@ New flags from the feed-work session (2026-07-05, `369b6a6`):
 
 ## Session Log
 
+### 2026-07-21 (Opus 4.8) — DIAGNOSTIC: the volume filter is inert on live data, because after the fabrication fix the live path carries no volume
+
+- **The filter cannot be measured on live data, because there is none.** Every post-fix live bar carries volume 0, which the corrected filter treats as unknown and passes, so the live kill rate is exactly 0 percent, down from the fabricated 32 to 84 percent. The filter is INERT on every live decision. Post-fix live real-volume bars: ~0 (2,754 absent vs 40 in the restart transition window).
+- **The prior kill rate was noise.** The 2026-07-21 "32 to 84 percent" was computed on the fabricated uniform-random series, a coin flip. The filter never killed 32 to 84 percent of real setups; it decided live entries on a random number, and now decides nothing.
+- **Only backfill has real volume, asymmetric by data availability.** Equity backfill is 100 percent present, crypto backfill only 35 percent (quiet crypto minutes report zero trades). On backfill the filter removes 28 percent of cross-back setups overall, but 49 to 73 percent on equities and 1 to 54 percent on crypto purely because zero-volume bars auto-pass. It is filtering data availability, not volatility.
+- **Outcomes unmeasurable:** the filter decision is not recorded per trade and only 4 real-path native exits exist (the 242 closed fills are overwhelmingly offline synthetic). Attribution is impossible without a backtest, which a diagnostic will not run.
+- **Cross-back is the selectivity that survives.** Already ON, it halves the raw oversold setups (3,012 to 1,728) with no volume input, so it works on the live path where volume is absent. Removing the volume filter would not leave the strategy unguarded.
+- **Recommendation, applied to NOTHING:** keep the filter as is, do not change `vol_multiple` (no live data to tune against), and adopt Alpaca's latest-BAR endpoints (the deferred feed change from the fabrication fix) so live bars carry real volume. Only then can the filter be measured on the data it actually gates. It is a dormant guard starved of data, not a broken one.
+- NOT touched: RiskGate logic, the live-trading gate, the adaptive limit-weakening invariant, Level 1 values, any threshold. Live trading stays off.
+
 ### 2026-07-21 (Opus 4.8) — Council cost estimate calibrated to measured spend: every ceiling tightens 29 percent
 
 - **Reconfirmed and applied.** A full council round measures $0.05618 over 41 persisted rounds (up from the audit's 15), so `council_est_cost_per_call_usd` was set from 0.04 to 0.056 in both the council base and the active_quant overlay, plus the C++ and Python fallback defaults so no stale copy drifts. No budget, ceiling, or threshold was raised: the tightening is the point.
