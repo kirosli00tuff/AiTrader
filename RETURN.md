@@ -275,6 +275,96 @@ Commit message: `Diagnose fast-tier confidence composition against the Level 1 f
 
 ---
 
+## Prompt: Measure the ATR volatility band against outcomes
+
+Date: 2026-07-21
+Model: Opus 4.8 (1M context)
+Prompt summary: a diagnostic. The RSI-2 entry requires ATR within atr_band_std (shipped 1.0) of its atr_mean_period mean. The 2026-07-21 diagnostic measured the band killing 38 to 62 percent of setups, and SOL/USD sat one gate from an entry blocked only by the band. The question is whether it removes bad setups or the volatility the strategy needs. Five tasks: for every symbol report current ATR, the mean, the standard deviation, the band edges, whether ATR is inside, and how often ATR sits above versus below the band; over stored history count band rejections split by direction (above upper, below lower) per symbol and class, a low-side rejection filtering dead tape and a high-side rejection refusing the needed volatility; compare outcomes for passed against rejected setups split by rejection direction (win rate, average return, max adverse excursion, count), stating plainly whether the band improves outcomes, is neutral, or removes profitable setups, a too-small sample being valid; sweep atr_band_std across a range covering 1.0 reporting setup count and outcome quality per asset class, whether crypto and equities want different widths, and what an unbounded band produces as baseline; report per-symbol and per-width tables with a recommendation to keep at 1.0, widen, split by asset class, or remove, applying nothing. No RiskGate, live-gate, or adaptive-invariant changes. Live trading stays off.
+
+**HEADLINE: the band is symmetric but the objective is not, and that is the finding. It rejects a cross-back setup whenever ATR is more than 1 SD from its 100-bar mean in EITHER direction, but the two directions mean opposite things for mean reversion. A LOW-side rejection (ATR below the mean, quiet tape) is defensibly skipping dead tape; a HIGH-side rejection (ATR above the mean) is refusing the very volatility a snapback needs. Over stored history the band rejects 46 percent of cross-back setups, and 42 percent of those rejections are the questionable high-side kind. Right now, in a calm market, EVERY current rejection is low-side: ATR is below its mean on seven of eleven symbols, which is why SOL/USD was blocked on 2026-07-21. Outcomes cannot be attributed from stored data, the same limit as the volume filter. The most promising change is a one-sided band, not a wider one, but nothing can be validated until per-entry band state is recorded or a backtest runs, so nothing is applied.**
+
+Changes: NONE. This was a diagnostic.
+
+TASK 1, WHAT THE BAND READS NOW, over the newest 100-plus-bar window per symbol:
+
+| symbol | ATR | mean | SD | lower | upper | inside | z |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| AAPL | 0.206 | 0.450 | 0.152 | 0.298 | 0.602 | NO | -1.61 |
+| MSFT | 0.294 | 0.572 | 0.251 | 0.321 | 0.823 | NO | -1.11 |
+| NVDA | 0.237 | 0.460 | 0.143 | 0.316 | 0.603 | NO | -1.55 |
+| QQQ | 0.568 | 0.893 | 0.266 | 0.627 | 1.159 | NO | -1.22 |
+| SPY | 0.356 | 0.614 | 0.169 | 0.445 | 0.784 | NO | -1.52 |
+| SOL/USD | 0.0147 | 0.0435 | 0.0179 | 0.0256 | 0.0614 | NO | -1.61 |
+| UNI/USD | 0.00183 | 0.00420 | 0.00136 | 0.00283 | 0.00556 | NO | -1.74 |
+| AAVE/USD | 0.0655 | 0.0547 | 0.0235 | 0.0312 | 0.0782 | YES | 0.46 |
+| BTC/USD | 62.2 | 61.6 | 12.7 | 49.0 | 74.3 | YES | 0.04 |
+| ETH/USD | 1.25 | 1.48 | 0.421 | 1.05 | 1.90 | YES | -0.54 |
+| LDO/USD | 0.0000678 | 0.000178 | 0.000165 | 0.0000128 | 0.000343 | YES | -0.67 |
+
+SEVEN OF ELEVEN ARE OUTSIDE THE BAND, AND ALL SEVEN ARE ON THE LOW SIDE (negative z, ATR below the mean). Not one symbol currently sits above its band. The market is calm relative to its recent history, so every band rejection right now is a quiet-tape rejection, which is exactly why SOL/USD (z = -1.61) was one gate from an entry and blocked only by the band on 2026-07-21.
+
+TASK 2, THE KILL RATE BY DIRECTION, over all stored history, on cross-back setups above the trend MA:
+
+| symbol | cross-back setups | in band | rejected ABOVE (volatile) | rejected below (quiet) |
+| --- | --- | --- | --- | --- |
+| BTC/USD | 266 | 138 | 38 | 90 |
+| ETH/USD | 254 | 146 | 38 | 70 |
+| SOL/USD | 246 | 144 | 39 | 63 |
+| AAVE/USD | 215 | 112 | 48 | 55 |
+| LDO/USD | 249 | 138 | 57 | 54 |
+| UNI/USD | 239 | 117 | 62 | 60 |
+| AAPL | 54 | 33 | 13 | 8 |
+| MSFT | 48 | 29 | 10 | 9 |
+| NVDA | 45 | 21 | 6 | 18 |
+| QQQ | 38 | 14 | 11 | 13 |
+| SPY | 53 | 31 | 7 | 15 |
+| **total** | **1,707** | **923** | **329** | **455** |
+
+The band passes 54 percent (923 of 1,707) and rejects 46 percent. Of the 784 rejections, 455 (58 percent) are LOW-side and 329 (42 percent) are HIGH-side. So the majority is dead-tape filtering, which is defensible, but a substantial 42 percent minority is the band refusing elevated volatility, which for a mean-reversion snapback is the wrong direction to filter. The split varies by symbol: NVDA (6 high vs 18 low) and BTC (38 vs 90) reject mostly low, while UNI (62 vs 60) and LDO (57 vs 54) reject near-evenly, so no symbol is purely one-sided over its history even though the current snapshot is all-low.
+
+TASK 3, DOES IT EARN ITS KEEP. UNMEASURABLE FROM STORED DATA, the same finding as the volume filter and for the same two reasons. (1) The band's pass/reject decision, and its direction, are NOT recorded per trade, so a fill cannot be attributed to a band state after the fact. (2) The real-path native fill sample is 4 `trade_exit` events; the 242 closed fills in the table are overwhelmingly offline synthetic and not gated by this band on real bars. Win rate, average return, and maximum adverse excursion split by rejection direction all require either a recorded per-entry band state (absent) or a backtest toggling the band (a behavior change this diagnostic will not make). The comparison the task asks for cannot be produced honestly from the data held.
+
+TASK 4, THE WIDTH SWEEP, cross-back setups passing the band at each width:
+
+| atr_band_std | total pass | crypto | equity | vs unbounded |
+| --- | --- | --- | --- | --- |
+| 0.5 | 449 | 390 | 59 | 26% |
+| 0.75 | 688 | 594 | 94 | 40% |
+| **1.0 (shipped)** | **923** | **795** | **128** | **54%** |
+| 1.5 | 1,297 | 1,112 | 185 | 76% |
+| 2.0 | 1,539 | 1,328 | 211 | 90% |
+| 3.0 | 1,672 | 1,444 | 228 | 98% |
+| unbounded (baseline) | 1,707 | 1,469 | 238 | 100% |
+
+UNBOUNDED is the baseline: 1,707 setups, of which the shipped 1.0 band admits 923, so the band removes 46 percent. Widening to 1.5 admits 76 percent (removes 24 percent), to 2.0 admits 90 percent. CRYPTO AND EQUITIES DO NOT CLEARLY WANT DIFFERENT WIDTHS on the pass-rate evidence: at 1.0 both classes pass 54 percent of their own setups (crypto 795/1,469, equity 128/238). The huge count asymmetry (crypto 1,469 vs equity 238 setups) is a reachability and Stage-C budget issue documented elsewhere, NOT a band-width issue, so splitting the width by class is not justified by this data.
+
+TASK 5, THE RECOMMENDATION. KEEP AT 1.0 FOR NOW, and do not widen, split, or remove, because the decisive evidence (outcomes) does not exist. But the band should not be considered settled, and the specific problem is its SYMMETRY. Options, ranked by how well the data supports them, applied to NOTHING:
+
+1. **Make the band ONE-SIDED (reject only the low tail).** This is the change the direction split most supports: 42 percent of rejections are high-side, and a mean-reversion entry arguably WANTS elevated volatility for a larger snapback, so refusing it is filtering in the wrong direction. A low-only band would keep the dead-tape filtering (the defensible 58 percent) and stop refusing volatility. OBSERVABLE: high-side rejections go to zero, cross-back setups rise about 19 percent (the 329 high-side), and if the removed high-side setups were profitable the win rate on the added entries holds. This is the most promising change AND the one that most needs outcome data before it is made.
+2. **Widen from 1.0.** At 1.5 the band removes 24 percent instead of 46 percent. But without outcomes this is a guess at where the good setups sit, and it treats both tails the same, so it is a blunter version of option 1.
+3. **Remove the band.** The unbounded baseline is 1,707 setups. Defensible only if the band demonstrably removes nothing profitable, which the data cannot show.
+
+THE PREREQUISITE for choosing among these is the same as for the volume filter: record the band state (in-band, above, below, and the z-score) on every entry and exit so outcomes can be attributed, or run a backtest sweeping the width against realized PnL. Until then the honest state is that the band removes 46 percent of setups, mostly quiet tape but 42 percent volatile tape, in a currently-calm market where it rejects everything low-side, and its symmetry is a design smell for a mean-reversion objective. Do not change it on this diagnostic.
+
+NOT touched: RiskGate logic, the live-trading gate, the adaptive limit-weakening invariant, Level 1 values, `atr_band_std`, `atr_mean_period`, any threshold, any behavior. Live trading stays off.
+
+VERIFICATION (2026-07-21):
+
+| Check | Result |
+| --- | --- |
+| Current band state | 7 of 11 outside, ALL on the low side |
+| Historical pass rate at 1.0 | 923 of 1,707 (54%) |
+| Rejection direction split | 58% low-side (quiet), 42% high-side (volatile) |
+| Outcome attribution | impossible, decision not recorded, 4 real fills |
+| Width sweep | 1.0 removes 46%, 1.5 removes 24%, 2.0 removes 10% |
+| Per-class width | not justified, both pass 54% at 1.0 |
+| Recommendation | keep 1.0 now; the promising change is a one-sided band; needs outcome data |
+| Changes applied | none |
+
+Commit message: `Measure the ATR volatility band against outcomes, findings only, live trading untouched`
+
+---
+
 ## Prompt: Diagnose the stale ETH exit
 
 Date: 2026-07-21

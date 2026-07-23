@@ -134,6 +134,15 @@ New flags from the feed-work session (2026-07-05, `369b6a6`):
 
 ## Session Log
 
+### 2026-07-21 (Opus 4.8) — DIAGNOSTIC: the ATR band is symmetric but mean reversion is not, and it currently rejects everything on the low side
+
+- **The design smell is symmetry.** The band rejects a cross-back setup whenever ATR is more than 1 SD from its 100-bar mean in either direction, but a LOW-side rejection (quiet tape) is defensibly skipping dead tape while a HIGH-side rejection refuses the volatility a snapback needs. Over stored history the band rejects 46 percent of cross-back setups (923 of 1,707 pass), and of the 784 rejections 58 percent are low-side and 42 percent high-side.
+- **Right now it rejects everything low-side.** In the current calm market, ATR is below its mean on 7 of 11 symbols and ABOVE it on none, so every current band rejection is a quiet-tape rejection. That is why SOL/USD (z = -1.61) was one gate from an entry and blocked only by the band on 2026-07-21.
+- **Outcomes unmeasurable**, same as the volume filter: the band decision and direction are not recorded per trade, and only 4 real-path native exits exist, so win rate / return / MAE split by rejection direction cannot be produced without recorded state or a backtest.
+- **Width sweep:** 1.0 removes 46 percent of setups, 1.5 removes 24 percent, 2.0 removes 10 percent, unbounded is the baseline. Crypto and equities both pass 54 percent at 1.0, so a per-class split is not justified; the count asymmetry (crypto 1,469 vs equity 238) is a reachability/budget issue, not a band-width one.
+- **Recommendation, applied to NOTHING:** keep 1.0 for now (no outcome data to change it on), but the most promising change is a ONE-SIDED band that keeps the low-tail dead-tape filter and stops refusing high-side volatility. The prerequisite is recording per-entry band state or running a backtest, the same prerequisite the volume filter needs.
+- NOT touched: RiskGate logic, the live-trading gate, the adaptive limit-weakening invariant, Level 1 values, any threshold. Live trading stays off.
+
 ### 2026-07-21 (Opus 4.8) — DIAGNOSTIC: the volume filter is inert on live data, because after the fabrication fix the live path carries no volume
 
 - **The filter cannot be measured on live data, because there is none.** Every post-fix live bar carries volume 0, which the corrected filter treats as unknown and passes, so the live kill rate is exactly 0 percent, down from the fabricated 32 to 84 percent. The filter is INERT on every live decision. Post-fix live real-volume bars: ~0 (2,754 absent vs 40 in the restart transition window).
