@@ -14,6 +14,65 @@ Commit message:
 
 ---
 
+## Prompt: Diagnose the stale ETH exit
+
+Date: 2026-07-21
+Model: Opus 4.8 (1M context)
+Prompt summary: a diagnostic. An ETH/USD position opened 2026-07-17 at average 2030.69 is still open and underwater near 1930 with no exit fired across six days. Available exits: the RiskGate stops, the ATR target, and the native Indicator exit on the RSI-2 cross above rsi2_exit. Provenance exempts exits so it is not the expected cause but verify rather than assume. Five tasks: report the full stored position record (entry timestamp, origin, sleeve, strategy family, entry bar provenance, every exit condition with its stored value, whether a target and a stop are present or absent); confirm from instrumentation whether exit evaluation runs for this position each iteration or declines silently and if it declines why no event; compute how far each exit condition is from firing with actual numbers and which is closest; determine whether a restart, profile change, or universe re-resolution orphaned it, checking whether the engine seeds exit state for pre-existing positions on construction or only for positions opened in the current process, with file and line; report plainly whether this is a defect, a correctly held position, or unexplained, separating evidence from hypothesis, describe the contained fix if a defect and apply nothing, list any other position exposed to the same cause. No RiskGate, live-gate, or adaptive-invariant changes. Live trading stays off.
+
+**HEADLINE: this is a DEFECT, and it strands every position that outlives the process that opened it. The engine holds open-position exit state ONLY in an in-memory map (`open_positions_`) populated ONLY at entry (`core/engine.cpp:1189` and `:2754`). The constructor never rehydrates it from the `positions` table, and the `positions` table has no stop or target column to rehydrate from. So a fresh engine starts with an empty map, the exit path's `open_positions_.find(key)` misses on every closed bar, and the position is invisible: not evaluated, not exited, and silent because the engine has no record it exists. The ETH long's native stop at 1993.66 was breached the moment price fell through it and price is now 1881.8, 5.6 percent past the stop. Five open positions are stranded by the same cause, including two prediction-market names that predate the Polymarket removal.**
+
+Changes: NONE. This was a diagnostic.
+
+TASK 1, THE POSITION RECORD. From the `positions` table: venue alpaca, symbol ETH/USD, side buy, qty 0.172355545624, avg_price 2030.68603759079, notional 350.0, opened_ts 2026-07-17T07:00:10Z, sleeve quant_core, unrealized_pnl 0.0 (stale, never updated). THE TABLE HAS NO STOP, NO TARGET, AND NO ORIGIN COLUMN. The full DDL is `id, venue, symbol, market, category, side, qty, avg_price, notional, opened_ts, unrealized_pnl, sleeve`. The exit conditions were never persisted on the position. They exist in ONE place, the `trade_entry` event at 2026-07-17T07:00:10Z: `{"factor":"momentum","regime":"trending","stop":1993.66,"strength":0.7,"target":2086.23}`. So the strategy family is MOMENTUM (not RSI-2 reversion), the entry was a trending-regime momentum crossover, the native stop was 1993.66 and the ATR target 2086.23, and the momentum time-stop is `time_stop_bars` 24 (2 hours at the 5-min bar). Entry bar provenance is not separately recorded on the position, but the `bars` row for ETH/USD at 07:00 carries `backfill`/`real_feed` provenance and the entry executed on a warm real path (a `warm_state` event fired at 07:00:10Z). A target and a stop were BOTH attached at entry (1993.66 and 2086.23); both are ABSENT from the durable position record and survive only in the event log.
+
+TASK 2, DOES THE EXIT PATH RUN. It runs, and it declines to see the position, which is worse than declining to exit it. Traced from code, not inferred: `on_closed_bar` (`core/engine.cpp:617`) calls `handle_bar_close` (`:659`, gated only on `!bootstrap_sim`), and `on_closed_bar` is reached on the live tick path (`:614`) every time a real bar closes. ETH/USD closed real_feed bars continuously, so `handle_bar_close` executed for it on every bar. Inside it, `:806` does `auto it = open_positions_.find(key)` with key `alpaca|ETH/USD`, and `:807` guards the entire exit block on `it != open_positions_.end()`. On a process that did not OPEN this position the map is empty, `find` returns `end()`, the block is skipped, and control falls through to the entry path below. NO DECLINE EVENT is written because a decline event would require the engine to know a position exists and choose not to exit it. It does not know. The silence is not a missing log line, it is the absence of any in-memory position to log about, which is exactly why silence here reads identically to "not running".
+
+TASK 3, HOW FAR FROM FIRING. Computed against the current ETH price 1881.8 (newest real_feed close).
+
+| exit | trigger | reads | distance |
+| --- | --- | --- | --- |
+| native stop | long exits when price <= 1993.66 | price 1881.8 | **BREACHED by 111.86 (5.61% past the stop)** |
+| ATR target | long exits when price >= 2086.23 | price 1881.8 | 204.43 away (10.86%) |
+| momentum time-stop | exit after 24 bars held | opened 6 days ago | **overdue by roughly 1,700 bars** |
+| RSI-2 Indicator exit | N/A | this is a MOMENTUM position | not attached: the indicator exit is reversion-only (`handle_bar_close` gates it on `ap.pos.factor == "reversion"`, `:816`) |
+| RiskGate daily-loss | realized loss breach | unrealized -25.66 (-7.33% on the position) | not applicable: the daily-loss gate acts on REALIZED PnL through the exit path, and this position never reaches it |
+
+THE CLOSEST condition is not close, it is long past: the native stop is breached by 5.6 percent and the time-stop by roughly seventy times its window. Any one of the stop, the target, or the time-stop would have closed this position days ago IF it were being managed. That none did is not a threshold being narrowly missed, it is the exit path never seeing the position.
+
+TASK 4, DID A RESTART ORPHAN IT. Yes, and the answer is structural. `open_positions_` (declared `core/engine.hpp:427`) is populated at exactly two sites, both entry paths: `core/engine.cpp:1189` (native entry) and `:2754` (research satellite entry). GREP OF THE ENTIRE ENGINE FINDS NO READ OF THE `positions` TABLE: there is no `load_positions`, no `SELECT ... FROM positions`, no rehydration call anywhere in `core/engine.cpp`, and `storage/storage.hpp` exposes no method to read open positions back (it only WRITES them via `upsert_position` and reads a per-sleeve COUNT for the GUI). The constructor (`core/engine.cpp:45` to `:200`) seeds `bar_history_` from the `bars` table, resolves the control files, onboards discovery symbols, and seeds the sleeve and feed state, but it never touches `positions`. So the engine seeds exit state ONLY for positions it opens in the current process, never for pre-existing ones. The ETH position opened 2026-07-17 has survived every restart since (the provenance session, the universe resolution, the profile switch, the volume fix, and the several stack restarts this session), and each fresh process started blind to it. The profile switch and the universe re-resolution are not the cause on their own; a plain restart is sufficient.
+
+TASK 5, THE VERDICT. DEFECT, unambiguous, and it is a capital-management defect rather than a strategy one: a position whose stop is breached by 5.6 percent is being carried indefinitely because no process after the opening one knows it is open. Live trading is off, so no real money is at risk today, but this is precisely the class of failure that must not exist before live: a stranded position with a breached stop is an uncapped loss.
+
+EVIDENCE vs HYPOTHESIS. Evidence: the `positions` table has no stop/target column; `open_positions_` is populated only at the two entry sites; no position-table read exists in the engine; `handle_bar_close` runs and its `find` misses; the stop is breached and no exit fired; five positions sit open with no `trade_exit`. Hypothesis, stated as such: that the position was managed correctly WHILE its opening process lived and only became stranded on that process's exit. The record cannot confirm this, because the opening process on 2026-07-17 left no exit-evaluation trace and the position may have been orphaned within minutes of opening if that process was short-lived. What is certain is that it has been unmanaged across every process since.
+
+THE CONTAINED FIX, described and NOT applied. Two parts, because the stop and target are not durable. (1) Persist the exit state with the position: add `stop_price`, `target_price`, `time_stop_bars`, `factor`, and `bars_held` columns to the `positions` table (or a sidecar table), written at entry alongside the existing `upsert_position`. (2) Rehydrate `open_positions_` at construction: read every `qty != 0` row from `positions`, reconstruct each `ActivePosition` from the persisted exit state, and seed the map so the very first `handle_bar_close` after a restart manages it. Until (1) exists, (2) has nothing to rebuild the stop from except the last `trade_entry` event, which is fragile (a position with no matching entry event, like the prediction-market names below, would rehydrate with no exit and still strand). What it would CHANGE: on the next restart the ETH stop would fire on the first closed bar, realizing the roughly -25.66 loss, which is the correct outcome of a breached stop. A guard test would assert that a position present in the table but absent from the map at construction is loaded and then exited when its stop is breached.
+
+OTHER POSITIONS EXPOSED TO THE SAME CAUSE, all five open rows:
+- **SPY**, opened 2026-07-14T23:25:20Z, quant_core. A live equity, same mechanism, stranded.
+- **BTC-USD** (legacy dash form, not BTC/USD), opened 2026-06-30T00:44:21Z, quant_core. The dash form is not even the symbol the current feed polls, so it can never be re-quoted or matched, a second layer of stranding.
+- **PRES-2028-YES** and **FED-CUT-Q3**, both opened 2026-06-30, quant_core. These are PREDICTION-MARKET positions that predate the Polymarket removal (2026-07-06). Their venue no longer exists in the system, so they can never be quoted, managed, or closed by any code path. They are permanently stranded and should be reconciled out through a deliberate, audited path rather than left as phantom open risk.
+
+NOT touched: RiskGate logic, the live-trading gate, the adaptive limit-weakening invariant, Level 1 values, any threshold, any behavior. Live trading stays off.
+
+VERIFICATION (2026-07-21):
+
+| Check | Result |
+| --- | --- |
+| Position record | no stop/target column; exits live only in the trade_entry event |
+| ETH stored exits | stop 1993.66, target 2086.23, factor momentum, time-stop 24 bars |
+| Exit path runs | yes, handle_bar_close executes; find() misses on an empty map |
+| Decline event | none, because the engine holds no record of the position |
+| Closest exit | native stop, breached by 111.86 (5.61%) |
+| Rehydration on construction | NONE, no positions-table read exists in core/engine.cpp |
+| open_positions_ populated | only at entry, engine.cpp:1189 and :2754 |
+| Other exposed positions | SPY, BTC-USD, PRES-2028-YES, FED-CUT-Q3, all stranded |
+| Changes applied | none |
+
+Commit message: `Diagnose stale ETH exit, findings only, live trading untouched`
+
+---
+
 ## Prompt: Remove the live volume fabrication
 
 Date: 2026-07-21
