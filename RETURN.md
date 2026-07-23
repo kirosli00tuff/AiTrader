@@ -204,6 +204,89 @@ Commit message: `Measure the volume filter on real volume for the first time, fi
 
 ---
 
+## Prompt: Measure equity RSI-2 entry threshold reachability and outcomes
+
+Date: 2026-07-21
+Model: Opus 4.8 (1M context). The prompt specified Fable; a session cannot switch models mid-run.
+Prompt summary: a diagnostic. RSI-2 reversion uses a split threshold, crypto under 10 and equity under 5. The 2026-07-21 diagnostic measured RSI-2 reaching its threshold 213 to 1,169 times per symbol and the full conjunction firing 7 to 97 times per symbol, and discovery Stage C spent its shared daily budget on crypto every day (58 lifetime crypto calls vs 2 equity), so equities are under-evaluated system-wide. The equity 5 is the tighter half and was flagged. Five tasks: over stored history count per equity symbol how often RSI-2 closed under 5, under 7, under 10, and how often each also passed the 200-MA trend filter, with crypto under 10 as the comparison, stating whether the equity threshold is selective or unreachable; report how often the full conjunction fired at 5 versus 7 and 10 holding everything else shipped, and which condition binds most at each; compare outcomes for entries under 5 against entries between 5 and 10 on equities and crypto (win rate, average return, count), stating whether deeper oversold produces better outcomes or only fewer trades, a too-small sample being valid; determine whether crypto and equity warrant different thresholds at all and whether 10 and 5 sit in the right relation, reporting what a shared threshold would produce; report with per-symbol tables whether the equity 5 should stay, loosen, or align with crypto, noting whether equity signal starvation is a threshold problem, a budget-allocation problem, or both, referencing the Stage C crypto budget exhaustion, applying nothing. No RiskGate, live-gate, or adaptive-invariant changes. Live trading stays off.
+
+**HEADLINE: the equity threshold of 5 is REACHABLE, not unreachable, but it fires equities at 40 percent of crypto's per-bar rate, and a shared 10 would bring them to 87 percent, near parity. Equity RSI-2 closes under 5 between 226 and 457 times per symbol over ~50 sessions, and the full conjunction fires 38 to 54 times per equity symbol, so 5 is selective, roughly one setup per session, not dead. Aligning equity to 10 multiplies equity setups 2.2x. Whether the deeper threshold produces BETTER equity outcomes is unmeasurable from stored data, the same limit as the last two diagnostics. Equity starvation is BOTH a threshold problem and a budget problem, but they act on different layers: the threshold halves the native equity strategy's setup rate, while the shared discovery budget starves Stage C equity evaluation entirely, and the budget half is the more actionable and higher-impact fix.**
+
+Changes: NONE. This was a diagnostic.
+
+TASK 1, THE REACHABILITY SPLIT, RSI-2 closes under each threshold over all stored bars, raw and with the 200-MA trend filter:
+
+| symbol | class | bars | <5 | <7 | <10 | trend&<5 | trend&<7 | trend&<10 |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| AAPL | equity | 4,424 | 226 | 313 | 433 | 107 | 150 | 209 |
+| MSFT | equity | 4,455 | 418 | 510 | 635 | 224 | 254 | 309 |
+| NVDA | equity | 4,455 | 245 | 345 | 479 | 67 | 106 | 161 |
+| QQQ | equity | 4,690 | 457 | 546 | 685 | 62 | 90 | 151 |
+| SPY | equity | 4,687 | 250 | 336 | 445 | 73 | 109 | 158 |
+| BTC/USD | crypto | 10,171 | 665 | 902 | 1,263 | 237 | 337 | 484 |
+| ETH/USD | crypto | 9,766 | 583 | 798 | 1,073 | 184 | 288 | 418 |
+| SOL/USD | crypto | 9,168 | 639 | 872 | 1,158 | 219 | 307 | 433 |
+| LDO/USD | crypto | 9,711 | 944 | 1,151 | 1,459 | 265 | 353 | 498 |
+| AAVE/USD | crypto | 8,688 | 613 | 811 | 1,089 | 228 | 306 | 413 |
+| UNI/USD | crypto | 8,751 | 649 | 876 | 1,214 | 259 | 365 | 554 |
+
+THE EQUITY THRESHOLD IS SELECTIVE, NOT UNREACHABLE. Equity RSI-2 reaches under 5 hundreds of times per symbol, and after the trend filter 62 to 224 times. The tightest is QQQ at 62 trend-and-below over ~50 sessions, still more than one per session. So 5 is doing what a tight threshold should: admitting fewer, deeper oversold readings, not walling equities off.
+
+TASK 2, THE FULL CONJUNCTION at each threshold (trend + cross-back, everything else shipped):
+
+| symbol | class | at 5 | at 7 | at 10 | 5 -> 10 |
+| --- | --- | --- | --- | --- | --- |
+| AAPL | equity | 54 | 78 | 116 | 2.1x |
+| MSFT | equity | 48 | 62 | 97 | 2.0x |
+| NVDA | equity | 45 | 65 | 96 | 2.1x |
+| QQQ | equity | 38 | 60 | 106 | 2.8x |
+| SPY | equity | 53 | 69 | 100 | 1.9x |
+| BTC/USD | crypto | 138 | 197 | 266 | (shipped 10) |
+| LDO/USD | crypto | 121 | 164 | 249 | (shipped 10) |
+| UNI/USD | crypto | 119 | 167 | 239 | (shipped 10) |
+
+WHICH CONDITION BINDS. Loosening RSI-2 from 5 to 10 roughly DOUBLES the equity conjunction (1.9x to 2.8x), so RSI-2 is a genuinely binding condition at 5, not a formality behind another gate. But it does not act alone: the trend filter removes roughly half of the raw sub-threshold readings (e.g. AAPL 226 under 5 to 107 trend-and-below to 54 with cross-back), and the cross-back removes roughly half again. So at every threshold the three conditions each cut the survivors by about half, and loosening RSI-2 moves the bottleneck without removing it, exactly as the prompt anticipated.
+
+TASK 3, OUTCOME QUALITY BY DEPTH. UNMEASURABLE FROM STORED DATA, the third diagnostic in a row to hit this same wall. The entry RSI-2 depth is NOT recorded on the trade, so a fill cannot be sorted into "under 5" versus "5 to 10" after the fact, and the real-path native fill sample is 4 exits against 242 mostly-synthetic closed fills. Whether deeper oversold produces better outcomes or only fewer trades cannot be answered from the data held; it needs the entry RSI-2 recorded per trade, or a backtest. The counts above prove 5 produces FEWER trades than 10 (about half), but say nothing about whether those fewer trades are BETTER, which is the actual question and the one the data cannot reach.
+
+TASK 4, IS THE SPLIT JUSTIFIED. On per-bar reachability the split is what makes equities fire less than crypto, and aligning to 10 nearly closes the gap:
+
+| set | full setups | bars | per 1,000 bars | vs crypto @10 |
+| --- | --- | --- | --- | --- |
+| equity @5 (shipped) | 238 | 22,711 | 10.5 | 40% |
+| equity @10 (hypothetical) | 515 | 22,711 | 22.7 | 87% |
+| crypto @10 (shipped) | 1,469 | 56,255 | 26.1 | 100% |
+
+So the 5-versus-10 split, not the bar count, is the main reason equities fire less per bar than crypto: at a shared 10 the equity per-bar rate rises to 87 percent of crypto's, near parity. THE RELATION 10-and-5 IS DIRECTIONALLY SUPPORTED BY THE RESEARCH the strategy cites (equities mean-revert more reliably and want a deeper oversold trigger, crypto is noisier and wants a looser one), and the data confirms 5 is reachable rather than punitive. What the data CANNOT confirm is that the deeper equity threshold produces better equity OUTCOMES, which is the only thing that would justify keeping equities at 40 percent of crypto's rate rather than moving toward parity. A shared 10 would roughly double equity setups and bring per-bar parity; whether that is an improvement or just more marginal trades is the unanswerable outcome question.
+
+TASK 5, THE RECOMMENDATION. KEEP EQUITY AT 5 FOR NOW, because loosening it trades a research-backed selectivity for more marginal setups with no outcome evidence that they are worth taking. But record the entry RSI-2 depth on every trade so the 5-versus-10 question becomes answerable, which is the same recorded-state prerequisite the volume filter and the ATR band both need.
+
+EQUITY STARVATION IS BOTH A THRESHOLD PROBLEM AND A BUDGET PROBLEM, and they act on different layers, which matters for which to fix first:
+- **The threshold** halves the NATIVE strategy's equity setup rate on the fixed whitelist (SPY, QQQ, AAPL, MSFT, NVDA), a 40-versus-87-percent per-bar effect. This is real but bounded, and changing it needs outcome data.
+- **The budget** starves DISCOVERY entirely of equities, independent of any threshold: crypto passes run hourly around the clock and exhaust the shared 12-call daily Stage-C budget before the US equity session opens, so equities recorded 2 lifetime Stage-C calls against 58 for crypto (2026-07-21 cost audit). No equity is ever evaluated by the funnel, at ANY RSI-2 threshold.
+
+THE BUDGET HALF IS THE HIGHER-IMPACT AND MORE ACTIONABLE FIX, and it does not touch the threshold: reserve a portion of the discovery Stage-C daily budget for the equity session, or give equities their own budget, so the funnel actually evaluates them. OBSERVABLE: `discovery_pass` rows for `asset_class=equity` begin recording non-zero `council_calls`, and equity candidates start reaching the watchlist. The threshold change and the budget change are independent, and the budget one can proceed without any outcome data because it corrects a structural allocation, not a strategy parameter. Neither is applied here.
+
+NOT touched: RiskGate logic, the live-trading gate, the adaptive limit-weakening invariant, Level 1 values, `rsi2_entry_equity`, `rsi2_entry_crypto`, the discovery budget, any threshold, any behavior. Live trading stays off.
+
+VERIFICATION (2026-07-21):
+
+| Check | Result |
+| --- | --- |
+| Equity RSI-2 under 5 | 226-457 per symbol, reachable not walled off |
+| Equity full conjunction at 5 | 38-54 per symbol over ~50 sessions |
+| 5 -> 10 multiplier | 1.9x to 2.8x equity setups |
+| Equity @5 per-bar rate | 40% of crypto @10; equity @10 would be 87% |
+| Outcome by depth | unmeasurable, depth not recorded, 4 real fills |
+| Split justified | directionally by research, unconfirmable by outcomes |
+| Starvation cause | threshold (native, bounded) AND budget (discovery, total) |
+| Higher-impact fix | reserve discovery budget for equities, independent of the threshold |
+| Changes applied | none |
+
+Commit message: `Measure equity RSI-2 entry threshold reachability and outcomes, findings only, live trading untouched`
+
+---
+
 ## Prompt: Diagnose fast-tier confidence composition against the Level 1 floor
 
 Date: 2026-07-21

@@ -134,6 +134,15 @@ New flags from the feed-work session (2026-07-05, `369b6a6`):
 
 ## Session Log
 
+### 2026-07-21 (Opus 4.8) — DIAGNOSTIC: equity RSI-2 at 5 is reachable but fires at 40 percent of crypto's per-bar rate, and equity starvation is two problems
+
+- **The equity 5 is selective, not unreachable.** RSI-2 closes under 5 between 226 and 457 times per equity symbol, and the full conjunction fires 38 to 54 times per symbol over ~50 sessions, roughly one per session. Loosening 5 to 10 roughly doubles the equity conjunction (1.9x to 2.8x).
+- **The split, not the bar count, is why equities fire less than crypto.** Per 1,000 bars: equity at 5 is 10.5 setups (40 percent of crypto at 10's 26.1), and equity at a hypothetical 10 would be 22.7 (87 percent, near parity). The 10-and-5 relation is directionally supported by the research the strategy cites (equities want a deeper oversold trigger), and 5 is reachable, so it is not punitive.
+- **Outcome by depth is unmeasurable** (third diagnostic in a row on this wall): entry RSI-2 depth is not recorded per trade and only 4 real-path native exits exist, so whether deeper oversold produces better outcomes or only fewer trades cannot be answered. The counts prove 5 gives fewer trades, not worse or better ones.
+- **Starvation is BOTH threshold and budget, on different layers.** The threshold halves the NATIVE equity setup rate (bounded, needs outcome data to change). The shared discovery budget starves Stage C of equities ENTIRELY: crypto runs hourly 24/7 and exhausts the 12-call daily budget before the equity session, so equities recorded 2 lifetime Stage-C calls vs 58 crypto. The budget half is independent of the threshold.
+- **Recommendation, applied to NOTHING:** keep equity 5 for now and record entry RSI-2 depth to make the 5-vs-10 question answerable. The higher-impact and more actionable fix is the budget: reserve discovery Stage-C budget for the equity session so the funnel evaluates equities at all, which needs no outcome data because it corrects an allocation, not a strategy parameter.
+- NOT touched: RiskGate logic, the live-trading gate, the adaptive limit-weakening invariant, Level 1 values, the RSI-2 thresholds, the discovery budget. Live trading stays off.
+
 ### 2026-07-21 (Opus 4.8) — DIAGNOSTIC: the ATR band is symmetric but mean reversion is not, and it currently rejects everything on the low side
 
 - **The design smell is symmetry.** The band rejects a cross-back setup whenever ATR is more than 1 SD from its 100-bar mean in either direction, but a LOW-side rejection (quiet tape) is defensibly skipping dead tape while a HIGH-side rejection refuses the volatility a snapback needs. Over stored history the band rejects 46 percent of cross-back setups (923 of 1,707 pass), and of the 784 rejections 58 percent are low-side and 42 percent high-side.
