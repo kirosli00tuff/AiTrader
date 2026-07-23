@@ -134,6 +134,14 @@ New flags from the feed-work session (2026-07-05, `369b6a6`):
 
 ## Session Log
 
+### 2026-07-21 (Opus 4.8) — DIAGNOSTIC: the fast tier cannot clear 0.65 by construction, because a benched dnn is averaged in as a confident zero
+
+- **STRUCTURAL, and the defect is in the composition, not the floor.** On the fast tier `compose_gate_verdict` correctly excludes the un-run council (weight 0.57) from the confidence denominator, leaving rule_based (0.18), dnn_advisory (0.15), and whale (0.10). But dnn is BENCHED and returns confidence 0.0 (live-probed) while its 0.15 stays in the denominator, so the composed confidence is `(0.18*rb + 0.15*0 + 0.10*whale)/0.43`. With rule_based at its fast-tier cap (0.88) and live whale (0.518) that is 0.4888, and the recorded ETH fast block was 0.488. Even whale at an unreachable 1.0 gives 0.60. The ceiling is below 0.65 under every input.
+- **The record agrees:** 27 of 27 fast-tier candidates blocked, max ever 0.535. The council tier is NOT structural (max blocked 0.644, and six entries fired including a council-tier momentum at strength 0.7 that cleared with a strong_buy council).
+- **Not the floor, not the tuner.** `rule_based_weight_floor` (0.35) never triggers here (rb share is already 0.419), and triggering would make it worse. The tuner is not overriding (weight_overrides empty, param_history stale from 2026-07-02), so the composition is stable.
+- **The contained fix, applied to NOTHING:** exclude a benched dnn from the confidence and edge denominator exactly as the un-run council already is (the 2026-07-15 `council_ran` mechanism). Projected: fast-tier confidence rises from 0.4888 to 0.7506 and clears, with no threshold change. The 0.65 floor is correct and stays; the bug is that a fast-tier entry's confidence is artificially low because a zero is averaged in.
+- NOT touched: RiskGate logic, the live-trading gate, the adaptive limit-weakening invariant, Level 1 values, min_confidence_default, any behavior. Live trading stays off.
+
 ### 2026-07-21 (Opus 4.8) — DIAGNOSTIC: open positions are stranded across restarts, the engine never rehydrates exit state
 
 - **DEFECT, not a held position.** The ETH/USD long opened 2026-07-17 at 2030.69 has no exit fired in six days because the engine cannot see it. Exit state lives only in the in-memory `open_positions_` map (`core/engine.hpp:427`), populated ONLY at entry (`core/engine.cpp:1189`, `:2754`). The constructor never reads the `positions` table, and the table has no stop or target column to read: its exits survive only in the `trade_entry` event (stop 1993.66, target 2086.23, factor momentum). A fresh process starts with an empty map, `handle_bar_close`'s `open_positions_.find(key)` misses on every closed bar, and the position is invisible: not evaluated, not exited, silent because there is no record to log about.

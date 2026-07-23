@@ -14,6 +14,77 @@ Commit message:
 
 ---
 
+## Prompt: Diagnose fast-tier confidence composition against the Level 1 floor
+
+Date: 2026-07-21
+Model: Opus 4.8 (1M context)
+Prompt summary: a diagnostic, the 0.65 min_confidence_default is Level 1 and stays. On 2026-07-21 four native entry candidates blocked on confidence below the floor at 0.509, 0.488, 0.427, 0.299, all on the fast tier, so no council ran. The open question is whether a fast-tier candidate reaches 0.65 at all or is a guaranteed block by construction. Five tasks: trace how the confidence reaching the RiskGate is composed on the fast-tier path by file and line, naming every input, its weight, the normalization, which inputs are absent because council did not run, and whether an absent council contributes zero, a neutral value, or is excluded from the denominator; compute the theoretical ceiling with every available input at its most favorable value and state whether it sits above or below 0.65; report the historical confidence distribution split by tier with min median max and how many of each tier ever cleared 0.65; determine whether adaptive.rule_based_weight_floor at 0.35 affects the fast-tier composition and whether the tuner moves any weight feeding it; report plainly whether the fast tier is structurally unable to clear the floor or correctly selective, with options ranked by expected impact and the observable indicating each worked, applying none. No RiskGate, live-gate, or adaptive-invariant changes. Live trading stays off.
+
+**HEADLINE: the fast tier is STRUCTURALLY unable to clear 0.65, and the cause is not the floor. It is the BENCHED dnn factor sitting in the confidence denominator at weight 0.15 contributing exactly zero, while the council factors (weight 0.57) are correctly excluded because they did not run. That leaves only rule_based (0.18) and whale (0.10) carrying real confidence, and their weighted maximum is 0.60, below 0.65 by construction. The analytic ceiling matches the live blocks to three decimals: rule_based at its fast-tier cap plus live whale composes 0.4888, and the recorded ETH fast-tier block was 0.488. 27 of 27 fast-tier candidates in the record blocked, and none ever cleared. This is a composition defect, and the fix is to exclude a benched factor from the confidence average exactly as an un-run council already is.**
+
+Changes: NONE. This was a diagnostic.
+
+TASK 1, THE COMPOSITION TRACE. The confidence reaching the RiskGate is built in `signal_engine/factor_engine.cpp`, `compose_gate_verdict` (`:144`) over `combine` (`:72`), called from the engine's entry path. The inputs, their config weights (`config/default_config.yaml:671` `model_weights`), and their fast-tier fate:
+
+| factor | weight | fast-tier confidence | in the denominator? |
+| --- | --- | --- | --- |
+| llm_primary | 0.27 | EXCLUDED (council did not run) | NO |
+| llm_secondary | 0.18 | EXCLUDED | NO |
+| llm_tertiary | 0.12 | EXCLUDED | NO |
+| rule_based | 0.18 | `0.7 + 0.3 * strength` (`core/engine.cpp:331`), max 0.88 at the fast-tier strength cap 0.6 | YES |
+| dnn_advisory | 0.15 | **0.0**, benched, live-probed | **YES** |
+| whale_signal | 0.10 | 0.5177, live-probed | YES |
+| rl_advisory | 0.0 | shipped off, absent | NO |
+
+THE COMPOSITION, exact: `combine` computes `confidence = sum(weight_i * confidence_i) / sum(weight_i)` over the factors PRESENT after exclusions (`factor_engine.cpp:112-125`). `compose_gate_verdict` decides the exclusions: when `council_ran` is false it drops the three `is_council_factor` slots from the subset (`:170`, `:180-183`), then recomputes confidence and edge from what remains (`:189-191`). AN ABSENT COUNCIL IS EXCLUDED FROM THE DENOMINATOR, not scored zero and not neutral: the 2026-07-15 `council_ran` fix does exactly this, and correctly, so the un-consulted council mocks cannot drag a genuine native conviction down. THE PROBLEM: a BENCHED dnn is NOT excluded. It returns `confidence: 0.0` from the bridge (live-probed: `benched: true`, top-level `bias`/`confidence`/`edge` all 0.0), and its weight 0.15 stays in the denominator. So the denominator is 0.18 + 0.15 + 0.10 = 0.43, and the 0.15 belonging to dnn contributes a zero to the numerator. That is the difference between "excluded from the average" (what the council gets) and "averaged in as a confident zero" (what the benched dnn gets).
+
+TASK 2, THE THEORETICAL CEILING. With rule_based at its maximum fast-tier confidence (strength capped at `fast_tier_max_conviction` 0.6, so `0.7 + 0.3*0.6 = 0.88`), dnn benched at 0.0, and whale at its live 0.5177:
+
+`(0.18*0.88 + 0.15*0.0 + 0.10*0.5177) / 0.43 = 0.4888`
+
+Pushing whale to an unreachable 1.0 (its confidence is bounded well below that) still gives `(0.18*0.88 + 0.10*1.0)/0.43 = 0.6009`. THE CEILING SITS BELOW 0.65 UNDER EVERY INPUT. The fast tier blocks every candidate by construction while dnn is benched, and that is the finding. The ceiling is not sensitive to the RiskGate floor at all: even a floor of 0.61 would block the entire tier.
+
+TASK 3, THE HISTORICAL DISTRIBUTION, from every `risk_block` event carrying a confidence and a tier:
+
+| tier | n | min | median | max | ever cleared 0.65 |
+| --- | --- | --- | --- | --- | --- |
+| fast | 27 | 0.299 | 0.420 | 0.535 | **0** |
+| council | 18 | 0.257 | 0.428 | 0.644 | 0 |
+
+The fast-tier max ever recorded is 0.535, comfortably under the 0.60 analytic ceiling. The council tier's max BLOCKED value is 0.644, a genuine near-miss rather than a structural wall. AND entries DO fire: six `trade_entry` events exist, including UNI/USD momentum at strength 0.7 on 2026-07-21, which took the COUNCIL tier (strength 0.7 exceeds the fast cap 0.6), had `council_eval` id 15 fire `strong_buy` with 3 directional voters at the same timestamp, cleared the gate, and entered. So the council tier is NOT structurally blocked, it clears when the council contributes real conviction. Only the fast tier is walled off.
+
+TASK 4, INTERACTIONS. `adaptive.rule_based_weight_floor` (0.35) does NOT affect the fast-tier block. On the fast-tier subset the rule_based share is 0.18/0.43 = 0.419, already above 0.35, so the floor never triggers (`factor_engine.cpp:96-108` only reweights when `rb/total < share`). Were it to trigger it would LOWER rule_based toward a 0.35 share, making the block worse, not better, so the floor is neither the cause nor a lever here. The tuner is not currently moving anything: `weight_overrides.json` is empty and `param_history` shows only stale 2026-07-02 nudges against a different weight scheme, so the engine reads the config `model_weights` directly. The composition is STABLE, not drifting. Even at full tuner activity the floor keeps rule_based at or above 0.35 raw, which does not lift the ceiling because the ceiling is set by dnn's zero sitting in the denominator, not by rule_based's weight.
+
+TASK 5, THE VERDICT. STRUCTURALLY UNABLE, and the defect is in the composition, never in the floor. The 2026-07-15 `council_ran` fix established the correct principle: a factor that did not produce a real read is excluded from the confidence average rather than averaged in as a zero. A benched dnn is exactly such a factor (its own CONTEXT entry says it "contributes ZERO"), but the composition excludes only the council, not a benched advisory. So a fast-tier native entry is judged on rule_based plus whale, diluted by dnn's zero, and cannot reach the floor.
+
+OPTIONS, ranked by expected impact, applied to NOTHING.
+
+1. **Exclude a benched dnn from the confidence and edge denominator, the same mechanism `council_ran` already uses.** `compose_gate_verdict` would drop `dnn_advisory` from the subset when the factor reports benched, alongside the existing council drop. PROJECTED: the fast-tier composed confidence rises from 0.4888 to `(0.18*0.88 + 0.10*0.5177)/0.28 = 0.7506`, clearing 0.65. OBSERVABLE: fast-tier candidates begin clearing the floor and entering without any threshold change, and the `risk_block` fast-tier median rises above 0.65. This is the contained fix, and it mirrors an existing, tested pattern. It touches composition only, never the RiskGate or the floor.
+2. **Let dnn un-bench by training on real fills.** Once the champion carries real-data provenance, dnn contributes real confidence (~0.6), and `(0.18*0.88 + 0.15*0.6 + 0.10*0.5177)/0.43 = 0.6981` clears on its own. OBSERVABLE: dnn provenance flips to real-data and fast-tier confidence clears. This is the graduation path already designed, but it is gated on real fills the system is not yet accumulating, so it is slow.
+3. **Reconsider whether a benched factor belongs in the ensemble denominator at all**, for every gate composition and not just the fast tier. Broader than the defect, noted for completeness.
+
+THE FLOOR IS CORRECT AND STAYS. 0.65 is doing its job: it refuses entries whose composed confidence is genuinely low. The bug is that a fast-tier entry's composed confidence is artificially low because a zero is being averaged in, not because the entry is weak.
+
+NOT touched: RiskGate logic, the live-trading gate, the adaptive limit-weakening invariant, Level 1 values, `min_confidence_default`, any threshold, any behavior. Live trading stays off.
+
+VERIFICATION (2026-07-21):
+
+| Check | Result |
+| --- | --- |
+| Fast-tier ceiling | 0.60 with whale at an unreachable 1.0, 0.4888 at live values |
+| Analytic vs observed | ceiling 0.4888, recorded ETH fast block 0.488 |
+| dnn state | benched, top-level confidence alias 0.0, live-probed |
+| Fast-tier candidates cleared 0.65 | 0 of 27 |
+| Council-tier structural? | no, 6 entries fired, one council-tier at strength 0.7 |
+| rule_based_weight_floor effect | none, rb share 0.419 already above 0.35 |
+| Tuner drift | none, weight_overrides empty, param_history stale |
+| Projected fix (exclude benched dnn) | 0.4888 to 0.7506, clears |
+| Changes applied | none |
+
+Commit message: `Diagnose fast-tier confidence composition against the Level 1 floor, findings only, live trading untouched`
+
+---
+
 ## Prompt: Diagnose the stale ETH exit
 
 Date: 2026-07-21
