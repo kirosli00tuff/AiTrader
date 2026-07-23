@@ -134,7 +134,7 @@ strategy:
   # (RSI-2 reversion + dual-MA momentum, two-tier + spend-ceiling cost controls,
   # wider whitelist). Default stays swing so nothing changes silently. The
   # active_quant block below is applied ONLY when profile is active_quant.
-  profile: swing
+  profile: active_quant
   momentum_enabled: true
   reversion_enabled: true
   # Which mean-reversion factor the reversion slot uses: bollinger (default) or
@@ -218,7 +218,12 @@ active_quant:
   per_symbol_council_cooldown_minutes: 60
   council_daily_spend_ceiling_usd: 5.0
   council_monthly_spend_ceiling_usd: 100.0
-  council_est_cost_per_call_usd: 0.04
+  # Measured 2026-07-21 at $0.0562 per full round (three providers + gate) from
+  # the persisted per-provider records, reconfirmed over 41 rounds. Calibrated
+  # up from 0.04 so every ceiling above enforces against real spend: the $5/day
+  # ceiling now permits 89 calls (was 125) and the $100/month 1,786 (was 2,500).
+  # The tightening is the point; no ceiling was raised to compensate.
+  council_est_cost_per_call_usd: 0.056
 
 # -----------------------------------------------------------------------------
 # Council cost controls — the full LLM council runs ONLY on a native strategy
@@ -267,7 +272,7 @@ council:
   # council_est_cost_per_call_usd) reaches a ceiling the engine forces the fast
   # tier, logged council_skip reason spend_ceiling. 0.0 disables. Swing leaves both
   # 0.0; active_quant sets them so a month stays near or under 100 dollars.
-  council_est_cost_per_call_usd: 0.04
+  council_est_cost_per_call_usd: 0.056   # measured 2026-07-21, was 0.04
   council_daily_spend_ceiling_usd: 0.0
   council_monthly_spend_ceiling_usd: 0.0
 
@@ -423,10 +428,15 @@ discovery:
 
   # Daily discovery council budget. SEPARATE from and ADDITIVE to the trading
   # council budget (council.council_daily_budget), so a discovery pass can never
-  # eat the quant loop's calls. Combined monthly estimate at full use:
-  # trading 40/day + discovery 12/day = 52 * $0.04 * 30 = ~$62/month worst case,
-  # under the $100 ceiling in sleeves.combined_monthly_spend_ceiling_usd, and far
-  # less in practice since the fast tier and Stage A drop most candidates free.
+  # eat the quant loop's calls. Combined monthly estimate at full use, at the
+  # MEASURED $0.056/round (was projected at $0.04, understated by 40 percent):
+  # trading 40/day + discovery 12/day = 52 * $0.056 * 30 = ~$87/month worst case.
+  # Adding the research budget (6/day at $0.08) is +$14/month, so the configured
+  # caps project ~$102/month, marginally OVER the $100
+  # sleeves.combined_monthly_spend_ceiling_usd, which then pauses both sleeves.
+  # Far less in practice: the fast tier and Stage A drop most candidates free,
+  # and measured 72-hour production spend was $2.18. The ceiling is a backstop,
+  # not the operating point.
   discovery_daily_council_budget: 12
   discovery_est_cost_per_call_usd: 0.04
 

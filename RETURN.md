@@ -14,6 +14,72 @@ Commit message:
 
 ---
 
+## Prompt: Calibrate the council cost estimate to measured spend
+
+Date: 2026-07-21
+Model: Opus 4.8 (1M context). The prompt specified Fable; a session cannot switch models mid-run, so it ran on Opus and this records that.
+Prompt summary: the 2026-07-21 audit measured a full council round at 0.0560 dollars while the configured council_est_cost_per_call_usd is 0.04, so every spend ceiling is 40 percent looser than it reads. Five tasks: recompute the per-round cost from the persisted prompt and per-provider records at current pricing, report the per-provider split and gate cost, and use any moved value stating the evidence; set council_est_cost_per_call_usd to the measured value and change nothing else, not raising any budget or ceiling to compensate, reporting the before and after effective call allowance at every ceiling; find every consumer of the estimate (daily council budget, monthly ceiling, discovery Stage C budget, research budget, any GUI display), confirm each reads the corrected value, and route any independent hardcoded copy through config; correct the config projection comment to the measured projection and state in the comment whether the caps now project over or under the combined ceiling; run pytest against 892 and ctest against 26 of 26 or the three known operator-edit failures, add or update a test pinning the estimate against a hardcoded old value, leave the operator strategy.profile edit as found, report. No RiskGate, live-gate, or adaptive-invariant changes. Live trading stays off.
+
+**HEADLINE: measurement reconfirmed at $0.05618 per round over 41 persisted rounds, applied as 0.056. Every council spend ceiling now enforces against real spend. The $5/day ceiling drops from permitting 125 calls to 89, and the $100/month from 2,500 to 1,786. No budget or ceiling was raised. A separate finding: discovery Stage C and the research sleeve price the SAME council with their OWN estimates (0.04 and 0.08), so they remain understated, but the prompt scoped this change to council_est_cost_per_call_usd and they were left as found.**
+
+Changes: applied the calibration to `config/default_config.yaml` (both blocks), the C++ and Python fallback defaults, and the projection comment; added one test.
+
+TASK 1, THE MEASUREMENT RECONFIRMED. Recomputed from the persisted `council_eval` prompts and `council_eval_provider` per-provider records at config pricing, now over 41 rounds (up from the 15 the audit had):
+
+| model | calls | total | per-round |
+| --- | --- | --- | --- |
+| claude-opus-4-8 | 41 | $1.6031 | $0.03910 |
+| gpt-5.5 | 41 | $0.4298 | $0.01048 |
+| gemini-3.1-pro-preview | 41 | $0.2580 | $0.00629 |
+| gate (claude-haiku-4-5) | 41 | $0.0125 | $0.00030 |
+| **full round** | | | **$0.05618** |
+
+The value has NOT moved from the audit ($0.0560), it firmed up on a larger sample. Opus is still 70 percent of the round on its $75/1M output rate. THE VALUE APPLIED IS 0.056, the measured per-round cost rounded to three places. Evidence: the token anchors are the 2026-07-20 optimization session's provider-usage measurements (system prefix 1,121 tokens, user 285, output ~255), which are direct usage-field reads, not estimates.
+
+TASK 2, THE CALIBRATION APPLIED. `council_est_cost_per_call_usd` set from 0.04 to 0.056 in the `council` base block and the `active_quant` overlay of `config/default_config.yaml`, and in both fallback defaults (`config/config.hpp:300`, `llm_consensus/config_access.py:165`) so no stale copy can drift. NOTHING ELSE CHANGED: no budget, no ceiling, no threshold. BEFORE AND AFTER EFFECTIVE CALL ALLOWANCE at every ceiling:
+
+| ceiling | value | calls at 0.04 | calls at 0.056 | change |
+| --- | --- | --- | --- | --- |
+| council_daily_spend_ceiling_usd | $5.00 | 125 | 89 | -29% |
+| council_monthly_spend_ceiling_usd | $100.00 | 2,500 | 1,786 | -29% |
+| combined_monthly_spend_ceiling_usd (council portion) | $100.00 | tightens proportionally | | |
+
+Every ceiling tightens by the same 29 percent (the ratio 0.04/0.056), which is the intended effect: the same dollar ceiling now stops the engine after fewer calls, at the point those calls actually cost the ceiling.
+
+TASK 3, EVERY CONSUMER. The estimate is read at six sites, all now resolving 0.056:
+- **C++ enforcement:** `signal_engine/council_gate.cpp:39` (`spend_ceiling_reached`, the engine's real daily/monthly ceiling enforcement), `core/engine.cpp:2472` (`combined_spend_ceiling_reached` across both sleeves), `core/engine.cpp:1064` (the discovery event payload), `core/main.cpp:414` (the startup banner display). All read `cfg_.council.council_est_cost_per_call_usd`, loaded via `config/config.cpp:282` and overlaid by the active_quant block at `:310`.
+- **Python:** `llm_consensus/config_access.py:279` (`combined_spend_ceiling_reached`) and `:289` (`spend_ceiling_reached`), both through the `council_est_cost_per_call_usd()` getter.
+
+NO INDEPENDENT HARDCODED COPY OF THE OLD ESTIMATE REMAINS. The two fallback defaults (config.hpp, config_access.py) were the only hardcoded 0.04 copies and are now 0.056, matching config. The three `0.04` strings in `tests/test_active_quant.py` are synthetic overlay INPUTS in hand-built test configs, not assertions of the shipped value, so they correctly stay.
+
+TWO SEPARATE ESTIMATES, REPORTED AND LEFT AS FOUND per the "change nothing else" scope. The prompt lists "the discovery Stage C budget" and "the research budget" as consumers, but they are NOT: discovery Stage C prices with its own `discovery_est_cost_per_call_usd` (`discovery/settings.py:28`, `discovery/funnel.py:618`, still 0.04) and research with `research_est_cost_per_call_usd` (still 0.08). A discovery Stage C round IS the same council costing the same $0.056, so `discovery_est_cost_per_call_usd` is understated by the same 40 percent, and `research_est_cost_per_call_usd` at 0.08 is now ABOVE the measured $0.056 (a research call is one council round, so 0.08 slightly over-estimates it). Calibrating those two is a separate change this prompt did not authorize; both are flagged here for a follow-up. THE GUI display path reads neither: `api_server/providers_cost.py` prices from `config/provider_prices.yaml` (token-based, the labeled local estimate), and `api_server/controls.py:1104` shows discovery cost from `discovery_est_cost_per_call_usd`. No GUI surface reads `council_est_cost_per_call_usd`.
+
+TASK 4, THE PROJECTION COMMENT. Corrected in `config/default_config.yaml` beside `discovery_daily_council_budget`: the worst-case combined monthly projection is now stated as `52 * $0.056 * 30 = ~$87/month` for council plus discovery, plus $14/month for the research budget, giving ~$102/month. The comment now states PLAINLY that the configured caps project MARGINALLY OVER the $100 `combined_monthly_spend_ceiling_usd`, which then pauses both sleeves, and that observed 72-hour production spend was $2.18, so the ceiling is a backstop not the operating point.
+
+TASK 5, VERIFICATION. pytest **893 passed** (up from 892, the +1 is the new pin). ctest **26 of 26 against the shipped config**; 23 of 26 with the operator's `strategy.profile: active_quant` edit, the same three known failures (`config`, `tuner_floor`, `market_hours_entry`), left exactly as found. Confirmed the C++ `config` test does NOT assert the estimate value, so the calibration passes cleanly under the shipped swing profile (verified by reverting only the profile edit and running the config target: passed). NEW TEST `tests/test_active_quant.py::test_shipped_estimate_is_the_measured_value_not_the_old_underestimate` reads the real shipped config and asserts the estimate is 0.056 and the Python fallback default is 0.056, so a regression to 0.04 in either the council base or the active_quant overlay fails the suite.
+
+NOT touched: RiskGate logic, the live-trading gate, the adaptive limit-weakening invariant, Level 1 values, any budget, any ceiling, any threshold. The operator's profile edit was left as found. Live trading stays off.
+
+VERIFICATION (2026-07-21):
+
+| Check | Result |
+| --- | --- |
+| Measured per round | $0.05618 over 41 rounds, applied 0.056 |
+| Value before / after | 0.04 -> 0.056 in both blocks + both fallback defaults |
+| $5/day allowance | 125 -> 89 calls |
+| $100/month allowance | 2,500 -> 1,786 calls |
+| Consumers routed to config | 6 sites, all resolve 0.056 |
+| Hardcoded old copies remaining | none |
+| discovery / research estimates | separate, understated, left as found (out of scope) |
+| Projection comment | corrected to ~$87 (+$14 research = ~$102), marginally over $100 |
+| pytest | 893 passed (from 892, +1 pin) |
+| ctest (shipped config) | 26/26 |
+| ctest (operator edit) | 23/26, same three known failures |
+
+Commit message: `Calibrate council cost estimate to measured spend, every ceiling tightens, live trading untouched`
+
+---
+
 ## Prompt: Diagnose the unaudited whale layer toggle events
 
 Date: 2026-07-21

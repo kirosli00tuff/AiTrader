@@ -113,3 +113,20 @@ def test_zero_est_cost_disables_the_ceiling(tmp_path):
     )
     cfg = _write_cfg(tmp_path, body)
     assert not ca.spend_ceiling_reached(100, 100, cfg)
+
+
+def test_shipped_estimate_is_the_measured_value_not_the_old_underestimate():
+    """The SHIPPED config's council_est_cost_per_call_usd must be the measured
+    per-round cost, never the old 0.04 that understated every spend ceiling by
+    40 percent (2026-07-21 cost audit + calibration). Reads the real shipped
+    file, so a regression to 0.04 in either the council base or the active_quant
+    overlay fails here. Both blocks are covered because the overlay wins under
+    active_quant, and a stale value in either would loosen a ceiling.
+    """
+    shipped = "config/default_config.yaml"
+    est = ca.council_est_cost_per_call_usd(shipped)
+    assert est == 0.056, (
+        f"shipped council_est_cost_per_call_usd is {est}, expected the measured "
+        "0.056; a value of 0.04 loosens every spend ceiling by 40 percent")
+    # The Python fallback default must not drift back to the old estimate either.
+    assert ca._SPEND_DEFAULTS["council_est_cost_per_call_usd"] == 0.056

@@ -162,7 +162,7 @@ def _council_num(key: str, cfg_path: str | None):
 # The C++ engine owns real enforcement; this mirror lets the Python cost/UI side
 # reason about the ceiling. Swing leaves the ceilings 0.0 (disabled).
 _SPEND_DEFAULTS: dict[str, float] = {
-    "council_est_cost_per_call_usd": 0.04,
+    "council_est_cost_per_call_usd": 0.056,   # measured 2026-07-21, matches config
     "council_daily_spend_ceiling_usd": 0.0,
     "council_monthly_spend_ceiling_usd": 0.0,
     "fast_tier_max_notional_pct": 0.0,

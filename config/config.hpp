@@ -297,7 +297,7 @@ struct CouncilConfig {
     // council_skip with reason spend_ceiling. 0.0 disables a ceiling. Swing leaves
     // both at 0.0 (no ceiling); active_quant sets them so a month stays near or
     // under 100 dollars. This can only SKIP spend, never widen risk.
-    double council_est_cost_per_call_usd = 0.04;  // gate + three providers, realistic estimate
+    double council_est_cost_per_call_usd = 0.056;  // measured 2026-07-21 (gate + three providers)
     double council_daily_spend_ceiling_usd = 0.0; // 0 = disabled
     double council_monthly_spend_ceiling_usd = 0.0; // 0 = disabled
 };

@@ -134,6 +134,15 @@ New flags from the feed-work session (2026-07-05, `369b6a6`):
 
 ## Session Log
 
+### 2026-07-21 (Opus 4.8) — Council cost estimate calibrated to measured spend: every ceiling tightens 29 percent
+
+- **Reconfirmed and applied.** A full council round measures $0.05618 over 41 persisted rounds (up from the audit's 15), so `council_est_cost_per_call_usd` was set from 0.04 to 0.056 in both the council base and the active_quant overlay, plus the C++ and Python fallback defaults so no stale copy drifts. No budget, ceiling, or threshold was raised: the tightening is the point.
+- **Effect:** every council spend ceiling now enforces against real spend. The $5/day ceiling permits 89 calls instead of 125, the $100/month 1,786 instead of 2,500, a uniform 29 percent tightening.
+- **Consumers:** six sites read it (four C++ enforcement/display, two Python ceiling checks), all now resolving 0.056, and no independent hardcoded copy of 0.04 remains. Reported separately and left as found per the change scope: discovery Stage C and the research sleeve price the SAME council with their OWN estimates (`discovery_est_cost_per_call_usd` 0.04, understated the same way; `research_est_cost_per_call_usd` 0.08, now slightly over the measured value). Calibrating those is a flagged follow-up.
+- **Projection comment corrected:** the worst-case combined monthly is now ~$87 (council + discovery) plus $14 research = ~$102, stated plainly as marginally OVER the $100 combined ceiling that then pauses both sleeves. Observed 72-hour production spend was $2.18, so the ceiling is a backstop.
+- **Verified:** pytest 893 (from 892, +1 pin asserting the shipped estimate is 0.056 not 0.04), ctest 26/26 against the shipped config (23/26 with the operator's profile edit, the same three known failures, left as found). The C++ config test does not assert the estimate value, so the calibration passes cleanly under the shipped profile.
+- NOT touched: RiskGate logic, the live-trading gate, the adaptive limit-weakening invariant, Level 1 values, any budget or ceiling. Live trading stays off.
+
 ### 2026-07-21 (Opus 4.8) — DIAGNOSTIC: the whale toggle events are a read failure, not a phantom writer, and the class is already fixed
 
 - **The FILE never changed. The READ did.** The six 2026-07-17 `layer.whale True -> False` events read `old=True` after each write of False not because anything restored True, but because `api_server/controls.read_controls` falls back to `_defaults()` on any read error and the layer default is True. So a click whose read could not open the file reports old=True while the disk still says False. The 2026-07-18 search for a writer restoring True correctly found none, because the cause was never a writer.
