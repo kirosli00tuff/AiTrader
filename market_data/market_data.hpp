@@ -22,7 +22,6 @@ struct MarketState {
     double ret_1 = 0.0;    // last-interval return
     double ret_5 = 0.0;    // 5-interval return
     double volatility = 0.0;
-    double spread = 0.0;
     double volume = 0.0;
     double order_book_imbalance = 0.0;  // [-1,1]
     std::string ts;

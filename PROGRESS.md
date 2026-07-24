@@ -134,6 +134,15 @@ New flags from the feed-work session (2026-07-05, `369b6a6`):
 
 ## Session Log
 
+### 2026-07-23 (Fable 5) — The last fabricated market fields leave the real path, and the contaminated volume leaves the ranking
+
+- **spread REMOVED from MarketState outright**: a uniform draw with zero consumers anywhere (traced by file and line), removed rather than zeroed so no future reader can trust it. **imbalance reports absence** (0.0, the scale's no-reading point) on the live feed; its one decision-adjacent reach was the mock factor shaping un-run council slots' bias/agreement on the fast tier, and that term now drops out. Real services never read it (dnn serves from bars since bars-v2, whale never reads the key, the council allowlist never rendered it).
+- **Whale market_bias catalyst fallback removed** (python_bridge/server.py): the engine never sends "bias", so the whale contradiction flag was ALWAYS judged against the per-symbol catalyst hash constant on the real path. Absent now reads 0.0 and the contradiction check disarms rather than fires on fiction. Mutation-killed pin in test_whale_market_bias.py.
+- **3,443 contaminated rows quarantined on production** (`scripts/quarantine_fabricated_volume_20260723.py`, mark never delete): `volume_source='fabricated_zeroed'` and the invented volume set to 0 ("none reported"). Urgent, not cosmetic: the venue-volume change made the 20-bar trailing average live again, and restart-seeded history would have fed it fabricated values. The discovery ranking gained structural exclusion (venue provenance only, quarantined rows out, PRAGMA-probed for old schemas). $1.59T of fictional dollar volume removed; AAVE/USD falls rank 3→5 (it out-ranked SOL/USD on fiction).
+- **Flags, deliberately left**: mock_factor's det_unit noise still shapes un-run council slots (documented mock-path design; changing the agreement feed is its own session); the mock catalyst provider itself (now ignored by every real service); offline synthesis by design.
+- **Guards**: whole-body lexical sweep of AlpacaFeed::poll (no RNG draw, no ms.spread), mutation-killed. Verified: pytest 898, ctest 25/28 (same three operator-edit failures), offline baselines identical.
+- NOT touched: RiskGate logic, the live-trading gate, the adaptive limit-weakening invariant, Level 1 values, any threshold. No row deleted. Live trading stays off.
+
 ### 2026-07-23 (Fable 5) — Live bars carry the venue's own volume: trade price stays, latest-bar v rides beside it
 
 - **The shape:** latest-TRADE price is kept (execution stays anchored to real trades; wholesale bars would move every decided/executed price by up to the measured 0.03-0.13% per-bar drift and would execute quiet crypto minutes on quote-derived prices no trade printed). The bridge adds the venue's latest MINUTE-BAR v per symbol (`<symbol>:v`/`<symbol>:bar_ts`, two extra batched GETs, 8→16 req/min vs a 200/min limit), and pure `consume_latest_bar` emits each completed venue bar's volume EXACTLY ONCE at rollover, as last observed. The aggregator sums those into the 5-minute bar, so real_feed rows now carry real venue volume and the volume filter becomes active on live decisions.

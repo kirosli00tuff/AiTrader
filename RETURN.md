@@ -14,6 +14,56 @@ Commit message:
 
 ---
 
+## Prompt: Remaining fabricated fields and contaminated rows
+
+Date: 2026-07-23
+Model: Fable 5. The prompt specified Opus; the session runs on Fable 5 and this line records that.
+Prompt summary: the residue the volume fabrication fix deliberately left. ms.spread and ms.order_book_imbalance were still uniform draws on the real path, and 3,465 contaminated bar rows still fed the dollar-volume ranking in discovery/universe.py. Six tasks: trace every consumer of the two fields on the real path by file and line; apply the absence treatment (real where reported, absent otherwise, remove a field nothing consumes); mark the contaminated rows by provenance per the 2026-07-18 quarantine precedent and exclude fabricated volume from the discovery ranking, reporting the ranking before and after; sweep the real path for the whole class of invented values including the known catalyst hash constant feeding the whale market_bias fallback; extend the no-fabrication guards with file-copy rollback proofs; verify and report. Live trading stays off.
+
+**HEADLINE: the last two fabricated market fields are gone from the real path. ms.spread had NO consumer anywhere and was REMOVED from MarketState outright. ms.order_book_imbalance now reports absence (0.0, the scale's no-reading point) on the live feed, and every consumer treats it as contributing nothing. The whale market_bias no longer falls back to the catalyst hash constant. The 3,443 contaminated rows (3,465 at the earlier count; backfill upserts since reclaimed 22) are marked 'fabricated_zeroed' and their invented volumes zeroed, removing $1.59 trillion of fictional dollar volume from the discovery ranking, where AAVE/USD had been out-ranking SOL/USD on fiction.**
+
+Changes:
+
+TASK 1, THE TRACE, by file and line as found:
+- **ms.spread** (drawn at market_data/market_data.cpp:216 on the real path, and in MockFeed): NO consumer. Not read by the engine, not persisted, not sent to the bridge, not in any prompt. A fabricated value nothing consumes, waiting for a future reader to trust it.
+- **ms.order_book_imbalance** (drawn at market_data/market_data.cpp:248 on the real path):
+  1. core/engine.cpp:295 (mock_factor): shapes the deterministic mock factor values. ON THE REAL PATH this REACHES A DECISION indirectly: the un-run council slots on the fast tier hold these mocks, and their bias and agreement stay in the full-set composition by design (the 2026-07-15 council_ran rule eases only confidence/edge). So a uniform draw was contributing to fast-tier bias and agreement.
+  2. core/engine.cpp:316 (gather_factors bridge payload): sent to /score/dnn (IGNORED since the 2026-07-18 bars-v2 unification, features come from bars), /score/whale (never reads the key), /score/rl (never reads it, and rl ships off).
+  3. core/engine.cpp:422 (council payload): sent to /score/llm; the evidence allowlist has never rendered it into a prompt (2026-07-20, confirmed rather than assumed). The Python MOCK provider (llm_consensus/providers.py:122) does read it, offline only.
+  4. Persisted rows: none. Model prompts: none.
+
+TASK 2, THE TREATMENT. spread: REMOVED from MarketState and both feeds (a field with no consumer is removed, not zeroed, so nothing can trust it later); the stale demo key in ml_factor/factor.py went with it. imbalance: the real path reports ABSENCE (0.0, the neutral point of the signed scale, meaning no reading) — the mock factor's imbalance term drops out, the real services never read it, and the offline MockFeed keeps its draw because offline synthesis is by design. Nothing is invented and nothing is carried forward.
+
+TASK 3, THE CONTAMINATED ROWS. Rows carrying fabricated volume, measured now: 3,443 bars with source='real_feed' AND volume > 0, all predating the fabrication fix (the earlier 3,465 shrank because backfill upserts reclaimed 22 rows to real provenance). Remaining readers before this session: discovery/universe.py dollar_volume_by_symbol (the crypto active-50 ranking), and — NEW since the venue-volume change one session ago — the 20-bar trailing volume average seeded from history after a restart, which made this quarantine urgent rather than cosmetic. TREATMENT per the quarantine precedent, mark never delete (`scripts/quarantine_fabricated_volume_20260723.py`, idempotent, run against production): a `volume_source` column, each row marked 'fabricated_zeroed', and the invented volume set to 0, the semantically correct "none reported" (the replaced value is KNOWN fiction; prices and provenance stay). The ranking additionally gained STRUCTURAL exclusion: venue-reported provenance only (backfill/real_feed) and never a quarantined row, with a PRAGMA probe so an old schema degrades to the wide query instead of erroring into "no evidence". RANKING BEFORE -> AFTER (7-day crypto dollar volume): BTC/USD 3.54e12 -> 1.20e6, ETH/USD 1.28e11 -> 4.17e5, and the FUNNEL-RELEVANT change: AAVE/USD falls from rank 3 (1.33e9, fabricated) to rank 5 (1.61e4, real), below SOL/USD and UNI/USD, so the fabricated series had been inflating AAVE two places in the liquidity ordering; MANA/RUNE synthetic residues (~$15 each) drop out entirely via the provenance filter. $1,588,494,204,216 of fictional dollar volume left the ranking's input.
+
+TASK 4, THE CLASS SWEEP, real path only:
+- **FIXED here**: the two fields above, and the whale market_bias catalyst fallback (python_bridge/server.py:446): /score/whale read payload["catalyst"] — the per-symbol HASH CONSTANT from the mock catalyst provider — as the market bias when "bias" was absent, and the engine never sends "bias", so the whale contradiction flag was ALWAYS judged against fiction on the real path. market_bias now comes only from an explicit measured "bias"; absent reads 0.0 and the contradiction check disarms rather than fires on fiction.
+- **FLAGGED, deliberately left, each with its reason**: (1) core/engine.cpp mock_factor's det_unit hash noise still shapes the un-run council slots' bias and agreement on the fast tier — a documented design limit ("advisory scores on the default path are deterministic mocks"), and changing what feeds the agreement gate is a strategy-behavior change needing its own session, not a residue sweep. (2) news::MockCatalystProvider (the hash-constant catalyst itself) still exists and rides in bridge payloads; after this session every real service ignores it, so its only remaining reach is the mock factor above — same flag. (3) MockFeed and the synthetic/replay feeds synthesize by design, offline only. (4) The Python mock council provider reads imbalance/catalyst, offline only.
+
+TASK 5, GUARDS EXTENDED, all mutation-proven by file-copy rollback. Lexical (test_feed_no_fabrication.cpp): a WHOLE-BODY sweep of AlpacaFeed::poll's code lines now refuses ANY next_uniform draw and any ms.spread reference, covering the class rather than one field; restoring the imbalance draw KILLED (1 assertion fails), restore verified diff-identical. Behavioral (tests/test_whale_market_bias.py): the catalyst key never reaches the whale scorer as market_bias and an explicit bias still does; restoring the fallback KILLED (1 test fails), restore verified diff-identical. The pre-existing lexical and behavioral guards pass unchanged.
+
+TASK 6, VERIFY. pytest 898 passed (896 + 2 new). ctest 25/28 under the operator's committed active_quant profile, the same three known failures (config, tuner_floor, market_hours_entry). Offline synthetic runs behaviorally IDENTICAL to the recorded baselines in both profiles (active_quant Trades=6 Blocked=2 Events=35, swing Trades=108 Blocked=204 Events=1222): the offline feeds kept their designed synthesis, so removing real-path fabrication changes nothing offline. The operator strategy.profile edit was left exactly as found.
+
+NOT touched: RiskGate logic, the live-trading gate, the adaptive limit-weakening invariant, Level 1 values, any threshold, MockFeed's or the synthetic feeds' designed offline synthesis. No bar row was deleted. Live trading stays off.
+
+VERIFICATION (2026-07-23):
+
+| Check | Result |
+| --- | --- |
+| pytest | 898 passed (896 + 2 new) |
+| ctest (operator's active_quant edit) | 25/28, same three known failures |
+| Offline synthetic, both profiles | identical to recorded baselines |
+| spread consumers | zero found; field removed from MarketState |
+| imbalance on the real path | reports absence (0.0), consumers contribute nothing |
+| Whale market_bias fallback | removed; mutation KILLED |
+| Whole-body poll lexical sweep | added; imbalance-draw mutation KILLED |
+| Rows quarantined | 3,443 marked fabricated_zeroed, $1.59T fiction removed |
+| Ranking change | AAVE/USD rank 3 -> 5; MANA/RUNE residues drop out |
+
+Commit message: `Remove the remaining fabricated market fields and exclude contaminated volume from discovery ranking, live trading untouched`
+
+---
+
 ## Prompt: Real live bar volume
 
 Date: 2026-07-23

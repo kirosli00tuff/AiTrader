@@ -68,7 +68,9 @@ std::vector<MarketState> MockFeed::poll() {
         ms.ret_1 = r;
         ms.ret_5 = ret5;
         ms.volatility = vol;
-        ms.spread = price * (0.0005 + 0.001 * next_uniform());
+        // spread was REMOVED from MarketState (2026-07-23): it had no
+        // consumer anywhere, and a fabricated value with no consumer is a
+        // trap for the next reader who trusts it.
         ms.volume = 1000.0 + 9000.0 * next_uniform();
         ms.order_book_imbalance = (next_uniform() - 0.5) * 2.0;
         ms.ts = ts;
@@ -211,7 +213,9 @@ std::vector<MarketState> AlpacaFeed::poll() {
         ms.ret_1 = r;
         ms.ret_5 = ret5;
         ms.volatility = vol;
-        ms.spread = price * (0.0005 + 0.001 * next_uniform());
+        // spread was REMOVED from MarketState (2026-07-23): a uniform draw
+        // with NO consumer anywhere. Removed rather than zeroed, so no future
+        // reader can trust a value nothing measures.
         // VOLUME IS ABSENT ON THIS PATH, AND ABSENT IS WHAT IT REPORTS
         // (2026-07-21). This line used to read
         // `ms.volume = 1000.0 + 9000.0 * next_uniform()`, a uniform draw per
@@ -243,7 +247,16 @@ std::vector<MarketState> AlpacaFeed::poll() {
             bridge_ok ? bridge::json_get_number(
                             *resp, instruments_[i].symbol + ":v", -1.0)
                       : -1.0);
-        ms.order_book_imbalance = (next_uniform() - 0.5) * 2.0;
+        // IMBALANCE IS ABSENT ON THIS PATH, AND ABSENT IS WHAT IT REPORTS
+        // (2026-07-23). This line was a uniform draw in [-1,1] per tick, the
+        // last surviving fabrication on the real path. No endpoint this feed
+        // calls carries an order book, so there is nothing to measure: 0.0
+        // means NO READING (the neutral point of the signed scale), and every
+        // consumer treats it as a value that contributes nothing — the mock
+        // factor's imbalance term drops out, the DNN serves from bars, the
+        // whale service never reads the key, and the council evidence
+        // allowlist never rendered it.
+        ms.order_book_imbalance = 0.0;
         ms.ts = ts;
         // Every tick this feed emits carries a real venue quote.
         ms.data_source = "real_feed";

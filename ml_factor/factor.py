@@ -240,5 +240,5 @@ if __name__ == "__main__":
     import json
 
     s = {"ret_5": 0.03, "volatility": 0.2, "imbalance": 0.4, "catalyst": 0.5,
-         "price": 100, "spread": 0.1}
+         "price": 100}
     print(json.dumps(score_state(s), indent=2))

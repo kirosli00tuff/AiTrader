@@ -443,7 +443,14 @@ def _handle(path: str, payload: dict) -> dict:
         return score_rl(payload)
     if path == "/score/whale":
         symbol = str(payload.get("symbol", "?"))
-        market_bias = float(payload.get("bias", payload.get("catalyst", 0.0)))
+        # market_bias comes ONLY from an explicit "bias" the caller measured.
+        # The old fallback read "catalyst", which on the real path is a
+        # per-symbol HASH CONSTANT from the mock catalyst provider, so the
+        # whale contradiction flag was being judged against an invented
+        # market bias (2026-07-23). Absent means 0.0, which the scorer treats
+        # as no-market-read: the contradiction check disarms rather than
+        # fires on fiction.
+        market_bias = float(payload.get("bias", 0.0))
         sig, _ = whale_signal_for(symbol, market_bias=market_bias)
         return sig.to_dict()
     if path == "/marketdata/alpaca":

@@ -105,6 +105,27 @@ int main() {
         maltest::check(stmt.find("9000.0") == std::string::npos,
                        "the 1000 + 9000 * uniform volume generator is back on "
                        "the real path");
+        // WHOLE-BODY sweep (2026-07-23): with spread REMOVED (no consumer)
+        // and imbalance reporting absence, NO code line in AlpacaFeed::poll
+        // may draw from the RNG or touch ms.spread at all. This covers the
+        // whole fabrication class on the real path, not one field.
+        std::stringstream body2(src.substr(poll));
+        bool rng_free = true, spread_free = true;
+        while (std::getline(body2, line)) {
+            const size_t first = line.find_first_not_of(" \t");
+            if (first == std::string::npos) continue;
+            if (line.compare(first, 2, "//") == 0) continue;   // a comment
+            if (line.find("next_uniform") != std::string::npos)
+                rng_free = false;
+            if (line.find("ms.spread") != std::string::npos)
+                spread_free = false;
+        }
+        maltest::check(rng_free,
+                       "AlpacaFeed::poll draws from the RNG somewhere: a "
+                       "fabricated market field is back on the real path");
+        maltest::check(spread_free,
+                       "ms.spread is back in AlpacaFeed::poll: the field was "
+                       "removed because nothing consumes it");
     }
 
     // BEHAVIORAL HALF: a tick carrying no volume must aggregate into a bar

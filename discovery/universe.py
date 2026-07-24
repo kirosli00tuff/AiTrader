@@ -59,10 +59,26 @@ def dollar_volume_by_symbol(db_path: str, symbols: list[str],
         return {}
     try:
         placeholders = ",".join("?" for _ in symbols)
+        # FABRICATED VOLUME IS EXCLUDED (2026-07-23), the way the decision
+        # path excludes it: only venue-reported provenance counts (backfill /
+        # real_feed), and rows quarantined by the fabricated-volume mark are
+        # out. The quarantine also zeroed those volumes, so the arithmetic
+        # excludes them even on a DB where these columns predate the marks;
+        # the predicates make the exclusion structural rather than a property
+        # of the data. Columns are probed so an old DB degrades to the
+        # widest query instead of erroring into "no evidence".
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(bars)")}
+        where_extra = ""
+        if "source" in cols:
+            where_extra += (
+                " AND COALESCE(source,'unknown') IN ('backfill','real_feed')")
+        if "volume_source" in cols:
+            where_extra += (
+                " AND COALESCE(volume_source,'') != 'fabricated_zeroed'")
         rows = conn.execute(
             f"SELECT symbol, SUM(close * volume) FROM bars "
-            f"WHERE symbol IN ({placeholders}) AND timestamp >= ? "
-            f"GROUP BY symbol",
+            f"WHERE symbol IN ({placeholders}) AND timestamp >= ?"
+            f"{where_extra} GROUP BY symbol",
             (*symbols, cutoff)).fetchall()
         for sym, dv in rows:
             if dv is None:
