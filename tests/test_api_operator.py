@@ -71,6 +71,29 @@ INSERT INTO watchlist(symbol, asset_class, added_ts, updated_ts, source,
     reason, sleeve_target, score, status) VALUES
   ('MANA/USD','crypto','2026-07-20T00:00:00Z','2026-07-20T00:00:00Z',
    'discovery','test','quant_core',0.5,'active');
+
+-- A bar under SOL/USD so its position health computes a last price: close 90
+-- against the durable stop 95.5 is a 5.76 percent breach for a long.
+INSERT INTO bars(venue, symbol, timeframe, timestamp, open, high, low, close,
+    volume, source) VALUES
+  ('alpaca','SOL/USD','5min','2026-07-22T02:00:00Z',91,92,89,90,5,'real_feed');
+
+-- Rejected entry candidates for the near-miss view (2026-07-24), one with a
+-- composition (tier fast, joins signals at the same ts) and one strategy-level.
+INSERT INTO entry_decision(ts, venue, symbol, bar_source, regime, factor,
+    outcome, first_reject, tier, confidence, edge, trade_id, source, state_json)
+  VALUES
+  ('2026-07-22T03:00:00Z','alpaca','ETH/USD','real_feed','trending','reversion',
+   'rejected','risk_gate:confidence below min_confidence_default','fast',
+   0.488,0.03,NULL,'live',
+   '{"rsi2": 9.1, "rsi2_entry": 10.0, "trend_ma": 1800.0,
+     "trend_dist_pct": 2.1, "atr_sd": 0.5, "atr_z": -0.4,
+     "volume_present": 1, "volume": 4.0, "vol_avg": 8.0}'),
+  ('2026-07-22T03:05:00Z','alpaca','BTC/USD','real_feed','neutral','none',
+   'rejected','rsi2_trigger','',NULL,NULL,NULL,'live','{}');
+INSERT INTO signals(ts, venue, symbol, factor, bias, confidence, edge) VALUES
+  ('2026-07-22T03:00:00Z','alpaca','ETH/USD','rule_based',0.5,0.88,0.07),
+  ('2026-07-22T03:00:00Z','alpaca','ETH/USD','whale_signal',0.2,0.518,0.02);
 """
 
 NEW_ROUTES = ("/activity", "/council/decisions", "/diagnostics/symbols",
@@ -180,6 +203,50 @@ def test_position_exits_durable_columns_and_unmanageable(client):
     um = {u["symbol"]: u for u in p["unmanageable"]}
     assert "PRES-TEST" in um
     assert "no longer exists" in um["PRES-TEST"]["reason"]
+
+
+def test_position_health_is_server_computed(client):
+    p = client.get("/positions/exits?mode=paper").json()
+    sol = next(x for x in p["positions"] if x["symbol"] == "SOL/USD")
+    h = sol["health"]
+    # Past stop, with the number that makes it true: (95.5-90)/95.5 = 5.76%.
+    assert h["past_stop"] is True
+    assert h["past_stop_pct"] == 5.76
+    assert h["last_price"] == 90
+    assert h["managed"] is True
+    # ETH has exits from the trade_entry event but no stored bar: absent price
+    # reads as absent, never as zero, and no breach is invented.
+    eth = next(x for x in p["positions"] if x["symbol"] == "ETH/USD")
+    assert eth["health"]["last_price"] is None
+    assert eth["health"]["past_stop"] is False
+
+
+def test_near_miss_view_aggregates_and_distances(client):
+    body = client.get("/decisions/nearmiss?window_hours=720").json()
+    kinds = {r["first_reject"]: r["n"] for r in body["by_reject"]}
+    assert kinds["rsi2_trigger"] == 1
+    assert kinds["risk_gate:confidence below min_confidence_default"] == 1
+    eth = next(r for r in body["rows"] if r["symbol"] == "ETH/USD")
+    # Distances are server-computed from the engine's own recorded state.
+    assert eth["distances"]["rsi2_above_entry"] == -0.9
+    assert eth["distances"]["volume_over_avg"] == 0.5
+    assert eth["distances"]["confidence_gap"] == round(0.488 - 0.65, 4)
+    # The composition ran on the fast tier: its per-factor inputs ride along.
+    factors = {f["factor"]: f["confidence"] for f in eth["factors"]}
+    assert factors["rule_based"] == 0.88
+    # The strategy-level rejection stands alone with no factors.
+    btc = next(r for r in body["rows"] if r["symbol"] == "BTC/USD")
+    assert btc["factors"] == []
+
+
+def test_factor_participation_distinguishes_states(client):
+    body = client.get("/factors/participation").json()
+    by = {f["factor"]: f for f in body["factors"]}
+    assert by["rule_based"]["status"] == "live"
+    assert by["rl_advisory"]["status"] == "shipped_off"
+    # The bridge is stubbed unreachable in this fixture, so an on-real
+    # advisory layer reads MOCK (bridge down), never silently "live".
+    assert by["whale_signal"]["status"] == "mock_bridge_down"
 
 
 def test_new_routes_are_get_only_and_bind_stays_loopback(client):

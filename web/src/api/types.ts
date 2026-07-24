@@ -690,12 +690,70 @@ export interface BarsResponse {
   session_change_pct: number | null;
 }
 
+/** Server-computed health verdict for one open position (2026-07-24): is it
+ * managed, with the number that makes each flag true. The frontend derives
+ * NOTHING from prices; every flag comes from the backend. */
+export interface PositionHealth {
+  last_price: number | null;
+  last_price_ts: string | null;
+  unmanageable_reason: string | null;
+  missing_exit_state: boolean;
+  past_stop: boolean;
+  past_stop_pct: number | null;
+  past_target: boolean;
+  past_target_pct: number | null;
+  time_stop_overdue: boolean;
+  time_stop_overdue_bars: number | null;
+  managed: boolean;
+}
+
 export interface PositionExit extends Position {
   stop: number | null;
   target: number | null;
   entry_factor: string | null;
   entry_regime: string | null;
   entry_logged_ts: string | null;
+  health?: PositionHealth;
+}
+
+/** One rejected entry candidate from the entry_decision table. */
+export interface NearMissRow {
+  id: number;
+  ts: string;
+  symbol: string;
+  regime: string | null;
+  factor: string | null;
+  first_reject: string | null;
+  tier: string | null;
+  confidence: number | null;
+  edge: number | null;
+  state: Record<string, unknown>;
+  distances: Record<string, number | null>;
+  factors: { factor: string; bias: number; confidence: number; edge: number }[];
+}
+
+export interface NearMisses {
+  window_hours: number;
+  rows: NearMissRow[];
+  by_reject: { first_reject: string | null; n: number }[];
+  by_symbol: { symbol: string; n: number }[];
+  entered: number;
+  min_confidence: number | null;
+}
+
+/** Which layers actually participate, not which are nominally enabled. */
+export interface FactorParticipationRow {
+  factor: string;
+  status: string;  // live | benched | mock_by_choice | mock_bridge_down | disabled | shipped_off
+  reason: string;
+  last_signal: { ts?: string; bias?: number; confidence?: number; edge?: number };
+}
+
+export interface FactorParticipation {
+  factors: FactorParticipationRow[];
+  bridge_reachable: boolean;
+  dnn_benched: boolean;
+  dnn_bench_reason: string;
 }
 
 /** An open position the engine reported it CANNOT manage at construction

@@ -134,6 +134,14 @@ New flags from the feed-work session (2026-07-05, `369b6a6`):
 
 ## Session Log
 
+### 2026-07-24 (Fable 5) — The screen now shows what is silently wrong and what nearly happened
+
+- **Position health** (/positions/exits `health`, server-computed): is it managed, past stop/target by how much (side-aware), time-stop overdue by how many bars, missing exit state, unmanageable reason. The GUI renders unhealthy positions as a banner above everything, boldest for past-stop. ETH/USD reads PAST STOP by 6.3%; SPY NOW ALSO reads past stop by 0.58% (surfaced by the computation itself).
+- **Near misses** (GET /decisions/nearmiss over entry_decision): rejected candidates by window, aggregated by first refusing condition and symbol, each row with the full condition set, server-computed distances from firing, and the composed confidence's per-factor inputs joined from signals. The view that would have shown the fast-tier ceiling without a diagnostic session.
+- **Factor participation** (GET /factors/participation): live | benched | mock_by_choice | mock_bridge_down | disabled | shipped_off, derived server-side from the control file, bench state, bridge reachability, and last persisted signal. dnn reads BENCHED where the toggle board said enabled.
+- **One source of truth**: the frontend derives nothing; the numbers that did not exist were added to the backend. Empty/degraded states render honestly (absent is absent, pre-migration tables read as empty, a down stack says so).
+- **Verified:** vitest 136 (129+7), tsc + build clean, pytest 914 (911+3), ctest 30/30. No control surface added, Level 1 read-only, pywebview untouched. Live trading stays off.
+
 ### 2026-07-24 (Fable 5) — Every engine stop names its caller, and the 2026-07-21 stop is closed: watchdog exonerated, sender unprovable
 
 - **The record could never have answered.** The endpoint chain ends in the same SIGTERM as any manual kill, no stop path journalled its caller, and `watchdog_restart` was an event kind with NO WRITER, so its absence proved nothing. The 07-21 stop is established as CLEAN (continuous_stop was written, ruling out crash/OOM/SIGKILL); the watchdog is EXONERATED by pairing (its remediation always stops-then-starts in one cycle, and no start followed for hours); the actual sender is unprovable from the record that exists.

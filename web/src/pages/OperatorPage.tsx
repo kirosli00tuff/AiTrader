@@ -1,10 +1,13 @@
+import { useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../api/client";
 import { useActivity } from "../api/useActivity";
 import { useApi } from "../api/useApi";
-import type { Health, Pnl, PositionExit, SymbolDiagnostics, UnmanageablePosition, WatchlistRow } from "../api/types";
+import type { FactorParticipation, Health, NearMisses, Pnl, PositionExit, SymbolDiagnostics, UnmanageablePosition, WatchlistRow } from "../api/types";
 import ActivityBySymbol from "../components/ActivityBySymbol";
+import FactorParticipationPanel from "../components/FactorParticipationPanel";
 import MarketsPanel from "../components/MarketsPanel";
+import NearMissPanel from "../components/NearMissPanel";
 import Explain from "../components/Explain";
 import { Panel } from "../components/ui";
 
@@ -22,6 +25,11 @@ export default function OperatorPage() {
   const exits = useApi<{ mode: string; positions: PositionExit[];
                          unmanageable: UnmanageablePosition[] }>(
     () => api.positionExits("paper"), 5000, []);
+  const [nmWindow, setNmWindow] = useState(24);
+  const nearMiss = useApi<NearMisses>(
+    () => api.nearMisses(nmWindow), 15000, [nmWindow]);
+  const participation = useApi<FactorParticipation>(
+    () => api.factorParticipation(), 15000, []);
   const wl = useApi<{ watchlist: WatchlistRow[]; enabled: boolean }>(
     () => api.watchlist(20, 0), 15000, []);
 
@@ -76,6 +84,15 @@ export default function OperatorPage() {
             </Explain>
           </div>
         )}
+      </Panel>
+
+      <Panel title="Why entries did not happen (near misses)">
+        <NearMissPanel data={nearMiss.data ?? undefined} windowHours={nmWindow}
+          onWindow={setNmWindow} />
+      </Panel>
+
+      <Panel title="Factor participation (actual, not nominal)">
+        <FactorParticipationPanel data={participation.data ?? undefined} />
       </Panel>
 
       {/* 4. Is it healthy */}

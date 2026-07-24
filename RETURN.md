@@ -14,6 +14,47 @@ Commit message:
 
 ---
 
+## Prompt: Operator observability
+
+Date: 2026-07-24
+Model: Fable 5. The prompt specified Opus; the session runs on Fable 5 and this line records that.
+Prompt summary: read-only observability closing two blind spots that let defects sit on a watched dashboard: a position 5.6 percent past its stop for six days that the screen never flagged, and a fast tier blocking 27 of 27 that looked identical to a quiet market. Six tasks: a position health view answering "is it managed" with the number behind each flag and an unmissable past-stop; a near-miss view over entry_decision with the first refusing condition, the full set, distances from firing, and the composed confidence with per-factor inputs; a factor participation board showing actual rather than nominal participation; no second source of truth (every number backend-computed); honest empty and degraded states; verify against all baselines. No control surface added. Live trading stays off.
+
+**HEADLINE: the three views exist, every number in them is server-computed, and both historical defects are now visually loud. Against the production data: ETH/USD renders an unmissable PAST STOP by 6.3 percent banner, SPY now ALSO reads past its stop by 0.58 percent (a new fact the health computation surfaced), the three unmanageable positions read UNMANAGED with their reasons, dnn_advisory reads BENCHED where a toggle board said enabled, and the near-miss view renders its recorded-rejections-by-condition aggregation that would have shown the fast-tier ceiling at a glance.**
+
+Changes:
+
+TASK 1, POSITION HEALTH. /positions/exits gains a server-computed `health` per position: last_price with its ts (the engine's own newest bar, nothing fetched), past_stop and past_target with the breach percent (side-aware), time_stop_overdue with the overdue bar count (from the durable columns), missing_exit_state, the unmanageable reason, and the one-word verdict `managed`. The GUI renders a banner ABOVE everything for any unhealthy position, boldest for past-stop, with the numbers in the sentence; a past-stop position cannot be a table row anyone scrolls past. Reuses the existing endpoint and unmanageable list, no parallel source.
+
+TASK 2, NEAR MISSES. New GET /decisions/nearmiss over entry_decision: rejected candidates in a selectable window (24/72/168 h in the GUI), aggregated by first refusing condition and by symbol so one condition refusing everything is a glance, plus the recent rows with the FULL recorded condition set, server-computed distances from firing (rsi2 gap to entry, trend distance, ATR z, volume over average, and the confidence gap to the unchanged 0.65 floor), and the composed confidence's per-factor inputs joined from the signals rows the engine persisted at the same instant. An empty window says plainly that recording started 2026-07-23 and absence of data is not absence of rejections.
+
+TASK 3, FACTOR PARTICIPATION. New GET /factors/participation derives, server-side, from the same sources the engine reads (control file enable and source axes, RL gate, dnn bench state, bridge reachability, newest persisted signal per factor): live | benched | mock_by_choice | mock_bridge_down | disabled | shipped_off, each with its reason and last signal. The GUI renders BENCHED and MOCK (bridge down) as loud chips, operator-chosen mock and disabled as dim ones, so a benched factor, an unreachable service, and a live factor reporting a low value each read differently. Verified against production: dnn BENCHED, rl SHIPPED OFF, and with the bridge stubbed down every on-real advisory reads MOCK (bridge down), never silently live.
+
+TASK 4, ONE SOURCE OF TRUTH. Every number is computed in api_server/operator.py from the tables the engine writes; the frontend renders and derives nothing (the breach percent, the distances, and the participation verdicts all arrive computed). The numbers that did not exist were added to the backend and are named here: per-position last_price/breach flags/overdue count, per-rejection distances, and the participation derivation.
+
+TASK 5, EMPTY AND DEGRADED. Each view renders without exception against an empty database (empty lists, honest copy), a down stack (the panels say data is unavailable rather than showing zeros), and a pre-migration table (near_misses catches the missing entry_decision table and returns the honest empty shape; position health reads absent prices as absent, pinned by test: ETH with no stored bar shows no invented breach).
+
+TASK 6, VERIFY. vitest 136 passed (129 baseline + 7 new: unmissable past-stop with its numbers, empty positions, dominating-refusal aggregation, empty window honesty, down-stack honesty twice, benched-vs-live-vs-bridge-down distinction). tsc clean, production build clean. pytest 914 passed (911 + 3 new endpoint tests). ctest 30 of 30. The pywebview wrapper, the page set, and the styling were left alone; Level 1 stays read-only and no control surface, write path, or threshold control was added.
+
+NOT touched: RiskGate logic, the live-trading gate, the adaptive limit-weakening invariant, Level 1 values, any control surface. Live trading stays off.
+
+VERIFICATION (2026-07-24):
+
+| Check | Result |
+| --- | --- |
+| vitest | 136 passed (129 + 7 new) |
+| tsc / build | clean / clean |
+| pytest | 914 passed (911 + 3 new) |
+| ctest | 30 of 30 |
+| ETH/USD banner | PAST STOP by 6.3%, unmissable |
+| SPY | NEW: past stop by 0.58%, surfaced by the health computation |
+| dnn on the board | BENCHED, distinct from live-low and mock |
+| Near-miss empty state | honest (recording began 2026-07-23) |
+
+Commit message: `Surface position health, near-miss entry decisions, and factor participation, read-only, live trading untouched`
+
+---
+
 ## Prompt: Engine stop attribution
 
 Date: 2026-07-24

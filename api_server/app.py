@@ -451,8 +451,26 @@ def get_bars(symbol: str, timeframe: str = Query("5min"),
 @app.get("/positions/exits")
 def get_position_exits(mode: str = Query(store.PAPER)):
     """Open positions with the exit levels the native strategy logged at
-    entry (ATR stop and target), the engine's own numbers."""
+    entry (ATR stop and target), the engine's own numbers, plus the
+    server-computed health verdict per position (2026-07-24)."""
     return operator.position_exits(_mode(mode))
+
+
+@app.get("/decisions/nearmiss")
+def get_near_misses(window_hours: int = Query(24, ge=1, le=720),
+                    limit: int = Query(100, ge=1, le=500)):
+    """Rejected entry candidates over a window: first refusing condition,
+    full condition set, composed confidence with per-factor inputs, and
+    server-computed distances from firing. Read-only (2026-07-24)."""
+    return operator.near_misses(window_hours=window_hours, limit=limit)
+
+
+@app.get("/factors/participation")
+def get_factor_participation():
+    """Which layers are ACTUALLY participating, not nominally enabled:
+    live, benched, mock by choice, mock because the bridge is down,
+    disabled, or shipped off. Read-only (2026-07-24)."""
+    return operator.factor_participation()
 
 
 @app.websocket("/stream")

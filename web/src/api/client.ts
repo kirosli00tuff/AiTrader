@@ -11,6 +11,7 @@ import type {
   AdaptiveEngineLogRow, WhaleFeeds,
   ActivityResponse, CouncilDecisions, SymbolDiagnostics, UniverseState, WatchdogDiagnostics,
   BarsResponse, PositionExit, UnmanageablePosition,
+  NearMisses, FactorParticipation,
 } from "./types";
 
 export const API_BASE = import.meta.env.VITE_API_BASE ?? "http://127.0.0.1:8000";
@@ -176,6 +177,10 @@ export const api = {
     get<{ mode: Mode; positions: PositionExit[];
           unmanageable: UnmanageablePosition[] }>(
       `/positions/exits?mode=${mode}`),
+  nearMisses: (windowHours = 24) =>
+    get<NearMisses>(`/decisions/nearmiss?window_hours=${windowHours}`),
+  factorParticipation: () =>
+    get<FactorParticipation>("/factors/participation"),
 
   longtermPositions: () =>
     get<{

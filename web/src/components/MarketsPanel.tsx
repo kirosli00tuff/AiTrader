@@ -51,8 +51,37 @@ export default function MarketsPanel({ symbols, positions,
   }, [symbols.join(",")]);
 
   const posBySym = new Map(positions.map((p) => [p.symbol, p]));
+  // POSITION HEALTH (2026-07-24): a position past its stop is UNMISSABLE, a
+  // banner above everything, never a row in a table. Every flag and number
+  // is server-computed; nothing is derived here.
+  const alerts = positions.filter((p) => p.health && (
+    !p.health.managed || p.health.past_stop || p.health.past_target ||
+    p.health.time_stop_overdue));
   return (
     <div data-testid="markets">
+      {alerts.map((p) => {
+        const h = p.health!;
+        return (
+          <div key={`health-${p.symbol}`}
+            className="chip chip-block"
+            data-testid={`position-alert-${p.symbol}`}
+            style={h.past_stop ? { fontSize: "1.05em", fontWeight: 700 } : {}}>
+            {p.symbol}:{" "}
+            {h.unmanageable_reason && <>UNMANAGED ({h.unmanageable_reason}). </>}
+            {h.missing_exit_state && !h.unmanageable_reason &&
+              <>NO EXIT STATE recorded: not managed toward any stop. </>}
+            {h.past_stop &&
+              <>PAST STOP by {h.past_stop_pct}% (last {fmt(h.last_price)} vs
+                stop {fmt(p.stop)}). Exits on the first closed bar after the
+                next engine start. </>}
+            {h.past_target &&
+              <>past target by {h.past_target_pct}% (last {fmt(h.last_price)}
+                {" "}vs target {fmt(p.target)}). </>}
+            {h.time_stop_overdue &&
+              <>time-stop overdue by {h.time_stop_overdue_bars} bars. </>}
+          </div>
+        );
+      })}
       {unmanageable.length > 0 && (
         <div className="chip chip-block" data-testid="unmanageable-positions">
           UNMANAGEABLE OPEN POSITIONS ({unmanageable.length}):{" "}
