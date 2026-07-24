@@ -132,6 +132,22 @@ public:
     // pins the two equal.
     static constexpr std::size_t kMinTradeableUniverse = 2;
 
+    // An open position found at construction that CANNOT be managed: its
+    // venue no longer resolves, its symbol is outside the resolved universe
+    // or fails the tradeable predicate, or its exit state is unrecoverable.
+    // Reported in the same LOUD shape as the empty-universe condition (a
+    // critical event, a startup-block line, a GUI surfacing) rather than
+    // silently dropped or silently "managed" without exits. Nothing is
+    // auto-closed: reconciliation is an operator decision through the
+    // journalled event path.
+    struct UnmanageablePosition {
+        std::string venue, symbol, sleeve, opened_ts, reason;
+        double qty = 0, notional = 0;
+    };
+    const std::vector<UnmanageablePosition>& unmanageable_positions() const {
+        return unmanageable_positions_;
+    }
+
 private:
     std::vector<signal_engine::FactorSignal> gather_factors(
         const market_data::MarketState& ms, const news::CatalystScore& cat,
@@ -178,6 +194,15 @@ private:
     static market_data::Instrument make_instrument(const std::string& symbol);
     // Log the resolved universe, loudly when it is empty or nearly empty.
     void report_universe(const std::string& ts);
+    // EXIT STATE MUST SURVIVE A RESTART (2026-07-23). Seed open_positions_ at
+    // construction from every positions row with qty != 0, so the first
+    // handle_bar_close after a restart manages the position instead of
+    // stranding it. Exit state comes from the persisted columns, else is
+    // backfilled from the position's trade_entry event; a position whose exit
+    // state cannot be recovered, or whose venue/symbol the stack can no
+    // longer serve, is NEVER given invented exits and NEVER silently dropped:
+    // it lands in unmanageable_positions_ with a critical event.
+    void rehydrate_open_positions(const std::string& ts);
     bool is_whitelisted(const std::string& symbol) const;
     // Native trading on a CLOSED bar for a whitelisted symbol: manage the open
     // position's native exit first, else consider a new strategy entry (council
@@ -425,6 +450,9 @@ private:
         std::string sleeve = "quant_core";
     };
     std::map<std::string, ActivePosition> open_positions_;  // key "venue|symbol"
+    // Open positions found at construction that cannot be managed (see the
+    // public struct). Filled once by rehydrate_open_positions.
+    std::vector<UnmanageablePosition> unmanageable_positions_;
     signal_engine::CouncilGateState council_state_;
     // Core-satellite scheduling + combined spend tracking (Q). research/rebalance
     // run on cadence, not per tick. calls_month feeds the combined spend ceiling.

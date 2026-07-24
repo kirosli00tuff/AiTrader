@@ -697,3 +697,17 @@ export interface PositionExit extends Position {
   entry_regime: string | null;
   entry_logged_ts: string | null;
 }
+
+/** An open position the engine reported it CANNOT manage at construction
+ * (position_unmanageable critical event): its venue no longer exists, its
+ * symbol is outside the resolved universe, or its exit state is
+ * unrecoverable. Surfaced loudly beside the positions it concerns. */
+export interface UnmanageablePosition {
+  ts: string | null;
+  venue: string | null;
+  symbol: string | null;
+  sleeve: string | null;
+  reason: string | null;
+  opened_ts: string | null;
+  qty: number | null;
+}

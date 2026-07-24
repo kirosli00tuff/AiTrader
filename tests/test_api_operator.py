@@ -49,6 +49,24 @@ INSERT INTO positions(venue, symbol, side, qty, avg_price, notional,
     opened_ts, unrealized_pnl) VALUES
   ('alpaca','ETH/USD','buy',0.5,3000,1500,'2026-07-20T01:05:00Z',12.0);
 
+-- A position with DURABLE exit-state columns (persisted at entry since
+-- 2026-07-23): these win over any trade_entry payload.
+INSERT INTO positions(venue, symbol, side, qty, avg_price, notional,
+    opened_ts, unrealized_pnl, stop_price, target_price, time_stop_bars,
+    factor, bars_held) VALUES
+  ('alpaca','SOL/USD','buy',1.0,100,100,'2026-07-22T01:00:00Z',0.0,
+   95.5,110.25,24,'reversion',3);
+
+-- A stranded position the engine reported unmanageable at construction.
+INSERT INTO positions(venue, symbol, side, qty, avg_price, notional,
+    opened_ts, unrealized_pnl) VALUES
+  ('polymarket','PRES-TEST','sell',10,0.5,5,'2026-06-30T00:00:00Z',0.0);
+INSERT INTO events(ts, kind, venue, symbol, severity, message, payload_json) VALUES
+  ('2026-07-23T00:00:00Z','position_unmanageable','polymarket','PRES-TEST',
+   'critical','OPEN POSITION CANNOT BE MANAGED: PRES-TEST',
+   '{"reason":"venue polymarket no longer exists in the system",
+     "sleeve":"quant_core","opened_ts":"2026-06-30T00:00:00Z","qty":10.0}');
+
 INSERT INTO watchlist(symbol, asset_class, added_ts, updated_ts, source,
     reason, sleeve_target, score, status) VALUES
   ('MANA/USD','crypto','2026-07-20T00:00:00Z','2026-07-20T00:00:00Z',
@@ -145,9 +163,23 @@ def test_bars_and_position_exits(client):
 
     p = client.get("/positions/exits?mode=paper").json()
     row = next(x for x in p["positions"] if x["symbol"] == "ETH/USD")
-    # The engine's own logged exit levels, never recomputed.
+    # The engine's own logged exit levels, never recomputed. ETH has no
+    # durable exit-state columns, so the trade_entry payload still serves.
     assert row["stop"] == 2900.5 and row["target"] == 3400.1
     assert row["entry_factor"] == "momentum"
+
+
+def test_position_exits_durable_columns_and_unmanageable(client):
+    p = client.get("/positions/exits?mode=paper").json()
+    # Durable exit-state columns (persisted at entry) are preferred.
+    sol = next(x for x in p["positions"] if x["symbol"] == "SOL/USD")
+    assert sol["stop"] == 95.5 and sol["target"] == 110.25
+    assert sol["entry_factor"] == "reversion"
+    # The engine's unmanageable verdict reaches the GUI beside the positions,
+    # naming the position and why it cannot be managed.
+    um = {u["symbol"]: u for u in p["unmanageable"]}
+    assert "PRES-TEST" in um
+    assert "no longer exists" in um["PRES-TEST"]["reason"]
 
 
 def test_new_routes_are_get_only_and_bind_stays_loopback(client):

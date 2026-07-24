@@ -67,6 +67,18 @@ CREATE TABLE IF NOT EXISTS positions (
     opened_ts TEXT NOT NULL,
     unrealized_pnl REAL DEFAULT 0,
     sleeve    TEXT DEFAULT 'quant_core',  -- quant_core | research_satellite
+    -- Exit state, persisted at entry (2026-07-23). EXIT STATE MUST SURVIVE A
+    -- RESTART: before these columns existed the stop and target lived only in
+    -- the engine's in-memory map and the trade_entry event, so a restart left
+    -- every open position unmanaged and invisible. NULL means "never
+    -- recorded" (a row written before the migration), distinct from 0 and
+    -- never guessed at: rehydration refuses to manage a position whose exit
+    -- state it cannot recover, and reports it loudly instead.
+    stop_price     REAL,
+    target_price   REAL,
+    time_stop_bars INTEGER,
+    factor         TEXT,     -- momentum | reversion | research
+    bars_held      INTEGER,  -- persisted per closed bar so the time-stop survives
     UNIQUE(venue, symbol)
 );
 

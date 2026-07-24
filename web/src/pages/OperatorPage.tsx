@@ -2,7 +2,7 @@ import { Link } from "react-router-dom";
 import { api } from "../api/client";
 import { useActivity } from "../api/useActivity";
 import { useApi } from "../api/useApi";
-import type { Health, Pnl, PositionExit, SymbolDiagnostics, WatchlistRow } from "../api/types";
+import type { Health, Pnl, PositionExit, SymbolDiagnostics, UnmanageablePosition, WatchlistRow } from "../api/types";
 import ActivityBySymbol from "../components/ActivityBySymbol";
 import MarketsPanel from "../components/MarketsPanel";
 import Explain from "../components/Explain";
@@ -19,7 +19,8 @@ export default function OperatorPage() {
   const health = useApi<Health>(() => api.health(), 5000, []);
   const diag = useApi<{ symbols: SymbolDiagnostics[] }>(
     () => api.diagSymbols(), 10000, []);
-  const exits = useApi<{ mode: string; positions: PositionExit[] }>(
+  const exits = useApi<{ mode: string; positions: PositionExit[];
+                         unmanageable: UnmanageablePosition[] }>(
     () => api.positionExits("paper"), 5000, []);
   const wl = useApi<{ watchlist: WatchlistRow[]; enabled: boolean }>(
     () => api.watchlist(20, 0), 15000, []);
@@ -59,7 +60,8 @@ export default function OperatorPage() {
 
       {/* 3. What is it about to do */}
       <Panel title="Working and watching">
-        <MarketsPanel symbols={symbols} positions={exits.data?.positions ?? []} />
+        <MarketsPanel symbols={symbols} positions={exits.data?.positions ?? []}
+          unmanageable={exits.data?.unmanageable ?? []} />
         {(wl.data?.watchlist ?? []).length > 0 && (
           <div style={{ marginTop: 8 }} data-testid="watchlist-chips">
             <span className="dim">Discovery watchlist: </span>

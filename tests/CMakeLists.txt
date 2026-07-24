@@ -200,6 +200,19 @@ target_link_libraries(test_provenance PRIVATE mal_storage mal_util
 add_test(NAME provenance COMMAND test_provenance
          WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 
+# Exit state survives a restart (2026-07-23): a rehydrated position's breached
+# stop fires on the first closed bar, event-log backfill recovers a
+# pre-migration position's exits and makes them durable, and an unmanageable
+# position (dead venue / unrecoverable exits) raises the CRITICAL loud
+# condition instead of being silently skipped or silently managed.
+add_executable(test_position_rehydration test_position_rehydration.cpp)
+target_link_libraries(test_position_rehydration PRIVATE mal_core
+                      mal_market_data mal_signal_engine mal_learning
+                      mal_storage mal_risk mal_config mal_util
+                      ${MAL_SQLITE_LIB})
+add_test(NAME position_rehydration COMMAND test_position_rehydration
+         WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
 # The real path never fabricates (2026-07-20): AlpacaFeed with the bridge down
 # yields NO ticks instead of a synthetic walk. Mutation killer for the
 # fabrication removal. Loopback only, nothing binds, no network.

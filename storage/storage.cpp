@@ -106,6 +106,14 @@ void Storage::init_schema(const std::string& schema_sql_path) {
         "ALTER TABLE bars ADD COLUMN source TEXT DEFAULT 'unknown'",
         // Provenance of the bar each trade executed against. Same posture.
         "ALTER TABLE trades ADD COLUMN bar_source TEXT DEFAULT 'unknown'",
+        // Exit state on the position (2026-07-23), so a restart can rehydrate
+        // open positions instead of stranding them. NULL on existing rows:
+        // "never recorded" is distinct from any value and is never guessed at.
+        "ALTER TABLE positions ADD COLUMN stop_price REAL",
+        "ALTER TABLE positions ADD COLUMN target_price REAL",
+        "ALTER TABLE positions ADD COLUMN time_stop_bars INTEGER",
+        "ALTER TABLE positions ADD COLUMN factor TEXT",
+        "ALTER TABLE positions ADD COLUMN bars_held INTEGER",
     };
     for (const char* m : migrations) {
         char* e = nullptr;
@@ -255,6 +263,107 @@ void Storage::upsert_position(const std::string& venue, const std::string& symbo
         .bind(5, side).bind(6, qty).bind(7, avg_price).bind(8, notional)
         .bind(9, opened_ts).bind(10, sleeve);
     s.step_done();
+}
+
+void Storage::upsert_position_exit_state(const std::string& venue,
+                                         const std::string& symbol,
+                                         double stop_price, double target_price,
+                                         int time_stop_bars,
+                                         const std::string& factor,
+                                         int bars_held) {
+    Stmt s(db_,
+           "UPDATE positions SET stop_price=?, target_price=?,"
+           " time_stop_bars=?, factor=?, bars_held=?"
+           " WHERE venue=? AND symbol=?");
+    s.bind(1, stop_price).bind(2, target_price).bind(3, time_stop_bars)
+        .bind(4, factor).bind(5, bars_held).bind(6, venue).bind(7, symbol);
+    s.step_done();
+}
+
+void Storage::update_position_bars_held(const std::string& venue,
+                                        const std::string& symbol,
+                                        int bars_held) {
+    Stmt s(db_,
+           "UPDATE positions SET bars_held=? WHERE venue=? AND symbol=?");
+    s.bind(1, bars_held).bind(2, venue).bind(3, symbol);
+    s.step_done();
+}
+
+std::vector<Storage::PositionRow> Storage::open_position_rows() {
+    std::vector<PositionRow> rows;
+    auto read = [&](const std::string& sql, bool with_exit_state) {
+        Stmt s(db_, sql);
+        auto col_text = [&](int i) -> std::string {
+            const unsigned char* t = sqlite3_column_text(s.raw(), i);
+            return t ? reinterpret_cast<const char*>(t) : "";
+        };
+        while (sqlite3_step(s.raw()) == SQLITE_ROW) {
+            PositionRow p;
+            p.id = sqlite3_column_int64(s.raw(), 0);
+            p.venue = col_text(1);
+            p.symbol = col_text(2);
+            p.market = col_text(3);
+            p.category = col_text(4);
+            p.side = col_text(5);
+            p.qty = sqlite3_column_double(s.raw(), 6);
+            p.avg_price = sqlite3_column_double(s.raw(), 7);
+            p.notional = sqlite3_column_double(s.raw(), 8);
+            p.opened_ts = col_text(9);
+            p.sleeve = col_text(10);
+            if (p.sleeve.empty()) p.sleeve = "quant_core";
+            if (with_exit_state) {
+                // NULL reads as absent, never as 0: "never recorded" must
+                // stay distinguishable from a recorded value.
+                if (sqlite3_column_type(s.raw(), 11) != SQLITE_NULL)
+                    p.stop_price = sqlite3_column_double(s.raw(), 11);
+                if (sqlite3_column_type(s.raw(), 12) != SQLITE_NULL)
+                    p.target_price = sqlite3_column_double(s.raw(), 12);
+                if (sqlite3_column_type(s.raw(), 13) != SQLITE_NULL)
+                    p.time_stop_bars = sqlite3_column_int(s.raw(), 13);
+                if (sqlite3_column_type(s.raw(), 14) != SQLITE_NULL)
+                    p.factor = col_text(14);
+                if (sqlite3_column_type(s.raw(), 15) != SQLITE_NULL)
+                    p.bars_held = sqlite3_column_int(s.raw(), 15);
+            }
+            rows.push_back(std::move(p));
+        }
+    };
+    try {
+        read("SELECT id,venue,symbol,market,category,side,qty,avg_price,"
+             "notional,opened_ts,COALESCE(sleeve,'quant_core'),stop_price,"
+             "target_price,time_stop_bars,factor,bars_held"
+             " FROM positions WHERE qty != 0 ORDER BY id",
+             /*with_exit_state=*/true);
+    } catch (const std::exception&) {
+        // Pre-migration table (no exit-state columns): read what exists. The
+        // exit fields stay absent, which the caller treats as unrecovered,
+        // never as zeros.
+        try {
+            read("SELECT id,venue,symbol,market,category,side,qty,avg_price,"
+                 "notional,opened_ts,COALESCE(sleeve,'quant_core')"
+                 " FROM positions WHERE qty != 0 ORDER BY id",
+                 /*with_exit_state=*/false);
+        } catch (const std::exception&) {
+            return {};  // no positions table at all: nothing to rehydrate
+        }
+    }
+    return rows;
+}
+
+std::optional<std::string> Storage::latest_trade_entry_payload(
+    const std::string& venue, const std::string& symbol) {
+    try {
+        Stmt s(db_,
+               "SELECT payload_json FROM events WHERE kind='trade_entry'"
+               " AND venue=? AND symbol=? ORDER BY id DESC LIMIT 1");
+        s.bind(1, venue).bind(2, symbol);
+        if (sqlite3_step(s.raw()) != SQLITE_ROW) return std::nullopt;
+        const unsigned char* t = sqlite3_column_text(s.raw(), 0);
+        if (!t) return std::nullopt;
+        return std::string(reinterpret_cast<const char*>(t));
+    } catch (const std::exception&) {
+        return std::nullopt;  // no events table: nothing to recover from
+    }
 }
 
 long long Storage::insert_research_thesis(const ResearchThesisRow& t) {

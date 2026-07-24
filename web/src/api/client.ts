@@ -10,7 +10,7 @@ import type {
   AdaptiveState, AdaptiveEvent, AdaptiveInterpretation, AdaptiveAction,
   AdaptiveEngineLogRow, WhaleFeeds,
   ActivityResponse, CouncilDecisions, SymbolDiagnostics, UniverseState, WatchdogDiagnostics,
-  BarsResponse, PositionExit,
+  BarsResponse, PositionExit, UnmanageablePosition,
 } from "./types";
 
 export const API_BASE = import.meta.env.VITE_API_BASE ?? "http://127.0.0.1:8000";
@@ -169,7 +169,9 @@ export const api = {
   bars: (symbol: string, limit = 120) =>
     get<BarsResponse>(`/bars/${encodeURIComponent(symbol).replace(/%2F/g, "/")}?limit=${limit}`),
   positionExits: (mode: Mode) =>
-    get<{ mode: Mode; positions: PositionExit[] }>(`/positions/exits?mode=${mode}`),
+    get<{ mode: Mode; positions: PositionExit[];
+          unmanageable: UnmanageablePosition[] }>(
+      `/positions/exits?mode=${mode}`),
 
   longtermPositions: () =>
     get<{

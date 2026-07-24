@@ -159,6 +159,45 @@ public:
                          double notional, const std::string& opened_ts,
                          const std::string& sleeve = "quant_core");
 
+    // Exit state persisted WITH the position (2026-07-23). Written at entry
+    // beside upsert_position, and by the rehydration backfill when it recovers
+    // exit state from the trade_entry event. Never touches qty/price columns.
+    void upsert_position_exit_state(const std::string& venue,
+                                    const std::string& symbol,
+                                    double stop_price, double target_price,
+                                    int time_stop_bars,
+                                    const std::string& factor, int bars_held);
+
+    // Persist the per-bar hold counter so the time-stop clock survives a
+    // restart (one tiny UPDATE per open position per closed bar).
+    void update_position_bars_held(const std::string& venue,
+                                   const std::string& symbol, int bars_held);
+
+    // One open-position row read back for rehydration. The exit fields are
+    // optional: a row written before the exit-state migration holds NULL
+    // there, and NULL must read as "never recorded", never as 0 (a target of
+    // 0 would exit a long instantly at price 0 — a guess the reader must not
+    // make).
+    struct PositionRow {
+        long long id = 0;
+        std::string venue, symbol, market, category, side, opened_ts, sleeve;
+        double qty = 0, avg_price = 0, notional = 0;
+        std::optional<double> stop_price, target_price;
+        std::optional<int> time_stop_bars, bars_held;
+        std::optional<std::string> factor;
+    };
+    // Every positions row with qty != 0, ordered by id. Tolerant: a DB whose
+    // positions table predates the exit-state columns (opened read-only or a
+    // failed migration) reads with every exit field absent rather than
+    // throwing.
+    std::vector<PositionRow> open_position_rows();
+
+    // payload_json of the newest trade_entry event for (venue, symbol), for
+    // the rehydration backfill: the only durable record of a pre-migration
+    // position's stop and target. nullopt when no such event exists.
+    std::optional<std::string> latest_trade_entry_payload(
+        const std::string& venue, const std::string& symbol);
+
     // Historical bars. upsert_bar is idempotent on (venue,symbol,timeframe,
     // timestamp). recent_bars returns up to `limit` most-recent bars for a
     // symbol+timeframe, ordered oldest-first (ascending) for indicator math.

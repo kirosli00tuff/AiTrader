@@ -14,6 +14,57 @@ Commit message:
 
 ---
 
+## Prompt: Position rehydration
+
+Date: 2026-07-23
+Model: Fable 5. The prompt specified Opus; the session runs on Fable 5 and this line records that rather than leaving the header wrong.
+Prompt summary: the capital-management fix for the 2026-07-21 stranded-position diagnostic. Six tasks: persist stop, target, time_stop, factor, and bars_held on the positions table with a migration that never guesses a missing value; backfill exit parameters for existing open positions from their trade_entry events where those events exist and report per position; rehydrate open_positions_ at engine construction from every qty != 0 row under the tradeable predicate so the first handle_bar_close after a restart manages the position; report BTC-USD, PRES-2028-YES, and FED-CUT-Q3 as explicit loud conditions in the empty-universe shape (critical event, startup-block line, GUI surfacing) with a recommended operator reconciliation path applied to nothing; add a mutation-tested guard that a restart no longer strands a position and that an unserviceable position raises the loud condition; verify against the 893 pytest and 26 of 26 ctest baselines and the recorded offline synthetic baselines. No RiskGate, live-gate, adaptive-invariant, or Level 1 changes. Live trading stays off.
+
+**HEADLINE: exit state is now durable and a restart manages every recoverable open position. The positions table carries stop_price, target_price, time_stop_bars, factor, and bars_held, written at both entry sites. The engine rehydrates open_positions_ at construction, backfilling a pre-migration position's exits from its trade_entry event and making them durable. Against a copy of the production database, ETH/USD and SPY rehydrate with their recorded stops (1993.66 and 743.303) and the breached ETH stop fires on the first closed bar after the next restart. BTC-USD, PRES-2028-YES, and FED-CUT-Q3 cannot be managed and now raise a CRITICAL position_unmanageable event each, a startup-block line, and a GUI surfacing. None was deleted and none was auto-closed. All five are paper artifacts: live trading has never been enabled, so no real capital is exposed.**
+
+Changes:
+
+TASK 1, PERSISTED EXIT STATE. Five columns on `positions` (`stop_price`, `target_price`, `time_stop_bars`, `factor`, `bars_held`), in `storage/schema.sql` for fresh databases and as tolerant ALTER migrations in `storage/storage.cpp init_schema` for existing ones. WHAT THE MIGRATION DOES WITH EXISTING ROWS: it adds the columns as NULL and changes no existing value. NULL means "never recorded" and is read back as absent (`std::optional`), never as 0, because `check_exit` reads a zero target as an instant target exit at price 0 for a long. A pre-migration database loads without crashing (the reader also tolerates a table with no exit columns at all) and no missing value is ever guessed. Both entry sites now write exit state beside `upsert_position`: the native entry writes the signal's stop/target/time-stop/factor, and the research entry writes its thesis-tightened stop and target, which previously existed NOWHERE durable because the research trade_entry event carries neither. `bars_held` persists on every closed bar (one indexed UPDATE per open position per bar) so the time-stop clock survives a restart instead of resetting.
+
+TASK 2, BACKFILL FROM THE EVENT LOG, per position against the production database (run against a copy; the live database migrates on the next engine start):
+- **ETH/USD** (opened 2026-07-17): RECOVERED from its trade_entry event. stop 1993.66, target 2086.23, factor momentum. time_stop_bars is not in the event; it was config-derived at entry and is re-derived from config (24), stated in the rehydration event rather than silently. bars_held is not recoverable, so the clock restarts at 0; the stop is breached 5.6 percent so the stop fires first regardless.
+- **SPY** (opened 2026-07-14): RECOVERED. stop 743.303, target 751.497, factor reversion. Same time_stop and bars_held caveats.
+- **BTC-USD** (opened 2026-06-30): NOT RECOVERED. No trade_entry event exists for it, and independently its legacy dash symbol form is outside the resolved universe. Handled under Task 4, given nothing invented.
+- **PRES-2028-YES** and **FED-CUT-Q3** (opened 2026-06-30, venue polymarket): NOT RECOVERED. No trade_entry events, and their venue no longer exists. Handled under Task 4.
+A recovery is made durable: the backfilled values are written into the new columns so the next restart reads columns, not the event log. A partial recovery (stop without target or the reverse) is refused as unrecoverable rather than half-applied.
+
+TASK 3, REHYDRATION AT CONSTRUCTION. `Engine::rehydrate_open_positions` (core/engine.cpp), called in the constructor after the watchlist merge and the universe report so serviceability is judged against the same universe the engine will trade. Every `qty != 0` row is considered. The serviceability judgment mirrors market_data/universe.py exactly as the C++ side already mirrors it: the venue must resolve (`cfg_.find_venue`), the feed must poll the symbol (whitelist union onboarded watchlist), and on the real path `symbol_is_tradeable` must hold. A manageable position seeds `open_positions_` with its persisted or recovered exit state and logs `position_rehydrated`; the first `handle_bar_close` after a restart then manages it exactly like a position opened in-process. Rehydrated positions carry no entry_signals (the entry-time advisory context was never persisted and is not invented); `combine()` and the attribution loop both handle the empty set. The legacy bootstrap-sim demo path is excluded (it manages simulated positions through its own loop).
+
+TASK 4, THE UNSERVICEABLE AND UNRECOVERABLE THREE, all held OUT of exit management and reported loudly in the empty-universe shape:
+- **PRES-2028-YES** (polymarket, qty 208.63, notional $100.39): venue 'polymarket' no longer exists in the system (removed 2026-07-06 for region).
+- **FED-CUT-Q3** (polymarket, qty 441.60, notional $179.10): same venue removal.
+- **BTC-USD** (alpaca, qty 0.0026, notional $169.87): the legacy dash form is not in the resolved universe, the feed never polls it, so no bar can ever close for it.
+The shape: one CRITICAL `position_unmanageable` event per position naming the position, its sleeve, its opening timestamp, its size, and the reason; a startup-block section in core/main.cpp listing each with its reason; and a GUI surfacing (the events feed via WATCHDOG_KINDS, plus /positions/exits now returns an `unmanageable` list rendered as a loud chip in the Operator page MarketsPanel). CAPITAL EXPOSURE, stated plainly: all five stranded positions are PAPER artifacts. Live trading has never been enabled, no live order path exists for any of them, and the equity they encumber is the paper account's. No real capital is exposed. RECOMMENDED RECONCILIATION, applied to NOTHING: close each through the journalled event path the way the SOL/USD precedent demands, never a raw DELETE. Concretely: an operator-confirmed reconciliation that books a closing trade row (origin distinct from 'strategy' so no training gate counts it), zeroes the position via the same `upsert_position` path an exit uses, and appends a `position_reconciled` event recording who, why, and the residual value. BTC-USD could alternatively be re-keyed to BTC/USD and managed normally, but that rewrites history for a position whose entry price (64372.65) is far from market, so the journalled close is the cleaner path. None of this was implemented.
+
+TASK 5, GUARD, mutation-tested. New `tests/test_position_rehydration.cpp` (ctest `position_rehydration`, 12 assertions). Scenario 1: an engine constructed against a database holding two open positions with recorded exits (one via the durable columns, one via only its trade_entry event) replays bars breaching both stops and both exits fire on the first closed bar, the table shows qty 0, and the event-recovered exit state was made durable. Scenario 2: a dead-venue position and an exit-state-unrecoverable position each raise the CRITICAL loud condition, are never silently managed (zero trades) and never silently dropped (rows intact). MUTATIONS KILLED by file-copy rollback: (1) reverting the rehydration call fails 9 assertions including every scenario-1 exit assertion; (2) making the unmanageable branch silently skip fails all 4 loud-condition assertions. Both restored and re-verified green, restoration diff-identical. Python: `tests/test_api_operator.py` gains a test pinning that durable columns win over the trade_entry payload and that the unmanageable verdict reaches /positions/exits with its reason.
+
+TASK 6, VERIFY. pytest 894 passed (893 baseline + 1 new). ctest with the operator's committed active_quant profile edit: 24/27, the same three known operator-edit failures (config, tuner_floor, market_hours_entry); with the profile swapped to swing for the check and then restored byte-identical: 27/27. Offline synthetic runs behaviorally IDENTICAL to the recorded baselines in both profiles: active_quant Trades=6 Blocked=2 Events=35, swing Trades=108 Blocked=204 Events=1222, reproduced before and after the change. Frontend: tsc clean, 129 tests passed, production build clean. The operator strategy.profile edit was left exactly as found. Noted for the record: no engine is currently running from this checkout (a separate stack runs from ~/Downloads/AiTrader against its own database), so the production rehydration, the ETH stop fire, and the three loud conditions take effect on the next engine start here.
+
+NOT touched: RiskGate logic, the live-trading gate, the adaptive limit-weakening invariant, Level 1 values, any threshold. No stranded position was deleted or auto-closed. Live trading stays off.
+
+VERIFICATION (2026-07-23):
+
+| Check | Result |
+| --- | --- |
+| pytest | 894 passed (893 baseline + 1 new) |
+| ctest (operator's active_quant edit) | 24/27, same three known failures |
+| ctest (swing profile check, restored after) | 27/27 |
+| Offline synthetic, active_quant | Trades=6 Blocked=2 Events=35, identical |
+| Offline synthetic, swing | Trades=108 Blocked=204 Events=1222, identical |
+| Mutation 1 (rehydration reverted) | KILLED, 9 assertions fail |
+| Mutation 2 (loud condition silenced) | KILLED, 4 assertions fail |
+| Production-copy dry run | ETH/USD + SPY rehydrated, 3 loud conditions |
+| Frontend | tsc clean, 129 tests, build clean |
+
+Commit message: `Rehydrate open positions and their exit state at construction, surface unmanageable positions loudly, live trading untouched`
+
+---
+
 ## Prompt: Calibrate the council cost estimate to measured spend
 
 Date: 2026-07-21

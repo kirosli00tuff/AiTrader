@@ -134,6 +134,15 @@ New flags from the feed-work session (2026-07-05, `369b6a6`):
 
 ## Session Log
 
+### 2026-07-23 (Fable 5) — Exit state survives a restart: open positions rehydrate at construction, unmanageable ones get loud
+
+- **The stranded-position defect is fixed.** The `positions` table now carries `stop_price`, `target_price`, `time_stop_bars`, `factor`, and `bars_held` (schema + tolerant ALTER migration, NULL on existing rows, never guessed). Both entry sites persist exit state beside the position, `bars_held` persists per closed bar so the time-stop clock survives, and `Engine::rehydrate_open_positions` seeds `open_positions_` at construction from every `qty != 0` row, so the first `handle_bar_close` after a restart manages the position.
+- **Backfill from the event log.** A pre-migration position recovers stop/target/factor from its trade_entry event and the recovery is made durable. Both stop AND target must recover, or the position is unrecoverable (a zero target reads as an instant target exit at price 0, a guess the reader refuses). On the production DB: ETH/USD (stop 1993.66, breached 5.6%) and SPY (stop 743.303) recover; the ETH stop fires on the first closed bar after the next restart.
+- **Unmanageable is LOUD, in the empty-universe shape.** BTC-USD (legacy dash form, never polled), PRES-2028-YES and FED-CUT-Q3 (venue polymarket removed) each raise a CRITICAL `position_unmanageable` event, a startup-block line, and a GUI surfacing (/positions/exits `unmanageable` list + events feed). Not deleted, not auto-closed, never silently managed. All five stranded positions are paper artifacts; no real capital is exposed. Recommended reconciliation (journalled event-path close, per the SOL/USD precedent) described and applied to nothing.
+- **Guard, mutation-tested:** ctest `position_rehydration` (12 assertions). Reverting rehydration fails 9; silencing the loud condition fails 4. Both restored and green.
+- **Verified:** pytest 894 (baseline 893 + 1), ctest 24/27 under the operator's active_quant edit (same three known failures; 27/27 under swing, restored byte-identical), offline synthetic baselines identical in both profiles (6/2/35, 108/204/1222), frontend tsc + 129 tests + build clean.
+- NOT touched: RiskGate logic, the live-trading gate, the adaptive limit-weakening invariant, Level 1 values. Live trading stays off.
+
 ### 2026-07-21 (Opus 4.8) — DIAGNOSTIC: equity RSI-2 at 5 is reachable but fires at 40 percent of crypto's per-bar rate, and equity starvation is two problems
 
 - **The equity 5 is selective, not unreachable.** RSI-2 closes under 5 between 226 and 457 times per equity symbol, and the full conjunction fires 38 to 54 times per symbol over ~50 sessions, roughly one per session. Loosening 5 to 10 roughly doubles the equity conjunction (1.9x to 2.8x).

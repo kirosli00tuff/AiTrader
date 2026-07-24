@@ -27,6 +27,7 @@ WATCHDOG_KINDS = (
     "feed_substitution", "feed_restored", "symbol_unavailable",
     "symbol_available", "watchdog_restart", "engine_supervisor",
     "continuous_start", "continuous_stop", "kill_switch", "provenance_block",
+    "position_unmanageable", "position_rehydrated",
 )
 
 # Council-tier decision events: the engine evaluated a setup all the way to a
@@ -238,24 +239,75 @@ def bars(symbol: str, timeframe: str = "5min", limit: int = 120) -> dict:
             "session_change_pct": change_pct}
 
 
+def _durable_exit_state(venue: str, symbol: str) -> dict:
+    """The exit-state columns persisted with the position (2026-07-23), the
+    durable source rehydration reads. Empty on a DB whose positions table
+    predates the migration, so the trade_entry fallback below still serves."""
+    try:
+        row = store.query_one(
+            "SELECT stop_price, target_price, factor FROM positions "
+            "WHERE venue=? AND symbol=?", (venue, symbol))
+        return row or {}
+    except Exception:  # noqa: BLE001 - pre-migration table, fall back
+        return {}
+
+
+def unmanageable_positions() -> list[dict]:
+    """The engine's own position_unmanageable verdicts (critical events
+    written at construction), one per still-open position: the GUI surfacing
+    of a position the engine cannot manage. Reads the engine's written
+    judgment, never re-derives it."""
+    try:
+        rows = store.query(
+            "SELECT e.ts, e.venue, e.symbol, e.message, e.payload_json "
+            "FROM events e JOIN positions p "
+            "ON p.venue = e.venue AND p.symbol = e.symbol AND p.qty != 0 "
+            "WHERE e.kind = 'position_unmanageable' AND e.id = ("
+            "  SELECT MAX(id) FROM events e2 "
+            "  WHERE e2.kind = 'position_unmanageable' "
+            "  AND e2.venue = e.venue AND e2.symbol = e.symbol)", ())
+    except Exception:  # noqa: BLE001 - advisory display, never fatal
+        return []
+    out = []
+    for r in rows:
+        payload = _parse_payload(r.get("payload_json"))
+        out.append({"ts": r.get("ts"),
+                    "venue": r.get("venue"),
+                    "symbol": r.get("symbol"),
+                    "sleeve": payload.get("sleeve"),
+                    "reason": payload.get("reason") or r.get("message"),
+                    "opened_ts": payload.get("opened_ts"),
+                    "qty": payload.get("qty")})
+    return out
+
+
 def position_exits(mode: str) -> dict:
-    """Open positions joined with the exit levels the native strategy logged
-    at entry (trade_entry payload: stop, target, factor, regime). The numbers
-    are the engine's own, recorded when it opened the position, never
-    recomputed here."""
+    """Open positions joined with the exit levels the engine manages them by:
+    the durable exit-state columns first (persisted at entry since
+    2026-07-23), else the trade_entry payload a pre-migration position left
+    behind. The numbers are the engine's own, never recomputed here. Rides
+    with the engine's unmanageable-position verdicts so the loud condition
+    reaches the GUI beside the positions it concerns."""
     positions = store.positions(mode)
     out = []
     for p in positions:
         if not p.get("qty"):
             continue
+        durable = _durable_exit_state(p["venue"], p["symbol"])
         entry_ev = store.query_one(
             "SELECT ts, payload_json FROM events WHERE kind='trade_entry' "
             "AND symbol=? ORDER BY id DESC LIMIT 1", (p["symbol"],))
         payload = _parse_payload((entry_ev or {}).get("payload_json"))
         out.append({**p,
-                    "stop": payload.get("stop"),
-                    "target": payload.get("target"),
-                    "entry_factor": payload.get("factor"),
+                    "stop": (durable.get("stop_price")
+                             if durable.get("stop_price") is not None
+                             else payload.get("stop")),
+                    "target": (durable.get("target_price")
+                               if durable.get("target_price") is not None
+                               else payload.get("target")),
+                    "entry_factor": (durable.get("factor")
+                                     or payload.get("factor")),
                     "entry_regime": payload.get("regime"),
                     "entry_logged_ts": (entry_ev or {}).get("ts")})
-    return {"mode": mode, "positions": out}
+    return {"mode": mode, "positions": out,
+            "unmanageable": unmanageable_positions()}

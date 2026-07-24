@@ -607,6 +607,23 @@ int main(int argc, char** argv) {
                                  "core or the data credentials. **\n";
                 }
             }
+            // Unmanageable open positions, the same LOUD startup shape as the
+            // degraded universe: named, explained, and never silently dropped.
+            {
+                const auto& um = engine.unmanageable_positions();
+                if (!um.empty()) {
+                    std::cout << "  ** UNMANAGEABLE OPEN POSITIONS: "
+                              << um.size() << " **\n";
+                    for (const auto& p : um)
+                        std::cout << "     " << p.symbol << " (" << p.venue
+                                  << ", " << p.sleeve << ", opened "
+                                  << p.opened_ts << ", qty "
+                                  << p.qty << "): " << p.reason << "\n";
+                    std::cout << "     Held out of exit management, never "
+                                 "silently dropped or auto-closed. Reconcile "
+                                 "through the journalled event path.\n";
+                }
+            }
             std::cout << "  feed/clock: " << eff_feed << " / " << eff_clock
                       << " (runtime-switchable via controls.json + GUI; a switch "
                          "away from alpaca_paper with an open position is blocked)\n"

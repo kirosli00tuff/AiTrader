@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { api } from "../api/client";
-import type { BarsResponse, PositionExit } from "../api/types";
+import type { BarsResponse, PositionExit, UnmanageablePosition } from "../api/types";
 import Explain from "./Explain";
 
 const fmt = (v: number | null | undefined, d = 2) =>
@@ -30,9 +30,11 @@ interface SymbolRow {
   bars: BarsResponse | null;
 }
 
-export default function MarketsPanel({ symbols, positions }: {
+export default function MarketsPanel({ symbols, positions,
+                                       unmanageable = [] }: {
   symbols: string[];
   positions: PositionExit[];
+  unmanageable?: UnmanageablePosition[];
 }) {
   const [rows, setRows] = useState<SymbolRow[]>([]);
 
@@ -51,6 +53,19 @@ export default function MarketsPanel({ symbols, positions }: {
   const posBySym = new Map(positions.map((p) => [p.symbol, p]));
   return (
     <div data-testid="markets">
+      {unmanageable.length > 0 && (
+        <div className="chip chip-block" data-testid="unmanageable-positions">
+          UNMANAGEABLE OPEN POSITIONS ({unmanageable.length}):{" "}
+          {unmanageable.map((u) => (
+            <span key={`${u.venue}|${u.symbol}`}>
+              <span className="mono">{u.symbol}</span>
+              {" "}({u.venue}, opened {u.opened_ts ?? "unknown"}): {u.reason}.{" "}
+            </span>
+          ))}
+          Held out of exit management, never silently dropped or auto-closed.
+          Reconcile through the journalled event path.
+        </div>
+      )}
       {rows.length === 0 && (
         <div className="empty" data-testid="markets-empty">
           No symbols to show. The traded universe appears here once the engine

@@ -174,6 +174,11 @@ Engine::Engine(config::Config cfg, EngineOptions opts)
     // trusted.
     report_universe(util::now_iso8601());
 
+    // EXIT STATE MUST SURVIVE A RESTART (2026-07-23). Rehydrate open
+    // positions AFTER the watchlist merge and the universe report, so the
+    // serviceability judgment sees the same universe the engine will trade.
+    rehydrate_open_positions(util::now_iso8601());
+
     // Sleeve enable, seeded from the control file before the first bar so the
     // sleeve does not spend one bar on the config default before the first
     // consume. prev_ is set to match, so construction logs no toggle event: the
@@ -431,6 +436,149 @@ void Engine::report_universe(const std::string& ts) {
                          static_cast<double>(rep.symbols.size())},
                         {"declared_count",
                          static_cast<double>(cfg_.strategy.whitelist.size())}})});
+}
+
+void Engine::rehydrate_open_positions(const std::string& ts) {
+    // EXIT STATE MUST SURVIVE A RESTART (2026-07-23). Before this, exit state
+    // lived only in the in-memory map populated at entry, so every position
+    // that outlived its opening process became invisible: not evaluated, not
+    // exited, and silent because there was no record to log against. Five
+    // positions were stranded that way, one 5.6 percent past its breached
+    // stop. This seeds the map from the durable positions table so the first
+    // handle_bar_close after a restart manages the position.
+    //
+    // The legacy bootstrap-sim demo drives simulated positions through its
+    // own loop and never uses the native exit path, so it is left alone.
+    if (opts_.bootstrap_sim) return;
+    for (const auto& row : storage_->open_position_rows()) {
+        const std::string key = row.venue + "|" + row.symbol;
+        if (open_positions_.count(key)) continue;
+
+        // Serviceability: the SAME judgment discovery onboarding and startup
+        // verification already run. The venue must resolve, the feed must
+        // poll the symbol (whitelist union watchlist, merged above), and on
+        // the real path the tradeable predicate must hold (the C++ mirror of
+        // market_data/universe.py).
+        std::string why;
+        if (!cfg_.find_venue(row.venue))
+            why = "venue '" + row.venue + "' no longer exists in the system";
+        else if (!is_whitelisted(row.symbol))
+            why = "symbol '" + row.symbol +
+                  "' is not in the resolved universe, the feed never polls it";
+        else if (!symbol_is_tradeable(row.symbol))
+            why = "symbol '" + row.symbol +
+                  "' fails the tradeable predicate (no real bar history)";
+
+        // Exit state: the persisted columns first, else backfilled from the
+        // position's trade_entry event, the only durable record a
+        // pre-migration position has. BOTH the stop and the target must be
+        // recovered: check_exit reads a zero target as an instant target exit
+        // at price 0 for a long, so a partial recovery is a guess, and a
+        // guess is refused. The time stop is not in the event; it was
+        // config-derived at entry and is re-derived from config here, stated
+        // in the event payload rather than silently. bars_held is not
+        // recoverable for a pre-migration row, so the time-stop clock
+        // restarts at zero; both currently stranded recoverable positions are
+        // far past their stops, so the stop fires first regardless.
+        double stop = 0.0, target = 0.0;
+        int time_stop = 0, bars_held = 0;
+        std::string factor;
+        std::string exit_source;
+        if (row.stop_price && row.target_price) {
+            stop = *row.stop_price;
+            target = *row.target_price;
+            time_stop = row.time_stop_bars.value_or(0);
+            bars_held = row.bars_held.value_or(0);
+            factor = row.factor.value_or("");
+            exit_source = "persisted";
+        } else if (why.empty()) {
+            auto payload = storage_->latest_trade_entry_payload(row.venue,
+                                                                row.symbol);
+            if (payload) {
+                stop = bridge::json_get_number(*payload, "stop", 0.0);
+                target = bridge::json_get_number(*payload, "target", 0.0);
+                factor = bridge::json_get_string(*payload, "factor", "");
+                time_stop = cfg_.strategy.time_stop_bars;
+            }
+            if (stop > 0.0 && target > 0.0) {
+                exit_source = "trade_entry event";
+                // Make the recovery durable so the next restart reads the
+                // columns instead of re-parsing the event log.
+                storage_->upsert_position_exit_state(row.venue, row.symbol,
+                                                     stop, target, time_stop,
+                                                     factor, bars_held);
+            } else {
+                why = "exit state unrecoverable: no persisted stop/target and "
+                      "no trade_entry event carrying both";
+            }
+        }
+
+        if (!why.empty()) {
+            // The LOUD condition, same shape as the empty universe: a
+            // critical event here, a startup-block line in main.cpp, and a
+            // GUI surfacing through the events feed and the positions view.
+            // The position is NOT deleted, NOT silently dropped, and NOT
+            // silently "managed" without exits. Reconciliation is an operator
+            // decision through the journalled event path.
+            unmanageable_positions_.push_back({row.venue, row.symbol,
+                                               row.sleeve, row.opened_ts, why,
+                                               row.qty, row.notional});
+            storage_->append_event(
+                {ts, "position_unmanageable", row.venue, row.symbol, "critical",
+                 "OPEN POSITION CANNOT BE MANAGED: " + row.symbol + " (" +
+                     row.sleeve + ", opened " + row.opened_ts + "): " + why +
+                     ". Held out of exit management, never silently dropped. "
+                     "Reconcile through the journalled event path; nothing is "
+                     "auto-closed.",
+                 util::to_json({{"symbol", row.symbol},
+                                {"venue", row.venue},
+                                {"sleeve", row.sleeve},
+                                {"reason", why},
+                                {"opened_ts", row.opened_ts}},
+                               {{"qty", row.qty},
+                                {"notional", row.notional}})});
+            continue;
+        }
+
+        ActivePosition ap;
+        ap.pos.venue = row.venue;
+        ap.pos.symbol = row.symbol;
+        ap.pos.market = row.market;
+        ap.pos.category = row.category;
+        ap.pos.factor = factor;
+        ap.pos.opened_ts = row.opened_ts;
+        ap.pos.direction = row.side == "sell" ? strategy::Direction::Short
+                                              : strategy::Direction::Long;
+        ap.pos.entry_price = row.avg_price;
+        ap.pos.qty = row.qty;
+        ap.pos.stop_price = stop;
+        ap.pos.target_price = target;
+        ap.pos.time_stop_bars = time_stop;
+        ap.pos.bars_held = bars_held;
+        // entry_signals stay EMPTY: the advisory context at entry was never
+        // persisted and is not invented. The exit path's attribution loop and
+        // combine() both handle an empty set (they contribute nothing).
+        ap.sleeve = row.sleeve;
+        open_positions_[key] = std::move(ap);
+        storage_->append_event(
+            {ts, "position_rehydrated", row.venue, row.symbol, "info",
+             "Rehydrated open position " + row.symbol + " (" + factor +
+                 ", opened " + row.opened_ts + ", exit state from " +
+                 exit_source + "): stop " + std::to_string(stop) +
+                 ", target " + std::to_string(target) +
+                 ", managed from the first closed bar",
+             util::to_json({{"symbol", row.symbol},
+                            {"factor", factor},
+                            {"exit_source", exit_source},
+                            {"opened_ts", row.opened_ts}},
+                           {{"stop", stop},
+                            {"target", target},
+                            {"time_stop_bars",
+                             static_cast<double>(time_stop)},
+                            {"bars_held",
+                             static_cast<double>(bars_held)},
+                            {"qty", row.qty}})});
+    }
 }
 
 market_data::Instrument Engine::make_instrument(const std::string& symbol) {
@@ -807,6 +955,10 @@ void Engine::handle_bar_close(const market_data::MarketState& ms,
     if (it != open_positions_.end()) {
         auto& ap = it->second;
         ++ap.pos.bars_held;
+        // Persist the hold counter so the time-stop clock survives a restart
+        // (one tiny indexed UPDATE per open position per closed bar).
+        storage_->update_position_bars_held(ms.venue, ms.symbol,
+                                            ap.pos.bars_held);
         // RSI-2 reversion positions add a native signal exit: close when RSI-2
         // rises back above its exit threshold. Computed from the symbol's bar
         // history. Bollinger reversion and momentum have no indicator exit.
@@ -1168,6 +1320,12 @@ void Engine::handle_bar_close(const market_data::MarketState& ms,
     storage_->insert_trade(tr);
     storage_->upsert_position(o.venue, o.symbol, o.market, o.category, o.side,
                               o.qty, o.price, o.notional, ts);
+    // Exit state persists WITH the position, so a restart can manage it
+    // (rehydrate_open_positions). Before this it lived only in memory and in
+    // the trade_entry event below.
+    storage_->upsert_position_exit_state(o.venue, o.symbol, sig.stop_price,
+                                         sig.target_price, sig.time_stop_bars,
+                                         sig.factor, 0);
     storage_->append_event(
         {ts, "trade_entry", o.venue, o.symbol, "info",
          "Native " + sig.factor + " " + side + " " + o.symbol + " @ " +
@@ -2745,6 +2903,12 @@ void Engine::maybe_run_research_pass(const market_data::MarketState& ms,
     storage_->insert_trade(tr);
     storage_->upsert_position(o.venue, o.symbol, o.market, o.category, "buy", o.qty,
                               o.price, o.notional, ts, "research_satellite");
+    // Exit state persists WITH the position (the research trade_entry event
+    // carries no stop or target, so without this a satellite position would
+    // be unrecoverable after a restart).
+    storage_->upsert_position_exit_state(o.venue, o.symbol, ap.pos.stop_price,
+                                         ap.pos.target_price,
+                                         ap.pos.time_stop_bars, "research", 0);
     storage_->append_event(
         {ts, "trade_entry", o.venue, o.symbol, "info",
          "Research satellite long " + o.symbol + " (conviction " +
