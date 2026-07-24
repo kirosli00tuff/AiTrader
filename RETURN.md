@@ -14,6 +14,26 @@ Commit message:
 
 ---
 
+## Prompt: First backtest questions
+
+Date: 2026-07-24
+Model: Fable 5. The prompt specified Opus; the session runs on Fable 5 and this line records that.
+Prompt summary: the first diagnostic run on the calibrated harness. Gate: run only if calibration reproduced the recorded decisions. It did: 6 of 6 provenance-clean decisions reproduce, and the historical entries are irreproducible by design with causes named. Four questions: base expectancy (the question nobody asked), pre-registered before any sweep; the volume filter, the ATR band, and the equity RSI-2 depth, each against OUTCOMES with samples and intervals; regime dependence via chronological folds. Nothing applied, no threshold changed.
+
+### PRE-REGISTRATION, written before any sweep ran
+
+Committed before the first comparison run so precedence is verifiable in git. Everything below this block and nothing else gets tested. Profile: active_quant (the running profile). Tape: the provenance-clean bars the harness feeds. All runs deterministic mal_backtest invocations.
+
+- H1 (base expectancy): the default configuration's pooled per-trade net return. Expected outcome at this sample: interval spans zero ("too thin" is a valid result).
+- H2 (volume filter): removing the volume filter's measurable input (--strip-volume, which makes every bar's volume read unmeasured THROUGH the real code path's own absent-volume semantics) does not degrade expectancy. Exactly one comparison: default vs strip-volume, pooled and per class.
+- H3 (ATR band): three registered variants against the 1.0 default: band 2.0 (--set-atr-band-std 2.0), band off (--set-atr-band-std 1000000), and ONE-SIDED-LOW computed post hoc from the band-off run by excluding trades whose recorded atr_z_at_entry < -1.0 (keeps the low-tail rejection, allows high-side volatility). No other band values will be run or reported.
+- H4 (equity RSI-2 entry): 7 and 10 against the default 5 (--set-rsi2-entry-equity), equity-class trades only. No other values.
+- COMPARISONS: 6 total (H2: 1, H3: 3, H4: 2). Multiple-comparison adjustment: Bonferroni at family alpha 0.05 requires per-comparison p < 0.0083, approximately 2.64 standard errors. Any difference inside that band is reported as consistent with noise.
+- REGIME DEPENDENCE: every claimed difference is checked across the harness's four expanding chronological folds; a difference that holds only in some folds is reported as regime-dependent, not validated.
+- REFUSAL: any cell below 30 trades reports insufficient_sample and no conclusion.
+
+---
+
 ## Prompt: Backtest harness
 
 Date: 2026-07-24
