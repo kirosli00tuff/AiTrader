@@ -134,6 +134,14 @@ New flags from the feed-work session (2026-07-05, `369b6a6`):
 
 ## Session Log
 
+### 2026-07-24 (Fable 5) — First pre-registered backtest run: every answer is honestly too thin, and that is the finding
+
+- **Gate passed:** calibration reproduced 6/6 provenance-clean recorded decisions, so the diagnostic ran. Hypotheses and the exact 6-comparison set were committed to RETURN.md BEFORE any sweep (842a194), Bonferroni bar 2.64 SE.
+- **Base expectancy (the question nobody asked):** pooled n=359, win 47.6% [42.5, 52.8], mean ret -1.75 bp [-5.26, +1.76] with costs. Every family/class interval spans zero. The evidence neither supports nor contradicts positive expectancy.
+- **The three filters, against outcomes:** volume filter delta +1.28 bp (z=0.56), ATR band 2.0 +1.74 bp (z=0.76), band off +0.86 bp, one-sided-low +0.54 bp, equity RSI-2 7/10 vs 5 -1.2/-0.9 bp (z=-0.2). Largest |z| 0.76 against the 2.64 bar: ALL consistent with noise. No filter shows evidence of earning its keep or of destroying edge.
+- **Regime:** all four chronological folds span zero and overlap; nothing is regime-attributable yet. Noise floor ~2.3 bp SE per arm; resolving a 2 bp effect needs ~9x the sample (months of tape or the live entry_decision joins).
+- **Applied to nothing.** Ranked by information value only: volume filter first (live-active, zero outcome evidence), band relaxation second, RSI-2 stays 5. NOT touched: RiskGate logic, live gate, adaptive invariant, any threshold. Live trading stays off.
+
 ### 2026-07-24 (Fable 5) — A backtest harness that calls the strategy by identity, calibrated, answering nothing yet
 
 - **`mal_backtest`** links the engine's own libraries and calls strategy::evaluate, check_exit, exit_fill_price, rsi2_exit_triggered, indicators_warm, and RiskGate::evaluate BY IDENTITY. Replicated and labelled: the 3-line sizing glue and the consecutive-loss cooldown expiry AccountManager owns live. `backtest/report.py` owns every statistic: n + 95% interval on every number, insufficient_sample refusal under 30 trades, expanding chronological folds.

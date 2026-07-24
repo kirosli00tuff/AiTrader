@@ -32,6 +32,34 @@ Committed before the first comparison run so precedence is verifiable in git. Ev
 - REGIME DEPENDENCE: every claimed difference is checked across the harness's four expanding chronological folds; a difference that holds only in some folds is reported as regime-dependent, not validated.
 - REFUSAL: any cell below 30 trades reports insufficient_sample and no conclusion.
 
+### FINDINGS (the six registered runs, nothing else; applied to NOTHING)
+
+**HEADLINE: every question gets the same honest answer at this sample: too thin to say, reported as a result. The base strategy's pooled expectancy is -1.75 bp per trade with a 95 percent interval of [-5.26, +1.76] over 359 trades, spanning zero. All six registered comparisons land far inside the noise band (largest |z| = 0.76 against the 2.64 SE Bonferroni bar). No filter shows evidence of earning its keep, and none shows evidence of destroying edge. The folds agree with each other, so nothing is even regime-suggestive yet.**
+
+TASK 1, BASE EXPECTANCY (default active_quant, next-open fills, measured costs):
+- pooled: n=359, win 47.6% [42.5, 52.8], mean ret -1.75 bp [-5.26, +1.76], net -$10.70 at harness sizing, max drawdown -$17.67. Interval spans zero: TOO THIN, the expected and valid answer.
+- momentum n=98: +0.67 bp [-9.37, +10.70]. reversion n=261: -2.66 bp [-5.69, +0.37]. crypto n=258: -2.54 bp [-6.51, +1.43]. equity n=101: +0.25 bp [-7.04, +7.54]. Every interval spans zero.
+- The evidence neither supports nor contradicts positive expectancy. The reversion interval leans negative without reaching it; that lean is not a finding at this sample.
+
+TASK 3, THE THREE FILTERS, against outcomes:
+- VOLUME FILTER (H2): stripping it adds 122 trades (359 to 481) and shifts pooled expectancy +1.28 bp, z=+0.56: consistent with noise, in both classes (crypto +1.86 bp z=0.70, equity -0.30 bp z=-0.07). The filter neither earns its keep nor removes profitable setups on this evidence.
+- ATR BAND (H3): 2.0 adds 117 trades, +1.74 bp, z=+0.76. Off adds 130 trades, +0.86 bp, z=+0.38. One-sided-low (post hoc per registration) +0.54 bp, z=+0.22. All noise. The band's rejections are not measurably protective OR destructive at this sample.
+- EQUITY RSI-2 (H4): 7 gives n=110 equity trades at -1.23 bp delta (z=-0.24); 10 gives n=138 at -0.92 bp (z=-0.20). Loosening adds trades without measurable expectancy change. No basis to move off 5.
+
+TASK 2 ACCOUNTING: exactly 6 comparisons ran, exactly as registered, Bonferroni bar 2.64 SE, largest observed |z| 0.76. ALL apparent differences are consistent with noise in their entirety.
+
+TASK 4, REGIME: the four chronological folds of the base run read -6.35, -0.91, -1.94, +2.13 bp, every fold interval spanning zero and overlapping every other. No filter comparison reaches significance pooled, so no fold-level claim is available to validate. The mild early-negative-to-late-positive drift is noted and NOT a finding.
+
+TASK 5, RANKED CANDIDATES (by information value, since no measured benefit exists; applied to NOTHING):
+1. Volume filter: the largest live behavioral change now active, with zero outcome evidence either way. CONFIRMATION OBSERVABLE: live entry_decision joins accumulating 30+ volume-rejected near-misses whose counterfactual outcomes (harness-computed) beat or match taken trades at 2.64 SE.
+2. ATR band at 2.0 or one-sided-low: adds ~30 percent more trades with no measured cost. CONFIRMATION: a fold-stable positive delta at 2.64 SE on roughly 9x today's sample.
+3. Equity RSI-2 stays 5: loosening bought trades, not expectancy.
+WHAT THE HARNESS ANSWERED: the ambiguity rate (0.28 percent, the stop-first assumption is immaterial), the noise floor (about 2.3 bp SE per comparison arm), and that no registered change is distinguishable from noise. WHAT IT COULD NOT: any directional verdict. DATA NEEDED: resolving a 2 bp true effect at the Bonferroni bar needs roughly 9x the per-arm sample, about 3,000 to 4,500 trades per arm, which at the recorded signal rate is several months of tape or the live week's entry_decision accumulation joined to outcomes.
+
+NOT touched: RiskGate logic, the live-trading gate, the adaptive limit-weakening invariant, Level 1 values, any threshold, any behavior. Live trading stays off.
+
+Commit message: `Measure base expectancy and the three filter questions on the harness, pre-registered, findings only, live trading untouched`
+
 ---
 
 ## Prompt: Backtest harness
