@@ -14,6 +14,49 @@ Commit message:
 
 ---
 
+## Prompt: Pre-flight reconciliation and baseline
+
+Date: 2026-07-24
+Model: Fable 5. The prompt specified Opus; the session runs on Fable 5 and this line records that.
+Prompt summary: production position state changes, run after prompts 19-21 landed. Six tasks: project the ETH/USD and SPY exits against the daily-loss halt and the kill switch BEFORE the restart; reconcile the three unmanageable positions through the journalled event path per the SOL/USD precedent; restart and take the real exits through the rehydrated exit path exactly as designed; report the armed safety spine; capture the week's baseline in one place; write the success criteria before any data exists. Do not start the validation week. Live trading stays off.
+
+**HEADLINE: the system is clean and ready, and every projected number matched reality. ETH/USD and SPY exited through the rehydrated exit path at 07:45:00Z on the first closed real_feed bar after the restart, at exactly the projected stop-fill values (-$6.42 and -$1.99, combined -$8.40 = 0.0084 percent of equity), nowhere near the 2 percent halt or the 3 percent kill trip. The three unmanageable positions were reconciled through the journalled event path and no critical position_unmanageable condition remains at startup. Open positions: ZERO. The baseline and the pass/fail criteria are in WEEKLOG.md, written before any week data exists. Two operational findings along the way: a foreign stale stack from ~/Downloads/AiTrader was squatting the bridge port and was stopped ATTRIBUTED through the new journal, and an unisolated watchdog test had written four spurious watchdog_restart events into the production journal, fixed by test isolation with the append-only rows left in place and noted here.**
+
+Changes:
+
+TASK 1, THE PROJECTION, before the restart. The exit path books the STOP price as the fill (exit_fill_price), even when price has gapped past it, so two numbers were projected and both reported: BOOKED ETH -$6.42 (stop 1993.66 vs entry 2030.686, qty 0.1723555, fee included) and SPY -$1.99; ECONOMIC mark at last stored prices -$28.04 and -$3.36. Against $100,000 equity: combined booked -$8.40 is 0.0084 percent, combined economic -$31.40 is 0.031 percent. THE VERDICT, stated before acting: neither exit approaches the 2.0 percent daily-loss halt ($2,000) or the 3.0 percent kill trip ($3,000); taking both was projected to halt nothing, and did not. The prompt's premise that the loss lands well past the 0.5 percent per-trade risk holds only at POSITION scale (7.3 percent of ETH's own $350 notional), not at account scale. The stop-fill idealization (booked $6.42 against an economic $28.04 on a gapped stop) is reported as a known paper-fill model property.
+
+TASK 2, THE RECONCILIATION, through the journalled event path (`scripts/reconcile_stranded_positions_20260724.py`, idempotent, never a delete). Per position (BTC-USD, PRES-2028-YES, FED-CUT-Q3): a closing trade row with origin 'reconciliation' (excluded from every real-fill gate, which count strategy only), pnl 0.0 outcome flat BECAUSE NO MARKET EXISTS TO MARK AGAINST (booking any other number would invent a price, and the event says so), the position row zeroed through the same semantics an exit uses (row kept), and a position_reconciled event carrying the reason and evidence. Confirmed on a copy first, then production, then verified: a fresh engine construction raises ZERO position_unmanageable conditions, so a future occurrence of that critical event means something.
+
+TASK 3, THE REAL EXITS, deliberately, as designed. Reconciliation first, then backfill, bridge, and engine (MAL_LAUNCHER=preflight_session). Two findings on the way: the engine initially launched against a STALE FOREIGN BRIDGE, because a leftover stack from ~/Downloads/AiTrader held port 8765 and served no data; its bridge and engine were stopped through stack.terminate_pid with full attribution (three process_stop events name the foreign pids and the reason), our bridge bound, and the runtime feed switch put the engine on alpaca_paper at iteration 0. WHAT FIRED: at 07:45:00Z, on the FIRST closed real_feed 5-minute bar after restart, ETH/USD exited on its native stop (booked pnl -6.416005) and SPY exited on its native stop (booked pnl -1.986845), both exactly as rehydrated and exactly as projected. Nothing was closed by hand and nothing was suppressed. THE RISKGATE'S RESPONSE: exits never consult the gate by design (a gate that could refuse an exit would trap a position); the realized -$8.40 entered the daily-loss accounting at 0.0084 percent, no halt and no trip, and alpaca's consecutive-loss counter moved to 2 of 3. The engine and bridge were then stopped ATTRIBUTED (process_stop naming the preflight session and reason, continuous_stop pairing with signal SIGTERM and pid), leaving the week start to the operator.
+
+TASK 4, THE SPINE, read from the record after the exits: kill switch untripped on all five venues, manual resume armed; approval_state live_enabled 0, manual_confirmation 0; all four independent live blocks confirmed in config; daily counters: realized today -$8.40, trades today 0 of 10, consecutive losses 2 of 3 on alpaca (ONE more consecutive loss triggers the Level 1 cooldown, the limit working, flagged so the operator is not surprised); open positions 0; RL gate counter 243 of 500 with the standing caveat that most counted fills are offline synthetic-feed fills (real-path native exits: 6 lifetime). The watchdog is NOT running at capture and is the operator's to start with the week; its acting conditions and its now-journalled restarts are recorded in the P20 entry and the WEEKLOG baseline.
+
+TASK 5 AND 6, BASELINE AND CRITERIA, in one place: WEEKLOG.md, appended BEFORE any week data exists. The baseline records HEAD at capture (66103ae, with this session's final commit as the week's code state), the config sha256 and the shipped-swing/lever-active_quant resolution, equity and lifetime PnL, the zero open positions with the morning's exits, the 8-of-8 warm universe, the spine readings, database size and per-table row counts, suite counts, and the resolved spend ceilings. The criteria state the pass conditions (attributed stops only, heartbeat continuity, no fabrication, no unmanaged breach, spend under ceilings, equity Stage-C calls happening), the WIDE expected trade band (0 to ~8 native entries/day) with the reason stated up front, THE EXPLICIT SENTENCE that a low trade count is not attributable to the fast-tier fix or the newly active volume filter individually and must not be read as a verdict on either, and what ends the run early versus what is Level 1 doing its job.
+
+INCIDENT, recorded per the honesty rule: four spurious watchdog_restart events landed in the production journal at 07:28:20Z, written by the newly added watchdog journaling running inside mocked-restart TESTS that did not isolate MAL_DB_PATH. Fixed by an autouse isolation fixture in all three watchdog test modules; the four rows stay (the journal is append-only) and are identifiable by their timestamp and their mocked-health payloads.
+
+VERIFY. pytest 914 passed, ctest 30 of 30, both after the isolation fix. Production state verified: zero open positions, zero unmanageable conditions, exits journalled, every stop attributed.
+
+NOT touched: RiskGate logic, the live-trading gate, the adaptive limit-weakening invariant, Level 1 values. The validation week was NOT started. Live trading stays off.
+
+VERIFICATION (2026-07-24):
+
+| Check | Result |
+| --- | --- |
+| Projection vs reality | ETH -6.42 / SPY -1.99 booked, exact match |
+| Level 1 response | no halt, no trip (0.0084% of equity); consec losses 2 of 3 |
+| Reconciliation | 3 closed via journalled path, idempotent, 0 unmanageable at startup |
+| Exits | both on the first closed real_feed bar, stop fills, nothing by hand |
+| Stop attribution | foreign stack + our stack stops all journalled with callers |
+| Baseline + criteria | WEEKLOG.md, written before data |
+| pytest / ctest | 914 / 30 of 30 |
+| Incident | 4 spurious watchdog_restart rows from unisolated tests; isolation fixed |
+
+Commit message: `Reconcile stranded positions, take rehydrated exits deliberately, capture the pre-flight baseline and success criteria, live trading untouched`
+
+---
+
 ## Prompt: Operator observability
 
 Date: 2026-07-24

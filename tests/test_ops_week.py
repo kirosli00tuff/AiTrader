@@ -13,6 +13,14 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
+
+@pytest.fixture(autouse=True)
+def _isolate_production_db(tmp_path, monkeypatch):
+    """The watchdog's journaling (2026-07-24) resolves MAL_DB_PATH fresh per
+    write. Without this, a mocked-restart test writes REAL watchdog_restart
+    events into the production journal (it did, four times, on 2026-07-24)."""
+    monkeypatch.setenv("MAL_DB_PATH", str(tmp_path / "isolated.db"))
+
 from ops import watchdog, backup, maintenance
 
 

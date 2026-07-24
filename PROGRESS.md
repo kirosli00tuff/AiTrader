@@ -134,6 +134,15 @@ New flags from the feed-work session (2026-07-05, `369b6a6`):
 
 ## Session Log
 
+### 2026-07-24 (Fable 5) — Pre-flight complete: positions reconciled, rehydrated exits taken, baseline and criteria recorded, week left to the operator
+
+- **Projection first, then reality, and they matched:** ETH/USD and SPY exited on their rehydrated native stops at 07:45:00Z on the FIRST closed real_feed bar after restart, booked at the stop fills exactly as projected (-$6.42, -$1.99; combined 0.0084% of equity, nowhere near the 2% halt or 3% kill trip). The stop-fill idealization (economic mark -$28.04 on the gapped ETH stop vs booked -$6.42) is recorded as a paper-fill model property. Consecutive losses now 2 of 3 on alpaca, flagged for the operator.
+- **The three unmanageable positions are reconciled** through the journalled event path (`scripts/reconcile_stranded_positions_20260724.py`: closing trade with origin 'reconciliation', pnl 0 because no market exists to mark against, position zeroed, position_reconciled event with evidence). Zero position_unmanageable conditions remain at startup, so that critical event means something again. Open positions: ZERO.
+- **The new attribution proved itself live:** a stale foreign stack from ~/Downloads/AiTrader was squatting the bridge port; it was stopped with journalled process_stop events naming the pids and reason, and the session's own engine/bridge stops paired continuous_stop (signal, pid) with their journalled callers.
+- **Baseline + success criteria in WEEKLOG.md, written before any data**: code/config/profile resolution, equity, universe 8/8 warm, spine readings, DB counts, ceilings; pass conditions, the WIDE 0-8 entries/day band with its reason, the explicit rule that a low trade count is not a verdict on the fast-tier fix or the volume filter, and what ends the run early vs Level 1 doing its job.
+- **Incident recorded:** four spurious watchdog_restart events written to production by unisolated watchdog tests; isolation fixture added to all three modules, append-only rows left and documented.
+- **Verified:** pytest 914, ctest 30/30. The validation week was NOT started. NOT touched: RiskGate logic, the live-trading gate, the adaptive limit-weakening invariant, Level 1 values. Live trading stays off.
+
 ### 2026-07-24 (Fable 5) — The screen now shows what is silently wrong and what nearly happened
 
 - **Position health** (/positions/exits `health`, server-computed): is it managed, past stop/target by how much (side-aware), time-stop overdue by how many bars, missing exit state, unmanageable reason. The GUI renders unhealthy positions as a banner above everything, boldest for past-stop. ETH/USD reads PAST STOP by 6.3%; SPY NOW ALSO reads past stop by 0.58% (surfaced by the computation itself).
