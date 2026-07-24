@@ -139,6 +139,31 @@ double atr(const std::vector<Bar>& bars, int period) {
     return atr_v;
 }
 
+std::vector<double> atr_series(const std::vector<Bar>& bars, int period) {
+    // Prefix ATR: out[j] == atr(bars[0..j], period), the SAME Wilder
+    // recurrence and float-op order as atr(), so each value is bit-identical
+    // to the windowed call it replaces (the ATR band used to copy
+    // atr_mean_period windows per evaluation; this is one pass).
+    int n = static_cast<int>(bars.size());
+    std::vector<double> out(std::max(n, 0), 0.0);
+    if (period < 1 || n <= period) return out;
+    std::vector<double> tr;
+    tr.reserve(n - 1);
+    for (int i = 1; i < n; ++i) {
+        double h = bars[i].high, l = bars[i].low, pc = bars[i - 1].close;
+        tr.push_back(std::max({h - l, std::fabs(h - pc), std::fabs(l - pc)}));
+    }
+    double a = 0.0;
+    for (int i = 0; i < period; ++i) a += tr[i];
+    a /= period;
+    out[period] = a;
+    for (int j = period + 1; j < n; ++j) {
+        a = (a * (period - 1) + tr[j - 1]) / period;
+        out[j] = a;
+    }
+    return out;
+}
+
 double adx(const std::vector<Bar>& bars, int period) {
     int n = static_cast<int>(bars.size());
     if (period < 1 || n < 2 * period + 1) return 0.0;
@@ -311,22 +336,43 @@ RegimeResult detect_regime(const std::vector<Bar>& bars,
 
 StrategySignal evaluate_momentum(const std::vector<Bar>& bars,
                                  const config::StrategyConfig& cfg,
-                                 bool allow_short, bool is_crypto) {
+                                 bool allow_short, bool is_crypto,
+                                 EvalTrace* trace) {
     StrategySignal sig;
     sig.factor = "momentum";
-    if (static_cast<int>(bars.size()) < cfg.ema_slow + 2) return sig;
+    // Recording only (2026-07-23): `reject` names the FIRST refusing
+    // condition in the trace and returns the same empty signal the bare
+    // `return sig;` always did. The trace is never consulted by a decision.
+    auto reject = [&](const char* why) -> StrategySignal& {
+        if (trace) trace->momentum_first_reject = why;
+        return sig;
+    };
+    if (static_cast<int>(bars.size()) < cfg.ema_slow + 2)
+        return reject("insufficient_history");
     auto closes = closes_of(bars);
     auto ef = ema_series(closes, cfg.ema_fast);
     auto es = ema_series(closes, cfg.ema_slow);
     size_t n = closes.size();
     bool cross_up = ef[n - 2] <= es[n - 2] && ef[n - 1] > es[n - 1];
     bool cross_down = ef[n - 2] >= es[n - 2] && ef[n - 1] < es[n - 1];
+    const bool raw_cross_up = cross_up, raw_cross_down = cross_down;
     double adx_v = adx(bars, cfg.atr_period);
     double atr_v = atr(bars, cfg.atr_period);
     double price = closes[n - 1];
     bool adx_ok = adx_v >= cfg.adx_min;
     bool vol_ok = price > 0 && (atr_v / price) >= cfg.atr_vol_floor;
-    if (!adx_ok || !vol_ok) return sig;
+    if (trace) {
+        trace->ema_f = ef[n - 1];
+        trace->ema_s = es[n - 1];
+        trace->adx_mom = adx_v;
+        trace->atr_over_price = price > 0 ? atr_v / price : 0.0;
+        trace->cross_up = cross_up;
+        trace->cross_down = cross_down;
+        trace->adx_ok = adx_ok;
+        trace->atr_floor_ok = vol_ok;
+    }
+    if (!adx_ok || !vol_ok)
+        return reject(!adx_ok ? "adx_floor" : "atr_vol_floor");
     // Dual trend filter for time-series momentum. A long needs price above BOTH
     // the medium and long MA (and, when ts_momentum_lookback > 0, a positive
     // return over that lookback). A short is the mirror. OFF by default so swing
@@ -334,23 +380,36 @@ StrategySignal evaluate_momentum(const std::vector<Bar>& bars,
     if (cfg.momentum_dual_ma_filter) {
         double med = sma(closes, cfg.momentum_medium_ma);
         double lng = sma(closes, cfg.momentum_long_ma);
-        if (med == 0.0 || lng == 0.0) return sig;  // not enough history yet
+        if (trace) {
+            trace->mom_medium_ma = med;
+            trace->mom_long_ma = lng;
+        }
+        if (med == 0.0 || lng == 0.0)
+            return reject("dual_ma_history");  // not enough history yet
         bool long_trend_ok = price > med && price > lng;
         bool short_trend_ok = price < med && price < lng;
         if (cfg.ts_momentum_lookback > 0 &&
             n > static_cast<size_t>(cfg.ts_momentum_lookback)) {
             double past = closes[n - 1 - cfg.ts_momentum_lookback];
             double ret = past != 0.0 ? (price - past) / past : 0.0;
+            if (trace) trace->ts_return = ret;
             long_trend_ok = long_trend_ok && ret > 0.0;
             short_trend_ok = short_trend_ok && ret < 0.0;
         }
         if (cross_up && !long_trend_ok) cross_up = false;
         if (cross_down && !short_trend_ok) cross_down = false;
+        if (trace)
+            trace->dual_ma_ok =
+                raw_cross_up == cross_up && raw_cross_down == cross_down;
     }
     Direction dir = Direction::None;
     if (cross_up) dir = Direction::Long;
     else if (cross_down && allow_short) dir = Direction::Short;
-    if (dir == Direction::None) return sig;
+    if (dir == Direction::None) {
+        if (!raw_cross_up && !raw_cross_down) return reject("no_ema_cross");
+        if (!cross_up && !cross_down) return reject("dual_ma");
+        return reject("short_not_allowed");
+    }
     sig.has_signal = true;
     sig.direction = dir;
     sig.entry_price = price;
@@ -375,12 +434,19 @@ StrategySignal evaluate_momentum(const std::vector<Bar>& bars,
 
 StrategySignal evaluate_reversion(const std::vector<Bar>& bars,
                                   const config::StrategyConfig& cfg,
-                                  bool allow_short, bool is_crypto) {
+                                  bool allow_short, bool is_crypto,
+                                  EvalTrace* trace) {
     StrategySignal sig;
     sig.factor = "reversion";
+    // Recording only (2026-07-23): same pattern as evaluate_momentum.
+    auto reject = [&](const char* why) -> StrategySignal& {
+        if (trace) trace->reversion_first_reject = why;
+        return sig;
+    };
     int need = std::max({cfg.bb_period, cfg.rsi_period + 2, cfg.vol_lookback,
                          cfg.atr_period + 1}) + 2;
-    if (static_cast<int>(bars.size()) < need) return sig;
+    if (static_cast<int>(bars.size()) < need)
+        return reject("insufficient_history");
     auto closes = closes_of(bars);
     size_t n = closes.size();
     Bollinger bb = bollinger(closes, cfg.bb_period, cfg.bb_std);
@@ -403,10 +469,24 @@ StrategySignal evaluate_reversion(const std::vector<Bar>& bars,
     bool short_reentry = prev_price > bb.upper && price <= bb.upper &&
                          rsi_prev >= cfg.rsi_overbought &&
                          rsi_now < cfg.rsi_overbought;
+    if (trace) {
+        trace->bb_lower = bb.lower;
+        trace->bb_mid = bb.mid;
+        trace->bb_upper = bb.upper;
+        trace->rsi14 = rsi_now;
+        trace->volume = bars[n - 1].volume;
+        trace->vol_avg = vavg;
+        trace->volume_present = volume_known;
+        trace->vol_ok = vol_ok;
+    }
     Direction dir = Direction::None;
     if (long_reentry && vol_ok) dir = Direction::Long;
     else if (short_reentry && vol_ok && allow_short) dir = Direction::Short;
-    if (dir == Direction::None) return sig;
+    if (dir == Direction::None) {
+        if (!long_reentry && !short_reentry) return reject("no_reentry");
+        if (!vol_ok) return reject("volume");
+        return reject("short_not_allowed");
+    }
     sig.has_signal = true;
     sig.direction = dir;
     sig.entry_price = price;
@@ -428,13 +508,23 @@ StrategySignal evaluate_reversion(const std::vector<Bar>& bars,
 
 StrategySignal evaluate_rsi2_reversion(const std::vector<Bar>& bars,
                                        const config::StrategyConfig& cfg,
-                                       bool is_crypto) {
+                                       bool is_crypto, EvalTrace* trace) {
     StrategySignal sig;
     sig.factor = "reversion";  // same ensemble slot as Bollinger reversion
+    // Recording only (2026-07-23): every condition is computed and recorded
+    // even past the first refusal (knowing only the first hides how close the
+    // others were), then the SAME sequential decision applies in the SAME
+    // order as before the trace existed. The trace never decides anything.
+    auto reject = [&](const char* why) -> StrategySignal& {
+        if (trace) trace->reversion_first_reject = why;
+        return sig;
+    };
+    if (trace) trace->rsi2_style = true;
     // Need enough bars for the long trend MA, the ATR band, and the RSI-2 series.
     int need = std::max({cfg.trend_ma_period, cfg.atr_mean_period + cfg.atr_period + 1,
                          cfg.rsi2_period + 2, cfg.vol_lookback + 1});
-    if (static_cast<int>(bars.size()) < need) return sig;
+    if (static_cast<int>(bars.size()) < need)
+        return reject("insufficient_history");
     auto closes = closes_of(bars);
     size_t n = closes.size();
     double price = closes[n - 1];
@@ -442,7 +532,7 @@ StrategySignal evaluate_rsi2_reversion(const std::vector<Bar>& bars,
     // Trend filter: LONG ONLY, and only above the long trend MA (buy dips inside
     // a confirmed uptrend). RSI-2 is a long-only reversion factor here.
     double trend_ma = sma(closes, cfg.trend_ma_period);
-    if (trend_ma <= 0.0 || price <= trend_ma) return sig;
+    const bool trend_ok = trend_ma > 0.0 && price > trend_ma;
 
     // Oversold trigger: RSI-2 below the entry threshold (looser for crypto). With
     // cross-back confirmation, wait for RSI-2 to tick back above the threshold
@@ -455,27 +545,40 @@ StrategySignal evaluate_rsi2_reversion(const std::vector<Bar>& bars,
         trigger = rsi_prev <= entry && rsi_now > entry;
     else
         trigger = rsi_now <= entry;
-    if (!trigger) return sig;
 
     // Volatility band: ATR within atr_band_std SD of its atr_mean_period mean, so
     // entries skip abnormally quiet or violent tape (improves profit factor).
-    double atr_v = atr(bars, cfg.atr_period);
-    std::vector<double> atr_hist;
-    atr_hist.reserve(cfg.atr_mean_period);
-    for (int k = cfg.atr_mean_period; k >= 1; --k) {
-        std::vector<Bar> window(bars.begin(), bars.end() - (k - 1));
-        if (static_cast<int>(window.size()) > cfg.atr_period)
-            atr_hist.push_back(atr(window, cfg.atr_period));
-    }
-    if (atr_hist.size() >= 2) {
-        double mean = 0.0;
-        for (double a : atr_hist) mean += a;
-        mean /= atr_hist.size();
-        double var = 0.0;
-        for (double a : atr_hist) var += (a - mean) * (a - mean);
-        var /= atr_hist.size();
-        double sd = std::sqrt(var);
-        if (sd > 0.0 && std::fabs(atr_v - mean) > cfg.atr_band_std * sd) return sig;
+    // Computed from the prefix ATR series: bit-identical values to the old
+    // per-window loop (same recurrence, same indices), one O(n) pass instead
+    // of atr_mean_period window copies. The recorded offline baselines pin
+    // the identity.
+    auto aseries = atr_series(bars, cfg.atr_period);
+    double atr_v = aseries.empty() ? 0.0 : aseries.back();
+    double band_mean = 0.0, band_sd = 0.0, band_z = 0.0;
+    bool band_ok = true;
+    const char* band_edge = "";
+    {
+        std::vector<double> atr_hist;
+        atr_hist.reserve(cfg.atr_mean_period);
+        int lo = std::max(static_cast<int>(n) - cfg.atr_mean_period,
+                          cfg.atr_period);
+        for (int j = lo; j < static_cast<int>(n); ++j)
+            atr_hist.push_back(aseries[j]);
+        if (atr_hist.size() >= 2) {
+            for (double a : atr_hist) band_mean += a;
+            band_mean /= atr_hist.size();
+            double var = 0.0;
+            for (double a : atr_hist) var += (a - band_mean) * (a - band_mean);
+            var /= atr_hist.size();
+            band_sd = std::sqrt(var);
+            if (band_sd > 0.0) {
+                band_z = (atr_v - band_mean) / band_sd;
+                if (std::fabs(atr_v - band_mean) > cfg.atr_band_std * band_sd) {
+                    band_ok = false;
+                    band_edge = atr_v < band_mean ? "low" : "high";
+                }
+            }
+        }
     }
 
     // Volume filter: skip below-average volume. A bar reporting NO volume is
@@ -485,8 +588,37 @@ StrategySignal evaluate_rsi2_reversion(const std::vector<Bar>& bars,
     // percent pass rate. Unknown volume does not gate. The trend filter, the
     // RSI-2 trigger, and the ATR band still decide.
     double vavg = avg_volume(bars, cfg.vol_lookback);
-    if (bars[n - 1].volume > 0.0 && vavg > 0 && bars[n - 1].volume < vavg)
-        return sig;
+    const double vol_now = bars[n - 1].volume;
+    const bool volume_present = vol_now > 0.0;
+    const bool vol_ok = !(volume_present && vavg > 0 && vol_now < vavg);
+
+    if (trace) {
+        trace->rsi2 = rsi_now;
+        trace->rsi2_prev = rsi_prev;
+        trace->rsi2_entry = entry;
+        trace->trend_ma = trend_ma;
+        trace->trend_dist_pct =
+            trend_ma > 0.0 ? (price - trend_ma) / trend_ma * 100.0 : 0.0;
+        trace->trend_ok = trend_ok;
+        trace->crossback_confirm = cfg.rsi2_crossback_confirm;
+        trace->rsi2_trigger = trigger;
+        trace->atr_v = atr_v;
+        trace->atr_mean = band_mean;
+        trace->atr_sd = band_sd;
+        trace->atr_z = band_z;
+        trace->atr_band_edge = band_edge;
+        trace->atr_band_ok = band_ok;
+        trace->volume = vol_now;
+        trace->vol_avg = vavg;
+        trace->volume_present = volume_present;
+        trace->vol_ok = vol_ok;
+    }
+
+    // The decision, in the SAME order as before the trace existed.
+    if (!trend_ok) return reject("trend_filter");
+    if (!trigger) return reject("rsi2_trigger");
+    if (!band_ok) return reject("atr_band");
+    if (!vol_ok) return reject("volume");
 
     sig.has_signal = true;
     sig.direction = Direction::Long;
@@ -562,7 +694,8 @@ double realized_pnl(const OpenPosition& pos, double exit_price) {
 }
 
 BlendedDecision evaluate(const std::vector<Bar>& bars,
-                         const config::StrategyConfig& cfg, bool is_crypto) {
+                         const config::StrategyConfig& cfg, bool is_crypto,
+                         EvalTrace* trace) {
     BlendedDecision d;
     d.regime = detect_regime(bars, cfg);
     bool allow_short = is_crypto && cfg.crypto_allow_short;
@@ -580,22 +713,44 @@ BlendedDecision evaluate(const std::vector<Bar>& bars,
             d.reversion_weight = cfg.neutral_reversion_weight;
             break;
     }
-    StrategySignal mom = cfg.momentum_enabled
-                             ? evaluate_momentum(bars, cfg, allow_short, is_crypto)
-                             : StrategySignal{};
+    if (trace) {
+        trace->regime = regime_to_string(d.regime.regime);
+        trace->adx = d.regime.adx;
+        trace->rvol = d.regime.rvol;
+        trace->momentum_weight = d.momentum_weight;
+        trace->reversion_weight = d.reversion_weight;
+    }
+    StrategySignal mom =
+        cfg.momentum_enabled
+            ? evaluate_momentum(bars, cfg, allow_short, is_crypto, trace)
+            : StrategySignal{};
+    if (trace && !cfg.momentum_enabled)
+        trace->momentum_first_reject = "disabled";
     // Reversion slot uses the RSI-2 factor when reversion_style is rsi2 (long
     // only, dips inside an uptrend), else the Bollinger reentry. Same ensemble
     // slot either way (factor "reversion").
     StrategySignal rev;
     if (cfg.reversion_enabled) {
         rev = cfg.reversion_style == "rsi2"
-                  ? evaluate_rsi2_reversion(bars, cfg, is_crypto)
-                  : evaluate_reversion(bars, cfg, allow_short, is_crypto);
+                  ? evaluate_rsi2_reversion(bars, cfg, is_crypto, trace)
+                  : evaluate_reversion(bars, cfg, allow_short, is_crypto, trace);
+    } else if (trace) {
+        trace->reversion_first_reject = "disabled";
     }
     // Rank by regime-weighted strength; -1 sentinel keeps a no-signal factor last.
     double mom_w = mom.has_signal ? d.momentum_weight * mom.strength : -1.0;
     double rev_w = rev.has_signal ? d.reversion_weight * rev.strength : -1.0;
-    if (mom_w < 0 && rev_w < 0) return d;  // neither fired
+    if (mom_w < 0 && rev_w < 0) {
+        if (trace) {
+            trace->selected_factor = "none";
+            // The overall first refusal is the regime-weighted LEADING
+            // family's; both families' own rejects are recorded beside it.
+            trace->first_reject = d.momentum_weight > d.reversion_weight
+                                      ? trace->momentum_first_reject
+                                      : trace->reversion_first_reject;
+        }
+        return d;  // neither fired
+    }
     if (mom_w >= rev_w) {
         d.signal = mom;
         d.signal.strength = d.momentum_weight * mom.strength;
@@ -603,6 +758,7 @@ BlendedDecision evaluate(const std::vector<Bar>& bars,
         d.signal = rev;
         d.signal.strength = d.reversion_weight * rev.strength;
     }
+    if (trace) trace->selected_factor = d.signal.factor;
     return d;
 }
 

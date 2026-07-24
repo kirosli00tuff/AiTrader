@@ -454,6 +454,34 @@ CREATE TABLE IF NOT EXISTS bars (
 );
 CREATE INDEX IF NOT EXISTS idx_bars_lookup ON bars(symbol, timeframe, timestamp);
 
+-- Entry-decision record (2026-07-23, RECORDING ONLY). One row per entry
+-- candidate the strategy evaluates on a closed bar, ENTERED OR REJECTED. A
+-- rejection used to write nothing at all, which is why three diagnostics in a
+-- row could not attribute the volume filter, the ATR band, or the RSI-2 depth
+-- to outcomes. first_reject names the first refusing condition; state_json
+-- carries the FULL condition set at decision time (knowing only the first
+-- hides how close the others were). trade_id joins trades.id when the
+-- candidate entered; a rejected row stands alone. Recording never alters a
+-- decision (guard-tested) and a failed write is logged and swallowed.
+CREATE TABLE IF NOT EXISTS entry_decision (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts           TEXT NOT NULL,
+    venue        TEXT,
+    symbol       TEXT NOT NULL,
+    bar_source   TEXT,
+    regime       TEXT,
+    factor       TEXT,                   -- momentum | reversion | none
+    outcome      TEXT NOT NULL,          -- entered | rejected
+    first_reject TEXT,                   -- '' when entered
+    tier         TEXT,                   -- fast | council | '' (never tiered)
+    confidence   REAL,                   -- composed gate confidence (NULL when not composed)
+    edge         REAL,
+    trade_id     INTEGER,                -- trades.id when the candidate entered
+    source       TEXT DEFAULT 'live',    -- live | backfill_event
+    state_json   TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_entry_decision ON entry_decision(symbol, ts);
+
 -- Current market regime per symbol (trending | range_bound | neutral). Written
 -- by the regime detector; read by the dashboard to show the per-symbol regime.
 CREATE TABLE IF NOT EXISTS regime_state (

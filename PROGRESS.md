@@ -134,6 +134,15 @@ New flags from the feed-work session (2026-07-05, `369b6a6`):
 
 ## Session Log
 
+### 2026-07-23 (Fable 5) — Every entry candidate records its decision state, rejections included: filter attribution becomes possible
+
+- **A filter which rejects silently cannot be evaluated.** Three diagnostics in a row hit that wall. Now `strategy::evaluate` computes an `EvalTrace` beside its decision (never consulted by it) and the engine persists one `entry_decision` row per closed-bar candidate: the first refusing condition AND the full set (RSI-2, trend MA distance, cross-back, ATR band with z and edge, volume presence, dual-MA state, regime, tier, composed confidence per factor), joined to the trade when one results, standing alone when rejected. Engine-level refusals (market hours, region, pre-check, RiskGate, no-execution) record too.
+- **Recording only, proven.** ctest `entry_decision_recording`: behavior digests identical with recording on and off in both profiles; recording off persists nothing; a rejection persists a named row; an entry joins its trade. Offline baselines bit-identical (6/2/35, 108/204/1222). The writer is noexcept: a failed write logs once and is swallowed.
+- **Cost:** ~22 microseconds per evaluation measured over 40,000 evaluations (~0.2 ms per live 5-minute cycle). Row rate ~2,000-2,700/day, ~1 MB/day, 90-day retention pruned at construction. The ATR band moved onto a bit-identical prefix `atr_series` (baselines pin the identity).
+- **Backfill:** 6 past entries recovered from trade_entry events (partial state, nothing invented); every historical rejection is unrecoverable because it wrote nothing.
+- **Answerability:** reachability/near-miss questions in days; outcome attribution needs ~30 closed real-path native trades per question, projected 2-6 weeks now that the fast tier is reachable.
+- **Verified:** pytest 894, ctest 25/28 (same three operator-edit failures). NOT touched: RiskGate logic, the live-trading gate, the adaptive limit-weakening invariant, Level 1 values, any threshold or decision. Live trading stays off.
+
 ### 2026-07-23 (Fable 5) — A non-participating factor leaves the confidence denominator: the fast tier can reach the unchanged 0.65 floor
 
 - **The defect was indistinguishability.** The bridge has reported `"benched": true` on /score/dnn since 2026-07-18, and the C++ engine discarded it, so a benched dnn (structural zeros) and a live dnn reporting 0.0 (an opinion) were identical downstream. Fixed first: `FactorSignal.participating` carries the service's own participation report end to end, and `compose_gate_verdict` drops a non-participating factor from the confidence/edge denominator exactly as it drops the un-run council, on both tiers. The exclusion keys off participation, never off the value 0.0: a participating low-confidence factor stays in, so a weak setup is never inflated.

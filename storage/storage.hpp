@@ -260,6 +260,25 @@ public:
     // absent or empty.
     long long max_adaptive_action_id();
 
+    // One entry-decision record (2026-07-23, RECORDING ONLY): the state of
+    // every entry condition at decision time, entered or rejected. trade_id
+    // joins trades.id when an entry executed; a rejected row stands alone.
+    struct EntryDecisionRow {
+        std::string ts, venue, symbol, bar_source, regime, factor, outcome,
+                    first_reject, tier, state_json;
+        std::string source = "live";     // live | backfill_event
+        double confidence = 0, edge = 0;
+        bool has_composition = false;    // confidence/edge meaningful (else NULL)
+        long long trade_id = 0;          // 0 = no resulting trade (NULL)
+    };
+    // NEVER throws and never propagates into the decision path: a failed
+    // write logs to stderr (once per process) and is swallowed. Returns the
+    // row id, or -1 on failure.
+    long long insert_entry_decision(const EntryDecisionRow& r) noexcept;
+    // Retention: drop decision records older than before_ts. Tolerant of a
+    // missing table; never throws.
+    void prune_entry_decisions(const std::string& before_ts) noexcept;
+
     // Persist the current regime + the regime-selected active factor for a symbol
     // (single row per symbol). active_factor is momentum | reversion | blend.
     void upsert_regime(const std::string& symbol, const std::string& regime,

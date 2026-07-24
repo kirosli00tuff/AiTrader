@@ -26,6 +26,57 @@ namespace {
 // unit-testable without a full Engine — see kMinClosedTradesForAdapt there.)
 constexpr size_t kBarHistoryCap = 300;
 double clamp01(double x) { return std::clamp(x, 0.0, 1.0); }
+// The FULL condition set of one entry evaluation as a flat JSON payload
+// (entry_decision.state_json). Recording only: nothing reads this back on any
+// decision path. Booleans are 0/1 numbers for the tiny JSON writer.
+std::string trace_to_json(const strategy::EvalTrace& t) {
+    auto b = [](bool v) { return v ? 1.0 : 0.0; };
+    return util::to_json(
+        {{"regime", t.regime},
+         {"selected_factor", t.selected_factor},
+         {"first_reject", t.first_reject},
+         {"momentum_first_reject", t.momentum_first_reject},
+         {"reversion_first_reject", t.reversion_first_reject},
+         {"atr_band_edge", t.atr_band_edge}},
+        {{"adx", t.adx},
+         {"rvol", t.rvol},
+         {"momentum_weight", t.momentum_weight},
+         {"reversion_weight", t.reversion_weight},
+         {"rsi2_style", b(t.rsi2_style)},
+         {"rsi2", t.rsi2},
+         {"rsi2_prev", t.rsi2_prev},
+         {"rsi2_entry", t.rsi2_entry},
+         {"trend_ma", t.trend_ma},
+         {"trend_dist_pct", t.trend_dist_pct},
+         {"trend_ok", b(t.trend_ok)},
+         {"crossback_confirm", b(t.crossback_confirm)},
+         {"rsi2_trigger", b(t.rsi2_trigger)},
+         {"atr", t.atr_v},
+         {"atr_mean", t.atr_mean},
+         {"atr_sd", t.atr_sd},
+         {"atr_z", t.atr_z},
+         {"atr_band_ok", b(t.atr_band_ok)},
+         {"volume", t.volume},
+         {"vol_avg", t.vol_avg},
+         {"volume_present", b(t.volume_present)},
+         {"vol_ok", b(t.vol_ok)},
+         {"bb_lower", t.bb_lower},
+         {"bb_mid", t.bb_mid},
+         {"bb_upper", t.bb_upper},
+         {"rsi14", t.rsi14},
+         {"ema_fast", t.ema_f},
+         {"ema_slow", t.ema_s},
+         {"adx_mom", t.adx_mom},
+         {"atr_over_price", t.atr_over_price},
+         {"cross_up", b(t.cross_up)},
+         {"cross_down", b(t.cross_down)},
+         {"adx_ok", b(t.adx_ok)},
+         {"atr_floor_ok", b(t.atr_floor_ok)},
+         {"mom_medium_ma", t.mom_medium_ma},
+         {"mom_long_ma", t.mom_long_ma},
+         {"ts_return", t.ts_return},
+         {"dual_ma_ok", b(t.dual_ma_ok)}});
+}
 double det_unit(const std::string& s, unsigned salt) {
     std::size_t h = std::hash<std::string>{}(s) ^ (salt * 2654435761u);
     return static_cast<double>(h % 100000) / 100000.0;
@@ -51,6 +102,15 @@ Engine::Engine(config::Config cfg, EngineOptions opts)
     // the feed and the bar-history seeding below. It cannot run here, because it
     // needs controls_path_ (resolved below), the feed (built below), and the
     // seeded bar history to warm what it adds.
+
+    // Entry-decision retention (recording only, 2026-07-23): keep ~90 days of
+    // decision records so the table stays bounded (~2,100 rows/day at the
+    // current universe). Wall-clock based, so scratch simulated-clock runs
+    // (which stamp rows with the simulated 2026-01 base date) prune on their
+    // next construction; production rows carry real timestamps and age out
+    // normally. Best-effort, never fatal.
+    storage_->prune_entry_decisions(util::epoch_to_iso8601(
+        static_cast<long>(std::time(nullptr)) - 90L * 86400L));
 
     // Adaptive react layer: start life PAST every action already queued, so a
     // defensive action that piled up while the engine was down is never replayed
@@ -1088,13 +1148,51 @@ void Engine::handle_bar_close(const market_data::MarketState& ms,
     if (trades_today_ >= cfg_.risk.max_trades_per_day) return;
 
     const bool is_crypto = ms.category == "crypto";
-    auto decision = strategy::evaluate(bar_history_[key], cfg_.strategy, is_crypto);
+    // Entry-decision recording (2026-07-23, RECORDING ONLY). The trace is
+    // computed by evaluate() beside the decision and never consulted by it;
+    // with recording off a null trace reproduces the identical decision
+    // (guard-tested end to end). The recorder itself cannot throw into this
+    // path: insert_entry_decision is noexcept and swallows failures.
+    strategy::EvalTrace trace;
+    const bool record_decisions = opts_.record_entry_decisions;
+    auto decision = strategy::evaluate(bar_history_[key], cfg_.strategy, is_crypto,
+                                       record_decisions ? &trace : nullptr);
+    auto record_entry_decision = [&](const std::string& outcome,
+                                     const std::string& first_reject,
+                                     const std::string& tier_label,
+                                     bool has_comp, double conf, double edge,
+                                     long long trade_id) {
+        if (!record_decisions) return;
+        storage::Storage::EntryDecisionRow r;
+        r.ts = ts;
+        r.venue = ms.venue;
+        r.symbol = ms.symbol;
+        r.bar_source = current_bar_source_;
+        r.regime = trace.regime;
+        r.factor = trace.selected_factor.empty() ? "none"
+                                                 : trace.selected_factor;
+        r.outcome = outcome;
+        r.first_reject = first_reject;
+        r.tier = tier_label;
+        r.has_composition = has_comp;
+        r.confidence = conf;
+        r.edge = edge;
+        r.trade_id = trade_id;
+        r.state_json = trace_to_json(trace);
+        storage_->insert_entry_decision(r);
+    };
     // Operator regime pin (test-only) overrides the detected regime used for the
     // council neutral-skip and the surfaced label. The strategy signal selection
     // already ran on the detected regime inside evaluate().
     decision.regime.regime = pinned_or(ms.symbol, decision.regime.regime);
     const auto& sig = decision.signal;
-    if (!sig.has_signal) return;
+    if (!sig.has_signal) {
+        record_entry_decision("rejected",
+                              trace.first_reject.empty() ? "no_signal"
+                                                         : trace.first_reject,
+                              "", false, 0.0, 0.0, 0);
+        return;
+    }
 
     // ---------- Venue-capability gate (global-session safety rule) ----------
     // Crypto trades 24/7 and is NEVER gated by a regional session. For an equity,
@@ -1115,6 +1213,8 @@ void Engine::handle_bar_close(const market_data::MarketState& ms,
                                 {"region", config::region_name(region)},
                                 {"symbol", ms.symbol}},
                                {})});
+            record_entry_decision("rejected", "venue_unavailable_for_region",
+                                  "", false, 0.0, 0.0, 0);
             return;
         }
     }
@@ -1142,6 +1242,8 @@ void Engine::handle_bar_close(const market_data::MarketState& ms,
                  util::to_json({{"reason", "market_hours_entry"},
                                 {"symbol", ms.symbol}},
                                {})});
+            record_entry_decision("rejected", "market_hours_entry",
+                                  "", false, 0.0, 0.0, 0);
             return;
         }
     }
@@ -1182,6 +1284,8 @@ void Engine::handle_bar_close(const market_data::MarketState& ms,
                  "Council skipped (risk pre-check): " + pre_dec.reason,
                  util::to_json({{"reason", pre_dec.reason},
                                 {"layer", pre_dec.layer}}, {})});
+            record_entry_decision("rejected", "risk_precheck:" + pre_dec.reason,
+                                  "", false, 0.0, 0.0, 0);
             return;
         }
     }
@@ -1294,6 +1398,10 @@ void Engine::handle_bar_close(const market_data::MarketState& ms,
                   {"required_agreement",
                    static_cast<double>(cfg_.risk.required_model_agreement_count)},
                   {"notional", o.notional}})});
+        record_entry_decision(
+            "rejected", "risk_gate:" + gate.reason,
+            tier == signal_engine::Tier::Fast ? "fast" : "council",
+            true, o.confidence, o.edge, 0);
         return;
     }
 
@@ -1312,6 +1420,10 @@ void Engine::handle_bar_close(const market_data::MarketState& ms,
     if (!fill.executed) {
         storage_->append_event({ts, "no_execution", o.venue, o.symbol, "info",
                                 fill.note, "{}"});
+        record_entry_decision(
+            "rejected", "no_execution",
+            tier == signal_engine::Tier::Fast ? "fast" : "council",
+            true, o.confidence, o.edge, 0);
         return;
     }
 
@@ -1325,7 +1437,11 @@ void Engine::handle_bar_close(const market_data::MarketState& ms,
     // real path. Recorded anyway: on offline modes it is synthetic/replay, and
     // the real-fill gates read it.
     tr.bar_source = current_bar_source_;
-    storage_->insert_trade(tr);
+    const long long entry_trade_id = storage_->insert_trade(tr);
+    record_entry_decision(
+        "entered", "",
+        tier == signal_engine::Tier::Fast ? "fast" : "council",
+        true, verdict.confidence, verdict.edge, entry_trade_id);
     storage_->upsert_position(o.venue, o.symbol, o.market, o.category, o.side,
                               o.qty, o.price, o.notional, ts);
     // Exit state persists WITH the position, so a restart can manage it

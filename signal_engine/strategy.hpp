@@ -130,16 +130,19 @@ struct StrategySignal {
 // When cfg.momentum_dual_ma_filter is on, a long also needs price above BOTH the
 // medium and long MA (and a positive lookback return when ts_momentum_lookback>0).
 // `is_crypto` selects the wider crypto ATR stop; it defaults false (equity stop).
+struct EvalTrace;  // forward declaration (defined below)
 StrategySignal evaluate_momentum(const std::vector<Bar>& bars,
                                  const config::StrategyConfig& cfg,
-                                 bool allow_short, bool is_crypto = false);
+                                 bool allow_short, bool is_crypto = false,
+                                 EvalTrace* trace = nullptr);
 
 // Strategy B — mean reversion: Bollinger reentry toward the mean, confirmed by
 // RSI leaving oversold/overbought AND volume above the N-bar average. `is_crypto`
 // selects the wider crypto ATR stop; it defaults false (equity stop).
 StrategySignal evaluate_reversion(const std::vector<Bar>& bars,
                                   const config::StrategyConfig& cfg,
-                                  bool allow_short, bool is_crypto = false);
+                                  bool allow_short, bool is_crypto = false,
+                                  EvalTrace* trace = nullptr);
 
 // Strategy B (RSI-2 variant) — Connors RSI-2 mean reversion. Long only. Fires
 // only when price is above the long trend MA (dips bought inside an uptrend) and
@@ -151,17 +154,64 @@ StrategySignal evaluate_reversion(const std::vector<Bar>& bars,
 // engine also exits on the RSI-2 cross above rsi2_exit (see rsi2_exit_triggered).
 StrategySignal evaluate_rsi2_reversion(const std::vector<Bar>& bars,
                                        const config::StrategyConfig& cfg,
-                                       bool is_crypto);
+                                       bool is_crypto,
+                                       EvalTrace* trace = nullptr);
 
 // True when the latest RSI-2 has risen at/above cfg.rsi2_exit. The engine checks
 // this for an open RSI-2 reversion position as a native exit (ExitReason::Indicator).
 bool rsi2_exit_triggered(const std::vector<Bar>& bars,
                          const config::StrategyConfig& cfg);
 
+// --- Entry-decision trace (2026-07-23, RECORDING ONLY) --------------------
+// The state of every entry condition at decision time, for the taken AND the
+// rejected path. Filled by evaluate() when a trace pointer is supplied; NEVER
+// consulted by any decision, so behavior with and without a trace is identical
+// by construction (a guard test proves it end to end). first_reject names the
+// FIRST condition that refused each factor family; the FULL set is recorded
+// too, because knowing only the first hides how close the others were.
+struct EvalTrace {
+    // Regime + blend.
+    std::string regime;
+    double adx = 0, rvol = 0;
+    double momentum_weight = 0, reversion_weight = 0;
+    std::string selected_factor;   // momentum | reversion | none
+    // The leading family's first refusal ("" when a signal was produced). The
+    // leading family is the regime-weighted heavier one; both families' own
+    // rejects are always recorded beside it.
+    std::string first_reject;
+    std::string momentum_first_reject, reversion_first_reject;
+    // Reversion, RSI-2 style.
+    bool rsi2_style = false;
+    double rsi2 = 0, rsi2_prev = 0, rsi2_entry = 0;
+    double trend_ma = 0, trend_dist_pct = 0;
+    bool trend_ok = false;
+    bool crossback_confirm = false, rsi2_trigger = false;
+    double atr_v = 0, atr_mean = 0, atr_sd = 0, atr_z = 0;
+    std::string atr_band_edge;     // "low" | "high" | "" (inside the band)
+    bool atr_band_ok = true;
+    double volume = 0, vol_avg = 0;
+    bool volume_present = false, vol_ok = true;
+    // Reversion, Bollinger style (swing profile).
+    double bb_lower = 0, bb_mid = 0, bb_upper = 0, rsi14 = 0;
+    // Momentum.
+    double ema_f = 0, ema_s = 0, adx_mom = 0, atr_over_price = 0;
+    bool cross_up = false, cross_down = false, adx_ok = false,
+         atr_floor_ok = false;
+    double mom_medium_ma = 0, mom_long_ma = 0, ts_return = 0;
+    bool dual_ma_ok = true;
+};
+
+// Prefix ATR series: out[j] == atr(bars[0..j], period) for every j >= period,
+// same Wilder recurrence and float-op order as atr(), so a value here is
+// bit-identical to the windowed call it replaces. Indices below `period` are
+// 0.0 (insufficient history), exactly as atr() reports there.
+std::vector<double> atr_series(const std::vector<Bar>& bars, int period);
+
 // Regime-weighted blend of both strategies. `is_crypto` selects the short
 // policy (crypto may short only when cfg.crypto_allow_short; equities never).
 // The returned signal's `strength` is the regime-WEIGHTED strength, which the
-// council neutral-skip gate consumes.
+// council neutral-skip gate consumes. `trace`, when supplied, records every
+// condition's state at decision time (recording only, never decisive).
 struct BlendedDecision {
     RegimeResult regime;
     StrategySignal signal;         // has_signal=false when neither fires
@@ -169,7 +219,8 @@ struct BlendedDecision {
     double reversion_weight = 0.0;
 };
 BlendedDecision evaluate(const std::vector<Bar>& bars,
-                         const config::StrategyConfig& cfg, bool is_crypto);
+                         const config::StrategyConfig& cfg, bool is_crypto,
+                         EvalTrace* trace = nullptr);
 
 // --- Native exits --------------------------------------------------------
 // Positions opened by the strategy carry their own stop / target / time-stop,

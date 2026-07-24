@@ -14,6 +14,50 @@ Commit message:
 
 ---
 
+## Prompt: Entry decision instrumentation
+
+Date: 2026-07-23
+Model: Fable 5. The prompt specified Opus; the session runs on Fable 5 and this line records that.
+Prompt summary: recording only, after three diagnostics in a row (volume filter, ATR band, RSI-2 depth) failed attribution because entry-time filter state is not recorded per trade and rejections write nothing. Six tasks: define the record for every entry candidate evaluated, entered or rejected, with the first rejecting condition AND the full set; persist to a dedicated table joining the resulting trade and standing alone on rejection, with row rate and retention; keep the hot path unregressed with a write that can never throw into the decision path; backfill what past entries allow without inventing unrecoverable fields; guard that decisions are identical with recording on and off in both profiles and that a rejection persists a row; verify and report. Change no threshold and no entry or exit decision. Live trading stays off.
+
+**HEADLINE: every entry candidate now persists its full condition state, entered or rejected. strategy::evaluate computes an EvalTrace beside its decision (never consulted by it), the engine writes one entry_decision row per closed-bar evaluation with the first refusing condition and the full set, and a rejected candidate finally leaves a record. Decisions are proven identical with recording on and off in both profiles, on the exact recorded baselines. Measured cost: about 22 microseconds per evaluation, and the writer is noexcept, so a failed write is logged once and swallowed, never propagated.**
+
+Changes:
+
+TASK 1, THE RECORD. `strategy::EvalTrace` carries, per evaluation: the RSI-2 value, previous value, and threshold used; the trend filter state with the 200-MA value and the percent distance from it; the cross-back configuration and trigger state; the ATR value with its band mean, SD, z-score, pass flag, and WHICH EDGE rejected (low or high); the volume value, lookback average, present-or-absent status, and pass flag; the momentum dual-MA state (EMA fast/slow, cross flags, ADX with its floor flag, ATR-over-price floor, medium and long MA, lookback return, dual-MA pass); the Bollinger state on the swing profile; the regime label with ADX/rvol and the regime weights; the selected factor; and the FIRST refusing condition per factor family plus the overall leading-family refusal. The engine adds the tier taken, the composed confidence and edge (NULL when composition never ran), and the bar provenance. Both the first reject and the full set persist, because knowing only the first hides how close the others were.
+
+TASK 2, PERSISTENCE. New `entry_decision` table (schema.sql), one row per candidate: keyed columns (ts, venue, symbol, bar_source, regime, factor, outcome, first_reject, tier, confidence, edge, trade_id, source) plus `state_json` holding the full condition set. `trade_id` joins `trades.id` when the candidate entered (pinned by the guard); a rejected row stands alone. Engine-level refusals past the strategy conditions record too: venue_unavailable_for_region, market_hours_entry, risk_precheck:<reason>, risk_gate:<reason>, no_execution. EXPECTED ROW RATE: one row per polled symbol per closed 5-minute bar on the real path, about 1,730/day for the six 24/7 crypto symbols plus 300 to 950/day for equities in-session, roughly 2,000 to 2,700 rows/day at ~450 bytes each, about 1 MB/day. The rate warrants retention, so it was added: rows older than 90 days prune at construction (best-effort, never fatal), bounding the table near 90 MB worst case against the current 29 MB database.
+
+TASK 3, THE HOT PATH, measured on the deterministic 5,000-iteration synthetic run (40,000 evaluations): pre-change 1.95-1.97 s; post-change recording OFF 1.95-1.98 s (identical, and the offline baselines are bit-identical); recording ON 2.84-2.88 s. The added cost is ~22 microseconds per evaluation (trace fill plus one SQLite insert), which on the live path is ~0.2 ms per 5-minute bar cycle across the whole universe: not material. The write CANNOT throw into the decision path: `insert_entry_decision` is noexcept, catches everything, logs to stderr once per process, and returns -1. The ATR band computation was refactored onto a prefix `atr_series` (same Wilder recurrence and float-op order, bit-identical values, pinned by the unchanged baselines) so tracing it does not add the old per-window copies.
+
+TASK 4, BACKFILL, run against the production database (`scripts/backfill_entry_decisions_20260723.py`, idempotent, dated per the quarantine precedent). RECOVERED: 6 past entries (SPY 07-14, QQQ 07-15 x2, ETH/USD 07-17, BTC/USD 07-17, UNI/USD 07-21) each gain a `source='backfill_event'` row with factor, regime, stop, target, strength from the trade_entry event and the trade's composed confidence/edge, all 6 joined to their trade rows. NOT RECOVERED, stated plainly: the per-condition state (RSI-2 value, ATR band, volume, trend distance) for those 6, because it was never recorded and the engine's in-memory bar window at those moments is not reconstructible, and EVERY historical rejection, because a rejection wrote nothing at all. 6 past entries gain usable (partial) decision state; all past rejections stay unattributable forever.
+
+TASK 5, GUARD. New ctest `entry_decision_recording` (8 assertions): over the deterministic synthetic feed in BOTH profiles (the shipped profile and the other one via a temp profile-swapped config), a behavior digest of every trade row plus block and event counts is IDENTICAL with recording on and off; recording off persists nothing; a rejected candidate persists a row with a named first_reject and full state; an entered candidate's row joins its trade. Any divergence fails the digest assertion, which is the defect the prompt defines.
+
+TASK 6, VERIFY. pytest 894 passed. ctest 25/28 under the operator's committed active_quant profile edit, the same three known failures (config, tuner_floor, market_hours_entry). Offline synthetic runs behaviorally IDENTICAL to the recorded baselines in both profiles (active_quant Trades=6 Blocked=2 Events=35, swing Trades=108 Blocked=204 Events=1222). Rejection distribution from the synthetic run, as a sanity read of the record: no_ema_cross 24,156, rsi2_trigger 12,220, trend_filter 1,246, insufficient_history 808, dual_ma_history 784, atr_band 595, dual_ma 72, volume 24.
+
+HOW LONG UNTIL THE THREE QUESTIONS BECOME ANSWERABLE. Two different clocks. (1) REACHABILITY AND NEAR-MISS questions (how often each filter rejects, how close the others were at each rejection, low-side vs high-side band splits on live data) become answerable within DAYS: at ~2,000+ rows/day, one week accumulates ~15,000 live decision records including every rejection. (2) OUTCOME ATTRIBUTION (does a filter's rejection improve win rate / return / MAE, the wall all three diagnostics hit) additionally needs closed real-path native trades joined to their decision rows. Only 4 real-path native exits existed at the diagnostics; with the fast tier now reachable (the 2026-07-23 denominator fix projects roughly 6 clearing candidates per day, each still subject to the unchanged RiskGate), reaching the ~30-closed-trades-per-question mark the tuner already uses as its minimum-evidence bar projects to roughly TWO TO SIX WEEKS of continuous running, sooner if the fast-tier flow lands at the projected rate, longer if agreement or edge refuses part of it. Until then every threshold question stays a guess, which is exactly why this session recorded and changed nothing else.
+
+NOT touched: RiskGate logic, the live-trading gate, the adaptive limit-weakening invariant, Level 1 values, any threshold, any entry or exit decision (proven by digest and baselines). Live trading stays off.
+
+VERIFICATION (2026-07-23):
+
+| Check | Result |
+| --- | --- |
+| pytest | 894 passed |
+| ctest (operator's active_quant edit) | 25/28, same three known failures |
+| Offline synthetic, active_quant | Trades=6 Blocked=2 Events=35, identical |
+| Offline synthetic, swing | Trades=108 Blocked=204 Events=1222, identical |
+| Decisions with recording on vs off | identical digest, both profiles |
+| Rejected candidate persists | yes, named first_reject + full state |
+| Cost per evaluation | +~22 us (1.95-1.98 s off vs 2.84-2.88 s on, 40k evals) |
+| Backfill | 6 past entries recovered, all rejections unrecoverable |
+| Retention | 90 days, pruned at construction |
+
+Commit message: `Record entry decision state for every candidate including rejections, making filter attribution possible, live trading untouched`
+
+---
+
 ## Prompt: Fast-tier DNN denominator
 
 Date: 2026-07-23

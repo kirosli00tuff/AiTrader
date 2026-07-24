@@ -3,6 +3,7 @@
 #include <sqlite3.h>
 
 #include <algorithm>
+#include <cstdio>
 #include <fstream>
 #include <sstream>
 #include <stdexcept>
@@ -593,6 +594,48 @@ long long Storage::max_adaptive_action_id() {
     if (sqlite3_step(raw) == SQLITE_ROW) out = sqlite3_column_int64(raw, 0);
     sqlite3_finalize(raw);
     return out;
+}
+
+long long Storage::insert_entry_decision(const EntryDecisionRow& r) noexcept {
+    // RECORDING ONLY: this runs on the closed-bar decision path, so it must
+    // never throw into it. A failed write is logged once and swallowed.
+    static bool warned = false;
+    try {
+        Stmt s(db_,
+               "INSERT INTO entry_decision(ts,venue,symbol,bar_source,regime,"
+               "factor,outcome,first_reject,tier,confidence,edge,trade_id,"
+               "source,state_json) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)");
+        s.bind(1, r.ts).bind(2, r.venue).bind(3, r.symbol)
+            .bind(4, r.bar_source).bind(5, r.regime).bind(6, r.factor)
+            .bind(7, r.outcome).bind(8, r.first_reject).bind(9, r.tier);
+        if (r.has_composition) s.bind(10, r.confidence).bind(11, r.edge);
+        else { s.bind_null(10); s.bind_null(11); }
+        if (r.trade_id > 0)
+            sqlite3_bind_int64(s.raw(), 12, r.trade_id);
+        else
+            s.bind_null(12);
+        s.bind(13, r.source).bind(14, r.state_json);
+        s.step_done();
+        return sqlite3_last_insert_rowid(db_);
+    } catch (const std::exception& e) {
+        if (!warned) {
+            warned = true;
+            std::fprintf(stderr,
+                         "entry_decision write failed (recording only, "
+                         "decisions unaffected): %s\n", e.what());
+        }
+        return -1;
+    }
+}
+
+void Storage::prune_entry_decisions(const std::string& before_ts) noexcept {
+    try {
+        Stmt s(db_, "DELETE FROM entry_decision WHERE ts < ?");
+        s.bind(1, before_ts);
+        s.step_done();
+    } catch (const std::exception&) {
+        // Missing table or locked DB: retention is best-effort, never fatal.
+    }
 }
 
 void Storage::upsert_regime(const std::string& symbol, const std::string& regime,

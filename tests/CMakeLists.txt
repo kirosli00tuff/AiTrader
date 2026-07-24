@@ -200,6 +200,18 @@ target_link_libraries(test_provenance PRIVATE mal_storage mal_util
 add_test(NAME provenance COMMAND test_provenance
          WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 
+# Entry-decision recording is recording only (2026-07-23): decisions identical
+# with recording on and off in both profiles, a rejected candidate persists a
+# row with its first refusal and full condition state, and an entered row
+# joins its trade.
+add_executable(test_entry_decision_recording test_entry_decision_recording.cpp)
+target_link_libraries(test_entry_decision_recording PRIVATE mal_core
+                      mal_market_data mal_signal_engine mal_learning
+                      mal_storage mal_risk mal_config mal_util
+                      ${MAL_SQLITE_LIB})
+add_test(NAME entry_decision_recording COMMAND test_entry_decision_recording
+         WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
 # Exit state survives a restart (2026-07-23): a rehydrated position's breached
 # stop fires on the first closed bar, event-log backfill recovers a
 # pre-migration position's exits and makes them durable, and an unmanageable

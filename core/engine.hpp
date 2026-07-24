@@ -57,6 +57,12 @@ struct EngineOptions {
     // Seconds per native bar bucket (default 5 min). <= 0 means one bar per tick
     // (testability lever so the native entry/exit path can be exercised quickly).
     long native_bar_seconds = 300;
+    // Entry-decision recording (2026-07-23, RECORDING ONLY). ON by default:
+    // every entry candidate the strategy evaluates on a closed bar persists
+    // its full condition state to the entry_decision table, entered or
+    // rejected. Never decisive: the guard test proves decisions identical
+    // with recording on and off. Exists as an option so that guard can run.
+    bool record_entry_decisions = true;
     // Offline feed/clock overrides (empty => use cfg.simulation.*):
     //   feed_mode  : flat_random_walk | synthetic_regimes | replay
     //   clock_mode : real | simulated

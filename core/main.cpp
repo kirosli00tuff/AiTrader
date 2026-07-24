@@ -165,6 +165,9 @@ int main(int argc, char** argv) {
         // the OFFLINE loop is driven; Alpaca stays paper + market-data only.
         std::string feed_mode = arg_value(argc, argv, "--feed-mode", "");
         std::string clock_mode = arg_value(argc, argv, "--clock-mode", "");
+        // Entry-decision recording is ON by default (recording only, never
+        // decisive). The flag exists for cost measurement and the guard test.
+        bool no_entry_recording = arg_flag(argc, argv, "--no-entry-recording");
 
         auto cfg = mal::config::load_config(cfg_path);
 
@@ -175,6 +178,7 @@ int main(int argc, char** argv) {
         opts.interval_seconds = interval_seconds;
         opts.data_source = data_source;
         opts.bootstrap_sim = bootstrap_sim;
+        opts.record_entry_decisions = !no_entry_recording;
         opts.native_bar_seconds = native_bar_seconds;
         opts.feed_mode = feed_mode;
         opts.clock_mode = clock_mode;
