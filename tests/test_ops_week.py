@@ -36,7 +36,7 @@ def test_watchdog_restarts_dead_engine_and_notifies(monkeypatch):
     monkeypatch.setattr(watchdog, "check_health", lambda cfg=None: _health(engine=False, fresh=False))
     monkeypatch.setattr(watchdog, "notify", lambda msg, cfg=None, title="": sent.append(msg) or True)
     monkeypatch.setattr(watchdog, "attempt_restart",
-                        lambda: restarted.append(True) or {"restarted": True, "detail": "running", "healed": {}})
+                        lambda reason="": restarted.append(True) or {"restarted": True, "detail": "running", "healed": {}})
     res = watchdog.run_once({})
     assert res["action"] == "restarted"
     assert restarted == [True]           # exactly ONE restart attempt
@@ -48,7 +48,7 @@ def test_watchdog_notifies_when_restart_fails(monkeypatch):
     monkeypatch.setattr(watchdog, "check_health", lambda cfg=None: _health(backend=False))
     monkeypatch.setattr(watchdog, "notify", lambda msg, cfg=None, title="": sent.append(msg) or True)
     monkeypatch.setattr(watchdog, "attempt_restart",
-                        lambda: {"restarted": False, "detail": "supervisor unreachable", "healed": {}})
+                        lambda reason="": {"restarted": False, "detail": "supervisor unreachable", "healed": {}})
     res = watchdog.run_once({})
     assert res["action"] == "restart_failed"
     assert sent and "DOWN" in sent[0]
@@ -58,7 +58,7 @@ def test_watchdog_notifies_kill_but_never_auto_resumes(monkeypatch):
     sent, restarts = [], []
     monkeypatch.setattr(watchdog, "check_health", lambda cfg=None: _health(kill=True))
     monkeypatch.setattr(watchdog, "notify", lambda msg, cfg=None, title="": sent.append(msg) or True)
-    monkeypatch.setattr(watchdog, "attempt_restart", lambda: restarts.append(True) or {})
+    monkeypatch.setattr(watchdog, "attempt_restart", lambda reason="": restarts.append(True) or {})
     res = watchdog.run_once({})
     assert res["action"] == "kill_notified"
     assert restarts == []                # NEVER auto-resumes a kill trip
@@ -75,7 +75,7 @@ def test_watchdog_never_touches_kill_request_file(monkeypatch, tmp_path):
     monkeypatch.setenv("MAL_CONTROL_DIR", str(tmp_path / "control"))
     monkeypatch.setattr(watchdog, "check_health", lambda cfg=None: _health(engine=False, fresh=False))
     monkeypatch.setattr(watchdog, "notify", lambda *a, **k: True)
-    monkeypatch.setattr(watchdog, "attempt_restart", lambda: {"restarted": True, "detail": "running", "healed": {}})
+    monkeypatch.setattr(watchdog, "attempt_restart", lambda reason="": {"restarted": True, "detail": "running", "healed": {}})
     watchdog.run_once({})
     assert not os.path.exists(str(tmp_path / "control" / "kill_request.json"))
 

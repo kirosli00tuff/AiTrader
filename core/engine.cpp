@@ -1,11 +1,15 @@
 #include "core/engine.hpp"
 
+#include <unistd.h>
+
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <csignal>
 #include <cstdio>
 #include <cstdlib>
 #include <ctime>
+#include <filesystem>
 #include <fstream>
 #include <functional>
 #include <iterator>
@@ -2670,11 +2674,21 @@ void Engine::run_forever(const volatile std::sig_atomic_t* stop_flag) {
     {
         const std::string ts = util::now_iso8601();
         std::string src = alpaca_feed_ ? "alpaca" : "mock";
+        // Attribution (2026-07-24): the start records WHO launched it (the
+        // launcher exports MAL_LAUNCHER; absent reads "unattributed") and the
+        // pid, so a restart pairs with the stop that preceded it.
+        const char* launcher_env = std::getenv("MAL_LAUNCHER");
+        const std::string launcher =
+            (launcher_env && *launcher_env) ? launcher_env : "unattributed";
         storage_->append_event(
             {ts, "continuous_start", "", "", "info",
              "Continuous paper loop started (source=" + src + ", feed=" +
-                 feed_mode_ + ", interval=" + std::to_string(interval) + "s)",
-             "{}"});
+                 feed_mode_ + ", interval=" + std::to_string(interval) +
+                 "s, launcher=" + launcher + ", pid=" +
+                 std::to_string(static_cast<long>(::getpid())) + ")",
+             util::to_json({{"launcher", launcher}},
+                           {{"pid",
+                             static_cast<double>(::getpid())}})});
     }
 
     // The feed and clock are runtime-switchable (Task 3): consume the toggle at
@@ -2687,7 +2701,42 @@ void Engine::run_forever(const volatile std::sig_atomic_t* stop_flag) {
     // promptly and paces every mode uniformly at the loop interval.
     int iteration = 0;
     bool replay_idle_logged = false;
+    // Heartbeat (2026-07-24): bound an unexplained stop in time. Every
+    // iteration writes .run/engine_heartbeat.json atomically (ts, pid,
+    // iteration, equity), so a stop no caller admits to is bounded to one
+    // loop interval and the last healthy state is recoverable from the file.
+    // Every hour an engine_uptime event journals the same durably. Cost: one
+    // ~120-byte rename per interval plus 24 event rows per day.
+    long last_uptime_epoch = 0;
+    auto write_heartbeat = [&](long now_epoch) {
+        try {
+            std::filesystem::create_directories(".run");
+            const std::string tmp = ".run/engine_heartbeat.json.tmp";
+            {
+                std::ofstream hb(tmp, std::ios::trunc);
+                hb << "{\"ts\": \"" << util::now_iso8601()
+                   << "\", \"pid\": " << static_cast<long>(::getpid())
+                   << ", \"iteration\": " << iteration
+                   << ", \"equity\": " << equity_ << "}\n";
+            }
+            std::rename(tmp.c_str(), ".run/engine_heartbeat.json");
+        } catch (...) {
+            // A heartbeat must never take the loop down.
+        }
+        if (now_epoch - last_uptime_epoch >= 3600) {
+            last_uptime_epoch = now_epoch;
+            storage_->append_event(
+                {util::now_iso8601(), "engine_uptime", "", "", "info",
+                 "Engine up, iteration " + std::to_string(iteration) +
+                     ", pid " + std::to_string(static_cast<long>(::getpid())),
+                 util::to_json({},
+                               {{"iteration", static_cast<double>(iteration)},
+                                {"pid", static_cast<double>(::getpid())},
+                                {"equity", equity_}})});
+        }
+    };
     while (!(stop_flag && *stop_flag)) {
+        write_heartbeat(static_cast<long>(std::time(nullptr)));
         consume_feed_clock();
         // Defensive actions from the adaptive real-time layer, if the operator
         // enabled it. A no-op returning immediately while the flag is false,
@@ -2724,11 +2773,29 @@ void Engine::run_forever(const volatile std::sig_atomic_t* stop_flag) {
     }
 
     const std::string ts = util::now_iso8601();
+    // Attribution (2026-07-24): record WHICH signal ended the loop and the
+    // pid, so this stop pairs with its continuous_start. The SENDER of a
+    // signal is not knowable from inside the process; when no
+    // engine_stop_requested event precedes this one, the sender is
+    // unattributed AND THE RECORD SAYS SO rather than recording nothing.
+    const int sig = stop_flag ? static_cast<int>(*stop_flag) : 0;
+    const std::string cause =
+        sig == SIGTERM ? "signal SIGTERM"
+        : sig == SIGINT ? "signal SIGINT"
+        : sig != 0     ? "signal " + std::to_string(sig)
+                       : "loop end (no signal)";
     storage_->append_event(
         {ts, "continuous_stop", "", "", "info",
          "Continuous paper loop stopped after " + std::to_string(iteration) +
-             " iterations, " + std::to_string(trade_count_) + " trades",
-         util::to_json({}, {{"final_equity", equity_}})});
+             " iterations, " + std::to_string(trade_count_) + " trades (" +
+             cause + ", pid=" +
+             std::to_string(static_cast<long>(::getpid())) +
+             "; sender is the engine_stop_requested event preceding this, "
+             "else unattributed)",
+         util::to_json({{"cause", cause}},
+                       {{"final_equity", equity_},
+                        {"stop_signal", static_cast<double>(sig)},
+                        {"pid", static_cast<double>(::getpid())}})});
     // SQLite writes autocommit per statement, so state is already durable.
 }
 

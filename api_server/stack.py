@@ -416,13 +416,38 @@ def pid_alive(pid: int) -> bool:
     return True
 
 
-def terminate(proc, timeout: float = 8.0) -> None:
-    """Graceful terminate then force kill. Accepts a Popen or None."""
+def _journal_process_stop(target_pid: int, why: str) -> None:
+    """Journal WHO is stopping WHAT before the signal goes out (2026-07-24).
+
+    Every stop path records its caller, its own pid, the target pid, and the
+    reason, so a stopped engine pairs its continuous_stop (which can only see
+    the signal) with the sender. Best-effort: attribution must never block a
+    shutdown.
+    """
+    try:
+        from api_server import store
+        store.append_event(
+            "process_stop",
+            f"Stopping pid {target_pid}: {why or 'unattributed caller'} "
+            f"(sender pid {os.getpid()})",
+            payload_json=json.dumps({
+                "target_pid": int(target_pid),
+                "sender_pid": os.getpid(),
+                "caller": why or "unattributed",
+            }))
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def terminate(proc, timeout: float = 8.0, why: str = "") -> None:
+    """Graceful terminate then force kill. Accepts a Popen or None. `why`
+    names the caller and reason for the stop journal."""
     if proc is None:
         return
     try:
         if proc.poll() is not None:
             return
+        _journal_process_stop(proc.pid, why)
         proc.terminate()
         deadline = time.time() + timeout
         while time.time() < deadline:
@@ -434,12 +459,14 @@ def terminate(proc, timeout: float = 8.0) -> None:
         pass
 
 
-def terminate_pid(pid: int, timeout: float = 8.0) -> bool:
+def terminate_pid(pid: int, timeout: float = 8.0, why: str = "") -> bool:
     """Graceful terminate then force kill of a bare pid (a foreign process we do
-    not hold a handle to). Returns True if it is not alive afterward."""
+    not hold a handle to). Returns True if it is not alive afterward. `why`
+    names the caller and reason for the stop journal."""
     if not pid_alive(pid):
         return True
     try:
+        _journal_process_stop(pid, why)
         os.kill(pid, signal.SIGTERM)
         deadline = time.time() + timeout
         while time.time() < deadline:
@@ -553,7 +580,9 @@ def free_port(port: int, label: str, exclude_pids=()) -> dict:
     holders = [p for p in port_holders(port) if p not in protect]
     if not holders:
         return {"port": port, "label": label, "action": "free", "pids": []}
-    cleared = [pid for pid in holders if terminate_pid(pid)]
+    cleared = [pid for pid in holders
+               if terminate_pid(pid, why=f"preflight: stale holder of "
+                                         f"{label} port {port}")]
     return {"port": port, "label": label, "action": "cleared", "pids": cleared}
 
 
@@ -623,7 +652,10 @@ def stop_tracked_pids() -> list[dict]:
     out = []
     for name, pid in tracked_pids().items():
         if pid_alive(pid):
-            out.append({"name": name, "pid": pid, "stopped": terminate_pid(pid)})
+            out.append({"name": name, "pid": pid,
+                        "stopped": terminate_pid(
+                            pid, why=f"stop_tracked_pids: teardown or "
+                                     f"self-heal of tracked '{name}'")})
         else:
             out.append({"name": name, "pid": pid, "stopped": True,
                         "already_dead": True})

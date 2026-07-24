@@ -50,7 +50,7 @@ def _wire(monkeypatch, *, health, running=True, posts=None, notes=None):
     notes = notes if notes is not None else []
     healed = []
 
-    def fake_post(path, timeout=30):
+    def fake_post(path, timeout=30, payload=None):
         posts.append(path)
         if path == "/engine/stop":
             return {"ok": True, "state": "not_running"}
@@ -112,7 +112,7 @@ def test_down_stack_skips_the_stop_and_still_starts(monkeypatch):
 def test_start_refusal_is_not_a_successful_restart(monkeypatch):
     # The exact response that fooled the old predicate for 60 cycles: ok
     # false, error "already running", state echo "running".
-    def refusing_post(path, timeout=30):
+    def refusing_post(path, timeout=30, payload=None):
         if path == "/engine/stop":
             return {"ok": True, "state": "not_running"}
         return {"ok": False, "state": "running",
@@ -130,7 +130,7 @@ def test_start_refusal_is_not_a_successful_restart(monkeypatch):
 def test_refused_stop_reports_failure_and_never_starts(monkeypatch):
     posts = []
 
-    def refusing_stop(path, timeout=30):
+    def refusing_stop(path, timeout=30, payload=None):
         posts.append(path)
         return {"ok": False, "error": "nope"}
 
@@ -148,7 +148,7 @@ def test_refused_stop_reports_failure_and_never_starts(monkeypatch):
 def test_unreachable_stop_leaves_the_running_stack_up(monkeypatch):
     # If the backend cannot be reached we cannot start either, so the sick
     # stack must be LEFT RUNNING rather than stopped into a hole.
-    def dead_post(path, timeout=30):
+    def dead_post(path, timeout=30, payload=None):
         raise OSError("connection refused")
 
     healed = []

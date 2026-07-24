@@ -39,6 +39,9 @@ API_PORT="${MAL_API_PORT:-8000}"
 DB="${MAL_DB_PATH:-$ROOT/market_ai_lab.db}"
 INTERVAL="${MAL_INTERVAL_SECONDS:-30}"
 export MAL_API_PORT="$API_PORT" MAL_DB_PATH="$DB"
+# Attribution (2026-07-24): the engine records its launcher in
+# continuous_start, so every restart pairs with the stop that preceded it.
+export MAL_LAUNCHER="start_script"
 
 BRIDGE_PID=""; ENGINE_PID=""; API_PID=""; VITE_PID=""; WATCHDOG_PID=""
 

@@ -107,7 +107,7 @@ def _wire(monkeypatch, *, health, running=True, age=None, posts=None,
     posts = posts if posts is not None else []
     notes = notes if notes is not None else []
 
-    def fake_post(path, timeout=30):
+    def fake_post(path, timeout=30, payload=None):
         posts.append(path)
         if path == "/engine/stop":
             return {"ok": True, "state": "not_running"}
@@ -291,7 +291,7 @@ def test_restart_rate_cap_holds_across_conditions(monkeypatch):
 def test_failed_restart_attempts_also_escalate(monkeypatch):
     posts, notes = _wire(monkeypatch, health=_health(substitution=True))
     monkeypatch.setattr(watchdog, "attempt_restart",
-                        lambda: {"restarted": False, "detail": "refused",
+                        lambda reason="": {"restarted": False, "detail": "refused",
                                  "healed": {}})
     assert watchdog.run_once({})["action"] == "restart_failed"
     res = watchdog.run_once({})
@@ -315,7 +315,7 @@ def test_kill_trip_during_hold_is_never_restarted(monkeypatch):
 def _wire_end_to_end(monkeypatch, db, *, age):
     posts, notes = [], []
 
-    def fake_post(path, timeout=30):
+    def fake_post(path, timeout=30, payload=None):
         posts.append(path)
         if path == "/engine/stop":
             return {"ok": True, "state": "not_running"}

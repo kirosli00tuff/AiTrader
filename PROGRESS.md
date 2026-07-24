@@ -134,6 +134,13 @@ New flags from the feed-work session (2026-07-05, `369b6a6`):
 
 ## Session Log
 
+### 2026-07-24 (Fable 5) — Every engine stop names its caller, and the 2026-07-21 stop is closed: watchdog exonerated, sender unprovable
+
+- **The record could never have answered.** The endpoint chain ends in the same SIGTERM as any manual kill, no stop path journalled its caller, and `watchdog_restart` was an event kind with NO WRITER, so its absence proved nothing. The 07-21 stop is established as CLEAN (continuous_stop was written, ruling out crash/OOM/SIGKILL); the watchdog is EXONERATED by pairing (its remediation always stops-then-starts in one cycle, and no start followed for hours); the actual sender is unprovable from the record that exists.
+- **Attribution, end to end:** /engine/stop and /engine/start take {caller, reason} (GUI sends gui_operator, watchdog names itself with its failing condition); the supervisor journals engine_stop_requested/engine_start_requested BEFORE acting, recording "unattributed" when unnamed rather than nothing; stack.terminate/terminate_pid/free_port/stop_tracked_pids journal process_stop with target, sender pid, and reason; the engine's continuous_start records launcher (MAL_LAUNCHER) + pid and continuous_stop records the ending signal + pid; the watchdog finally writes real watchdog_restart events.
+- **Bounded in time:** `.run/engine_heartbeat.json` rewritten atomically every loop iteration (a silent death is bounded to 15 s, last healthy state recoverable) plus an hourly engine_uptime event (24 rows/day).
+- **Verified:** pytest 911 (906 + 5), ctest 30/30 (new stop_attribution), vitest 129, tsc + build clean. NOT touched: RiskGate logic, the live-trading gate, the adaptive limit-weakening invariant, the kill-switch path. Live trading stays off.
+
 ### 2026-07-24 (Fable 5) — The profile gets its runtime lever, the shipped config is restored, and the three-test allowlist dissolves clean
 
 - **The premise sharpened:** the "uncommitted operator edit" was swept into commit 440fda8 on 2026-07-21, so the tree SHIPPED active_quant for three days while the failing tests were excused as an operator artifact. The allowlist masked no regression: all three failures reproduce their first-excusal assertions exactly, and ctest reads 29/29 the moment the shipped profile is restored. No allowlist remains.

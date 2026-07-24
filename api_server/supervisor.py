@@ -23,6 +23,7 @@ subprocess.
 """
 from __future__ import annotations
 
+import json
 import os
 import threading
 
@@ -130,7 +131,19 @@ class Supervisor:
 
     # --- start ---------------------------------------------------------------
 
-    def start(self, background: bool = True) -> dict:
+    def start(self, background: bool = True, caller: str = "",
+              reason: str = "") -> dict:
+        # Attribution (2026-07-24): a start pairs with the stop that preceded
+        # it. Same rule as stop(): an unidentified caller is recorded as
+        # unattributed, never unrecorded.
+        from api_server import store
+        store.append_event(
+            "engine_start_requested",
+            f"Engine start requested by {caller or 'unattributed'}: "
+            f"{reason or 'no reason given'} (supervisor pid {os.getpid()})",
+            payload_json=json.dumps({"caller": caller or "unattributed",
+                                     "reason": reason or "no reason given",
+                                     "supervisor_pid": os.getpid()}))
         with self._lock:
             if self._state in (STARTING, WARMING, RUNNING, STOPPING):
                 return {**self._build_state(), "ok": False,
@@ -218,6 +231,9 @@ class Supervisor:
             # 4. Engine, strict mode. It exits if an on-real layer is unreachable.
             self._engine = stack.spawn(
                 stack.engine_cmd(db),
+                # Attribution: the engine records its launcher in
+                # continuous_start, pairing every restart with its stop.
+                env={"MAL_LAUNCHER": "gui_supervisor"},
                 log_path=os.path.join(logdir, "engine.log"))
             stack.record_pid("engine", self._engine.pid)
             stack.sleep(ENGINE_SETTLE_SECONDS)
@@ -239,9 +255,11 @@ class Supervisor:
             # event log, so the GUI shows the cause instead of going dark.
             self._error = str(e)
             self._report_teardown(str(e))
-            stack.terminate(self._engine)
+            stack.terminate(self._engine,
+                            why=f"supervisor start-failure teardown: {e}")
             self._engine = None
-            stack.terminate(self._bridge)
+            stack.terminate(self._bridge,
+                            why=f"supervisor start-failure teardown: {e}")
             self._bridge = None
             stack.remove_pid("engine")
             stack.remove_pid("bridge")
@@ -261,7 +279,21 @@ class Supervisor:
 
     # --- stop (graceful shutdown, NOT the kill switch) -----------------------
 
-    def stop(self) -> dict:
+    def stop(self, caller: str = "", reason: str = "") -> dict:
+        # Attribution (2026-07-24): the stop REQUEST journals its caller, the
+        # reason, and this process's pid BEFORE the engine winds down, so a
+        # continuous_stop (which can only see the signal) pairs with its
+        # sender. A caller that does not identify itself is recorded as
+        # unattributed rather than recorded nowhere.
+        who = caller or "unattributed"
+        why = reason or "no reason given"
+        from api_server import store
+        store.append_event(
+            "engine_stop_requested",
+            f"Engine stop requested by {who}: {why} "
+            f"(supervisor pid {os.getpid()})",
+            payload_json=json.dumps({"caller": who, "reason": why,
+                                     "supervisor_pid": os.getpid()}))
         with self._lock:
             lk = stack.lock_status()
             if self._state == NOT_RUNNING and not lk["alive"]:
@@ -272,14 +304,15 @@ class Supervisor:
             self._set_state(STOPPING)
         # Terminate outside the lock. Prefer owned handles, fall back to the lock
         # pids for a foreign engine the script started.
+        stop_why = f"/engine/stop by {who}: {why}"
         if eng is not None:
-            stack.terminate(eng)
+            stack.terminate(eng, why=stop_why)
         elif lk["alive"] and lk.get("engine_pid"):
-            stack.terminate_pid(lk["engine_pid"])
+            stack.terminate_pid(lk["engine_pid"], why=stop_why)
         if br is not None:
-            stack.terminate(br)
+            stack.terminate(br, why=stop_why)
         elif lk.get("bridge_pid"):
-            stack.terminate_pid(lk["bridge_pid"])
+            stack.terminate_pid(lk["bridge_pid"], why=stop_why)
         stack.remove_pid("engine")
         stack.remove_pid("bridge")
         stack.clear_lock()

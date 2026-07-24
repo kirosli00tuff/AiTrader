@@ -84,8 +84,11 @@ bool arg_flag(int argc, char** argv, const std::string& flag) {
 
 // Set by SIGINT/SIGTERM; the continuous loop finishes its current tick, flushes,
 // and exits cleanly.
+// Stores the SIGNAL NUMBER, not a bare flag (2026-07-24), so the engine's
+// continuous_stop event can say WHICH signal ended the loop. Any nonzero
+// value stops the loop exactly as before.
 volatile std::sig_atomic_t g_stop = 0;
-extern "C" void handle_stop(int) { g_stop = 1; }
+extern "C" void handle_stop(int sig) { g_stop = sig; }
 }  // namespace
 
 int main(int argc, char** argv) {

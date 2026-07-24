@@ -2069,7 +2069,7 @@ def test_preflight_clears_stale_holder_and_leaves_others(monkeypatch, tmp_path):
     from api_server import stack
     killed = []
     monkeypatch.setattr(stack, "terminate_pid",
-                        lambda pid, timeout=8.0: (killed.append(pid) or True))
+                        lambda pid, timeout=8.0, why="": (killed.append(pid) or True))
     bp = stack.bridge_port()
     # Only the bridge port is held by a stale pid; other stack ports are free.
     monkeypatch.setattr(stack, "port_holders",
@@ -2086,7 +2086,7 @@ def test_preflight_never_targets_own_pid(monkeypatch):
     from api_server import stack
     killed = []
     monkeypatch.setattr(stack, "terminate_pid",
-                        lambda pid, timeout=8.0: (killed.append(pid) or True))
+                        lambda pid, timeout=8.0, why="": (killed.append(pid) or True))
     # Even if our own process appears to hold a stack port, it is protected.
     monkeypatch.setattr(stack, "port_holders", lambda port: [_os.getpid()])
     stack.preflight_ports()
@@ -2103,7 +2103,7 @@ def test_pid_file_record_read_and_stop(monkeypatch, tmp_path):
     stopped = []
     monkeypatch.setattr(stack, "pid_alive", lambda pid: True)
     monkeypatch.setattr(stack, "terminate_pid",
-                        lambda pid, timeout=8.0: (stopped.append(pid) or True))
+                        lambda pid, timeout=8.0, why="": (stopped.append(pid) or True))
     res = stack.stop_tracked_pids()
     assert {r["pid"] for r in res} == {111, 222}
     assert set(stopped) == {111, 222}

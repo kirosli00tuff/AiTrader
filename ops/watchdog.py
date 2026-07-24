@@ -453,20 +453,25 @@ def notify(message: str, cfg: dict | None = None, title: str = "AiTrader watchdo
         return False
 
 
-def _supervisor_post(path: str, timeout: float = 30) -> dict:
+def _supervisor_post(path: str, timeout: float = 30,
+                     payload: dict | None = None) -> dict:
     """POST to a supervisor endpoint on the backend. Raises on transport
-    failure so the caller decides what an unreachable supervisor means."""
+    failure so the caller decides what an unreachable supervisor means.
+    `payload` names the caller and reason (2026-07-24): the watchdog is the
+    only automated caller of /engine/stop, and the 2026-07-21 unattributable
+    stop is what an unnamed caller costs."""
     req = urllib.request.Request(
         stack.api_health_url().replace("/health", path),
-        data=b"{}", method="POST",
+        data=json.dumps(payload or {}).encode(), method="POST",
         headers={"Content-Type": "application/json"})
     with urllib.request.urlopen(req, timeout=timeout) as r:
         return json.loads(r.read().decode())
 
 
-def attempt_restart() -> dict:
+def attempt_restart(reason: str = "") -> dict:
     """One clean restart, for BOTH failure shapes: a down stack and a
-    running-but-sick one (degraded bridge, feed substitution).
+    running-but-sick one (degraded bridge, feed substitution). `reason` names
+    the failing condition so the stop it triggers is attributed (2026-07-24).
 
     Why remediation never fired before 2026-07-19: this function only knew how
     to START. With the sick bridge still answering HTTP 200, stack_running()
@@ -486,7 +491,10 @@ def attempt_restart() -> dict:
     stopped: dict | None = None
     if stack.stack_running()["running"]:
         try:
-            stopped = _supervisor_post("/engine/stop")
+            stopped = _supervisor_post(
+                "/engine/stop",
+                payload={"caller": "watchdog",
+                         "reason": reason or "remediation restart"})
         except Exception as e:
             return {"healed": {}, "stopped": None, "restarted": False,
                     "detail": (f"stop unreachable ({type(e).__name__}); "
@@ -498,7 +506,10 @@ def attempt_restart() -> dict:
     started = False
     detail = ""
     try:
-        body = _supervisor_post("/engine/start")
+        body = _supervisor_post(
+            "/engine/start",
+            payload={"caller": "watchdog",
+                     "reason": reason or "remediation restart"})
         started = (bool(body.get("ok"))
                    and str(body.get("state", "")) in ("starting", "warming",
                                                       "running"))
@@ -748,7 +759,25 @@ def run_once(cfg: dict | None = None) -> dict:
     # recorded whether or not it succeeds, so a failing restart cannot loop
     # either.
     snap, note = capture_before_restart(h)
-    r = attempt_restart()
+    restart_reason = f"condition {cond}: {_status_line(h)}"
+    r = attempt_restart(reason=restart_reason)
+    # Journal the restart to the EVENTS table (2026-07-24). Until now the
+    # watchdog's only records were the state file (best-effort) and ntfy, so
+    # "no watchdog_restart event" proved nothing: the kind had NO writer. The
+    # 2026-07-21 stop was unattributable for exactly this reason.
+    try:
+        from api_server import store
+        store.append_event(
+            "watchdog_restart",
+            f"Watchdog restarted the stack on {restart_reason} "
+            f"(watchdog pid {os.getpid()})",
+            payload_json=json.dumps({
+                "condition": cond, "reason": restart_reason,
+                "watchdog_pid": os.getpid(),
+                "restarted": bool(r.get("restarted")),
+                "detail": str(r.get("detail", ""))}))
+    except Exception:
+        pass  # journaling must never break remediation
     history.append(now)
     _save_state({"condition": cond, "holding": False,
                  "attempts": (int(st.get("attempts", 0)) + 1

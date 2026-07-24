@@ -76,8 +76,12 @@ export const api = {
   // --- Engine lifecycle (supervisor). Stop is a graceful shutdown, NOT the
   // kill switch, which stays on the /kill path above and is independent.
   engineState: () => get<EngineState>("/engine/state"),
-  engineStart: () => post<EngineState>("/engine/start", {}),
-  engineStop: () => post<EngineState>("/engine/stop", {}),
+  // Attribution (2026-07-24): every start/stop names its caller, so the
+  // engine's continuous_stop pairs with a journalled sender.
+  engineStart: () => post<EngineState>("/engine/start",
+    { caller: "gui_operator", reason: "start button" }),
+  engineStop: () => post<EngineState>("/engine/stop",
+    { caller: "gui_operator", reason: "stop button" }),
 
   // --- Controls -------------------------------------------------------------
   controls: () => get<ControlsState>("/controls"),

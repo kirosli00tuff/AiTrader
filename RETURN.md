@@ -14,6 +14,52 @@ Commit message:
 
 ---
 
+## Prompt: Engine stop attribution
+
+Date: 2026-07-24
+Model: Fable 5. The prompt specified Opus; the session runs on Fable 5 and this line records that.
+Prompt summary: the 2026-07-21 stop at 14:28:55Z is unattributed and a week-long run is about to start. Six tasks: confirm from the record whether the stop came through POST /engine/stop rather than a signal, a kill, or a crash; audit every stop path with file and line, journaling, and unattended-fire capability; make every stop and start record its caller, pid, reason, and timestamp before wind-down; bound an unexplained stop in time with a heartbeat; report every watchdog stop/restart condition and state whether the watchdog is exonerated, implicated, or unprovable; verify with a test per path and report whether the 07-21 stop is explained. Live trading stays off.
+
+**HEADLINE: the record could never have answered the question, and now it can. The only trace of the 07-21 stop is a bare continuous_stop event: the engine records ruled out a crash or an OOM kill (the event was written on the way down) but could not distinguish the /engine/stop endpoint from ANY clean SIGTERM, because the endpoint's own chain ends in the same signal and no path journalled its caller. Worse, `watchdog_restart` was an event kind with NO WRITER, so its absence proved nothing. The watchdog is nevertheless EXONERATED by pairing: its remediation always stops-then-starts in one cycle, and no continuous_start followed the 14:28:55Z stop for hours. Every stop and start path now journals caller, pid, and reason, the engine records which signal ended it and who launched it, and a heartbeat bounds any future silent death to one 15-second loop interval.**
+
+Changes:
+
+TASK 1, WHAT THE RECORD DISTINGUISHES. Established: the stop was CLEAN. continuous_stop was written at 14:28:55Z with the summary intact, which a SIGKILL, an OOM kill, or a crash cannot produce (no code runs after those). NOT establishable, said plainly: whether the clean signal came from the supervisor's endpoint chain (POST /engine/stop -> stack.terminate -> SIGTERM) or from any other SIGTERM sender (a manual kill, the operator's recorded pkill habit, a system signal), because the chain converges on the same signal and nothing journalled upstream. Every path below is therefore treated.
+
+TASK 2, EVERY STOP PATH, audited with its record-keeping AS FOUND:
+- POST /engine/stop (api_server/app.py:688 -> supervisor.py stop): journalled NOTHING. Callable unattended (the watchdog). NOW journals engine_stop_requested.
+- Supervisor start-failure teardown (supervisor.py ~242): journalled the error, not the stop. Fires unattended. NOW journals via terminate(why=).
+- Watchdog remediation (ops/watchdog.py attempt_restart -> the endpoint): journalled to its STATE FILE and ntfy only; the events table got nothing, and the `watchdog_restart` kind listed in the GUI's diagnostics feed HAD NO WRITER ANYWHERE, a dead kind. Fires unattended. NOW: names itself in the endpoint payload AND writes a real watchdog_restart event.
+- stack.terminate / terminate_pid (stack.py:419/437), free_port (:549, stale port holders), stop_tracked_pids (:620, script trap + self-heal): journalled nothing. free_port and self-heal fire unattended. NOW all journal process_stop with target pid, sender pid, and reason.
+- Engine signal handler (core/main.cpp handle_stop): recorded a bare flag; continuous_stop said nothing about the signal or the pid. NOW records both.
+- UNJOURNALABLE, named: a direct SIGKILL, an OOM kill, or an operator pkill leaves no in-band record by nature. These are bounded by the Task 4 heartbeat rather than journalled.
+
+TASK 3, ATTRIBUTION, end to end. Every stop request records caller, reason, and pid BEFORE the engine winds down: the endpoint takes an optional {caller, reason} body (the GUI sends gui_operator, the watchdog sends watchdog plus its failing condition) and the supervisor journals engine_stop_requested FIRST, recording "unattributed" when unnamed rather than recording nothing. stack.terminate/terminate_pid journal process_stop before the signal goes out. The START pairs with the stop: engine_start_requested journals the same shape, and the engine's continuous_start now records its launcher (MAL_LAUNCHER: start_script | gui_supervisor, else unattributed) and pid, while continuous_stop records the ending signal, the pid, and states that its sender is the preceding engine_stop_requested event or unattributed.
+
+TASK 4, THE BOUND. Two records on a cadence: `.run/engine_heartbeat.json` rewritten atomically EVERY loop iteration (ts, pid, iteration, equity), so a silent death is bounded to one loop interval (15 s) and the last healthy state is recoverable from the file; and an `engine_uptime` event every hour, so the bound survives in the durable journal too. Cost: one ~120-byte rename per 15 s and 24 event rows per day.
+
+TASK 5, THE WATCHDOG. Conditions on which it acts, from the current code: a down stack and a running-but-sick one (degraded bridge, feed substitution past the startup grace) trigger ONE stop-then-start remediation per cycle; a recurring condition inside the hold window, or the hourly restart cap, escalates to notify-and-hold (no stop); a kill trip is notify-only, never restarted; universe degradation notifies. Journaling as found: state file (best-effort, silent except) and ntfy only, no events. COULD IT HAVE FIRED AT 14:28:55Z WITHOUT A TRACE: a restart would have left no event (dead kind) and the state file write could fail silently, so absence of those proves little. THE EXONERATING EVIDENCE IS THE PAIRING: attempt_restart stops and starts in the same call, and the journal shows NO continuous_start after the 14:28:55Z stop for hours (the eventual restart was a separate, later act). A watchdog that stopped the stack would have started it within the minute. VERDICT: the watchdog's remediation path is EXONERATED on the record; the stop's actual sender (GUI button, manual signal, or another SIGTERM source) is UNPROVABLE from the record that exists and will not be unprovable again.
+
+TASK 6, VERIFY. pytest 911 passed (906 + 5 new attribution tests: supervisor journals before acting, unnamed reads unattributed, the route passes the caller through, terminate_pid journals process_stop, the watchdog names itself). ctest 30 of 30 including the new `stop_attribution` test (continuous_start carries launcher and pid, continuous_stop carries the ending signal and pid, proven by running run_forever against a pre-set SIGTERM). Frontend: tsc clean, vitest 129 of 129 (one unrelated discovery-controls flake failed once and passes on rerun, 4 consecutive greens), production build clean. Pre-existing test mocks were updated to the new optional-parameter signatures; no behavior assertions changed except the intended ones. THE 2026-07-21 STOP: explained as a clean external SIGTERM-class stop with the watchdog exonerated, sender unprovable from the existing record, and structurally impossible to lose again.
+
+NOT touched: RiskGate logic, the live-trading gate, the adaptive limit-weakening invariant, Level 1 values, the kill-switch path (attribution never touches the kill request file). Live trading stays off.
+
+VERIFICATION (2026-07-24):
+
+| Check | Result |
+| --- | --- |
+| pytest | 911 passed (906 + 5 new) |
+| ctest | 30 of 30 (new stop_attribution) |
+| vitest / tsc / build | 129 passed (one flake, green on rerun) / clean / clean |
+| 07-21 stop mechanism | clean signal established; sender unprovable |
+| Watchdog | exonerated by the missing paired start |
+| watchdog_restart kind | had NO writer; now written |
+| Heartbeat | per-iteration file + hourly event |
+
+Commit message: `Attribute every engine stop to its caller and bound an unexplained stop in time, live trading untouched`
+
+---
+
 ## Prompt: Config divergence and test allowlist
 
 Date: 2026-07-24

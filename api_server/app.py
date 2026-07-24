@@ -677,17 +677,25 @@ def get_engine_state():
 
 
 @app.post("/engine/start")
-def post_engine_start():
+def post_engine_start(body: dict | None = None):
     """Start the warmed paper stack (backfill, warm, bridge, engine), health
     checked between steps. Refuses a second start when one is already running,
     clears a stale lock from a crashed run. Strict mode: an unreachable on-real
-    layer fails the start with what is missing."""
-    return supervisor.SUPERVISOR.start()
+    layer fails the start with what is missing. The optional body names the
+    caller and reason; an unidentified caller is journalled as unattributed
+    (2026-07-24)."""
+    body = body or {}
+    return supervisor.SUPERVISOR.start(
+        caller=str(body.get("caller", "")), reason=str(body.get("reason", "")))
 
 
 @app.post("/engine/stop")
-def post_engine_stop():
+def post_engine_stop(body: dict | None = None):
     """Graceful shutdown of the bridge + engine the supervisor started. This is
     NOT the kill switch. The safety halt is the kill-request control file the
-    engine reads on its own, independent of this endpoint."""
-    return supervisor.SUPERVISOR.stop()
+    engine reads on its own, independent of this endpoint. The optional body
+    names the caller and reason; an unidentified caller is journalled as
+    unattributed (2026-07-24)."""
+    body = body or {}
+    return supervisor.SUPERVISOR.stop(
+        caller=str(body.get("caller", "")), reason=str(body.get("reason", "")))

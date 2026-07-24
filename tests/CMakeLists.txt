@@ -200,6 +200,16 @@ target_link_libraries(test_provenance PRIVATE mal_storage mal_util
 add_test(NAME provenance COMMAND test_provenance
          WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 
+# Engine stop attribution (2026-07-24): continuous_start records launcher +
+# pid, continuous_stop records the ending signal + pid, so a stop pairs with
+# its start and with any journalled stop request.
+add_executable(test_stop_attribution test_stop_attribution.cpp)
+target_link_libraries(test_stop_attribution PRIVATE mal_core mal_market_data
+                      mal_signal_engine mal_learning mal_storage mal_risk
+                      mal_config mal_util ${MAL_SQLITE_LIB})
+add_test(NAME stop_attribution COMMAND test_stop_attribution
+         WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
 # The strategy profile's runtime lever (2026-07-23): the shipped config
 # carries the shipped profile (swing), controls.json strategy_profile
 # overrides at load, invalid/missing means config decides.
