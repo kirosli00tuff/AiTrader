@@ -90,6 +90,13 @@ target_link_libraries(mal_core PUBLIC
 add_executable(mal_engine core/main.cpp)
 target_link_libraries(mal_engine PRIVATE mal_core)
 
+# Backtest harness (2026-07-24): calls strategy::evaluate and the RiskGate by
+# identity (the same compiled libraries the engine links), never a
+# reimplementation. Reads bars, writes JSON lines, touches no decision path.
+add_executable(mal_backtest core/backtest_main.cpp)
+target_link_libraries(mal_backtest PRIVATE mal_signal_engine mal_risk
+                      mal_config mal_storage mal_util)
+
 # --- Tests (CTest) ---
 enable_testing()
 add_subdirectory(tests)

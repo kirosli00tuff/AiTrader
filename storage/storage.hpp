@@ -212,6 +212,17 @@ public:
                                       const std::string& start_ts,
                                       const std::string& end_ts);
 
+    // Backtest feed (2026-07-24): ONLY bars the live path would trade on.
+    // Provenance real_feed or backfill, never synthetic or unknown, and never
+    // a row either quarantine script marked (the fabricated-volume quarantine
+    // sets volume_source='fabricated_zeroed'; the synthetic quarantine sets
+    // source='synthetic', which the provenance predicate already excludes).
+    // Tolerant of a DB predating the volume_source column.
+    std::vector<BarRow> real_bars_in_range(const std::string& symbol,
+                                           const std::string& timeframe,
+                                           const std::string& start_ts,
+                                           const std::string& end_ts);
+
     // THE TRADEABLE INVARIANT'S DATA QUESTION (2026-07-20): does this symbol
     // have any REAL bar history (source real_feed or backfill), any timeframe?
     // Engine::symbol_is_tradeable is the C++ enforcement point and this is its

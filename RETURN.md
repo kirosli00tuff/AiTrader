@@ -14,6 +14,36 @@ Commit message:
 
 ---
 
+## Prompt: Backtest harness
+
+Date: 2026-07-24
+Model: Fable 5. The prompt specified Opus; the session runs on Fable 5 and this line records that.
+Prompt summary: build and calibrate a backtest harness that calls the strategy by identity, answers no strategy question. Seven tasks: call strategy::evaluate and the live RiskGate by identity or build nothing; feed only live-tradeable provenance with a lookahead-corruption proof; pessimistic fills and measured costs with the intrabar ambiguity named; calibrate against the recorded decisions and report every divergence with its cause; statistical honesty enforced in code; the council scope limit stated; verify and report. Live trading stays off.
+
+**HEADLINE: the harness exists (`mal_backtest` + `backtest/report.py`), every decision comes from the engine's own compiled functions, and calibration reproduces 6 of 6 decisions whose inputs still exist. The six historical trade_entry events do NOT reproduce, for a proven data-lineage cause: they were decided on live in-memory bars whose stored rows have since been quarantine-zeroed (fabricated volume) or replaced by backfill upserts, so their inputs no longer exist in tradeable form. That is the quarantine working, not harness logic diverging. At the current sample (359 pooled harness trades) every expectancy interval spans zero: the harness is calibrated and honest, and it answers nothing yet.**
+
+Changes:
+
+TASK 1, CALLED BY IDENTITY. `core/backtest_main.cpp` links the SAME compiled libraries the engine links (mal_signal_engine, mal_risk) and calls strategy::evaluate (with its EvalTrace), check_exit, exit_fill_price, rsi2_exit_triggered, indicators_warm, and risk::RiskGate::evaluate by identity, across no language boundary at all: the harness is C++ where the strategy is, and Python (`backtest/report.py`) owns only statistics over the emitted JSON lines, the same split that made _features_at one object. REPLICATED AND LABELLED, not hidden: the three-line sizing formula from handle_bar_close (per-trade RETURN metrics are independent of it) and one bookkeeping approximation, the consecutive-loss cooldown expiry that AccountManager owns live (without it a third loss froze the whole tape: 459 of 459 gate blocks in the first pass read max_consecutive_losses, which is not what the live engine does). The rolling history uses the engine's own 300-bar cap and its own order: history, warm gate, evaluate.
+
+TASK 2, PROVENANCE AND LOOKAHEAD. `Storage::real_bars_in_range` feeds only real_feed/backfill rows and excludes every row either quarantine script marked (synthetic-marked rows via provenance, fabricated-volume rows via volume_source), tolerant of pre-migration schemas. Usable 5-minute bars per symbol under active_quant: BTC/USD 10,433, ETH/USD 10,004, SOL/USD 9,646, AAPL 4,733, MSFT 4,765, NVDA 4,765, QQQ 4,765, SPY 4,761. LOOKAHEAD PROVEN: tests/test_backtest_harness.py corrupts every bar after a cutoff to absurd prices and asserts every decision at or before the cutoff byte-identical, over a real decision count.
+
+TASK 3, FILLS AND COSTS. Entries fill at the NEXT bar open, never the signal close (the fill gap per trade is emitted). Fee 0.0001 per side, MEASURED from all 77 real recorded fills, never assumed. SLIPPAGE, stated: none beyond the next-open fill and the engine's own stop-price exit fills, which idealize gapped stops exactly as the live paper path does. INTRABAR AMBIGUITY: resolved as the stop through check_exit's own risk-first order, counted per trade: 1 of 359 trades (0.28 percent), so the result does not currently hinge on that assumption.
+
+TASK 4, CALIBRATION. Every decision recorded WITH provenance-clean inputs reproduces: 6 of 6 live entry_decision rows match the harness bar for bar (signal presence and first refusing condition). The six historical trade_entry events (07-14 to 07-21) do NOT reproduce, cause per entry: SPY 07-14 and QQQ 07-15 x2 predate the volume fabrication fix and the backfill upserts that replaced their bars; ETH and BTC 07-17 were decided on live-aggregated bars now quarantine-zeroed and excluded by the harness's own provenance rule; UNI 07-21 has no surviving tradeable bars at its decision time at all. The inputs those decisions consumed were later PROVEN fabricated or replaced, so irreproducibility is the correct outcome, and the harness runs only on the tape it can defend. This calibration standard is what P24's gate consumes.
+
+TASK 5, HONESTY IN CODE. backtest/report.py: every statistic carries n and a 95 percent interval (Wilson for rates, t for means), any group under 30 trades returns status insufficient_sample with an explicit no-conclusion note (the train_real refusal shape), and validation folds are expanding chronological slices matching the DNN trainer. Pinned by tests.
+
+TASK 6, SCOPE, STATED AS A LIMIT. The harness covers the NATIVE strategy layer and the DETERMINISTIC gates. The RiskGate runs by identity with quality fields set to pass (the engine's own risk pre-check shape) because the advisory ensemble's live inputs (whale) were never recorded for historical bars. Fast-tier strategy decisions replay faithfully because no council runs there. COUNCIL-TIER DECISIONS DO NOT REPLAY AND ARE REFUSED: a model replayed today may know what happened after the bar, so a council backtest would carry hindsight the live decision did not have. No such mode exists in the binary.
+
+TASK 7, VERIFY AND ERROR BARS. pytest 917 passed (914 + 3 harness guards), ctest 30 of 30, zero build warnings, offline synthetic baselines identical in both profiles (the harness touches no decision path; the only shared-code change is one additive read method). WHAT THE HARNESS CAN ANSWER: native-strategy expectancy and filter questions on the provenance-clean tape, with intervals. WHAT IT CANNOT: council-tier behavior, advisory-confidence gating, and any question below its sample floor. ERROR BARS AT CURRENT SAMPLE, from the first full calibration pass (active_quant, 359 trades): win rate 47.6 percent CI [42.5, 52.8], mean per-trade return -0.018 percent CI [-0.053, +0.018], every per-factor and per-class interval spans zero. A roughly 3.5-basis-point-wide half-interval per trade is the resolution limit today: real effects smaller than that are invisible at this sample.
+
+NOT touched: RiskGate logic, the live-trading gate, the adaptive limit-weakening invariant, Level 1 values, any threshold, any decision path. No strategy question was answered. Live trading stays off.
+
+Commit message: `Build and calibrate a provenance-respecting backtest harness that calls the strategy by identity, answers nothing yet, live trading untouched`
+
+---
+
 ## Prompt: Pre-flight reconciliation and baseline
 
 Date: 2026-07-24

@@ -134,6 +134,15 @@ New flags from the feed-work session (2026-07-05, `369b6a6`):
 
 ## Session Log
 
+### 2026-07-24 (Fable 5) — A backtest harness that calls the strategy by identity, calibrated, answering nothing yet
+
+- **`mal_backtest`** links the engine's own libraries and calls strategy::evaluate, check_exit, exit_fill_price, rsi2_exit_triggered, indicators_warm, and RiskGate::evaluate BY IDENTITY. Replicated and labelled: the 3-line sizing glue and the consecutive-loss cooldown expiry AccountManager owns live. `backtest/report.py` owns every statistic: n + 95% interval on every number, insufficient_sample refusal under 30 trades, expanding chronological folds.
+- **Provenance + lookahead:** only real_feed/backfill bars, both quarantines excluded (usable: BTC 10,433, ETH 10,004, SOL 9,646, equities ~4,750 each). Corrupting future bars provably changes no prior decision.
+- **Fills pessimistic:** next-bar-open entries, fee 0.0001 measured from all 77 real fills, no further slippage (stated), intrabar stop-first ambiguity counted: 1 of 359 trades (0.28%).
+- **Calibration:** 6 of 6 provenance-clean recorded decisions reproduce. The six historical trade_entry events do not, cause per entry: their inputs were since quarantine-zeroed or replaced by backfill, so they no longer exist in tradeable form. The quarantine working, not logic diverging.
+- **Scope limit:** native strategy + deterministic gates only; council-tier replay REFUSED (hindsight contamination). Error bars at current sample: pooled n=359, win 47.6% [42.5, 52.8], mean ret -0.018% [-0.053, +0.018], every interval spans zero.
+- **Verified:** pytest 917 (914+3), ctest 30/30, zero warnings, offline baselines identical. NOT touched: RiskGate logic, live gate, adaptive invariant, any decision path. Live trading stays off.
+
 ### 2026-07-24 (Fable 5) — Pre-flight complete: positions reconciled, rehydrated exits taken, baseline and criteria recorded, week left to the operator
 
 - **Projection first, then reality, and they matched:** ETH/USD and SPY exited on their rehydrated native stops at 07:45:00Z on the FIRST closed real_feed bar after restart, booked at the stop fills exactly as projected (-$6.42, -$1.99; combined 0.0084% of equity, nowhere near the 2% halt or 3% kill trip). The stop-fill idealization (economic mark -$28.04 on the gapped ETH stop vs booked -$6.42) is recorded as a paper-fill model property. Consecutive losses now 2 of 3 on alpaca, flagged for the operator.
