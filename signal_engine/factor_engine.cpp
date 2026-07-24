@@ -1,5 +1,6 @@
 #include "signal_engine/factor_engine.hpp"
 
+#include <algorithm>
 #include <cmath>
 
 namespace mal::signal_engine {
@@ -154,8 +155,8 @@ CombinedVerdict compose_gate_verdict(const std::vector<FactorSignal>& signals,
     CombinedVerdict full =
         combine(signals, weights, min_factor_conf, rule_based_min_share);
 
-    // Decide which factors may drive the gate confidence/edge. Two independent
-    // exclusions can apply, and they compose:
+    // Decide which factors may drive the gate confidence/edge. Three
+    // independent exclusions can apply, and they compose:
     //   drop_rule_based  — native_conviction_feeds_gate is OFF, so the gate
     //                      confidence/edge come from the advisory factors alone
     //                      (the native setup still drives bias and sizing).
@@ -164,15 +165,31 @@ CombinedVerdict compose_gate_verdict(const std::vector<FactorSignal>& signals,
     //                      LLM slots hold only neutral mocks that were never
     //                      consulted. They must not drag a genuine native
     //                      conviction below the RiskGate floor.
+    //   non-participating — the factor's service reported it did NOT
+    //                      participate (benched model, unavailable service),
+    //                      so its zeros are structural, not an opinion. A
+    //                      NON-PARTICIPATING FACTOR LEAVES THE DENOMINATOR
+    //                      AND NEVER AVERAGES IN AS A CONFIDENT ZERO
+    //                      (2026-07-23: a benched dnn_advisory held every
+    //                      fast-tier confidence below the floor by
+    //                      construction). The exclusion keys off the
+    //                      participation flag, never off the value 0.0: a
+    //                      participating factor legitimately reporting low
+    //                      confidence stays in, because excluding it would
+    //                      inflate confidence on a genuinely weak setup.
     // Bias, verdict, and agreement always stay from the full set, so this only
     // reweights confidence/edge and never makes the gate any easier on agreement.
     const bool drop_rule_based = !native_conviction_feeds_gate;
     const bool drop_council = !council_ran;
-    if (!drop_rule_based && !drop_council) return full;
+    const bool any_absent =
+        std::any_of(signals.begin(), signals.end(),
+                    [](const FactorSignal& s) { return !s.participating; });
+    if (!drop_rule_based && !drop_council && !any_absent) return full;
 
     std::vector<FactorSignal> subset;
     subset.reserve(signals.size());
     for (const auto& s : signals) {
+        if (!s.participating) continue;
         if (drop_rule_based && s.factor == "rule_based") continue;
         if (drop_council && is_council_factor(s.factor)) continue;
         subset.push_back(s);

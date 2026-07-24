@@ -19,6 +19,16 @@ struct FactorSignal {
     double bias = 0.0;        // signed directional bias [-1,1]
     double confidence = 0.0;  // [0,1]
     double edge = 0.0;        // expected edge (return net of fees)
+    // ABSENT vs UNCERTAIN (2026-07-23). false means the factor did NOT
+    // participate in this evaluation: its model is benched or its service
+    // reported itself unavailable, so its zeros are structural, not an
+    // opinion. compose_gate_verdict drops a non-participating factor from the
+    // confidence/edge denominator exactly as it drops the un-run council. A
+    // PARTICIPATING factor legitimately reporting low confidence keeps
+    // participating = true and STAYS in the denominator: the distinction keys
+    // off this flag (set from the service's own participation report), never
+    // off the value 0.0.
+    bool participating = true;
 };
 
 // Per-factor weight control state.

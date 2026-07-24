@@ -172,6 +172,10 @@ def _unavailable(model_id: str, reason: str) -> dict:
         "benched": benched,
         **({"benched_reason": bench_detail} if benched else {}),
         "bias": 0.0, "confidence": 0.0, "edge": 0.0,
+        # ABSENT, not uncertain: an unavailable factor did not participate, so
+        # the engine drops it from the confidence denominator rather than
+        # averaging in a confident zero.
+        "participating": False,
     }
 
 
@@ -214,6 +218,11 @@ def score_state(state: dict, scale_cap: float = _DEFAULT_SCALE_CAP) -> dict:
     # toggle is untouched.
     benched, detail = bench_state()
     out["benched"] = benched
+    # ABSENT vs UNCERTAIN (2026-07-23): participation is the wire signal the
+    # engine keys the denominator exclusion off. A benched factor did NOT
+    # participate (its zeros are structural); a serving factor participates
+    # even when its confidence is legitimately low.
+    out["participating"] = not benched
     if benched:
         out["benched_reason"] = detail
         out["bias"] = 0.0

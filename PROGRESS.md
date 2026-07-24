@@ -134,6 +134,15 @@ New flags from the feed-work session (2026-07-05, `369b6a6`):
 
 ## Session Log
 
+### 2026-07-23 (Fable 5) — A non-participating factor leaves the confidence denominator: the fast tier can reach the unchanged 0.65 floor
+
+- **The defect was indistinguishability.** The bridge has reported `"benched": true` on /score/dnn since 2026-07-18, and the C++ engine discarded it, so a benched dnn (structural zeros) and a live dnn reporting 0.0 (an opinion) were identical downstream. Fixed first: `FactorSignal.participating` carries the service's own participation report end to end, and `compose_gate_verdict` drops a non-participating factor from the confidence/edge denominator exactly as it drops the un-run council, on both tiers. The exclusion keys off participation, never off the value 0.0: a participating low-confidence factor stays in, so a weak setup is never inflated.
+- **Effect, bounded:** the four recorded candidates compose 0.509→0.782, 0.488→0.749, 0.427→0.656 (clear) and 0.299→0.459 (still blocked). Of the 27 recorded fast-tier confidence blocks, 12 would clear the unchanged floor and 15 still fail. The fast tier goes from structurally impossible to reachable; the RiskGate still evaluates every candidate unchanged. No weight, threshold, or Level 1 value moved.
+- **Sweep:** council already excluded via council_ran; rl_advisory doubly out (not in ensemble unless enabled, weight 0.0 skipped by combine); whale's quiet zero LEFT IN with reason (it is a measurement, and structural absence cannot occur on the real path under strict mode); a mid-run bridge failure leaving a factor on its mock is named and left (documented degradation, not a confident zero).
+- **Guard:** 8 new assertions in `test_fast_tier_confidence` plus Python pins on the `participating` key. Mutations killed both directions (old denominator restored: 3 fail; value-keyed exclusion: 2 fail).
+- **Verified:** pytest 894, ctest 24/27 (same three operator-edit failures), offline synthetic baselines identical in both profiles (mocks participate, so offline is untouched by design).
+- NOT touched: RiskGate logic, the live-trading gate, the adaptive limit-weakening invariant, min_confidence_default 0.65. Live trading stays off.
+
 ### 2026-07-23 (Fable 5) — Exit state survives a restart: open positions rehydrate at construction, unmanageable ones get loud
 
 - **The stranded-position defect is fixed.** The `positions` table now carries `stop_price`, `target_price`, `time_stop_bars`, `factor`, and `bars_held` (schema + tolerant ALTER migration, NULL on existing rows, never guessed). Both entry sites persist exit state beside the position, `bars_held` persists per closed bar so the time-stop clock survives, and `Engine::rehydrate_open_positions` seeds `open_positions_` at construction from every `qty != 0` row, so the first `handle_bar_close` after a restart manages the position.

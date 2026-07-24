@@ -14,6 +14,58 @@ Commit message:
 
 ---
 
+## Prompt: Fast-tier DNN denominator
+
+Date: 2026-07-23
+Model: Fable 5. The prompt specified Opus; the session runs on Fable 5 and this line records that.
+Prompt summary: the fix for the 2026-07-21 fast-tier composition diagnostic, run after position rehydration landed (confirmed in the tree at ddac55f before proceeding). On the fast tier compose_gate_verdict excludes the un-run council from the confidence denominator but not the benched dnn_advisory, whose 0.15 weight stays in the denominator while it returns confidence 0.0, so the fast-tier ceiling (0.60 at an unreachable whale 1.0) sits below the 0.65 floor under every input and 27 of 27 fast-tier candidates blocked. Six tasks: establish how the code distinguishes an absent factor from an uncertain one and fix that first if they are indistinguishable, keying exclusion off participation and never off the value 0.0; exclude a non-participating dnn_advisory from the confidence and edge denominator by the council_ran mechanism and report the composition before and after for the four recorded blocked candidates; sweep every other factor for the same shape; bound the effect against the unmoved 0.65 floor and the 27 recorded blocks; add a mutation-tested guard both directions; verify against the baselines and report. min_confidence_default 0.65 is Level 1 and stays exactly as shipped. Live trading stays off.
+
+**HEADLINE: the states were distinguishable on the wire and indistinguishable downstream, which was the defect. The bridge's /score/dnn response has carried "benched": true since the 2026-07-18 bench gate, and the C++ engine discarded it, so a benched dnn and a live dnn reporting 0.0 were the same signal by the time composition ran. The fix carries participation end to end: the service reports it, the engine reads it onto the FactorSignal, and compose_gate_verdict drops a non-participating factor from the confidence and edge denominator exactly as it drops the un-run council. No weight, threshold, or Level 1 value changed. Projected on the 27 recorded fast-tier blocks: 12 now clear the unchanged 0.65 floor, 15 still fail, and every one still passes through the unchanged RiskGate.**
+
+Changes:
+
+TASK 1, ABSENT vs UNCERTAIN. How the code distinguished them BEFORE: Python-side fully (score_state returns "benched": true with a reason, zeroed aliases, raw outputs visible; _unavailable returns "available": false with a reason), C++-side not at all. gather_factors read only bias/confidence/edge off the response, so downstream a benched dnn was byte-identical to a live dnn returning 0.0 on its own signal. That indistinguishability is the defect and was fixed FIRST: FactorSignal gains `participating` (default true), the dnn response now carries an explicit "participating" key (false when benched or unavailable, true when serving), and the engine reads it. The exclusion keys off this flag, never off the value 0.0: a participating factor reporting 0.0 stays in the denominator, pinned by the guard.
+
+TASK 2, THE EXCLUSION. compose_gate_verdict gains a third composable exclusion beside drop_rule_based and drop_council: a signal with participating=false leaves the confidence/edge subset on BOTH tiers (a structural zero is structural on either tier). Bias, verdict, and agreement stay from the full set, so agreement is never eased. The four recorded blocked candidates, before -> after (scale 0.43/0.28 = 1.536, exact because the benched dnn contributed 0 to the numerator while its 0.15 weight sat in the denominator, and the rule_based share floor never triggers on either side, 0.419 before and 0.643 after both above 0.35):
+- UNI/USD 0.5090 -> 0.7817, clears
+- ETH/USD 0.4878 -> 0.7491, clears
+- SOL/USD 0.4272 -> 0.6560, clears
+- SPY 0.2989 -> 0.4590, still blocked
+No weight changed, no threshold changed, no Level 1 value changed.
+
+TASK 3, THE SWEEP, factor by factor:
+- **llm_primary/secondary/tertiary**: already excluded when the council did not run (the 2026-07-15 council_ran mechanism). An operator-disabled provider slot is dropped from the ensemble entirely. NOT the defect.
+- **dnn_advisory**: HAD the defect on both tiers. FIXED here, both the benched state and the unavailable-service state ("participating": false in both response shapes).
+- **whale_signal**: LEFT IN, with reason. Whale's zero-confidence "quiet" read is a MEASUREMENT (feeds on, adapters ran, nothing relevant observed), not absence: excluding it would inflate confidence on setups whale genuinely has nothing to support, exactly the inflation Task 1 forbids. Structural absence (no feed enabled) cannot occur on the real path: strict mode ties on-real whale to SEC_EDGAR_ENABLED at startup, an operator-disabled whale layer leaves the ensemble via the layer toggle (already out of the denominator), and on-mock is an explicit choice that participates by design.
+- **rl_advisory**: NOT the defect, doubly. It joins the ensemble only when rl_enabled, and combine() skips any factor whose normalized weight is <= 0, so the shipped 0.0 weight never enters the denominator even if enabled.
+- **rule_based**: native, always computed in-process, has no benched or unavailable state.
+- **Named and left**: a mid-run bridge failure (HTTP error) leaves a factor on its deterministic mock, which participates as a mock. That is the documented degradation path (strict mode covers startup), distinct from the confident-zero shape, and changing it is a feed-availability decision outside this scope.
+
+TASK 4, THE BOUND. Projected against the 27 recorded fast-tier confidence blocks: 12 clear the unchanged 0.65 floor (max projected 0.8209, LDO/USD), 15 still fail (min 0.459). The fast tier goes from structurally impossible (ceiling 0.60 below the floor under every input) to reachable, so the fast-tier trade rate rises from zero to a nonzero rate on the order of several entries per day at recent candidate volume, WHICH IS THE INTENDED CORRECTION, not tuning: the floor did not move, a candidate that still composes below 0.65 still fails, and every clearing candidate is still evaluated by the unchanged RiskGate on confidence, edge, agreement, and every hard limit (a projected "clears" here passed only the confidence comparison; the gate's other refusals still apply). The council tier's six historical entries composed with a participating-shaped ensemble and are unaffected retroactively; going forward a benched dnn leaves the council-tier denominator too, which raises council-tier composed confidence the same principled way.
+
+TASK 5, GUARD, in tests/test_fast_tier_confidence.cpp (Case 4, 8 new assertions): a benched dnn (participating=false) leaves the denominator and the fast tier clears the unchanged floor; a PARTICIPATING dnn with the SAME zeros stays in the denominator and still gates; the two diverge keyed off the flag; bias and agreement identical; the council tier excludes the benched dnn and stays the plain combine when everything participates. MUTATIONS KILLED by file-copy rollback: (A) restoring the old denominator (non-participating stays in) fails 3 assertions; (B) keying exclusion off the value 0.0 (excludes a participating factor) fails 2 assertions including the no-inflation pin. Restored and re-verified green, diff-identical. Python pins in tests/test_abstention_and_bench.py: benched response carries participating false, serving response carries participating true.
+
+TASK 6, VERIFY. pytest 894 passed (the P13 baseline, no new Python test count change beyond the added assertions). ctest 24/27 under the operator's committed active_quant profile, the same three known failures (config, tuner_floor, market_hours_entry). Offline synthetic runs behaviorally IDENTICAL to the recorded baselines in both profiles (active_quant Trades=6 Blocked=2 Events=35, swing Trades=108 Blocked=204 Events=1222): the offline mocks all participate, so the exclusion changes nothing there, which is the intended containment. The live-path effect (fast tier reachable) is the intended effect and is reported above rather than tuned back. The operator strategy.profile edit was left exactly as found.
+
+NOT touched: RiskGate logic, the live-trading gate, the adaptive limit-weakening invariant, min_confidence_default 0.65, any weight, any threshold. Live trading stays off.
+
+VERIFICATION (2026-07-23):
+
+| Check | Result |
+| --- | --- |
+| pytest | 894 passed |
+| ctest (operator's active_quant edit) | 24/27, same three known failures |
+| Offline synthetic, active_quant | Trades=6 Blocked=2 Events=35, identical |
+| Offline synthetic, swing | Trades=108 Blocked=204 Events=1222, identical |
+| Mutation A (old denominator restored) | KILLED, 3 assertions fail |
+| Mutation B (exclusion keyed off 0.0) | KILLED, 2 assertions fail |
+| Four recorded candidates | 0.509/0.488/0.427 clear at 0.782/0.749/0.656; 0.299 stays blocked at 0.459 |
+| 27 recorded fast-tier blocks | 12 clear, 15 still fail, floor unmoved |
+
+Commit message: `Exclude non-participating factors from the confidence denominator, fast tier can reach the unchanged Level 1 floor, live trading untouched`
+
+---
+
 ## Prompt: Position rehydration
 
 Date: 2026-07-23

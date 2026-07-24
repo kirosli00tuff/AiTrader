@@ -372,6 +372,14 @@ std::vector<signal_engine::FactorSignal> Engine::gather_factors(
                                                     s.confidence));
                 s.edge = std::max(0.0, bridge::json_get_number(*resp, "edge",
                                                                s.edge));
+                // ABSENT vs UNCERTAIN (2026-07-23): the service reports its
+                // own participation (false = benched model or unavailable
+                // service, so its zeros are structural). compose_gate_verdict
+                // drops a non-participating factor from the confidence/edge
+                // denominator. Missing key means participating, so a service
+                // that predates the flag keeps today's behavior.
+                s.participating =
+                    bridge::json_get_bool(*resp, "participating", true);
             }
         }
 

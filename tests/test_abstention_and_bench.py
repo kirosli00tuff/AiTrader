@@ -193,6 +193,10 @@ def test_synthetic_champion_contributes_exactly_zero(tmp_path, monkeypatch):
     assert out["bias"] == 0.0
     assert out["confidence"] == 0.0
     assert out["edge"] == 0.0
+    # ABSENT, not uncertain: a benched factor reports it did NOT participate,
+    # so the engine drops it from the confidence denominator instead of
+    # averaging in a confident zero.
+    assert out["participating"] is False
     # Raw stays visible and the model really scored: the confidence head is
     # structurally positive (softmax max_p >= 0.2), so a served raw read is
     # provably distinct from the zeroed unavailable payload.
@@ -214,6 +218,7 @@ def test_real_trained_champion_contributes_normally(tmp_path, monkeypatch):
                       provenance="real-data")
     out = _fresh_score(monkeypatch, db)
     assert out["benched"] is False
+    assert out["participating"] is True
     assert out["bias"] == out["dnn_action_bias"]
     assert out["confidence"] == out["dnn_confidence"]
 

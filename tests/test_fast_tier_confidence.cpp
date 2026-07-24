@@ -106,5 +106,56 @@ int main() {
                    "council_ran=true equals the full-ensemble combine (council "
                    "tier untouched)");
 
+    // --- Case 4: ABSENT vs UNCERTAIN (2026-07-23). A NON-PARTICIPATING dnn ---
+    // (benched: structural zeros, participating=false) leaves the confidence
+    // denominator, exactly as the un-run council does. A PARTICIPATING dnn
+    // reporting the SAME zeros is an opinion and STAYS in the denominator, so
+    // a genuinely weak setup is not inflated. The two must diverge, and the
+    // divergence must key off the flag, never off the value 0.0.
+    std::vector<FactorSignal> absent = {
+        {"rule_based", 0.55, 0.88, 0.075, true},   // fast-tier native cap
+        {"llm_primary", 0.05, 0.50, 0.01, true},   // un-consulted council mock
+        {"llm_secondary", 0.05, 0.50, 0.01, true},
+        {"llm_tertiary", 0.05, 0.50, 0.01, true},
+        {"dnn_advisory", 0.0, 0.0, 0.0, false},    // BENCHED: did not participate
+        {"whale_signal", 0.30, 0.518, 0.02, true}, // live whale read
+    };
+    std::vector<FactorSignal> uncertain = absent;
+    uncertain[4].participating = true;  // same zeros, but a served opinion
+
+    auto absent_fast = compose_gate_verdict(absent, w, /*native_feeds_gate=*/true,
+                                            0.05, kRuleFloor,
+                                            /*council_ran=*/false);
+    auto uncertain_fast = compose_gate_verdict(uncertain, w, true, 0.05,
+                                               kRuleFloor, /*council_ran=*/false);
+    maltest::check(absent_fast.confidence >= kMinConfidence,
+                   "a benched dnn no longer holds the fast tier below the "
+                   "unchanged floor");
+    maltest::check(uncertain_fast.confidence < kMinConfidence,
+                   "a PARTICIPATING low-confidence dnn stays in the denominator "
+                   "and still gates (no inflation on a weak setup)");
+    maltest::check(absent_fast.confidence > uncertain_fast.confidence,
+                   "absent and uncertain diverge, keyed off participation");
+    maltest::check(std::fabs(absent_fast.bias - uncertain_fast.bias) < 1e-9,
+                   "bias identical: participation only reweights confidence/edge");
+    maltest::check(absent_fast.agreement_count == uncertain_fast.agreement_count,
+                   "agreement identical: participation never eases agreement");
+
+    // Council tier: the benched dnn leaves the denominator there too (its zero
+    // is structural on either tier), while a participating one keeps the plain
+    // full-ensemble combine.
+    auto absent_council = compose_gate_verdict(absent, w, true, 0.05, kRuleFloor,
+                                               /*council_ran=*/true);
+    auto uncertain_council = compose_gate_verdict(uncertain, w, true, 0.05,
+                                                  kRuleFloor,
+                                                  /*council_ran=*/true);
+    maltest::check(absent_council.confidence > uncertain_council.confidence,
+                   "council tier: benched dnn excluded from the denominator");
+    maltest::check(std::fabs(uncertain_council.confidence -
+                             combine(uncertain, w, 0.05, kRuleFloor).confidence) <
+                       1e-9,
+                   "council tier with every factor participating stays the plain "
+                   "full-ensemble combine");
+
     return maltest::report("fast_tier_confidence");
 }
