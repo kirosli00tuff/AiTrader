@@ -60,6 +60,9 @@ SOURCES = ("mock", "real")
 # away from alpaca_paper with an open position is refused (never orphans it).
 FEED_MODES = ("alpaca_paper", "synthetic_regimes", "replay", "flat_random_walk")
 CLOCK_MODES = ("real", "simulated")
+# The strategy profile's runtime lever (2026-07-23): validated allowlist, so
+# a hand-edited control file can never select an unknown profile.
+STRATEGY_PROFILES = ("swing", "active_quant")
 def _council_models() -> tuple[str, ...]:
     """The three council model ids straight from config (llm_primary/secondary/
     tertiary), so the per-model toggle keys never drift from the configured
@@ -211,6 +214,19 @@ def _defaults() -> dict:
         "feed_mode": feed if feed in FEED_MODES else "alpaca_paper",
         "clock_mode": clock if clock in CLOCK_MODES else "real",
         "models": {m: True for m in COUNCIL_MODELS},
+        # THE STRATEGY PROFILE'S RUNTIME LEVER (2026-07-23). Seeded from
+        # config (which ships swing), overridden here by the operator, read
+        # by core/profile_controls.hpp at engine startup and by
+        # market_data.universe.resolved_profile on the Python side. This is
+        # the lever the profile lacked: its only mechanism was editing the
+        # SHIPPED default, and that edit got swept into a commit (440fda8).
+        # Flat and unique across the written file (the engine's reader is a
+        # flat search); validated so a hand-edited file can never select an
+        # unknown profile.
+        "strategy_profile": (
+            str((cfg.get("strategy", {}) or {}).get("profile", "swing"))
+            if str((cfg.get("strategy", {}) or {}).get("profile", "swing"))
+            in STRATEGY_PROFILES else "swing"),
         "gate_enabled": bool(llm.get("gate_enabled", True)),
         "auto_promote": bool(adaptive.get("dnn_auto_promote_if_better", False)),
         "rl_enabled": bool(rl.get("rl_enabled", False)),
@@ -370,6 +386,8 @@ def read_controls() -> dict:
         state["feed_mode"] = saved["feed_mode"]
     if saved.get("clock_mode") in CLOCK_MODES:
         state["clock_mode"] = saved["clock_mode"]
+    if saved.get("strategy_profile") in STRATEGY_PROFILES:
+        state["strategy_profile"] = saved["strategy_profile"]
     for k in ("pending_promote", "pending_rollback"):
         if k in saved:
             state[k] = saved[k]

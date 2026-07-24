@@ -58,6 +58,29 @@ _DEFAULT_CORE = "BTC/USD,ETH/USD,SPY,QQQ"
 
 # --- the declared sets -------------------------------------------------------
 
+def resolved_profile(cfg_path: str | None = None) -> str:
+    """THE strategy profile, resolved the way the engine resolves it
+    (2026-07-23): the control-file ``strategy_profile`` key wins, config
+    seeds. Mirrors core/profile_controls.hpp + main.cpp so both halves read
+    the same resolved value. An unreadable control file or an invalid value
+    means NO OVERRIDE, config decides (the precedence rule; the fallback
+    decision is recorded in CONTEXT.md). Read fresh per call: a hand-edited
+    profile takes effect per process start, and the engine applies it on its
+    NEXT start, so switch profiles through a stack restart."""
+    override = ""
+    try:
+        from llm_consensus import control_file
+        raw = str(control_file.control_state().get("strategy_profile") or "")
+        if raw in ("swing", "active_quant"):
+            override = raw
+    except Exception:  # noqa: BLE001 - unreadable means no override
+        override = ""
+    if override:
+        return override
+    from llm_consensus.config_access import config_block
+    return str(config_block("strategy", cfg_path).get("profile", "swing"))
+
+
 def declared_core(cfg_path: str | None = None) -> list[str]:
     """The config-declared core, profile-resolved. DECLARED, not verified.
 
@@ -70,7 +93,9 @@ def declared_core(cfg_path: str | None = None) -> list[str]:
     from llm_consensus.config_access import config_block
     strat = config_block("strategy", cfg_path)
     raw = str(strat.get("whitelist", _DEFAULT_CORE))
-    if str(strat.get("profile", "swing")) == "active_quant":
+    # The profile resolves through the control-file lever (2026-07-23), so
+    # both language halves key off the same resolved value.
+    if resolved_profile(cfg_path) == "active_quant":
         aq = config_block("active_quant", cfg_path)
         raw = str(aq.get("whitelist", raw) or raw)
     out: list[str] = []

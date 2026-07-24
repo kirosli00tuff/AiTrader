@@ -24,6 +24,7 @@
 #include "core/engine.hpp"
 #include "core/adaptive_controls.hpp"
 #include "core/layer_toggles.hpp"
+#include "core/profile_controls.hpp"
 
 namespace {
 std::string arg_value(int argc, char** argv, const std::string& flag,
@@ -169,7 +170,32 @@ int main(int argc, char** argv) {
         // decisive). The flag exists for cost measurement and the guard test.
         bool no_entry_recording = arg_flag(argc, argv, "--no-entry-recording");
 
+        // THE PROFILE'S RUNTIME LEVER (2026-07-23). Resolve the strategy
+        // profile through the control-file precedence path: load config once
+        // to learn the control dir, read the flat strategy_profile key, and
+        // when a valid override exists reload with it applied so the
+        // active_quant overlay keys off the RESOLVED profile. Startup-only:
+        // the profile is never re-read mid-run, so an unreadable file can
+        // never switch a running strategy (see core/profile_controls.hpp and
+        // CONTEXT.md for the fallback decision). The banner below prints the
+        // resolved profile WITH its source.
         auto cfg = mal::config::load_config(cfg_path);
+        std::string profile_source = "config";
+        {
+            const char* cdenv = std::getenv("MAL_CONTROL_DIR");
+            const std::string cdir = (cdenv && *cdenv)
+                ? std::string(cdenv)
+                : (cfg.system.control_dir.empty() ? std::string(".control")
+                                                  : cfg.system.control_dir);
+            const std::string ov = mal::core::resolve_profile_override(
+                cdir + "/controls.json");
+            if (!ov.empty() && ov != cfg.strategy.profile) {
+                cfg = mal::config::load_config(cfg_path, ov);
+                profile_source = "control file";
+            } else if (!ov.empty()) {
+                profile_source = "control file (matches config)";
+            }
+        }
 
         mal::core::EngineOptions opts;
         opts.db_path = db_path;
@@ -335,7 +361,8 @@ int main(int argc, char** argv) {
                 << "  regime:    ADX>=" << st.regime_adx_trend
                 << " trending / rvol>=" << st.regime_rvol_high << " range-bound"
                 << " (leads: trending->momentum, range->reversion, neutral->blend)\n"
-                << "  profile:   " << st.profile << "  (reversion=" << st.reversion_style
+                << "  profile:   " << st.profile << " [" << profile_source
+                << "]  (reversion=" << st.reversion_style
                 << ", dual-MA momentum=" << (st.momentum_dual_ma_filter ? "on" : "off")
                 << ")\n"
                 << "  rsi-2:     period " << st.rsi2_period << " entry crypto<"

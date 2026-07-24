@@ -134,7 +134,7 @@ strategy:
   # (RSI-2 reversion + dual-MA momentum, two-tier + spend-ceiling cost controls,
   # wider whitelist). Default stays swing so nothing changes silently. The
   # active_quant block below is applied ONLY when profile is active_quant.
-  profile: active_quant
+  profile: swing
   momentum_enabled: true
   reversion_enabled: true
   # Which mean-reversion factor the reversion slot uses: bollinger (default) or

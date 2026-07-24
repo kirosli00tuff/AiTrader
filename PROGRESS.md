@@ -134,6 +134,14 @@ New flags from the feed-work session (2026-07-05, `369b6a6`):
 
 ## Session Log
 
+### 2026-07-24 (Fable 5) — The profile gets its runtime lever, the shipped config is restored, and the three-test allowlist dissolves clean
+
+- **The premise sharpened:** the "uncommitted operator edit" was swept into commit 440fda8 on 2026-07-21, so the tree SHIPPED active_quant for three days while the failing tests were excused as an operator artifact. The allowlist masked no regression: all three failures reproduce their first-excusal assertions exactly, and ctest reads 29/29 the moment the shipped profile is restored. No allowlist remains.
+- **The lever:** flat controls.json `strategy_profile` (swing | active_quant, validated), read at startup by `core/profile_controls.hpp` + `main.cpp` (applied as load_config's profile override so the overlay keys off the resolved value) and per call by `market_data.universe.resolved_profile` on the Python side. The writer seeds it from config and emits it once; the key-uniqueness scrape covers it automatically. The banner prints the resolved profile with its source.
+- **Fallback decided, not copied:** unreadable means config decides, safe HERE because the profile resolves once at startup and can never switch a running strategy mid-session; the restart-time residual is made loud (source-labelled banner) rather than prevented, since fail-stop would make an advisory file load-bearing for liveness. Recorded in CONTEXT.md.
+- **Restored and proven:** yaml back to `profile: swing`, the running choice moved into `.control/controls.json`. Swing yaml + lever active_quant reproduces Trades=6 Blocked=2 Events=35 exactly; the swing default reproduces 108/204/1222. Guards on both halves pin the shipped profile, the override, and the anti-edit mechanism.
+- **Verified:** pytest 906 (902 + 4), ctest 29/29 against the shipped config. The UI does not read the profile, so vitest/tsc were out of scope. NOT touched: RiskGate logic, the live-trading gate, the adaptive limit-weakening invariant, Level 1 values. Live trading stays off.
+
 ### 2026-07-23 (Fable 5) — Every cost estimate carries the measured value, and the equity session finally gets Stage-C budget it can use
 
 - **Calibration:** `discovery_est_cost_per_call_usd` 0.04→0.056 and `research_est_cost_per_call_usd` 0.08→0.056, in the yaml and every fallback default (C++, settings.py, config_access.py, controls.py). Recomputed rather than assumed: pricing unchanged since the calibration, prompt-text recomputation over 46 rounds gives $0.043 as a floor (Opus thinking tokens bill unpersisted), the usage-measured $0.05618 stands. Nothing raised: the combined worst-case projection is now ~$97/month, honestly UNDER the $100 backstop (the mixed estimates read ~$102). No independent copy of either old value remains, pinned by test.

@@ -128,7 +128,8 @@ std::vector<std::string> split_csv(const std::string& s) {
 
 }  // namespace
 
-Config load_config(const std::string& path) {
+Config load_config(const std::string& path,
+                   const std::string& profile_override) {
     auto root = load_yaml_file(path);
     Config c;
 
@@ -219,6 +220,12 @@ Config load_config(const std::string& path) {
     // strategy (native signal layer — evaluated on closed bars only)
     auto& st = c.strategy;
     st.profile = get_str(root, "strategy.profile", st.profile);
+    // The runtime lever wins over the shipped default (the control-file
+    // precedence rule, per key). Applied HERE, before the active_quant
+    // overlay below, so the overlay keys off the RESOLVED profile. Empty
+    // means no override; an invalid value was refused upstream
+    // (core/profile_controls.hpp) and validation below still applies.
+    if (!profile_override.empty()) st.profile = profile_override;
     st.momentum_enabled = get_bool(root, "strategy.momentum_enabled", st.momentum_enabled);
     st.reversion_enabled = get_bool(root, "strategy.reversion_enabled", st.reversion_enabled);
     st.reversion_style = get_str(root, "strategy.reversion_style", st.reversion_style);

@@ -527,7 +527,14 @@ struct Config {
 // Load + validate. Throws std::runtime_error with a precise reason on any
 // invalid or unsafe value. On success the returned config is guaranteed
 // internally consistent (e.g. live disabled by default everywhere).
-Config load_config(const std::string& path);
+// profile_override: the runtime strategy-profile lever (2026-07-23), resolved
+// from controls.json by core/profile_controls.hpp and applied here so the
+// active_quant overlay keys off the RESOLVED profile. Empty means no override
+// (config decides), which keeps every existing caller and every test
+// hermetic: an explicit cfg_path with no override pins the file exactly as
+// before. An invalid override is refused upstream and never reaches here.
+Config load_config(const std::string& path,
+                   const std::string& profile_override = "");
 
 // Validate an already-populated config. Returns an empty vector when valid,
 // otherwise a list of human-readable problems. Pure: no side effects.

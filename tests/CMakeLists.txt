@@ -200,6 +200,14 @@ target_link_libraries(test_provenance PRIVATE mal_storage mal_util
 add_test(NAME provenance COMMAND test_provenance
          WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 
+# The strategy profile's runtime lever (2026-07-23): the shipped config
+# carries the shipped profile (swing), controls.json strategy_profile
+# overrides at load, invalid/missing means config decides.
+add_executable(test_profile_lever test_profile_lever.cpp)
+target_link_libraries(test_profile_lever PRIVATE mal_config mal_bridge)
+add_test(NAME profile_lever COMMAND test_profile_lever
+         WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
 # Entry-decision recording is recording only (2026-07-23): decisions identical
 # with recording on and off in both profiles, a rejected candidate persists a
 # row with its first refusal and full condition state, and an entered row

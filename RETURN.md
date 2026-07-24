@@ -14,6 +14,47 @@ Commit message:
 
 ---
 
+## Prompt: Config divergence and test allowlist
+
+Date: 2026-07-24
+Model: Fable 5. The prompt specified Opus; the session runs on Fable 5 and this line records that.
+Prompt summary: the operator's strategy.profile edit and the three-test ctest allowlist it created. Six tasks: verify the allowlist masks no fresh regression by reporting each failure's actual assertion against its first-excusal reason; give strategy.profile a control-file runtime lever on both language halves; decide whether the standard unreadable-means-config fallback is safe for a profile selector before applying it; restore the shipped config and prove behavior unchanged through the lever, reporting whether ctest reads clean; guard the shipped profile, the override on both sides, and against the edit mechanism returning; verify and report. Live trading stays off.
+
+**HEADLINE: the premise was stale in a way that strengthens the finding. The profile edit is not an uncommitted local edit: it was swept into commit 440fda8 on 2026-07-21, so the tree SHIPPED active_quant for three days while every test that asserts shipped defaults kept failing under a label that called it an operator artifact. The allowlist masked no regression: all three failures reproduce their first-excusal assertions exactly and all three pass the moment the profile reverts, proven by ctest 29 of 29 against the restored shipped config. The profile now has the runtime lever the pattern demanded: controls.json strategy_profile, read by both halves, with the operator's running choice preserved through it and the shipped file back to swing.**
+
+Changes:
+
+TASK 1, THE ALLOWLIST AUDIT. Actual failures under the active_quant config, assertion by assertion: `config` fails five shipped-default pins (default profile is swing, bollinger reversion, dual-MA off, no fast-tiering, spend ceilings disabled); `tuner_floor` fails "synthetic run keeps generating native entries past 100 closed trades" (active_quant closes ~3 on that tape, the recorded selectivity, and the fast-tier fix cannot change it because offline mocks all participate); `market_hours_entry` fails "crafted equity entry executed IN US hours" and its dependent exit assertion (the crafted swing setup never fires under active_quant). Each matches its first-excusal reason from the 2026-07-21 verification session. NO FRESH REGRESSION hides behind the label: with the shipped profile restored, ctest reads 29 of 29 (28 prior tests plus the new lever test). THE REAL FINDING is upstream of the label: the "operator edit" stopped being an edit on 2026-07-21 when commit 440fda8 absorbed it, so the excuse "we run against the operator's edited file" was, for three days, "the shipped file itself is wrong". The allowlist did its job on content and failed on provenance.
+
+TASK 2, THE LEVER. Flat controls.json key `strategy_profile` (validated to swing | active_quant), following the established pattern: C++ reads it in `core/profile_controls.hpp` (scraped by the key-uniqueness guard like every core reader) and `main.cpp` applies it as `config::load_config`'s new profile_override so the active_quant overlay keys off the RESOLVED profile; Python resolves through `market_data.universe.resolved_profile` (control_state first, config seed), which `declared_core` now uses, so the whitelist, the watchdog, and the GUI see the same profile the engine runs. The writer (`api_server/controls.py`) seeds the key from config and emits it exactly once, which the existing uniqueness scrape now enforces automatically. The startup banner prints the resolved profile WITH its source: `profile: active_quant [control file]`.
+
+TASK 3, THE FALLBACK DIRECTION, decided before applying the pattern. The standard direction (unreadable means no override, config decides) IS correct here, for a reason specific to this key: the profile is resolved ONCE at startup and never re-read mid-run, because it derives the whitelist, the indicator stack, and the warm thresholds, so an unreadable control file CANNOT silently switch a running strategy mid-session by construction. The residual hazard is across a restart: an automated restart with a torn or unreadable control file would come up in swing while the operator expects active_quant. That hazard is accepted and made LOUD rather than prevented: the banner and the config load label the resolved profile with its source, so a wrong-profile start is visible on the first line an operator or a log reader sees. The alternative, refusing to start on an unreadable control file, was rejected: it converts a transient file problem into a dead stack, the exact failure shape the 2026-07-20 postmortem forbids, and it would make the control file load-bearing for liveness when the whole design keeps it advisory. An invalid value is refused, never guessed. Recorded in CONTEXT.md.
+
+TASK 4, THE RESTORE. config/default_config.yaml is back to `profile: swing` (the single line 440fda8 absorbed), and the operator's running choice moved into the lever: `.control/controls.json` now carries `strategy_profile: active_quant`, written through the module's own atomic validated writer. BEHAVIOR UNCHANGED ACROSS THE SWITCH, proven on the deterministic synthetic feed: swing yaml + control-file active_quant produces Trades=6 Blocked=2 Events=35, byte-identical to the recorded active_quant baseline, with the banner reading `active_quant [control file]`; the swing default (empty control dir) produces Trades=108 Blocked=204 Events=1222, identical to the recorded swing baseline. ctest against the restored shipped config: 29 of 29. NOTHING in the three excused tests was a real failure: every one passes under the config it asserts.
+
+TASK 5, GUARDS. C++ `test_profile_lever` (ctest): the shipped config carries the shipped profile (the guard that fails if a future session reintroduces a yaml profile edit, committed or not, as the mechanism), the override applies the overlay at load (rsi2, eight-name core), an invalid value is refused, a missing file means config decides. Python `tests/test_profile_lever.py`: same shipped-profile guard from the Python side, the override resolves the eight-name core, invalid/absent falls back to swing, and the controls writer round-trips the key emitting it exactly once. The existing key-uniqueness scrape picked up the new core reader automatically (it globs core/*_controls.hpp), so a duplicate or never-emitted `strategy_profile` fails the precedence suite.
+
+TASK 6, VERIFY. pytest 906 passed (902 baseline + 4 new). ctest 29 of 29 against the restored shipped config, no allowlist left. Offline synthetic baselines identical in both profiles, reported in Task 4. The UI does not read the profile (no web/src reference), so vitest and tsc were out of scope by the prompt's own condition. The week-config materializer (api_server/stack.materialize_week_config) still writes its explicit active_quant file and stays coherent with the lever (same value, override is a no-op there).
+
+NOT touched: RiskGate logic, the live-trading gate, the adaptive limit-weakening invariant, Level 1 values, any threshold. The profile the stack RUNS is unchanged: active_quant, now expressed through the lever instead of the shipped file. Live trading stays off.
+
+VERIFICATION (2026-07-24):
+
+| Check | Result |
+| --- | --- |
+| pytest | 906 passed (902 + 4 new) |
+| ctest (restored shipped config) | 29 of 29, allowlist gone |
+| Three excused failures | same first-excusal assertions, no fresh regression |
+| The edit's provenance | committed in 440fda8, not uncommitted as believed |
+| Lever baseline (swing yaml + control active_quant) | Trades=6 Blocked=2 Events=35, identical |
+| Swing baseline | Trades=108 Blocked=204 Events=1222, identical |
+| Banner | prints resolved profile with source |
+| Uniqueness scrape | covers strategy_profile automatically |
+
+Commit message: `Give the strategy profile a runtime lever, restore the shipped config, verify the test allowlist masks nothing, live trading untouched`
+
+---
+
 ## Prompt: Discovery budget allocation and cost estimates
 
 Date: 2026-07-23
