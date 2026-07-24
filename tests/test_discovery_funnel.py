@@ -290,12 +290,19 @@ def test_daily_budget_binds_across_passes(tmp_path):
     assert any(d.reason == "daily_budget_exhausted" for d in result.drops)
 
 
-def test_exhausted_budget_makes_no_council_call_at_all(tmp_path):
+def test_exhausted_budget_makes_no_gate_or_council_call_at_all(tmp_path):
+    # 2026-07-23: the short-circuit moved BEFORE Stage B. The old behavior
+    # (gate still ran on an exhausted budget) paid 12 Haiku calls per dead
+    # pass to produce survivors Stage C could never evaluate — 75 recorded
+    # passes did exactly that. Stage B exists to feed Stage C; with no Stage C
+    # possible it buys nothing, so the finalists drop un-gated with the true
+    # reason and the pass record still shows the funnel looked.
     cfg = _write_cfg(tmp_path, discovery_daily_council_budget=4)
     evaluator = SpyEvaluator()
+    gate = SpyGate()
     snaps = [_snap(f"S{i}", change_pct=5.0 - i * 0.1) for i in range(4)]
 
-    result = funnel.run_pass("equity", snapshots=snaps, gate=SpyGate(),
+    result = funnel.run_pass("equity", snapshots=snaps, gate=gate,
                              evaluator=evaluator, calls_used_today=4,
                              cfg_path=cfg)
 
@@ -303,9 +310,12 @@ def test_exhausted_budget_makes_no_council_call_at_all(tmp_path):
     assert result.council_calls == 0
     assert evaluator.seen == []
     assert result.est_cost_usd == 0.0
-    # The cheap gate still ran: it costs fractions of a cent, and its result is
-    # what tells the operator the funnel was working when the budget ran out.
-    assert result.gate_calls > 0
+    assert result.gate_calls == 0
+    assert gate.seen == []
+    assert any(d.reason == "daily_budget_exhausted" for d in result.drops)
+    # Stage A still recorded the finalists, so the operator sees the funnel
+    # looked and why nothing was spent.
+    assert result.finalists
 
 
 def test_evaluator_error_drops_one_without_killing_the_pass(tmp_path):

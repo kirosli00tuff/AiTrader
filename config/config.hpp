@@ -326,7 +326,8 @@ struct SleeveConfig {
     double research_conviction_threshold = 0.70;  // min council conviction to open a satellite position
     int research_passes_per_day = 3;              // scheduled deep-research passes per day
     int research_daily_budget = 6;                // max deep-research council calls per day
-    double research_est_cost_per_call_usd = 0.08; // deep research is pricier per call
+    double research_est_cost_per_call_usd = 0.056; // the same council, the same
+                                                   // MEASURED per-round cost
     // Rebalancing (trims the overweight sleeve through the normal exit path).
     bool rebalance_on_drift = true;               // drift-band trigger
     int rebalance_check_minutes = 360;            // scheduled check cadence
@@ -375,7 +376,7 @@ struct DiscoveryConfig {
     // council budget, so discovery can never eat the quant loop's calls. Sized
     // with the trading budget so combined monthly spend stays near the target.
     int discovery_daily_council_budget = 12;
-    double discovery_est_cost_per_call_usd = 0.04;
+    double discovery_est_cost_per_call_usd = 0.056;  // MEASURED per-round cost
     // Cadence. Crypto runs hourly around the clock. Equities run at the US
     // session open and hourly through US regular hours only.
     int crypto_interval_minutes = 60;

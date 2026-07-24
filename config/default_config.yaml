@@ -364,7 +364,9 @@ sleeves:
   research_conviction_threshold: 0.70       # min council conviction to open a satellite position
   research_passes_per_day: 3
   research_daily_budget: 6                  # deep-research council calls per day
-  research_est_cost_per_call_usd: 0.08
+  # The same council, so the same MEASURED $0.056/round (2026-07-23; the old
+  # 0.08 overstated research spend by 43% against the combined ceiling).
+  research_est_cost_per_call_usd: 0.056
   rebalance_on_drift: true
   rebalance_check_minutes: 360
   combined_monthly_spend_ceiling_usd: 100.0 # pauses BOTH sleeves when reached (0=off)
@@ -429,16 +431,29 @@ discovery:
   # Daily discovery council budget. SEPARATE from and ADDITIVE to the trading
   # council budget (council.council_daily_budget), so a discovery pass can never
   # eat the quant loop's calls. Combined monthly estimate at full use, at the
-  # MEASURED $0.056/round (was projected at $0.04, understated by 40 percent):
-  # trading 40/day + discovery 12/day = 52 * $0.056 * 30 = ~$87/month worst case.
-  # Adding the research budget (6/day at $0.08) is +$14/month, so the configured
-  # caps project ~$102/month, marginally OVER the $100
-  # sleeves.combined_monthly_spend_ceiling_usd, which then pauses both sleeves.
-  # Far less in practice: the fast tier and Stage A drop most candidates free,
-  # and measured 72-hour production spend was $2.18. The ceiling is a backstop,
-  # not the operating point.
+  # MEASURED $0.056/round (every estimate now carries the same measured value,
+  # 2026-07-23): trading 40/day + discovery 12/day = 52 * $0.056 * 30 =
+  # ~$87/month worst case. Adding the research budget (6/day at $0.056) is
+  # +$10/month, so the configured caps project ~$97/month, UNDER the $100
+  # sleeves.combined_monthly_spend_ceiling_usd backstop. Far less in practice:
+  # the fast tier and Stage A drop most candidates free, and measured 72-hour
+  # production spend was $2.18. The ceiling is a backstop, not the operating
+  # point.
   discovery_daily_council_budget: 12
-  discovery_est_cost_per_call_usd: 0.04
+  # The same council the trading tier runs, so the same MEASURED per-round
+  # cost (usage-measured $0.05618 over 41 rounds, re-checked 2026-07-23 at
+  # unchanged provider pricing; the persisted-prompt lower bound is $0.043
+  # because Opus thinking tokens bill without being persisted).
+  discovery_est_cost_per_call_usd: 0.056
+  # Of the daily budget, this many Stage-C calls are RESERVED for the equity
+  # session (2026-07-23): crypto runs hourly around the clock and exhausted
+  # the shared pool in the first UTC hours EVERY recorded day, so equities got
+  # 2 lifetime Stage-C calls against 87 crypto. Crypto may not spend into the
+  # reservation while a US session is still ahead or open that UTC day; after
+  # the US close, and on weekends, the unused reservation is RELEASED to
+  # crypto rather than silently expiring. An allocation inside the unchanged
+  # 12-call total, never a raise.
+  discovery_equity_reserved_calls: 4
 
   # Cadence. Crypto runs hourly around the clock (crypto never closes). Equities
   # run at the US session open and hourly through US regular hours only.

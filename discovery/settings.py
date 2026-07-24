@@ -25,7 +25,8 @@ _DEFAULTS: dict[str, object] = {
     "max_survivors": 5,
     "max_council_calls_per_pass": 5,
     "discovery_daily_council_budget": 12,
-    "discovery_est_cost_per_call_usd": 0.04,
+    "discovery_est_cost_per_call_usd": 0.056,
+    "discovery_equity_reserved_calls": 4,
     "crypto_interval_minutes": 60,
     "equity_interval_minutes": 60,
     "prescreen_min_score": 0.15,
@@ -124,6 +125,15 @@ def discovery_daily_council_budget(cfg_path: str | None = None) -> int:
 
 def discovery_est_cost_per_call_usd(cfg_path: str | None = None) -> float:
     return float(_num("discovery_est_cost_per_call_usd", cfg_path))
+
+
+def discovery_equity_reserved_calls(cfg_path: str | None = None) -> int:
+    """Stage-C calls reserved for the equity session, inside the unchanged
+    daily total. Clamped to [0, daily budget] so a misconfigured reservation
+    can never exceed the pool it reserves from."""
+    total = discovery_daily_council_budget(cfg_path)
+    raw = int(_num("discovery_equity_reserved_calls", cfg_path))
+    return max(0, min(raw, total))
 
 
 def crypto_interval_minutes(cfg_path: str | None = None) -> int:

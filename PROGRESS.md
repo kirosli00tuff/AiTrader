@@ -134,6 +134,15 @@ New flags from the feed-work session (2026-07-05, `369b6a6`):
 
 ## Session Log
 
+### 2026-07-23 (Fable 5) — Every cost estimate carries the measured value, and the equity session finally gets Stage-C budget it can use
+
+- **Calibration:** `discovery_est_cost_per_call_usd` 0.04→0.056 and `research_est_cost_per_call_usd` 0.08→0.056, in the yaml and every fallback default (C++, settings.py, config_access.py, controls.py). Recomputed rather than assumed: pricing unchanged since the calibration, prompt-text recomputation over 46 rounds gives $0.043 as a floor (Opus thinking tokens bill unpersisted), the usage-measured $0.05618 stands. Nothing raised: the combined worst-case projection is now ~$97/month, honestly UNDER the $100 backstop (the mixed estimates read ~$102). No independent copy of either old value remains, pinned by test.
+- **The exhaustion, diagnosed:** crypto spent 12/12 in the FIRST UTC hours of every recorded day, always before the 13:30 US open. 18 of 19 equity passes got zero Stage-C calls; the one exception (2026-07-20, the day crypto left 2 unspent) is the only time an equity candidate was ever declined on merit (AMD avoid 0.552, UPS avoid 0.0). Lifetime 87 crypto calls vs 2 equity.
+- **The reservation:** `discovery_equity_reserved_calls: 4` of the unchanged 12. One pure function (`effective_daily_budget`) caps crypto at 8 while a US session is ahead or open that UTC weekday; equities always see 12 and their cadence already restricts them to US hours; after the close and on weekends the unused reservation RELEASES to crypto instead of expiring. Behavior pinned by tests.
+- **Both audit wastes were still live, both fixed contained:** recently-refused (venue-unserviceable) symbols are filtered out of the pass input for 7 days via the journalled refusals, and an exhausted budget now short-circuits BEFORE Stage B (75 recorded passes had paid ~12 Haiku calls each into dead passes). The funnel structure is untouched.
+- **Verified:** pytest 902, ctest 25/28 (same three operator-edit failures), offline baselines identical (discovery ships disabled).
+- NOT touched: RiskGate logic, the live-trading gate, the adaptive limit-weakening invariant, Level 1 values, the 12-call total, any budget or ceiling. Live trading stays off.
+
 ### 2026-07-23 (Fable 5) — The last fabricated market fields leave the real path, and the contaminated volume leaves the ranking
 
 - **spread REMOVED from MarketState outright**: a uniform draw with zero consumers anywhere (traced by file and line), removed rather than zeroed so no future reader can trust it. **imbalance reports absence** (0.0, the scale's no-reading point) on the live feed; its one decision-adjacent reach was the mock factor shaping un-run council slots' bias/agreement on the fast tier, and that term now drops out. Real services never read it (dnn serves from bars since bars-v2, whale never reads the key, the council allowlist never rendered it).

@@ -212,7 +212,7 @@ def fast_tier_max_conviction(cfg_path: str | None = None) -> float:
 _SLEEVE_DEFAULTS: dict[str, float] = {
     "research_conviction_threshold": 0.70,
     "research_daily_budget": 6,
-    "research_est_cost_per_call_usd": 0.08,
+    "research_est_cost_per_call_usd": 0.056,
     "combined_monthly_spend_ceiling_usd": 100.0,
 }
 

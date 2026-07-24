@@ -14,6 +14,49 @@ Commit message:
 
 ---
 
+## Prompt: Discovery budget allocation and cost estimates
+
+Date: 2026-07-23
+Model: Fable 5, as the prompt specified.
+Prompt summary: the two items carried out of the calibration session. Discovery Stage C and the research sleeve price the same council with their own estimates (0.04 understated, 0.08 slightly over the measured 0.056), and crypto runs hourly around the clock and exhausts the shared 12-call Stage C budget before the equity session opens every recorded day, so one asset class is structurally never evaluated. Five tasks: calibrate both estimates to the measured per-round cost recomputed at current pricing, reporting the before/after effective allowance at every ceiling each feeds, raising nothing, confirming no hardcoded copies remain; diagnose the exhaustion by hour and asset class and state whether an equity candidate has ever reached Stage C and been declined on merit; reserve equity budget inside the unchanged total, respecting the US-hours cadence, with reserved budget unspendable outside those hours and never silently expiring; check whether the two ordering wastes from the cost audit are still live and fix what is contained without restructuring the funnel; verify with tests pinning the reservation and the estimates. Live trading stays off.
+
+**HEADLINE: both estimates now carry the measured $0.056/round, 4 of the 12 daily Stage-C calls are reserved for the equity session inside the unchanged total, and both ordering wastes were still live and are fixed. The recomputation at current pricing confirms the measured value stands: provider pricing is unchanged since the calibration, the persisted-prompt recomputation over all 46 rounds gives $0.043/round as a floor (Opus thinking tokens bill without being persisted, so prompt text under-counts output), and the usage-measured $0.05618 remains the honest figure. The exhaustion diagnosis is unambiguous: crypto spent the full budget in the first UTC hours of EVERY recorded day, always before the 13:30 UTC open, and equities have had exactly ONE Stage-C pass ever — 2026-07-20 16:44, two calls, both declined on merit (AMD avoid at conviction 0.552, UPS avoid at 0.0). Every other equity pass (18 of 19) got zero calls.**
+
+Changes:
+
+TASK 1, THE CALIBRATION. Recomputed rather than assumed: provider pricing (config/provider_prices.yaml) is byte-identical to what the 2026-07-21 calibration used, and a fresh per-round recomputation over all 46 persisted rounds from the stored prompts and rationales gives $0.04298 — a LOWER BOUND, because Opus thinking tokens bill as output and are never persisted (Opus alone is $0.031/round of the text-based figure). The usage-measured $0.05618 therefore stands, applied as 0.056 to BOTH keys: `discovery_est_cost_per_call_usd` 0.04 -> 0.056 (yaml, C++ default, discovery/settings.py default, api_server/controls.py default) and `research_est_cost_per_call_usd` 0.08 -> 0.056 (yaml, C++ default, llm_consensus/config_access.py default). EFFECTIVE ALLOWANCE AT EVERY CEILING EACH FEEDS: the discovery estimate feeds spend REPORTING only (the discovery budget is a call count, 12/day, unchanged), so no call allowance moves; the reported cost of a full discovery day rises from $0.48 to $0.672, which is the truth. The research estimate feeds the combined $100 monthly ceiling on both sides (Engine::combined_spend_ceiling_reached and the Python projection): research spend was overcounted 43 percent, so the ceiling paused sleeves early; at 0.056 the same $100 ceiling accommodates 1,786 research-priced calls instead of 1,250 while measuring the same dollars honestly. No budget or ceiling was raised: the projection comment now reads ~$97/month worst case (52 trading+discovery calls/day plus 6 research calls/day, all at 0.056), UNDER the $100 backstop, where the old mixed estimates read ~$102. NO INDEPENDENT COPY REMAINS: the only surviving 0.04 in the tree is the historical annotation on the council key's own comment.
+
+TASK 2, THE EXHAUSTION, from every recorded day of discovery_pass: crypto consumed 12/12 on 07-17, 07-18, 07-19, 07-21, 07-22, 07-23 (10 on 07-20, 5 so far on 07-24), and the hourly trace shows the spend landing in the FIRST UTC hours — 00:00-02:00 on 07-21/22/23/24, 06:00-09:00 on the others — ALWAYS fully spent before the 13:30 UTC US open. The mechanism is confirmed as the shared pool, not an equity screen: 19 equity passes ran, 18 of them recorded zero council calls with the budget already gone, and the single equity pass with calls (2026-07-20 16:44) happened on the one day crypto had left 2 of 12 unspent. HAS AN EQUITY CANDIDATE EVER REACHED STAGE C AND BEEN DECLINED ON MERIT: YES, exactly twice, both in that one pass — AMD, avoid at conviction 0.552 (a genuine merit decline below the discovery floor), and UPS, avoid at 0.0. Lifetime totals now 87 crypto Stage-C calls against 2 equity.
+
+TASK 3, THE RESERVATION, an allocation inside the unchanged 12: new `discovery_equity_reserved_calls: 4` (config + control-file overridable through the same settings overlay, clamped to [0, total]). The mechanism is one pure function, `discovery/run.py effective_daily_budget`, passed into `funnel.run_pass` as an explicit budget: on a UTC weekday BEFORE the US close, crypto's effective budget is 8 (it may not spend into the reservation while a session is still ahead or open); equities always see the full 12, and their existing cadence (`due`: US open plus hourly through RTH only) is what makes the reservation unspendable outside those hours, so no second hours rule was written. AFTER the US close, and on weekends (no session to reserve for), crypto's budget returns to the full 12, so an unused reservation is RELEASED to the better disposition rather than silently expiring. WHY 4: the equity cadence yields about 7 passes per session and the recorded merit-decline pass cost 2 calls, so 4 guarantees roughly two evaluated passes per session, while crypto keeps 8 of the 12 — crypto loses at most 4 calls on weekdays, exactly the calls equities were structurally denied, and takes them back whenever equities leave them unspent.
+
+TASK 4, THE ORDERING WASTE, both re-checked against the intervening sessions and BOTH STILL LIVE, both fixed contained:
+- **Evaluate-before-serviceability**: still live (funnel.run_pass at discovery/run.py:253 against the judge at :293), so ZEC/USD-shaped symbols could re-spend a full round every pass after the venue proved it serves nothing. Contained fix, input filtering rather than funnel surgery: `watchlist.recent_onboarding_refusals` (read-only over the journalled applied=0 refusals) holds recently refused symbols OUT of the pass input for 7 days, logged, after which a venue that later lists the symbol is retried. The funnel itself is untouched.
+- **Stage B paid into a dead pass**: still live and far past the audit's 17 of 20 — 75 recorded passes paid gate calls with zero council calls under `budget_exhausted`. Fixed: the exhausted-budget short-circuit moved BEFORE Stage B in run_pass, so a pass with no possible Stage C drops its finalists un-gated with the true reason and pays nothing. Stage A still records what the funnel saw. The pre-existing funnel test that pinned the old behavior ("the cheap gate still ran") was updated to pin the corrected spec, with the 75-pass measurement in its comment.
+
+TASK 5, VERIFY. pytest 902 passed (898 + 4 net new: the estimate pins for both keys and both fallback defaults, the reservation behavior pins including release-after-close and weekend, the clamp, and the run_pass budget-override pin; plus the updated funnel exhaustion test). ctest 25/28 under the operator's committed active_quant profile, the same three known failures (config, tuner_floor, market_hours_entry). The C++/Python default drift guard (test_discovery_funnel) passes with the new 0.056 on both sides. Offline synthetic runs behaviorally IDENTICAL to the recorded baselines in both profiles (active_quant Trades=6 Blocked=2 Events=35, swing Trades=108 Blocked=204 Events=1222): discovery ships disabled, so the allocation changes nothing offline. The operator strategy.profile edit was left exactly as found.
+
+NOT touched: RiskGate logic, the live-trading gate, the adaptive limit-weakening invariant, Level 1 values, the 12-call daily total, any budget or ceiling (both estimates measure the same dollars more honestly; nothing was raised to compensate), the funnel structure. Live trading stays off.
+
+VERIFICATION (2026-07-23):
+
+| Check | Result |
+| --- | --- |
+| pytest | 902 passed |
+| ctest (operator's active_quant edit) | 25/28, same three known failures |
+| Offline synthetic, both profiles | identical to recorded baselines |
+| Recomputed per-round cost | pricing unchanged; text floor $0.043; measured $0.05618 stands |
+| Estimates | discovery 0.04 -> 0.056, research 0.08 -> 0.056, all copies |
+| Exhaustion mechanism | crypto spends 12/12 in the first UTC hours, every day |
+| Equity on merit | once ever: AMD avoid 0.552, UPS avoid 0.0 (2026-07-20) |
+| Reservation | 4 of 12, crypto capped at 8 until US close, released after |
+| Ordering waste (a) | still live; recently-refused symbols filtered from input |
+| Ordering waste (b) | still live, 75 passes; Stage B now skipped on exhausted budget |
+
+Commit message: `Calibrate remaining cost estimates and reserve discovery budget for the equity session, live trading untouched`
+
+---
+
 ## Prompt: Remaining fabricated fields and contaminated rows
 
 Date: 2026-07-23

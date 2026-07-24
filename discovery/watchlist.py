@@ -247,6 +247,32 @@ def apply_event(conn: sqlite3.Connection, ev: WatchlistEvent) -> dict:
             "reason": "removed" if applied else "not_on_watchlist"}
 
 
+def recent_onboarding_refusals(conn: sqlite3.Connection,
+                               within_hours: int = 168) -> set[str]:
+    """Symbols whose onboarding was journalled REFUSED within the window.
+
+    Read-only over the event journal (2026-07-23). The funnel spends a full
+    Stage-C round BEFORE serviceability is verified, so a venue-unserviceable
+    symbol (the ZEC/USD and APT/USD shape) re-surfaced and re-spent on every
+    pass after its refusal. Filtering the recently refused OUT of the pass
+    input spends nothing on a symbol the venue already proved it cannot
+    serve; the window (default 7 days) lets a venue that later lists the
+    symbol be retried rather than banned forever. Tolerant: a missing journal
+    reads as no refusals.
+    """
+    ensure_schema(conn)
+    try:
+        cutoff = (datetime.now(timezone.utc) -
+                  timedelta(hours=within_hours)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        rows = conn.execute(
+            "SELECT DISTINCT symbol FROM watchlist_event "
+            "WHERE action='add' AND applied=0 AND ts >= ? "
+            "AND reason LIKE 'onboarding refused%'", (cutoff,)).fetchall()
+        return {str(r[0]) for r in rows if r and r[0]}
+    except sqlite3.Error:
+        return set()
+
+
 def journal_onboarding_refusal(conn: sqlite3.Connection, symbol: str, *,
                                reason: str, ts: str | None = None) -> dict:
     """Journal a REFUSED onboarding without touching the watchlist table.

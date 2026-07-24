@@ -68,6 +68,35 @@ def us_market_open(now: datetime) -> bool:
     return US_RTH_OPEN_MINUTE <= minute < US_RTH_CLOSE_MINUTE
 
 
+def effective_daily_budget(asset_class: str, now: datetime,
+                           cfg_path: str | None = None) -> int:
+    """The Stage-C budget THIS asset class may spend against today (Task 3,
+    2026-07-23). Pure, so it is directly testable.
+
+    Crypto runs hourly around the clock and exhausted the shared 12-call pool
+    in the first UTC hours of EVERY recorded day, so equities got 2 lifetime
+    Stage-C calls against 87. The fix is an allocation inside the UNCHANGED
+    total: while a US equity session is still ahead or open this UTC day
+    (weekday, before the US close), crypto may spend only the unreserved
+    share. Equities always see the full budget: their cadence (`due`) already
+    restricts them to US regular hours, so the reservation is not spendable
+    outside those hours by construction. After the US close, and on weekends
+    (no session to reserve for), the unused reservation is RELEASED to crypto
+    rather than silently expiring: a better disposition exists, so it is
+    taken.
+    """
+    total = settings.discovery_daily_council_budget(cfg_path)
+    if asset_class != "crypto":
+        return total
+    reserved = settings.discovery_equity_reserved_calls(cfg_path)
+    if now.weekday() >= 5:  # weekend: no US session today, nothing to reserve
+        return total
+    minute = now.hour * 60 + now.minute
+    if minute >= US_RTH_CLOSE_MINUTE:  # session over: release the reservation
+        return total
+    return max(0, total - reserved)
+
+
 def due(asset_class: str, last_ts: str | None, now: datetime,
         cfg_path: str | None = None) -> tuple[bool, str]:
     """Is a pass due for this asset class? Pure, so it is directly testable.
@@ -207,6 +236,27 @@ def run_once(asset_class: str, *, db_path: str = _DEFAULT_DB,
             return {"status": "empty_universe", "asset_class": asset_class,
                     "reason": f"no {asset_class} symbols configured"}
 
+        # A symbol the venue PROVED unserviceable does not re-enter the
+        # funnel while its refusal is fresh (2026-07-23). The full round
+        # spends BEFORE serviceability is verified, so ZEC/USD and APT/USD
+        # each cost a Stage-C round after their venue had already returned
+        # zero bars. The journalled refusal (2026-07-20) is the evidence;
+        # filtering here spends nothing on it. The refusal ages out (7 days),
+        # so a later venue listing is retried rather than banned.
+        refused_recently = watchlist.recent_onboarding_refusals(conn)
+        if refused_recently:
+            before = len(symbols)
+            symbols = [s for s in symbols if s not in refused_recently]
+            if len(symbols) < before:
+                log.info(
+                    "discovery: %d symbol(s) held out of the %s pass, venue "
+                    "recently proved unserviceable: %s", before - len(symbols),
+                    asset_class,
+                    ", ".join(sorted(refused_recently)[:8]))
+        if not symbols:
+            return {"status": "empty_universe", "asset_class": asset_class,
+                    "reason": "every symbol recently proved unserviceable"}
+
         if client is None:
             from discovery.finnhub_source import FinnhubClient, is_live
             if not is_live():
@@ -254,7 +304,10 @@ def run_once(asset_class: str, *, db_path: str = _DEFAULT_DB,
             asset_class, snapshots=snapshots, gate=gate, evaluator=evaluator,
             calls_used_today=store.council_calls_today(
                 conn, now.strftime("%Y-%m-%d")),
-            cfg_path=cfg_path, ts=ts)
+            cfg_path=cfg_path, ts=ts,
+            # The per-class allocation (equity reservation) inside the
+            # unchanged daily total. See effective_daily_budget.
+            daily_budget=effective_daily_budget(asset_class, now, cfg_path))
 
         payload = result.to_dict()
         pass_id = store.record_pass(conn, payload)

@@ -552,7 +552,8 @@ def build_snapshots(symbols: list[str], client, *,
 
 def run_pass(asset_class: str, *, snapshots: list[dict], gate, evaluator,
              calls_used_today: int = 0, cfg_path: str | None = None,
-             ts: str | None = None) -> PassResult:
+             ts: str | None = None,
+             daily_budget: int | None = None) -> PassResult:
     """Run one full funnel pass over one asset class.
 
     Takes prepared snapshots, so the fetching stays the caller's business and
@@ -569,7 +570,11 @@ def run_pass(asset_class: str, *, snapshots: list[dict], gate, evaluator,
     result = PassResult(ts=ts, asset_class=asset_class,
                         universe_count=len(snapshots))
 
-    daily_budget = settings.discovery_daily_council_budget(cfg_path)
+    # daily_budget may be overridden by the caller for the per-class
+    # allocation (the equity reservation, discovery/run.py
+    # effective_daily_budget). None keeps the configured total.
+    if daily_budget is None:
+        daily_budget = settings.discovery_daily_council_budget(cfg_path)
     remaining = max(0, daily_budget - max(0, calls_used_today))
     result.budget_remaining = remaining
 
@@ -588,6 +593,21 @@ def run_pass(asset_class: str, *, snapshots: list[dict], gate, evaluator,
         result.reason = "every instrument scored below the pre-screen floor"
         return result
 
+    # AN EXHAUSTED BUDGET STOPS THE PASS BEFORE STAGE B (2026-07-23). The
+    # short-circuit used to sit after the gate, so 75 recorded passes paid 12
+    # Haiku calls each to produce survivors a spent budget could never
+    # evaluate. Stage B exists to feed Stage C; with no Stage C possible it
+    # buys nothing, so the finalists are dropped here, un-gated, with the
+    # true reason.
+    if remaining <= 0:
+        for f in finalists:
+            result.drops.append(Drop(f.symbol, STAGE_B,
+                                     "daily_budget_exhausted", f.score))
+        result.status = "budget_exhausted"
+        result.reason = (f"discovery daily council budget {daily_budget} "
+                         f"spent, no gate or council call made this pass")
+        return result
+
     # Stage B: cheap gate, finalists only.
     survivors, drops_b, gate_calls = gate_finalists(
         finalists, gate, settings.max_survivors(cfg_path))
@@ -599,15 +619,8 @@ def run_pass(asset_class: str, *, snapshots: list[dict], gate, evaluator,
         result.reason = "the gate rejected every finalist"
         return result
 
-    # Stage C: the only paid stage, bounded twice over.
-    if remaining <= 0:
-        for s in survivors:
-            result.drops.append(Drop(s, STAGE_C, "daily_budget_exhausted", 0.0))
-        result.status = "budget_exhausted"
-        result.reason = (f"discovery daily council budget {daily_budget} spent, "
-                         f"no council call made this pass")
-        return result
-
+    # Stage C: the only paid stage, bounded twice over. (The remaining <= 0
+    # case can no longer reach here: it short-circuits before Stage B above.)
     scores = {f.symbol: f.score for f in finalists}
     candidates, drops_c, calls = evaluate_survivors(
         survivors, evaluator,

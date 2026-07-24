@@ -1101,7 +1101,7 @@ def discovery_state() -> dict:
     # The EFFECTIVE budget and ceilings: the operator's control file wins.
     budget = int(eff["discovery_daily_council_budget"])
     used = discovery_used_today()
-    est = _float("discovery_est_cost_per_call_usd", 0.04)
+    est = _float("discovery_est_cost_per_call_usd", 0.056)
     return {
         "enabled": bool(eff["discovery_enabled"]),
         "long_term_sleeve_enabled": bool(eff["long_term_sleeve_enabled"]),
