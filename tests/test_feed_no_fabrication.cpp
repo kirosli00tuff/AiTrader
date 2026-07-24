@@ -123,5 +123,36 @@ int main() {
                        "one");
     }
 
+    // --- LIVE BAR VOLUME IS THE VENUE'S OWN, OR ABSENT (2026-07-23) ---------
+    // The bridge forwards the venue's latest MINUTE BAR volume beside the
+    // trade price, and consume_latest_bar emits each completed venue bar's
+    // volume EXACTLY ONCE, at rollover, as last observed. Nothing is counted
+    // at first sight (the bar is still forming), nothing is emitted twice,
+    // and a poll the venue does not answer emits nothing: a stale or
+    // carried-forward volume can never reach a bar.
+    {
+        LatestBarTrack t;
+        maltest::check(consume_latest_bar(t, "", -1.0) == 0.0 && t.ts.empty(),
+                       "no venue bar: absence stays absence");
+        maltest::check(consume_latest_bar(t, "T1", 100.0) == 0.0,
+                       "a forming venue bar is never counted at first sight");
+        maltest::check(consume_latest_bar(t, "T1", 150.0) == 0.0,
+                       "a still-forming bar is never emitted early (no double "
+                       "count)");
+        maltest::check(consume_latest_bar(t, "", -1.0) == 0.0,
+                       "a poll the venue does not answer emits nothing: no "
+                       "carried-forward stale value");
+        maltest::check(consume_latest_bar(t, "T2", 30.0) == 150.0,
+                       "a completed venue bar's volume is emitted exactly "
+                       "once at rollover, as last observed");
+        maltest::check(consume_latest_bar(t, "T2", 40.0) == 0.0,
+                       "and never re-emitted afterwards");
+        maltest::check(consume_latest_bar(t, "T3", 0.0) == 40.0,
+                       "the next rollover emits the next bar's volume");
+        maltest::check(consume_latest_bar(t, "T4", 10.0) == 0.0,
+                       "a genuine zero-volume venue bar (quiet crypto minute) "
+                       "contributes zero, never an invented number");
+    }
+
     return maltest::report("feed_no_fabrication");
 }

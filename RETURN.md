@@ -14,6 +14,54 @@ Commit message:
 
 ---
 
+## Prompt: Real live bar volume
+
+Date: 2026-07-23
+Model: Fable 5. The prompt specified Opus; the session runs on Fable 5 and this line records that.
+Prompt summary: the feed change deferred from the volume fabrication fix. The live path uses Alpaca latest-TRADE endpoints, which carry a single trade size and no bar aggregate, so live bars honestly report volume 0 and the volume filter is inert on every live decision. The latest-BAR endpoints carry a real v. Six tasks: report what each endpoint returns per asset class with latency/staleness and what the engine uses the trade price for, stating whether wholesale bars would change the decided/executed price and by how much; choose between wholesale latest-bar and trade-price-plus-bar-volume with request cost, staleness, and disagreement risk, and implement the choice; preserve the no-fabrication invariant with existing guards passing unchanged; bound how many recent candidates the filter would newly reject on real volume without changing any threshold; add a mutation-tested guard against invented, double-counted, and carried-forward volume; verify against baselines and report. Live trading stays off.
+
+**HEADLINE: the live path now carries the venue's own bar volume beside the trade price. The bridge forwards the latest MINUTE-BAR v per symbol ("<symbol>:v"/"<symbol>:bar_ts"), and the feed emits each completed venue bar's volume EXACTLY ONCE, at rollover, as last observed (consume_latest_bar, a pure mutation-tested function). Price stays the latest TRADE: execution remains anchored to real trades and no decision price changed. Probed live end to end: SPY v 853, BTC/USD v 7.3e-05, and a quiet ETH minute forwarding a genuine venue zero. The volume filter goes from inert to active, and on stored venue-reported bars it would reject roughly 58 to 63 percent of measurable equity bars and 28 to 58 percent of measurable crypto minutes — reported plainly as a finding for a later tuning session, with vol_multiple untouched.**
+
+Changes:
+
+TASK 1, WHAT EACH ENDPOINT RETURNS, probed live 2026-07-23/24 with the operator's keys:
+- Equity latest trade (/v2/stocks/trades/latest): a single trade {p, s, t, exchange...}. SPY p 739.01, s 40, t 20:08:11Z.
+- Equity latest bar (/v2/stocks/bars/latest): the newest minute bar {t, o, h, l, c, v, n, vw}. SPY t 20:08:00Z, v 853, n 10.
+- Crypto latest trade (/v1beta3/crypto/us/latest/trades): {p, s, t}. BTC/USD p 65002.15, s 0.000425.
+- Crypto latest bar (/v1beta3/crypto/us/latest/bars): same bar shape; a QUIET minute returns a real bar with v 0, n 0 and quote-derived OHLC/vw — a genuine venue zero, not absence.
+LATENCY: statistically identical round trips (~230-260 ms both). STALENESS: the trade is the newest actual trade; the bar lags up to a minute by construction — but the probe caught the INVERSION on quiet crypto: BTC's latest trade was 8 minutes old while the latest bar was current, because a quiet tape stops trading before it stops quoting. WHAT THE ENGINE USES THE TRADE PRICE FOR: the tick price feeds ret_1/ret_5/volatility, the aggregated 5-minute OHLC (and therefore every indicator), entry sizing (qty = notional/entry_price), the native stop/target levels, and the paper fill price. MOVING WHOLESALE TO BARS WOULD CHANGE THE DECIDED AND EXECUTED PRICE: measured mean |close-open| per stored real 5-minute bar is 0.025 to 0.128 percent by symbol, so a one-minute-scale substitution moves prices by a fraction of that on typical bars and more on fast tape; and on quiet crypto minutes the bar's OHLC is quote-derived (n=0), so wholesale bars would execute paper fills on prices no trade printed, which is a fabrication-adjacent step this project has spent three sessions removing.
+
+TASK 2, THE SHAPE, chosen and implemented: KEEP LATEST-TRADE FOR PRICE, ADD LATEST-BAR FOR VOLUME ONLY. Cost: two extra batched GETs per poll (one per asset class), 8 -> 16 requests/minute at the 15-second poll interval against Alpaca's 200/minute limit (8 percent). Staleness: volume attribution lags one minute by construction (a minute bar is counted when the venue rolls past it) and a crypto bar gap defers the count to the next bar's arrival — bounded attribution lag into the 5-minute bucket where the completion is OBSERVED, never a lost or doubled quantity. Disagreement risk: zero on the decision path, because bar prices are never read — only v and t leave the bar payload. Wholesale latest-bar was REJECTED for the reasons measured in Task 1 (it changes every decided and executed price and executes on quote-derived prices in quiet crypto minutes). Implementation: market_data/alpaca_source.py fetch_prices attaches "<symbol>:v"/"<symbol>:bar_ts" from the two latest-bar endpoints (a malformed or missing bar attaches nothing); market_data/market_data.cpp consume_latest_bar (pure) tracks the forming bar per symbol and emits each completed bar's volume exactly once at rollover, as last observed; AlpacaFeed::poll sets ms.volume from it and the existing BarAggregator sums those emissions into the 5-minute bar, which then persists as a real_feed row with real venue volume.
+
+TASK 3, THE INVARIANT, preserved and re-proven. Absence stays absence: a poll the venue does not answer emits 0 (NO VOLUME REPORTED), a malformed bar attaches nothing bridge-side, and a stale value is never re-emitted (the tracker forgets a bar the moment its volume is counted). A genuine venue zero (quiet crypto minute) is forwarded as such and the filters already treat zero as not-measured-above-zero. THE EXISTING GUARDS PASS UNCHANGED: the lexical scan of AlpacaFeed::poll (no RNG, no 9000.0 in the volume assignment), the volume-less-ticks-close-volume-less-bars aggregator assertion, and the strategy assertion that below-average gates while absent does not, all green with zero source changes to those assertions.
+
+TASK 4, THE BOUND, measured on the last 2,000 stored venue-reported 5-minute bars per symbol (v > 0 against its 20-bar trailing average, the rsi2 filter's own comparison). Share of bars reporting volume at all: equities 82 percent, BTC/USD 66, ETH/USD 52, SOL/USD 34, UNI/USD 30, LDO/USD 24, AAVE/USD 21 (quiet crypto minutes report a genuine zero and pass as unmeasured). Of the measurable bars, the filter would reject: AAPL/MSFT 63 percent, NVDA 62, QQQ 60, SPY/BTC 58, ETH 48, UNI 46, AAVE 43, SOL 42, LDO 28. THE PROJECTED REJECTION RATE IS LARGE and is reported plainly as a finding for a later tuning session: right-skewed volume makes "below the 20-bar mean" reject more than half of measurable bars by construction. vol_multiple was NOT touched and no threshold changed; the entry_decision recording landed one session ago exists precisely so this filter's live effect can now be attributed to outcomes before anyone tunes it.
+
+TASK 5, GUARD, in tests/test_feed_no_fabrication.cpp (8 new assertions on the pure consume_latest_bar): no venue bar emits nothing; a forming bar is never counted at first sight; a still-forming bar is never emitted early; a venue-silent poll emits nothing (no carry-forward); a completed bar's volume is emitted exactly once at rollover and never re-emitted; a genuine zero-volume bar contributes zero. MUTATIONS KILLED by file-copy rollback: (A) emitting the forming bar's v every poll fails 2 assertions (the double-count shape); (B) carrying the tracked value forward on venue silence fails the no-carry-forward assertion. Both restored and re-verified green, diff-identical. Python pins in tests/test_live_bar_volume.py: the trade price stays the price, the venue v and bar_ts attach, a genuine zero forwards, and a malformed bar attaches nothing.
+
+TASK 6, VERIFY. pytest 896 passed (894 + 2 new). ctest 25/28 under the operator's committed active_quant profile, the same three known failures (config, tuner_floor, market_hours_entry). MockFeed and the offline synthetic and replay modes are UNCHANGED (none of them touch AlpacaFeed or fetch_prices), and the offline synthetic runs are behaviorally IDENTICAL to the recorded baselines in both profiles (active_quant Trades=6 Blocked=2 Events=35, swing Trades=108 Blocked=204 Events=1222). Live end to end: fetch_prices returned SPY 739.01 with SPY:v 853, BTC/USD 65056.70 with BTC/USD:v 7.3e-05, ETH/USD:v 0.0 (genuine quiet-minute zero) on one call. The operator strategy.profile edit was left exactly as found.
+
+NOT touched: RiskGate logic, the live-trading gate, the adaptive limit-weakening invariant, Level 1 values, vol_multiple, vol_lookback, any threshold, MockFeed, the offline feed modes, any decision price. Live trading stays off.
+
+VERIFICATION (2026-07-23):
+
+| Check | Result |
+| --- | --- |
+| pytest | 896 passed (894 + 2 new) |
+| ctest (operator's active_quant edit) | 25/28, same three known failures |
+| Offline synthetic, active_quant | Trades=6 Blocked=2 Events=35, identical |
+| Offline synthetic, swing | Trades=108 Blocked=204 Events=1222, identical |
+| Existing no-fabrication guards | pass unchanged, zero edits to them |
+| Mutation A (forming bar counted every poll) | KILLED, 2 assertions fail |
+| Mutation B (carry-forward on venue silence) | KILLED, 1 assertion fails |
+| Live probe | SPY:v 853, BTC/USD:v 7.3e-05, ETH quiet zero forwarded |
+| Request cost | 8 -> 16 req/min against a 200/min limit |
+| Projected filter effect | 42-63% of measurable bars would reject; reported, not tuned |
+
+Commit message: `Source live bar volume from the venue instead of reporting absence, no fabrication, live trading untouched`
+
+---
+
 ## Prompt: Entry decision instrumentation
 
 Date: 2026-07-23

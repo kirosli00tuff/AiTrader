@@ -109,6 +109,24 @@ private:
 // Every tick this feed emits is a real venue quote (`data_source` real_feed).
 // `last_poll_was_live()` reports whether the most recent poll contained any
 // real Alpaca data.
+// Per-symbol tracking of the venue's LATEST minute bar, for honest live bar
+// volume (2026-07-23). The latest-bar endpoint serves the newest (possibly
+// still forming) minute bar; its volume may still grow, so counting it on
+// first sight undercounts and counting it every poll double-counts. The rule:
+// a minute bar's volume is emitted EXACTLY ONCE, at the poll where the venue
+// rolls to a NEWER bar, using the last value observed for the completed bar.
+// A poll with no venue bar emits nothing and changes nothing: absence stays
+// absence, and a stale value is never re-emitted or carried forward.
+struct LatestBarTrack {
+    std::string ts;     // timestamp of the venue bar last observed
+    double vol = -1.0;  // its last observed volume (-1 = nothing observed)
+};
+// Pure: returns the volume this tick should carry (0.0 = none/absent) and
+// updates the track. bar_ts empty or bar_vol < 0 means the venue reported no
+// bar this poll.
+double consume_latest_bar(LatestBarTrack& track, const std::string& bar_ts,
+                          double bar_vol);
+
 class AlpacaFeed : public Feed {
 public:
     using Instrument = mal::market_data::Instrument;
@@ -134,6 +152,8 @@ private:
     // Symbols already warned unavailable, so the notice fires once per symbol
     // per outage rather than once per poll. Cleared when data returns.
     std::set<std::string> unavailable_warned_;
+    // Venue latest-bar tracking per instrument (live bar volume, 2026-07-23).
+    std::vector<LatestBarTrack> latest_bars_;
 };
 
 }  // namespace mal::market_data

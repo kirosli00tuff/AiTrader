@@ -134,6 +134,14 @@ New flags from the feed-work session (2026-07-05, `369b6a6`):
 
 ## Session Log
 
+### 2026-07-23 (Fable 5) — Live bars carry the venue's own volume: trade price stays, latest-bar v rides beside it
+
+- **The shape:** latest-TRADE price is kept (execution stays anchored to real trades; wholesale bars would move every decided/executed price by up to the measured 0.03-0.13% per-bar drift and would execute quiet crypto minutes on quote-derived prices no trade printed). The bridge adds the venue's latest MINUTE-BAR v per symbol (`<symbol>:v`/`<symbol>:bar_ts`, two extra batched GETs, 8→16 req/min vs a 200/min limit), and pure `consume_latest_bar` emits each completed venue bar's volume EXACTLY ONCE at rollover, as last observed. The aggregator sums those into the 5-minute bar, so real_feed rows now carry real venue volume and the volume filter becomes active on live decisions.
+- **The invariant holds:** absence stays absence (venue-silent polls emit nothing, malformed bars attach nothing, nothing is re-emitted or carried forward, a genuine quiet-minute zero forwards as zero). The existing lexical/behavioral no-fabrication guards pass with zero edits; 8 new assertions pin the rollover rule, mutation-killed both directions (double-count and carry-forward).
+- **Bounded effect, reported not tuned:** on stored venue-reported bars the filter would reject 58-63% of measurable equity bars and 28-58% of measurable crypto minutes (quiet crypto minutes report genuine zeros and pass as unmeasured: only 21-66% of crypto bars are measurable). Large, flagged for a later tuning session against entry_decision outcomes; `vol_multiple` untouched.
+- **Probed live end to end:** SPY:v 853, BTC/USD:v 7.3e-05, ETH quiet-minute zero forwarded. Verified: pytest 896, ctest 25/28 (same three operator-edit failures), offline baselines identical (MockFeed and offline modes untouched).
+- NOT touched: RiskGate logic, the live-trading gate, the adaptive limit-weakening invariant, Level 1 values, any threshold, any decision price. Live trading stays off.
+
 ### 2026-07-23 (Fable 5) — Every entry candidate records its decision state, rejections included: filter attribution becomes possible
 
 - **A filter which rejects silently cannot be evaluated.** Three diagnostics in a row hit that wall. Now `strategy::evaluate` computes an `EvalTrace` beside its decision (never consulted by it) and the engine persists one `entry_decision` row per closed-bar candidate: the first refusing condition AND the full set (RSI-2, trend MA distance, cross-back, ATR band with z and edge, volume presence, dual-MA state, regime, tier, composed confidence per factor), joined to the trade when one results, standing alone when rejected. Engine-level refusals (market hours, region, pre-check, RiskGate, no-execution) record too.

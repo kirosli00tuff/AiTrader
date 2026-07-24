@@ -128,6 +128,26 @@ def fetch_prices(symbols: list[str]) -> dict:
     cryptos = [s for s in symbols if _is_crypto(s)]
     any_live = False
 
+    def _attach_bar_volume(sym: str, bar: object) -> None:
+        # Latest-BAR volume (2026-07-23). The latest-trade endpoints carry a
+        # single trade size, never a bar aggregate, so live bar volume was
+        # honestly reported ABSENT. The latest-bar endpoints carry the venue's
+        # own per-minute v; the PRICE stays the trade price (execution stays
+        # anchored to real trades). Keys are "<symbol>:v" / "<symbol>:bar_ts",
+        # which the C++ flat reader cannot confuse with the bare symbol key.
+        # A malformed or missing bar attaches NOTHING: absence stays absence,
+        # nothing is invented and nothing is carried forward. A venue bar with
+        # v == 0 (crypto quiet minute, n == 0) is a genuine venue answer and
+        # is forwarded as such; every volume consumer already treats zero as
+        # not-measured-above-zero.
+        if not isinstance(bar, dict):
+            return
+        v = bar.get("v")
+        ts = bar.get("t")
+        if isinstance(v, (int, float)) and v >= 0 and isinstance(ts, str) and ts:
+            out[f"{sym}:v"] = float(v)
+            out[f"{sym}:bar_ts"] = ts
+
     # Equities: latest trade per symbol (batch endpoint).
     if equities:
         q = ",".join(equities)
@@ -141,6 +161,13 @@ def fetch_prices(symbols: list[str]) -> dict:
                 if isinstance(px, (int, float)) and px > 0:
                     out[sym] = float(px)
                     any_live = True
+        bar_resp = _http("GET",
+                         f"{_DATA_BASE}/v2/stocks/bars/latest?symbols={q}",
+                         headers)
+        bars = (bar_resp or {}).get("bars", {}) if isinstance(bar_resp, dict) \
+            else {}
+        for sym in equities:
+            _attach_bar_volume(sym, bars.get(sym))
 
     # Crypto: latest trade per pair.
     if cryptos:
@@ -156,6 +183,13 @@ def fetch_prices(symbols: list[str]) -> dict:
                 if isinstance(px, (int, float)) and px > 0:
                     out[sym] = float(px)
                     any_live = True
+        bar_resp = _http(
+            "GET", f"{_DATA_BASE}/v1beta3/crypto/us/latest/bars?symbols={q}",
+            headers)
+        bars = (bar_resp or {}).get("bars", {}) if isinstance(bar_resp, dict) \
+            else {}
+        for sym, pair in pairs.items():
+            _attach_bar_volume(sym, bars.get(pair))
 
     out["source"] = "alpaca" if any_live else "unavailable"
     return out

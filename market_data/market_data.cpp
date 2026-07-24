@@ -91,7 +91,35 @@ AlpacaFeed::AlpacaFeed(std::vector<Instrument> instruments,
     for (const auto& i : instruments_) {
         last_prices_.push_back(i.price);
         recent_returns_.emplace_back();
+        latest_bars_.emplace_back();
     }
+}
+
+double consume_latest_bar(LatestBarTrack& track, const std::string& bar_ts,
+                          double bar_vol) {
+    // No venue bar this poll: emit nothing, change nothing. A stale value is
+    // never re-emitted and never carried forward into a poll the venue did
+    // not answer.
+    if (bar_ts.empty() || bar_vol < 0.0) return 0.0;
+    if (track.ts.empty()) {
+        // First observation: remember, emit nothing yet. This bar's volume is
+        // emitted once, when the venue rolls past it.
+        track.ts = bar_ts;
+        track.vol = bar_vol;
+        return 0.0;
+    }
+    if (bar_ts == track.ts) {
+        // Same (still forming) bar: track its growth, emit nothing.
+        track.vol = bar_vol;
+        return 0.0;
+    }
+    // The venue rolled to a newer bar: the previously observed bar is
+    // complete. Emit its last observed volume EXACTLY ONCE and start tracking
+    // the new bar.
+    const double completed = track.vol > 0.0 ? track.vol : 0.0;
+    track.ts = bar_ts;
+    track.vol = bar_vol;
+    return completed;
 }
 
 void AlpacaFeed::add_instrument(const Instrument& i) {
@@ -103,6 +131,7 @@ void AlpacaFeed::add_instrument(const Instrument& i) {
     instruments_.push_back(i);
     last_prices_.push_back(i.price);
     recent_returns_.emplace_back();
+    latest_bars_.emplace_back();
 }
 
 double AlpacaFeed::next_uniform() {
@@ -195,24 +224,25 @@ std::vector<MarketState> AlpacaFeed::poll() {
         // consumed it and decided 3,235 live-bar comparisons at a 49.2
         // percent pass rate, a coin flip by construction.
         //
-        // Why 0 and not a real number: the bridge's /marketdata/alpaca
-        // returns `fetch_prices`, which carries PRICE only, and the endpoints
-        // behind it (/v2/stocks/trades/latest and the crypto latest-trades
-        // endpoint) return a single trade SIZE, not a bar aggregate. Summing
-        // per-poll trade sizes would double count the same trade across polls
-        // and miss every trade between them, so no honest bar volume exists
-        // here to use. Alpaca's latest-BAR endpoints do carry a real `v`, and
-        // adopting them is a feed change, recorded as a follow-up rather than
-        // smuggled into a correctness fix.
-        //
-        // 0 means NO VOLUME REPORTED, and the consumers treat it that way:
-        // the strategy volume filters skip the check when the current bar
-        // reports no volume rather than reading it as "below average". A
-        // genuine zero-volume bar is handled identically, which is correct:
-        // you cannot judge volume you do not have. Same rule as the
-        // fabricated price walk removed on 2026-07-20, applied to the one
-        // field that removal left behind.
-        ms.volume = 0.0;
+        // VOLUME IS THE VENUE'S OWN, OR ABSENT (2026-07-23). The trade
+        // endpoints behind the price carry a single trade SIZE, never a bar
+        // aggregate, so the fabrication fix correctly reported absence here.
+        // The bridge now also forwards the venue's latest MINUTE BAR volume
+        // ("<symbol>:v" / "<symbol>:bar_ts" from the latest-bar endpoints),
+        // and consume_latest_bar emits each completed venue bar's volume
+        // EXACTLY ONCE, at rollover, as last observed. The aggregator sums
+        // those emissions into the 5-minute bar, so a live real_feed bar now
+        // carries real venue volume. A poll the venue does not answer emits
+        // nothing: 0 still means NO VOLUME REPORTED, the filters still treat
+        // it as unmeasured, and nothing is invented or carried forward.
+        ms.volume = consume_latest_bar(
+            latest_bars_[i],
+            bridge_ok ? bridge::json_get_string(
+                            *resp, instruments_[i].symbol + ":bar_ts", "")
+                      : std::string(),
+            bridge_ok ? bridge::json_get_number(
+                            *resp, instruments_[i].symbol + ":v", -1.0)
+                      : -1.0);
         ms.order_book_imbalance = (next_uniform() - 0.5) * 2.0;
         ms.ts = ts;
         // Every tick this feed emits carries a real venue quote.
