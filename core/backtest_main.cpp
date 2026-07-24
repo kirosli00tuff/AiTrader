@@ -43,6 +43,8 @@
 #include <string>
 #include <vector>
 
+#include <sqlite3.h>
+
 #include "config/config.hpp"
 #include "core/util.hpp"
 #include "risk/risk_gate.hpp"
@@ -176,6 +178,34 @@ int main(int argc, char** argv) {
     storage::Storage store(db_path);
     risk::RiskGate gate(cfg.risk);  // THE RiskGate, by identity
 
+    // ---- Source identity: every report names the database it read --------
+    // A deep-history analysis DB carries an analysis_meta table (feed,
+    // adjustment, bias note); production has none. Emitting it here makes a
+    // deep-history result impossible to confuse with a production result.
+    *out << "{\"t\":\"meta\",\"db\":\"" << jesc(db_path) << "\"";
+    {
+        sqlite3* meta_db = nullptr;
+        if (sqlite3_open_v2(db_path.c_str(), &meta_db, SQLITE_OPEN_READONLY,
+                            nullptr) == SQLITE_OK) {
+            sqlite3_stmt* st = nullptr;
+            if (sqlite3_prepare_v2(meta_db,
+                                   "SELECT key, value FROM analysis_meta",
+                                   -1, &st, nullptr) == SQLITE_OK) {
+                while (sqlite3_step(st) == SQLITE_ROW) {
+                    const auto* k = sqlite3_column_text(st, 0);
+                    const auto* v = sqlite3_column_text(st, 1);
+                    if (k && v)
+                        *out << ",\"" << jesc(reinterpret_cast<const char*>(k))
+                             << "\":\""
+                             << jesc(reinterpret_cast<const char*>(v)) << "\"";
+                }
+            }
+            sqlite3_finalize(st);
+        }
+        sqlite3_close(meta_db);
+    }
+    *out << "}\n";
+
     // ---- Load the provenance-clean tape, merged chronologically ----------
     std::vector<storage::BarRow> tape;
     std::map<std::string, int> usable;
@@ -229,7 +259,7 @@ int main(int argc, char** argv) {
     std::map<std::string, double> pending_atr_z;
     std::map<std::string, double> pending_close;
     Book book{cfg.system.starting_paper_balance,
-              cfg.system.starting_paper_balance, "", 0.0, 0, {}};
+              cfg.system.starting_paper_balance, "", 0.0, 0, 0, {}};
     risk::PortfolioState ps;
     long trades = 0, ambiguous = 0, gate_blocks = 0;
 

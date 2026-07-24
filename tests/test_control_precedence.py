@@ -32,6 +32,15 @@ import pytest
 from llm_consensus import control_file
 
 
+@pytest.fixture(autouse=True)
+def _isolate_production_db(tmp_path, monkeypatch):
+    """controls._audit journals every setter through store.append_event, which
+    resolves MAL_DB_PATH fresh per write. Without this, the setter tests wrote
+    REAL control_change events into the production journal (they did, 15 rows
+    per pytest run, found 2026-07-24 by the deep-history freeze check)."""
+    monkeypatch.setenv("MAL_DB_PATH", str(tmp_path / "isolated.db"))
+
+
 @pytest.fixture
 def ctl(tmp_path, monkeypatch):
     monkeypatch.setenv("MAL_CONTROL_DIR", str(tmp_path))

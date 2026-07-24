@@ -134,6 +134,14 @@ New flags from the feed-work session (2026-07-05, `369b6a6`):
 
 ## Session Log
 
+### 2026-07-24 (Fable 5) — Deep history loaded and validated into a separate analysis database, production frozen, nothing asked yet
+
+- Probed before pulling: equity SIP 5-minute history begins 2016-01-01, crypto 2021-01-01 including SOL. Pulled equities from 2019-01-01 split-adjusted SIP and crypto from the true start into `analysis_bars.db` (3,306,485 bars, 652 MB, gitignored), 61.4x the production usable tape, projecting roughly 22,000 harness trades against the first run's 359.
+- Split adjustment proven in the pulled series: NVDA 10-for-1 gap +0.02 percent, AAPL 4-for-1 gap +2.17 percent, where unadjusted would show -90 and -75.
+- Bounding findings: historical volume is SIP consolidated, the live path is IEX at roughly 5 percent of consolidated, so backfill and live volume are NOT comparable and the volume question is answerable in SIP terms only. Crypto volume presence collapses after 2022 (BTC 31.8 percent of 2024 bars). SOL has a 417-day delisting hole (2023-07-06 to 2024-08-26), left empty. Selection bias named in analysis_meta and every harness report.
+- The freeze check caught tests/test_control_precedence.py journaling control_change events into the production database on every pytest run (MAL_CONTROL_DIR isolated, MAL_DB_PATH not). Fixed with the autouse isolation fixture, proven sealed. Production bars, trades, signals, positions, entry_decision all match the pre-flight baseline. The week is untouched.
+- Instrument changes reported and recalibrated: meta source line in mal_backtest, source passthrough in report.py, one warning fix. 6 of 6 decisions reproduce, pytest 917, ctest 30 of 30, synthetic baselines identical. No pre-registered question asked.
+
 ### 2026-07-24 (Fable 5) — First pre-registered backtest run: every answer is honestly too thin, and that is the finding
 
 - **Gate passed:** calibration reproduced 6/6 provenance-clean recorded decisions, so the diagnostic ran. Hypotheses and the exact 6-comparison set were committed to RETURN.md BEFORE any sweep (842a194), Bonferroni bar 2.64 SE.

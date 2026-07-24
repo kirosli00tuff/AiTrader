@@ -49,7 +49,7 @@ def mean_ci(xs: list[float]) -> tuple[float, float, float]:
 def load(path: str) -> dict:
     """Parse a harness JSONL file into typed record lists."""
     out: dict = {"trades": [], "signals": [], "gate_blocks": [], "bars": {},
-                 "summary": {}, "calib": []}
+                 "summary": {}, "calib": [], "meta": {}}
     with open(path) as fh:
         for line in fh:
             line = line.strip()
@@ -69,6 +69,8 @@ def load(path: str) -> dict:
                 out["summary"] = d
             elif t == "calib":
                 out["calib"].append(d)
+            elif t == "meta":
+                out["meta"] = {k: v for k, v in d.items() if k != "t"}
     return out
 
 
@@ -134,6 +136,10 @@ def report(path: str) -> dict:
     r = load(path)
     trades = r["trades"]
     return {
+        # The database the harness read, verbatim from its meta line. A
+        # deep-history analysis DB also carries feed, adjustment, and its
+        # bias note here; production carries only the path.
+        "source": r["meta"],
         "bars": r["bars"],
         "summary": r["summary"],
         "signals": len(r["signals"]),
