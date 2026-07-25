@@ -111,12 +111,18 @@ Fill IbkrLiveAdapter::place(const risk::OrderProposal& o) {
          << "\"side\":\"" << util::json_escape(o.side) << "\","
          << "\"qty\":" << o.qty << ","
          << "\"price\":" << o.price << "}";
-    auto resp = bridge::http_post_json(bridge_host_, bridge_port_,
-                                       "/execute/ibkr_live", body.str());
-    if (!resp) {
-        f.note = "IBKR live failed safely: IB Gateway bridge unreachable";
+    auto r = bridge::http_post(bridge_host_, bridge_port_, "/execute/ibkr_live",
+                               body.str());
+    if (!r.ok()) {
+        // Name the outcome MEASURED (2026-07-25). A refused connect, a request
+        // that could not be sent, and a bridge that accepted the order and then
+        // timed out are three different situations on a LIVE order path, and
+        // the last one may mean the order exists. Never call all three
+        // "unreachable".
+        f.note = "IBKR live failed safely: " + r.describe();
         return f;
     }
+    auto resp = std::optional<std::string>(r.body);
     std::string status = bridge::json_get_string(*resp, "status", "");
     if (status != "ok") {
         std::string err = bridge::json_get_string(*resp, "error", "refused");

@@ -90,6 +90,11 @@ def build_verdict(*, symbol: str, council, dnn: dict, whale: dict,
     agreement = int(_safe_float(getattr(council, "agreement_count", 0)))
     directional_count = int(_safe_float(getattr(council, "directional_count", 0)))
     abstentions = int(_safe_float(getattr(council, "abstentions", 0)))
+    # Failed calls, reported separately from considered holds (2026-07-25). A
+    # REPORTING split only: an errored verdict was already excluded from
+    # directional_count and contributed nothing to bias or conviction, so no
+    # branch below reads it and no verdict changes value.
+    errors = int(_safe_float(getattr(council, "errors", 0)))
 
     dnn_bias = _clamp(_safe_float((dnn or {}).get("bias")), -1.0, 1.0)
     whale_bias = _clamp(
@@ -140,8 +145,9 @@ def build_verdict(*, symbol: str, council, dnn: dict, whale: dict,
         rationale = (
             f"Council {getattr(council, 'verdict', '?')} on {symbol}: bias "
             f"{council_bias:.2f}, conviction {council_conf:.2f} among "
-            f"{directional_count} directional voter(s), {abstentions} abstained, "
-            f"agreement {agreement}. Advisory dnn {dnn_bias:+.2f}, whale "
+            f"{directional_count} directional voter(s), {abstentions} abstained"
+            + (f", {errors} call(s) FAILED" if errors else "") +
+            f", agreement {agreement}. Advisory dnn {dnn_bias:+.2f}, whale "
             f"{whale_bias:+.2f} -> conviction {conviction:.2f} ({adj:+.3f}). "
             + "; ".join(parts)
         )[:1000]
@@ -155,6 +161,7 @@ def build_verdict(*, symbol: str, council, dnn: dict, whale: dict,
         "agreement": agreement,
         "directional_count": directional_count,
         "abstentions": abstentions,
+        "errors": errors,
         "size_pct": size_pct,
         "horizon": horizon,
         "rationale": rationale,

@@ -226,6 +226,13 @@ Engine::Engine(config::Config cfg, EngineOptions opts)
     discovery_ = read_discovery_controls(controls_path_, cfg_.discovery);
     prev_discovery_ = discovery_;
     if (discovery_.enabled) onboard_discovered_symbols(util::now_iso8601());
+    // Seed the completion journal at the newest recorded pass per asset class,
+    // so a restart never re-journals a pass a previous run already reported.
+    // Only THIS run's passes get a completion event.
+    for (const char* ac : {"crypto", "equity"}) {
+        auto row = storage_->latest_discovery_pass(ac);
+        discovery_journalled_pass_[ac] = row ? row->id : 0;
+    }
 
     // Report the universe the engine will actually trade, and refuse to be
     // quiet about a declared symbol the venue has never served. AFTER the
@@ -1559,7 +1566,8 @@ void Engine::log_discovery_state_once(const std::string& kind,
                                       const std::string& asset_class,
                                       const std::string& reason,
                                       const std::string& severity,
-                                      const std::string& ts) {
+                                      const std::string& ts,
+                                      const std::string& outcome) {
     // Dedupe on kind+reason, not on kind alone: "outside US regular trading
     // hours" and "no FINNHUB_API_KEY resolved" are both blocks, and an operator
     // reading the log has to be able to tell them apart when one replaces the
@@ -1569,10 +1577,58 @@ void Engine::log_discovery_state_once(const std::string& kind,
     auto it = discovery_last_state_.find(asset_class);
     if (it != discovery_last_state_.end() && it->second == state) return;
     discovery_last_state_[asset_class] = state;
+    // `outcome` is the MEASURED transport label (connect_failed, timed_out,
+    // http_error, ...) when there was one. It is a separate field from the
+    // human sentence deliberately: the sentence is for an operator reading the
+    // feed, the label is for a query that has to count how often each distinct
+    // failure happened without parsing prose.
     storage_->append_event(
         {ts, kind, "", "", severity,
          "Discovery " + asset_class + ": " + reason,
-         util::to_json({{"asset_class", asset_class}, {"reason", reason}}, {})});
+         util::to_json({{"asset_class", asset_class},
+                        {"reason", reason},
+                        {"outcome", outcome}}, {})});
+}
+
+void Engine::journal_pass_completion(const std::string& asset_class,
+                                     const std::string& ts,
+                                     const std::string& transport) {
+    // Sourced from the TABLE, never from the HTTP response. Python owns
+    // `discovery_pass` and writes the row before it answers, so the row is the
+    // authority on whether a pass completed and the response is only how the
+    // engine found out. Reading the row is what lets the journal record a
+    // completion whose response was lost, which is every pass before
+    // 2026-07-25: 99 starts, zero completions.
+    auto row = storage_->latest_discovery_pass(asset_class);
+    if (!row) return;
+    auto& seen = discovery_journalled_pass_[asset_class];
+    if (row->id <= seen) return;  // already journalled, or older than the seed
+    seen = row->id;
+    const std::string counts =
+        "universe " + std::to_string(row->universe_count) + " -> finalists " +
+        std::to_string(row->finalists_count) + " -> survivors " +
+        std::to_string(row->survivors_count) + " -> evaluated " +
+        std::to_string(row->evaluated_count) + ", " +
+        std::to_string(row->council_calls) + " council call(s)";
+    std::string msg = "Discovery pass END (" + asset_class + "): " + counts;
+    if (row->status != "ok") msg += " [" + row->status + "]";
+    if (transport != "ok")
+        msg += " (completion read from the pass record, transport " +
+               transport + ")";
+    storage_->append_event(
+        {ts, "discovery_pass", "", "", "info", msg,
+         util::to_json({{"asset_class", asset_class},
+                        {"status", row->status},
+                        {"reason", row->reason},
+                        {"transport", transport},
+                        {"pass_ts", row->ts}},
+                       {{"pass_id", static_cast<double>(row->id)},
+                        {"universe_count", static_cast<double>(row->universe_count)},
+                        {"finalists", static_cast<double>(row->finalists_count)},
+                        {"survivors", static_cast<double>(row->survivors_count)},
+                        {"evaluated", static_cast<double>(row->evaluated_count)},
+                        {"council_calls", static_cast<double>(row->council_calls)},
+                        {"est_cost_usd", row->est_cost_usd}})});
 }
 
 void Engine::launch_discovery_pass(const std::string& asset_class,
@@ -1596,14 +1652,17 @@ void Engine::launch_discovery_pass(const std::string& asset_class,
                              "\",\"db\":\"" + db +
                              "\",\"force\":true,\"engine_reads_enabled\":true}";
     // A pass runs the funnel end to end (Finnhub pre-screen, Haiku gate, then up
-    // to max_council_calls_per_pass council calls), so it needs the council
-    // timeout, not the fast-call one. The fast 8s budget would hang up mid-pass
-    // and read as a failure while the work continued on the bridge.
-    const int timeout_ms = cfg_.council.engine_council_call_timeout_ms;
+    // to max_council_calls_per_pass council calls), so it needs the DISCOVERY
+    // deadline, not the single-round-trip council one. Using the council timeout
+    // here is the 2026-07-25 defect: it hung up at 60 s on every pass that made
+    // a council call, 18 of 18, while the funnel finished normally 30 s later
+    // and recorded everything. The engine peeks this future and never blocks, so
+    // waiting longer costs nothing.
+    const int timeout_ms = cfg_.council.engine_discovery_call_timeout_ms;
     discovery_inflight_[asset_class] = std::async(
         std::launch::async, [host, port, body, timeout_ms]() {
-            return bridge::http_post_json(host, port, "/discovery/run_once",
-                                          body, timeout_ms);
+            return bridge::http_post(host, port, "/discovery/run_once", body,
+                                     timeout_ms);
         });
 }
 
@@ -1617,70 +1676,77 @@ void Engine::collect_discovery_passes() {
             continue;
         }
         const std::string asset_class = it->first;
-        std::optional<std::string> resp;
+        bridge::HttpResult res;
         try {
-            resp = it->second.get();
+            res = it->second.get();
         } catch (...) {
-            resp = std::nullopt;  // advisory layer: never take the loop down
+            // advisory layer: never take the loop down. A throw here is the
+            // task failing, which is not a transport observation, so it is
+            // labelled as what it is rather than borrowing a socket outcome.
+            res.outcome = bridge::HttpOutcome::kIncomplete;
+            res.detail = "the pass task threw";
         }
         it = discovery_inflight_.erase(it);
 
         const std::string ts = util::now_iso8601();
-        if (!resp) {
-            log_discovery_state_once(
-                "discovery_blocked", asset_class,
-                "bridge unreachable, the funnel runs Python-side", "warn", ts);
+        if (!res.ok()) {
+            // REPORT WHAT WAS MEASURED (2026-07-25). describe() is the only
+            // place that may say "unreachable", and it says it only when
+            // connect actually failed. A 90-second funnel now reads as
+            // "no response within the 300000 ms deadline", which is true.
+            log_discovery_state_once("discovery_blocked", asset_class,
+                                     res.describe(), "warn", ts, res.label());
+            // A LOST RESPONSE SAYS NOTHING ABOUT WHETHER THE PASS COMPLETED.
+            // Passes 103 and 104 both finished, wrote their rows, and could
+            // have added a watchlist member while the engine read a timeout.
+            // Both of these calls read the DATABASE and never needed the
+            // response, so neither may sit behind it. Before this change both
+            // sat after the `continue` below, and onboarding had therefore
+            // never run once from a pass in 99 passes: every one of the 43
+            // recorded onboardings happened at engine construction instead.
+            onboard_discovered_symbols(ts);
+            journal_pass_completion(asset_class, ts, res.label());
             continue;
         }
+        const std::string& resp_body = res.body;
         const std::string status =
-            bridge::json_get_string(*resp, "status", "error");
+            bridge::json_get_string(resp_body, "status", "error");
         if (status == "not_due") {
             // Should not normally arrive: the engine asked /discovery/due first
             // and only starts a pass it was told is due. Python re-checks anyway,
             // and Python wins, since it owns the cadence.
             log_discovery_state_once(
                 "discovery_skip", asset_class,
-                bridge::json_get_string(*resp, "reason", "not due"), "info", ts);
+                bridge::json_get_string(resp_body, "reason", "not due"), "info",
+                ts, "ok");
             continue;
         }
         if (status != "ok") {
             // Every non-ok status carries a reason from discovery/run.py: a
             // missing Finnhub key, an empty universe, no quotes, or the flag off
             // Python-side. The operator sees WHICH, instead of a silent return.
+            // The reason DEFAULTS to the status only when the payload genuinely
+            // carries none, which used to print "budget_exhausted:
+            // budget_exhausted" 48 times because the ok-path payload had no
+            // top-level reason key at all. run.py now sends one.
             log_discovery_state_once(
                 "discovery_blocked", asset_class,
-                status + ": " + bridge::json_get_string(*resp, "reason", status),
-                "warn", ts);
+                status + ": " +
+                    bridge::json_get_string(resp_body, "reason", status),
+                "warn", ts, "status_" + status);
+            // A non-ok pass still ran Stage A and Stage B and still recorded its
+            // row, so the journal gets its completion and the universe gets its
+            // refresh, for the same reason as the transport-failure branch.
+            onboard_discovered_symbols(ts);
+            journal_pass_completion(asset_class, ts, "ok");
             continue;
         }
 
-        // The pass ran. Log every stage count, so the funnel narrowing is visible
-        // and a stage that silently drops everything is diagnosable.
-        const double universe = bridge::json_get_number(*resp, "universe_count", 0);
-        const double finalists = bridge::json_get_number(*resp, "finalists", 0);
-        const double survivors = bridge::json_get_number(*resp, "survivors", 0);
-        const double evaluated = bridge::json_get_number(*resp, "evaluated", 0);
-        const double calls = bridge::json_get_number(*resp, "council_calls", 0);
-        const double cost = bridge::json_get_number(*resp, "est_cost_usd", 0);
+        // The pass ran and the answer arrived. The completion event is written
+        // from the recorded row by one writer, so the journal has exactly one
+        // shape whether the response landed or not.
         discovery_last_state_.erase(asset_class);  // a pass ran: re-arm the skip log
-        storage_->append_event(
-            {ts, "discovery_pass", "", "", "info",
-             "Discovery pass END (" + asset_class + "): universe " +
-                 std::to_string(static_cast<int>(universe)) + " -> finalists " +
-                 std::to_string(static_cast<int>(finalists)) + " -> survivors " +
-                 std::to_string(static_cast<int>(survivors)) + " -> evaluated " +
-                 std::to_string(static_cast<int>(evaluated)) + ", " +
-                 std::to_string(static_cast<int>(calls)) + " council call(s)",
-             util::to_json({{"asset_class", asset_class},
-                            {"onboard_status",
-                             bridge::json_get_string(*resp, "onboard_status",
-                                                     "noop")}},
-                           {{"universe_count", universe},
-                            {"finalists", finalists},
-                            {"survivors", survivors},
-                            {"evaluated", evaluated},
-                            {"council_calls", calls},
-                            {"est_cost_usd", cost}})});
+        journal_pass_completion(asset_class, ts, "ok");
         onboard_discovered_symbols(ts);
     }
 }
@@ -1853,16 +1919,21 @@ void Engine::consume_discovery() {
         const std::string q = "{\"asset_class\":\"" + asset_class +
                               "\",\"db\":\"" + opts_.db_path +
                               "\",\"engine_reads_enabled\":true}";
-        auto resp = bridge::http_post_json(
+        auto due = bridge::http_post(
             opts_.bridge_host, opts_.bridge_port, "/discovery/due", q,
             cfg_.council.engine_bridge_call_timeout_ms);
         const std::string ts = util::now_iso8601();
-        if (!resp) {
-            log_discovery_state_once(
-                "discovery_blocked", asset_class,
-                "bridge unreachable, the funnel runs Python-side", "warn", ts);
+        if (!due.ok()) {
+            // The cadence question is one indexed SQLite read, so the fast
+            // timeout is right for it. Report the measured outcome anyway: a
+            // refused connect and a bridge that took longer than 8 s to answer
+            // a cheap question are different problems with different fixes.
+            log_discovery_state_once("discovery_blocked", asset_class,
+                                     due.describe(), "warn", ts, due.label());
             continue;
         }
+        const std::string& resp_body = due.body;
+        auto resp = std::optional<std::string>(resp_body);
         if (!bridge::json_get_bool(*resp, "enabled", false)) {
             // The engine says on, Python says off. They read the same file, so
             // this means the control file and the shipped config disagree in a

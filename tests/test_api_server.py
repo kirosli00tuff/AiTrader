@@ -1900,7 +1900,12 @@ def _mk_spawn(engine_alive=True):
     """A spawn() that returns a live bridge and an engine whose liveness is
     configurable. When the engine is not alive it writes a strict-mode failure
     line to the engine log, the way a real strict-mode refusal would."""
-    def _spawn(cmd, env=None, log_path=None):
+    def _spawn(cmd, env=None, log_path=None, log_name=None):
+        # log_name is the 2026-07-25 route: the supervisor names the
+        # stream and stack.spawn owns the stamped, rotating file.
+        if log_name and not log_path:
+            from api_server import stack as _stack   # module-scope has no `stack`
+            log_path = os.path.join(_stack.run_dir(), f"{log_name}.log")
         is_engine = any("mal_engine" in str(c) for c in cmd)
         if is_engine and not engine_alive:
             if log_path:
@@ -2200,7 +2205,7 @@ def test_supervisor_spawns_bridge_with_whale_env(sup, client, monkeypatch):
     from api_server import stack
     seen = {}
 
-    def _rec_spawn(cmd, env=None, log_path=None):
+    def _rec_spawn(cmd, env=None, log_path=None, log_name=None):
         if any("python_bridge" in str(c) for c in cmd):
             seen["bridge_env"] = env or {}
         return FakeProc(pid=(222 if any("mal_engine" in str(c) for c in cmd) else 111),
@@ -2219,9 +2224,9 @@ def test_supervisor_readiness_gate_blocks_engine_when_bridge_unhealthy(sup, monk
     calls = {"spawn": 0}
     real_spawn = _mk_spawn(engine_alive=True)
 
-    def _count_spawn(cmd, env=None, log_path=None):
+    def _count_spawn(cmd, env=None, log_path=None, log_name=None):
         calls["spawn"] += 1
-        return real_spawn(cmd, env, log_path)
+        return real_spawn(cmd, env, log_path, log_name)
 
     monkeypatch.setattr(stack, "spawn", _count_spawn)
     monkeypatch.setattr(stack, "http_ok", lambda *a, **k: False)  # bridge never healthy

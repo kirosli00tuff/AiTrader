@@ -11,6 +11,117 @@ Model:
 Prompt summary: one line.
 Changes: what changed.
 
+## Prompt: Capture process output, typed transport result, discovery deadline, onboard on block, journal pass completion, provider retry, errors distinct from abstentions
+
+Date: 2026-07-25
+Model: Opus 5 (claude-opus-5[1m]), xhigh effort. The prompt said "Model: Opus" and named no version. The session runs on Opus 5 and this line records that.
+Prompt summary: seven tasks. Task 0, priority zero: the launcher must capture stdout and stderr per process to rotated files under `.run`, and the watchdog must capture evidence about a failing component before stopping it. Task 1: apply all seven fixes recorded in the 2026-07-25 diagnostic. Task 2: journal the discovery pass completion event. Task 3: one bounded retry for transient provider failures, and record an errored verdict distinctly from a considered abstention everywhere a human reads one, with composition math unchanged. Task 4: bring the stack up, run a real discovery pass, verify each claim by observation, then leave the stack as found and say which. Task 5: tests including mutation tests on the typed-result distinction and the onboard-on-block path. Task 6: document, commit, push.
+
+Constraints honored: no RiskGate logic, no live-trading gate, no adaptive limit-weakening invariant, no Level 1 risk value, no promotion criteria, no RL fill gate, no `min_directional_votes`, no trading threshold of any kind. Live trading stays off. Bind stays loopback. Run autonomously, safest option when ambiguous, noted here.
+
+## OUTCOME
+
+**HEADLINE: `discovery_pass` END at 2026-07-25T05:07:12Z, 95 seconds after its start, with zero `discovery_blocked` events. That is the first pass completion in the events journal in the project's history (99 starts, 0 completions before today), and 95 seconds is exactly the shape that used to produce "bridge unreachable" at 61 s or 92 s.**
+
+### TASK 0: NO FAILURE MAY LEAVE NO TRACE
+
+**The gap, named.** `scripts/start_paper_trading.sh` launched the bridge, engine, api, watchdog, and vite with a bare `&` and no redirection at all. `ops/start.sh` wrote two files with a truncating `>`, no timestamps, no rotation. That is why `.run/bridge.log` and `.run/start.log` were five days stale and why the backend's death was unknowable.
+
+**New `ops/logpipe.py`.** Every supervised process pipes through it: one ISO-8601 UTC stamp per line, append-only, size-rotated (16 MiB, 3 generations, 64 MiB worst case per process), unbuffered so a dying process's last line is already on disk. It writes `--- <name> log opened (pid N) ---` and `--- <name> stream closed ---` markers so "which run wrote this" is answerable from the file alone.
+
+Both launchers now wrap every process in `> >("$PY" -m ops.logpipe <name>) 2>&1`. **Process substitution, not a pipeline, deliberately:** `$!` after a pipeline is the LAST command's pid, so a pipe would have made every recorded pid the logger's. `api_server.stack.spawn` gains a `log_name` route that spawns the logger as its own PROCESS and hands the child its stdin. A thread in the supervisor would stop logging when the supervisor dies, which is the exact failure being fixed.
+
+**Live verification, all five files received output from their own process:**
+
+| file | lines | evidence |
+|---|---|---|
+| `.run/api.log` | 17 | `INFO: Uvicorn running on http://127.0.0.1:8000`, stamped |
+| `.run/engine.log` | 134 | the full startup block through `Shutdown complete.` |
+| `.run/bridge.log` | 34 | open and close markers at 05:05:35Z and 05:12:41Z |
+| `.run/watchdog.log` | 2 | open and close markers |
+
+Honest note: `watchdog.log` and `bridge.log` carry only the boundary markers because neither process emitted anything during seven minutes of a healthy stack. That proves the pipe is wired end to end, not that those processes are chatty. The api log is the one that matters, and it is the one that was missing.
+
+**Watchdog pre-stop capture.** `capture_before_restart` now fires for any DOWN component, not only for `bridge_degraded`/`feed_substitution`, and records per component: pid, process start epoch, age, the tail of its `.run/<name>.log`, and a final health probe (`final_health` or `final_health_error`). Written to `diagnostics/component_failure-<name>-*.json`. An existing test asserted the old "a plain crash captures nothing" behaviour and was deliberately inverted, with the reason written into the test.
+
+### TASK 1: THE SEVEN FIXES
+
+**1 (HIGH), typed transport result.** `bridge::http_post` returns `HttpResult{outcome, body, status, elapsed_ms, deadline_ms, detail}` over six outcomes: `kOk`, `kConnectFailed`, `kSendFailed`, `kTimedOut`, `kIncomplete`, `kHttpError`. `label()` gives a stable machine token; `describe()` gives an operator sentence. **Only `kConnectFailed` may say "unreachable", because it is the only one that measured it.** The timeout also became a TOTAL deadline recomputed before every receive, replacing the per-receive `SO_RCVTIMEO` that let a dribbling peer run forever while a peer that thought quietly for 61 s read as a failure.
+
+Every reporting caller updated: the discovery collector, the `/discovery/due` cadence call, the IBKR live-order note (three different situations on a live path, and one of them may mean the order exists), and the startup `/status` probe, which now says why the bridge is down instead of only that it is. `http_post_json` stays as a shim for call sites with nothing to report.
+
+**2 (HIGH), the discovery deadline. APPROACH CHOSEN: a dedicated deadline, not an async endpoint.** New `council.engine_discovery_call_timeout_ms` (300000) guards `/discovery/run_once`. **Why not async:** the engine already runs this call off its loop thread with `std::async` and peeks it with `wait_for(0)`, so it never blocks on it and never did. The call was already asynchronous from the engine's side; the only thing wrong was the number. Adding a polling protocol would have added a state machine and a new failure mode to fix a wrong constant. Config validation now refuses a discovery deadline below one council round trip and a council deadline below one provider call, so the mistake cannot return through a config edit. That check caught the new integration test's own config on first run, which is the check doing its job.
+
+**3 (HIGH), onboard on the block path.** `onboard_discovered_symbols` and `journal_pass_completion` both moved ahead of the `continue`. Both read the database Python already wrote and never needed the response. **Verified by observation in the integration test:** a watchlist member the funnel adds mid-pass is onboarded in the same session rather than at the next restart. Reverting the call fails that test.
+
+**4 (MEDIUM), errors counted separately from abstentions.** See Task 3 below.
+
+**5 (MEDIUM), one bounded provider retry.** See Task 3 below.
+
+**6 (MEDIUM), process stderr persisted.** Task 0 above.
+
+**7 (LOW), the doubled status.** `discovery/run.py`'s success path now returns a `reason` key, so a non-ok status prints its sentence instead of "budget_exhausted: budget_exhausted". Not exercised live this run (no non-ok pass occurred), so this one is proven by code and not by observation.
+
+### TASK 2: WHY THE COMPLETION EVENT WAS MISSING
+
+**It was never unwritten code. It was unreachable code.** The `discovery_pass` event was already constructed at `engine.cpp:1666`, after the `continue` that the block path takes on every failed collection. Since the block fired on 44 of 44 collections that mattered, the line never executed once in 99 passes.
+
+The fix is structural rather than a re-add: `journal_pass_completion` reads the `discovery_pass` ROW that Python writes, not the HTTP response body, and is called on every branch after a launched pass. Idempotent per pass id, seeded at construction from the newest recorded pass so a restart never re-journals history. **That is what lets the journal record a completion whose response was lost**, which is the whole class of failure this session exists to close.
+
+### TASK 3: PROVIDER RETRY AND THE ERROR/ABSTENTION SPLIT
+
+**RETRY POLICY, stated exactly.** Attempts: **2 maximum** (`MAX_PROVIDER_ATTEMPTS`), applied uniformly to every provider through the shared `_RealLLMProvider`. Backoff: **1.5 s** fixed. **The retry shares the provider's existing `provider_timeout_seconds` budget rather than adding to it** — each attempt gets only the time left on the deadline, and a retry is skipped entirely when under 5 s remains (`MIN_PROVIDER_RETRY_BUDGET_SECONDS`). Two full-length attempts plus a backoff would push a round past the engine's `/score/llm` deadline and turn a provider problem into a transport problem, which is the confusion this session exists to remove.
+
+Retried (transient): HTTP 408, 409, 425, 429, 500, 502, 503, 504, 529, and transport failures that never reached a status line (read timeouts, connection resets). Not retried (permanent): 400, 401, 403, 404, and any other status, because a second attempt is a second certain failure that costs the round its remaining budget. Every read records its `attempts` in `extra`, so "the retry fired" is a fact in the persisted row rather than a log line only.
+
+**MEASURED ERROR RATE AFTER: 0 errors in 6 provider calls on the live run**, against 17 of 57 (29.8 percent) historically, all Gemini. **Stated plainly: the retry did not fire on this run, because no provider failed.** Its behaviour is proven by deterministic test (retried once then succeeds, retried once then gives up, never retried on 401, and a budget test asserting the round stays inside its deadline), not by live observation. Six calls is far too small a sample to claim the rate moved.
+
+**THE ERROR/ABSTENTION SPLIT.** `abstentions` now counts providers that ANSWERED and held. `errors` counts calls that failed. Split in `ConsensusResult` (plus `responded_count`), in `council_eval.errors`, in `council_eval_provider.errored` (and `abstained` now means answered-and-held), in `load_evaluation`, in `/council/decisions` (joined from the council's own rows, because `model_outputs` is the C++ engine's record and carries only bias/confidence/edge, so an errored provider lands there identical to a hold), and in the GUI, which renders a red **"call FAILED"** chip and a `N call(s) FAILED` line instead of counting it as an abstention.
+
+**COMPOSITION MATH UNCHANGED, AND NO HISTORICAL VERDICT CHANGES VALUE. Verified by replaying all 57 recorded evaluations through both accounting rules on identical inputs and weights: 0 deciding values differ (bias, confidence, edge, verdict, agreement, directional_count), exactly 17 abstention counts differ.** Those 17 are the Gemini failures. A first attempt at this verification compared against the stored composed values using a flat weight the table does not record and produced 14 spurious deltas; that was an artifact of the reconstruction, and the differential A/B above is the correct test.
+
+Migration adds both columns with **no DEFAULT**, so a historical row keeps NULL, meaning "written before this distinction existed". Readers fall back to `source='error'`, which is exactly how the 17 stayed identifiable. `load_evaluation` opens read-only and so cannot migrate; it builds its SELECT from `PRAGMA table_info` instead of assuming the columns exist.
+
+### TASK 4: LIVE VERIFICATION
+
+Bounded 420-second headless run, `MAL_HEADLESS=1 MAL_RUN_SECONDS=420`, real Alpaca paper feed, real council.
+
+| claim | result |
+|---|---|
+| the pass completes without a `discovery_blocked` event | **YES.** `discovery_pass_start` 05:05:37Z, `discovery_pass` END 05:07:12Z, 95 s. Zero blocks this run. |
+| a `discovery_pass` completion event reaches the journal | **YES.** Payload: `pass_id 105, status ok, transport ok, universe 48, finalists 12, survivors 5, evaluated 5, council_calls 2, est_cost_usd 0.112`. |
+| a watchlist add is onboarded within the session | **NOT EXERCISED LIVE.** Both verdicts were `hold` (AAVE/USD eval 58, LDO/USD eval 59), so the pass added nothing and the active watchlist is empty. Onboarding correctly had nothing to do. Proven instead by the integration test, which has the funnel add `LATE/USD` mid-pass and asserts it is onboarded before the process exits, and which fails when the call is reverted. |
+| the provider retry fires and is recorded | **NOT EXERCISED LIVE.** All 6 provider calls succeeded, `errors 0`. Proven by test. |
+| an errored verdict is distinguishable everywhere | **COLUMNS LIVE AND POPULATED.** All 6 rows carry `source=real, abstained=1, errored=0`, and both evals carry `errors=0`. The distinguishing path is proven end to end by test, including a pre-migration row. |
+| every process log receives output | **YES.** api 17 lines, engine 134, bridge 34, watchdog 2, all stamped. |
+
+**Stack state: found DOWN, left DOWN.** The previous session found the validation stack torn down by the watchdog at 03:37:50Z. This session brought it up only for the bounded verification run and let the start script's own `trap cleanup EXIT` stop it. Ports 8765 and 8000 are free and no `mal_engine`, `python_bridge`, `api_server`, or `ops.watchdog` process is running. **The operator decides whether to restart the validation week.**
+
+### TASK 5: TESTS
+
+New `tests/test_bridge_transport.cpp` (ctest `bridge_transport`): binds loopback ephemeral ports and provokes each outcome deliberately. Asserts a refused connect is the only one that says "unreachable", a slow-but-healthy server is `timed_out` and names its deadline, the same server inside a larger deadline succeeds, a 500 is `http_error` carrying the status, a truncated response is `incomplete_response`, and **four distinct failure modes report four distinct labels**.
+
+New `tests/test_failure_visibility.py`, 15 tests: logpipe stamping, rotation and bounded generations, `spawn(log_name=)` capturing a child's stderr without the parent, watchdog component capture and its healthy-stack noop, the retry (once then success, once then give up, never on 401, and inside budget), the transient/permanent classifier, the error/abstention split in the composer, the composition-unchanged differential, distinct persistence, a pre-migration row, and the end-to-end engine integration test.
+
+**Mutation-tested both ways, with file-copy rollback:**
+- Removing `onboard_discovered_symbols` and `journal_pass_completion` from the block path: the integration test FAILS on the onboarding assertion.
+- Collapsing `describe()` and `label()` back to one generic cause: `bridge_transport` FAILS with 9 assertion failures and the integration test FAILS on "a slow funnel is NOT unreachable".
+
+No real network in tests beyond the Task 4 verification run. Every bind is `127.0.0.1` port 0.
+
+**Full suite green: ctest 31/31, pytest 967, vitest 136, tsc clean, vite build clean.**
+
+Two existing tests were updated rather than worked around. `tests/test_api_server.py`'s spawn fakes did not accept the new `log_name` keyword. `tests/test_watchdog_per_symbol.py` asserted that a plain crash captures nothing, which is the behaviour Task 0 exists to change; it was inverted with the reason written into the test.
+
+### NOTED AMBIGUITIES, SAFEST OPTION TAKEN
+
+- **Dedicated deadline over an async endpoint** for `/discovery/run_once`, reasoned above. The safest change to a working money path is the smallest one that fixes the actual defect.
+- **`abstained` reinterpreted rather than a third column added.** An errored row now records `abstained=0, errored=1`. `direction` stays `flat`, since the bias genuinely is zero and existing readers depend on it.
+- **Historical rows left untouched.** `events` and `council_eval*` are append-only audit journals. The 17 historical errors are still identifiable through `source`, and every reader falls back to it.
+- **The stack was left down**, matching how it was found. Restarting a validation week is an operator decision, not a side effect of a code session.
+
+Commit: `Capture process output, give the transport helper a typed result, match the discovery deadline to its work, onboard on the block path, journal pass completion, retry transient provider errors, and record errors distinctly from abstentions, live trading untouched`
+
 ## Prompt: Diagnose the discovery bridge-unreachable transient and the provider error path (OBSERVATIONAL ONLY, validation week running)
 
 Date: 2026-07-25

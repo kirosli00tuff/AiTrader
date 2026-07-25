@@ -276,6 +276,16 @@ struct CouncilConfig {
     // the shorter timeout. Both are config values, never literals at the call site.
     int engine_council_call_timeout_ms = 60000;   // wait for /score/llm (real council)
     int engine_bridge_call_timeout_ms = 8000;     // wait for a fast bridge call
+    // A DEADLINE MUST MATCH THE WORK IT GUARDS (2026-07-25). /discovery/run_once
+    // is not one round trip: it runs Stage A over the whole universe through a
+    // rate-limited Finnhub client, Stage B gate calls, then up to
+    // max_council_calls_per_pass full council rounds. Borrowing the single-call
+    // council timeout meant every pass that made a council call (18 of 18) read
+    // as a transport failure at 60 s while the funnel finished normally. The
+    // engine never blocks on this call (std::async plus a wait_for(0) peek), so
+    // a generous deadline costs nothing and only decides how long the engine
+    // waits before concluding the answer is lost.
+    int engine_discovery_call_timeout_ms = 300000;  // wait for a whole funnel pass
     // Bridge-to-provider timeouts (seconds), read by the Python bridge (mirrored
     // in llm_consensus/config_access.py). A single slow or hung provider fails
     // that one provider gracefully after this, the council proceeds on the rest.

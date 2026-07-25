@@ -282,6 +282,7 @@ Config load_config(const std::string& path,
     co.neutral_skip_strength_threshold = get_double(root, "council.neutral_skip_strength_threshold", co.neutral_skip_strength_threshold);
     co.engine_council_call_timeout_ms = get_int(root, "council.engine_council_call_timeout_ms", co.engine_council_call_timeout_ms);
     co.engine_bridge_call_timeout_ms = get_int(root, "council.engine_bridge_call_timeout_ms", co.engine_bridge_call_timeout_ms);
+    co.engine_discovery_call_timeout_ms = get_int(root, "council.engine_discovery_call_timeout_ms", co.engine_discovery_call_timeout_ms);
     co.provider_timeout_seconds = get_int(root, "council.provider_timeout_seconds", co.provider_timeout_seconds);
     co.gate_timeout_seconds = get_int(root, "council.gate_timeout_seconds", co.gate_timeout_seconds);
     co.fast_tier_max_notional_pct = get_double(root, "council.fast_tier_max_notional_pct", co.fast_tier_max_notional_pct);
@@ -664,6 +665,17 @@ std::vector<std::string> validate_config(const Config& cfg) {
         problems.push_back("council.engine_council_call_timeout_ms must be >= 1");
     if (co.engine_bridge_call_timeout_ms < 1)
         problems.push_back("council.engine_bridge_call_timeout_ms must be >= 1");
+    if (co.engine_discovery_call_timeout_ms < 1)
+        problems.push_back("council.engine_discovery_call_timeout_ms must be >= 1");
+    // A discovery pass CONTAINS council rounds, so its deadline can never be
+    // tighter than one round trip. Borrowing the council timeout for the whole
+    // funnel is the 2026-07-25 defect, and this is the check that keeps it from
+    // being reintroduced by a config edit.
+    if (co.engine_discovery_call_timeout_ms < co.engine_council_call_timeout_ms)
+        problems.push_back("council.engine_discovery_call_timeout_ms must be >= "
+                           "engine_council_call_timeout_ms (a discovery pass "
+                           "contains council rounds and cannot be given less "
+                           "time than one of them)");
     if (co.provider_timeout_seconds < 1)
         problems.push_back("council.provider_timeout_seconds must be >= 1");
     if (co.gate_timeout_seconds < 1)

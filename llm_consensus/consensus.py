@@ -30,7 +30,7 @@ from .providers import (  # noqa: F401
     OpenAIProvider,
 )
 from .verdicts import (  # noqa: F401
-    ConsensusResult, ModelVerdict, _det_unit, bias_to_verdict,
+    ConsensusResult, ModelVerdict, _det_unit, bias_to_verdict, is_error,
 )
 
 # Provider "personality" skews — kept identical to the original ensemble so the
@@ -274,7 +274,14 @@ def consensus(state: dict, providers: list[LLMProvider] | None = None,
     # agreement 3).
     directional = [(v, p) for v, p in zip(verdicts, prov)
                    if abs(v.bias) > 1e-9]
-    abstentions = len(verdicts) - len(directional)
+    # A FAILED CALL IS NOT AN ABSTENTION (2026-07-25). Both are non-directional
+    # and both stay out of the math below, which is unchanged: an errored
+    # verdict carries bias 0.0, so it was never in `directional` and never
+    # contributed to bias, confidence, edge, or agreement. What changes is only
+    # the COUNT a human reads. Splitting them here is why council_eval stops
+    # saying three providers held when two held and one never answered.
+    errors = sum(1 for v in verdicts if is_error(v))
+    abstentions = len(verdicts) - len(directional) - errors
     if directional:
         dwsum = sum(p.weight for _, p in directional) or 1.0
         bias = sum(v.bias * p.weight for v, p in directional) / dwsum
@@ -298,6 +305,7 @@ def consensus(state: dict, providers: list[LLMProvider] | None = None,
         gate=decision.to_dict(),
         directional_count=len(directional),
         abstentions=abstentions,
+        errors=errors,
     )
     # Per-provider persistence for replay (2026-07-20): every scored round is
     # recorded with its full state, exact prompts, and one row per provider,

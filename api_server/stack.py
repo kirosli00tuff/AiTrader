@@ -19,6 +19,7 @@ import os
 import signal
 import sqlite3
 import subprocess
+import sys
 import time
 import urllib.request
 
@@ -345,17 +346,43 @@ def sleep(seconds: float) -> None:
 
 
 def spawn(cmd: list[str], env: dict | None = None,
-          log_path: str | None = None) -> subprocess.Popen:
-    """Launch a detached child, redirecting output to log_path when given."""
+          log_path: str | None = None,
+          log_name: str | None = None) -> subprocess.Popen:
+    """Launch a detached child, capturing its output.
+
+    `log_name` is the preferred route: the child's stdout and stderr go through
+    an `ops.logpipe` process that stamps every line and rotates the file, so a
+    component that dies leaves its last words on disk with a time against them
+    (2026-07-25). `log_path` is the older raw-append behaviour, kept so existing
+    callers and tests keep working.
+
+    The logger is its own process rather than a thread, deliberately: the
+    supervisor that spawns the bridge can itself die, and the bridge's log must
+    not stop when it does. That is exactly the failure being fixed.
+    """
+    full_env = {**os.environ, **(env or {})}
+    logger = None
     out = None
-    if log_path:
+    if log_name:
+        os.makedirs(run_dir(), exist_ok=True)
+        logger = subprocess.Popen(
+            [sys.executable, "-m", "ops.logpipe", log_name],
+            stdin=subprocess.PIPE, stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL, env=full_env, cwd=_REPO_ROOT,
+            start_new_session=True)
+        out = logger.stdin
+    elif log_path:
         os.makedirs(os.path.dirname(log_path), exist_ok=True)
         out = open(log_path, "ab", buffering=0)
-    full_env = {**os.environ, **(env or {})}
-    return subprocess.Popen(cmd, stdout=out or subprocess.DEVNULL,
-                            stderr=subprocess.STDOUT if out else subprocess.DEVNULL,
-                            env=full_env, cwd=_REPO_ROOT,
-                            start_new_session=True)
+    proc = subprocess.Popen(
+        cmd, stdout=out or subprocess.DEVNULL,
+        stderr=subprocess.STDOUT if out else subprocess.DEVNULL,
+        env=full_env, cwd=_REPO_ROOT, start_new_session=True)
+    if logger is not None and logger.stdin is not None:
+        # Drop OUR copy of the write end, so the logger sees EOF when the child
+        # exits instead of waiting on a descriptor nobody is writing to.
+        logger.stdin.close()
+    return proc
 
 
 def run_backfill(db: str | None = None) -> dict | None:

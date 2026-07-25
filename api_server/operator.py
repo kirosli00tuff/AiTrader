@@ -75,6 +75,50 @@ def events_since(last_id: int, cap: int = 200) -> list[dict]:
     return activity(since_id=max(0, int(last_id)), limit=cap)["events"]
 
 
+# How far back from a decision event to look for the council round behind it.
+# The engine writes model_outputs and the decision event in the same iteration,
+# and the council persisted its own rows moments earlier in the same round trip.
+_COUNCIL_JOIN_WINDOW_SECONDS = 180
+
+
+def _council_error_facts(symbol: str, ts: str) -> tuple[set[str], dict]:
+    """Which provider slots FAILED in the council round behind this decision,
+    plus the round's answered/abstained/errored counts.
+
+    Returns (set of slot names, numbers dict). An old row with no `errored`
+    column falls back to `source='error'`, which is exactly how the 17
+    historical failures stayed identifiable. Never raises: a missing table or
+    an unmatched decision reads as no errors, which is the pre-2026-07-25
+    behaviour and safe to render.
+    """
+    if not symbol or not ts:
+        return set(), {}
+    try:
+        row = store.query_one(
+            "SELECT id, directional_count, abstentions, COALESCE(errors, 0) AS "
+            "errors FROM council_eval WHERE symbol = ? AND ts <= ? "
+            "AND CAST((julianday(?) - julianday(ts)) * 86400 AS INTEGER) <= ? "
+            "ORDER BY id DESC LIMIT 1",
+            (symbol, ts, ts, _COUNCIL_JOIN_WINDOW_SECONDS))
+        if not row:
+            return set(), {}
+        rows = store.query(
+            "SELECT slot, COALESCE(errored, CASE WHEN source='error' THEN 1 "
+            "ELSE 0 END) AS errored FROM council_eval_provider WHERE eval_id = ?",
+            (row["id"],))
+    except Exception:  # noqa: BLE001 - display path, never fatal
+        return set(), {}
+    slots = {str(p["slot"]) for p in rows if p.get("errored")}
+    directional = int(row.get("directional_count") or 0)
+    abstentions = int(row.get("abstentions") or 0)
+    return slots, {
+        "directional_count": directional,
+        "abstentions": abstentions,
+        "errors": int(row.get("errors") or 0) or len(slots),
+        "responded_count": directional + abstentions,
+    }
+
+
 def council_decisions(limit: int = 25) -> dict:
     """Decision records: each council-tier evaluation with the numbers it was
     judged on and the per-provider outputs recorded at the same moment.
@@ -96,11 +140,20 @@ def council_decisions(limit: int = 25) -> dict:
         providers = store.query(
             "SELECT model, verdict, confidence, edge, weight "
             "FROM model_outputs WHERE ts = ? ORDER BY weight DESC", (r["ts"],))
+        # A FAILED CALL MUST NOT RENDER AS A HOLD (2026-07-25). model_outputs is
+        # the C++ engine's record and carries only bias, confidence, and edge,
+        # so an errored provider lands there as verdict "hold" at confidence
+        # 0.0, byte-identical to a considered abstention. The truth lives in the
+        # council's own per-provider rows, so it is joined in here rather than
+        # inferred from the numbers, which is what the GUI was doing.
+        errored, counts = _council_error_facts(r.get("symbol") or "", r["ts"])
+        for p in providers:
+            p["errored"] = bool(p.get("model") in errored)
         decisions.append({
             "id": r["id"], "ts": r["ts"], "kind": r["kind"],
             "symbol": r.get("symbol") or "",
             "message": r.get("message") or "",
-            "numbers": payload, "providers": providers})
+            "numbers": {**payload, **counts}, "providers": providers})
     cfg = store.load_config()
     council_cfg = (cfg.get("council") or {})
     risk_cfg = (cfg.get("risk") or {})

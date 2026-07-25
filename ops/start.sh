@@ -71,7 +71,7 @@ cleanup_pidfile() { [ -f "$1" ] && kill "$(cat "$1")" 2>/dev/null || true; rm -f
 cleanup_pidfile "$RUN_DIR/bridge.pid"
 echo "[start] starting python_bridge on $BRIDGE_HOST:$BRIDGE_PORT ..."
 BRIDGE_PORT="$BRIDGE_PORT" nohup python "$REPO_ROOT/python_bridge/server.py" \
-  >"$RUN_DIR/bridge.log" 2>&1 &
+  > >(python -m ops.logpipe bridge) 2>&1 &
 echo $! >"$RUN_DIR/bridge.pid"
 
 # --- 4. Start the engine in CONTINUOUS mode -------------------------------
@@ -84,7 +84,7 @@ if [ "$INTERVAL" != "0" ]; then
 fi
 echo "[start] starting engine (continuous, source=$DATA_SOURCE) ..."
 nohup "$REPO_ROOT/build/mal_engine" "${ENGINE_ARGS[@]}" \
-  >"$RUN_DIR/engine.log" 2>&1 &
+  > >(python -m ops.logpipe engine) 2>&1 &
 echo $! >"$RUN_DIR/engine.pid"
 
 # --- 5. Open the dashboard -------------------------------------------------

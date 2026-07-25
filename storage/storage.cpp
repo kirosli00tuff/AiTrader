@@ -585,6 +585,45 @@ std::vector<BarRow> Storage::real_bars_in_range(const std::string& symbol,
     }
 }
 
+std::optional<Storage::DiscoveryPassRow> Storage::latest_discovery_pass(
+    const std::string& asset_class) {
+    // Tolerant read, same rule as watchlist_symbols: a DB predating discovery
+    // has no table, and a missing table degrades to "no pass", never a throw.
+    const char* sql =
+        "SELECT id, ts, status, COALESCE(reason,''), universe_count, "
+        "finalists_count, survivors_count, evaluated_count, council_calls, "
+        "est_cost_usd FROM discovery_pass WHERE asset_class=? "
+        "ORDER BY id DESC LIMIT 1";
+    sqlite3_stmt* raw = nullptr;
+    if (sqlite3_prepare_v2(db_, sql, -1, &raw, nullptr) != SQLITE_OK) {
+        if (raw) sqlite3_finalize(raw);
+        return std::nullopt;
+    }
+    sqlite3_bind_text(raw, 1, asset_class.c_str(), -1, SQLITE_TRANSIENT);
+    std::optional<DiscoveryPassRow> out;
+    if (sqlite3_step(raw) == SQLITE_ROW) {
+        DiscoveryPassRow r;
+        auto text = [&](int col) {
+            const unsigned char* s = sqlite3_column_text(raw, col);
+            return s ? std::string(reinterpret_cast<const char*>(s))
+                     : std::string();
+        };
+        r.id = sqlite3_column_int64(raw, 0);
+        r.ts = text(1);
+        r.status = text(2);
+        r.reason = text(3);
+        r.universe_count = sqlite3_column_int(raw, 4);
+        r.finalists_count = sqlite3_column_int(raw, 5);
+        r.survivors_count = sqlite3_column_int(raw, 6);
+        r.evaluated_count = sqlite3_column_int(raw, 7);
+        r.council_calls = sqlite3_column_int(raw, 8);
+        r.est_cost_usd = sqlite3_column_double(raw, 9);
+        out = r;
+    }
+    sqlite3_finalize(raw);
+    return out;
+}
+
 std::vector<std::string> Storage::watchlist_symbols(const std::string& sleeve) {
     // Tolerant read: a DB created before discovery has no watchlist table, and a
     // missing table must degrade to "no watchlist", never to a throw. Discovery

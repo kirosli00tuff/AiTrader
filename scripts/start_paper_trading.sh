@@ -132,7 +132,8 @@ echo ""
 
 # --- 1. Python bridge (real council + dnn + whale) --------------------------
 echo "[1/4] starting Python bridge on 127.0.0.1:${BRIDGE_PORT} ..."
-BRIDGE_PORT="$BRIDGE_PORT" "$PY" -m python_bridge.server &
+BRIDGE_PORT="$BRIDGE_PORT" "$PY" -m python_bridge.server \
+  > >("$PY" -m ops.logpipe bridge) 2>&1 &
 BRIDGE_PID=$!
 "$PY" -m api_server.stack record-pid bridge "$BRIDGE_PID" >/dev/null 2>&1 || true
 wait_http "http://127.0.0.1:${BRIDGE_PORT}/health" "bridge" 40 \
@@ -146,7 +147,8 @@ curl -s "http://127.0.0.1:${BRIDGE_PORT}/status" \
 echo "[2/4] starting engine (feed_mode alpaca_paper, clock real, full whitelist) ..."
 "$ENGINE" --continuous --interval-seconds "$INTERVAL" \
   --feed-mode alpaca_paper --clock-mode real \
-  --bridge "127.0.0.1:${BRIDGE_PORT}" --db "$DB" &
+  --bridge "127.0.0.1:${BRIDGE_PORT}" --db "$DB" \
+  > >("$PY" -m ops.logpipe engine) 2>&1 &
 ENGINE_PID=$!
 sleep 3
 kill -0 "$ENGINE_PID" 2>/dev/null \
@@ -159,7 +161,7 @@ echo "      engine running (pid $ENGINE_PID). Crypto 24/7; equities respect mark
 
 # --- 3. GUI backend ----------------------------------------------------------
 echo "[3/4] starting GUI backend on 127.0.0.1:${API_PORT} ..."
-"$PY" -m api_server.run &
+"$PY" -m api_server.run > >("$PY" -m ops.logpipe api) 2>&1 &
 API_PID=$!
 "$PY" -m api_server.stack record-pid api "$API_PID" >/dev/null 2>&1 || true
 wait_http "http://127.0.0.1:${API_PORT}/health" "api" 40 \
@@ -171,7 +173,7 @@ echo "      GUI backend healthy."
 # restart via the supervisor on a failure, and notifies via ntfy.sh. It never
 # touches the kill-request file and never auto-resumes a kill trip.
 echo "[3b] starting crash watchdog ..."
-"$PY" -m ops.watchdog &
+"$PY" -m ops.watchdog > >("$PY" -m ops.logpipe watchdog) 2>&1 &
 WATCHDOG_PID=$!
 "$PY" -m api_server.stack record-pid watchdog "$WATCHDOG_PID" >/dev/null 2>&1 || true
 echo "      watchdog running (pid $WATCHDOG_PID)."
@@ -198,7 +200,7 @@ else
   echo "  >>> Open the GUI at:  http://127.0.0.1:5173"
   echo "      (Ops and Controls carry the per-level off / on-mock / on-real toggles)"
   echo ""
-  ( cd web && npm run dev ) &
+  ( cd web && npm run dev ) > >("$PY" -m ops.logpipe vite) 2>&1 &
   VITE_PID=$!
   "$PY" -m api_server.stack record-pid vite "$VITE_PID" >/dev/null 2>&1 || true
   wait "$VITE_PID"

@@ -18,6 +18,8 @@ from __future__ import annotations
 import logging
 import math
 import os
+import re
+import time
 from dataclasses import dataclass, replace
 from typing import ClassVar, Protocol
 
@@ -28,6 +30,49 @@ from .verdicts import (
 )
 
 log = logging.getLogger("llm_consensus")
+
+# ONE bounded retry for a transient provider failure (2026-07-25). Measured
+# over the whole recorded history: gemini-3.1-pro-preview failed 17 of 57 calls
+# (29.8 percent) while gpt-5.5 and claude-opus-4-8 each failed 0 of 57, and
+# every observed cause was transient (HTTP 503 "high demand", and a read
+# timeout). There was no retry anywhere, so roughly a third of council rounds
+# silently ran two-handed.
+#
+# Two attempts, not more: a provider that fails twice inside its own budget is
+# not having a blip, and a council round has a deadline to respect.
+MAX_PROVIDER_ATTEMPTS = 2
+PROVIDER_RETRY_BACKOFF_SECONDS = 1.5
+# Do not start a second attempt that cannot plausibly finish. Retrying with two
+# seconds left just burns the backoff and returns the same failure later.
+MIN_PROVIDER_RETRY_BUDGET_SECONDS = 5.0
+
+# Transient means "the same request might well succeed now". Rate limits,
+# server-side overload, and transport timeouts qualify. An auth failure, a
+# malformed request, and a model-not-found do not: retrying those is a second
+# certain failure that costs a round its remaining budget.
+_TRANSIENT_STATUS = (408, 409, 425, 429, 500, 502, 503, 504, 529)
+_TRANSIENT_TEXT = re.compile(
+    r"timed out|timeout|connection (?:reset|aborted|error)|temporarily "
+    r"unavailable|overloaded|high demand|try again|rate.?limit",
+    re.IGNORECASE)
+
+
+def _is_transient(exc: Exception) -> bool:
+    """Whether a provider failure is worth exactly one more attempt.
+
+    Classified from the message because http_json collapses every failure into
+    LLMHTTPError with a formatted string ("HTTP 503: ...", "request failed:
+    ..."). Keeping the classifier here rather than widening that seam means the
+    retry policy has one home and the HTTP helper stays a helper.
+    """
+    msg = str(exc)
+    m = re.match(r"HTTP (\d{3})", msg)
+    if m:
+        return int(m.group(1)) in _TRANSIENT_STATUS
+    # A transport failure that never reached a status line.
+    if msg.startswith("request failed:") or msg.startswith("non-JSON response:"):
+        return bool(_TRANSIENT_TEXT.search(msg)) or msg.startswith("request failed:")
+    return bool(_TRANSIENT_TEXT.search(msg))
 
 
 # --- Stable, cacheable instruction prefix (per mode) -------------------------
@@ -183,10 +228,56 @@ class _RealLLMProvider:
         return replace(v, source="mock", model_id=self.model_id,
                        rationale=f"MOCK ({reason}): {v.rationale}")
 
-    def _call(self, state: dict, key: str) -> str:
+    def _call(self, state: dict, key: str, timeout: float | None = None) -> str:
         url, headers, payload = self._request(state, key)
-        resp = http_json.post_json(url, headers, payload, timeout=self.timeout)
+        resp = http_json.post_json(
+            url, headers, payload,
+            timeout=self.timeout if timeout is None else timeout)
         return self._text_from_response(resp)
+
+    def _call_with_retry(self, state: dict, key: str) -> tuple[str, int]:
+        """One bounded retry for a TRANSIENT failure. Returns (text, attempts).
+
+        Raises the LAST error when every attempt failed, so the caller's
+        existing flat-verdict fallback is unchanged.
+
+        THE RETRY SHARES THE PROVIDER'S EXISTING BUDGET, it does not add to it.
+        Two full-length attempts plus a backoff would push a council round past
+        the engine's /score/llm deadline and turn a provider problem into a
+        transport problem, which is precisely the confusion the 2026-07-25
+        session exists to remove. Each attempt gets only the time left on
+        `self.timeout`, and a retry is skipped when too little remains to be
+        worth making.
+        """
+        deadline = time.monotonic() + self.timeout
+        last: Exception | None = None
+        attempts = 0
+        while attempts < MAX_PROVIDER_ATTEMPTS:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            attempts += 1
+            try:
+                return self._call(state, key, timeout=remaining), attempts
+            except Exception as e:  # noqa: BLE001 - classified below
+                last = e
+                if attempts >= MAX_PROVIDER_ATTEMPTS or not _is_transient(e):
+                    break
+                left = (deadline - time.monotonic()
+                        - PROVIDER_RETRY_BACKOFF_SECONDS)
+                if left < MIN_PROVIDER_RETRY_BUDGET_SECONDS:
+                    log.warning(
+                        "council provider %s (%s) transient failure with too "
+                        "little budget left to retry (%.1fs): %s",
+                        self.name, self.model_id, max(0.0, left), e)
+                    break
+                log.warning(
+                    "council provider %s (%s) transient failure, retrying once "
+                    "in %.1fs: %s", self.name, self.model_id,
+                    PROVIDER_RETRY_BACKOFF_SECONDS, e)
+                time.sleep(PROVIDER_RETRY_BACKOFF_SECONDS)
+        raise last if last is not None else http_json.LLMHTTPError(
+            "no attempt was made within the provider budget")
 
     def score(self, state: dict) -> ModelVerdict:
         key = self._api_key()
@@ -195,28 +286,40 @@ class _RealLLMProvider:
             # into thesis output and the GUI, and credential identifiers do
             # not belong there (test_research_satellite pins this).
             return self._mock_verdict(state, f"no {self.LABEL} key")
+        attempts = 1
         try:
-            text = self._call(state, key)
+            text, attempts = self._call_with_retry(state, key)
         except Exception as e:  # network / status / decode errors
-            log.warning("council provider %s (%s) call failed: %s",
-                        self.name, self.model_id, e)
+            log.warning("council provider %s (%s) call failed after %d "
+                        "attempt(s): %s", self.name, self.model_id,
+                        MAX_PROVIDER_ATTEMPTS if _is_transient(e) else 1, e)
             return flat_verdict(self.name, f"flat: {self.LABEL} call error",
-                                source="error", model_id=self.model_id)
+                                source="error", model_id=self.model_id,
+                                extra={"attempts": MAX_PROVIDER_ATTEMPTS
+                                       if _is_transient(e) else 1,
+                                       "error": str(e)[:200]})
         obj = http_json.extract_json_object(text)
         if obj is None:
             log.warning("council provider %s (%s) returned unparseable output",
                         self.name, self.model_id)
             _debug_raw(self.name, self.model_id, text)
             return flat_verdict(self.name, f"flat: {self.LABEL} unparseable JSON",
-                                source="error", model_id=self.model_id)
+                                source="error", model_id=self.model_id,
+                                extra={"attempts": attempts})
         try:
-            return verdict_from_payload(self.name, obj, source="real",
-                                        model_id=self.model_id)
+            v = verdict_from_payload(self.name, obj, source="real",
+                                     model_id=self.model_id)
+            # Record the attempt count on every read, so "the retry fired" is a
+            # measurable fact in the persisted row rather than a log line only.
+            if attempts > 1:
+                v.extra = {**v.extra, "attempts": attempts}
+            return v
         except Exception as e:
             log.warning("council provider %s (%s) bad payload: %s",
                         self.name, self.model_id, e)
             return flat_verdict(self.name, f"flat: {self.LABEL} bad payload",
-                                source="error", model_id=self.model_id)
+                                source="error", model_id=self.model_id,
+                                extra={"attempts": attempts})
 
 
 # --- Google Gemini transport (shared by the tertiary provider AND the gate) --

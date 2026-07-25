@@ -22,6 +22,8 @@ from __future__ import annotations
 import json
 import logging
 import sqlite3
+
+from .verdicts import is_error
 from datetime import datetime, timezone
 
 log = logging.getLogger("llm_consensus")
@@ -60,6 +62,29 @@ _SCHEMA = (
         state_json TEXT NOT NULL)""",
 )
 
+# Added after the tables shipped, so an existing database keeps every row.
+# NO DEFAULT on either column: NULL keeps its only honest meaning, which is
+# "written before this distinction existed". A historical row must not start
+# claiming its abstentions were verified reads (2026-07-25).
+_MIGRATIONS = (
+    ("council_eval", "errors",
+     "ALTER TABLE council_eval ADD COLUMN errors INTEGER"),
+    ("council_eval_provider", "errored",
+     "ALTER TABLE council_eval_provider ADD COLUMN errored INTEGER"),
+)
+
+
+def _migrate(conn) -> None:
+    """Add the columns an older database is missing. Idempotent and silent."""
+    for table, column, ddl in _MIGRATIONS:
+        try:
+            cols = {r[1] for r in conn.execute(
+                f"PRAGMA table_info({table})").fetchall()}
+            if column not in cols:
+                conn.execute(ddl)
+        except Exception:  # noqa: BLE001 - record-keeping never breaks a verdict
+            pass
+
 
 def _direction_of(bias: float) -> str:
     if bias > 1e-9:
@@ -89,11 +114,13 @@ def record_evaluation(db_path: str, state: dict, result,
         try:
             for ddl in _SCHEMA:
                 conn.execute(ddl)
+            _migrate(conn)
             cur = conn.execute(
                 "INSERT INTO council_eval (ts, symbol, mode, prompt_version, "
                 "state_json, system_prompt, user_prompt, bias, confidence, "
                 "edge, verdict, agreement_count, directional_count, "
-                "abstentions, gate_json) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                "abstentions, errors, gate_json) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (ts, str(state.get("symbol", "?")), prompt_mode(state),
                  PROMPT_VERSION, json.dumps(state, default=str),
                  system_prompt_for(state, cfg_path), render_user_prompt(state),
@@ -102,22 +129,30 @@ def record_evaluation(db_path: str, state: dict, result,
                  int(result.agreement_count),
                  int(getattr(result, "directional_count", 0)),
                  int(getattr(result, "abstentions", 0)),
+                 int(getattr(result, "errors", 0)),
                  json.dumps(getattr(result, "gate", None))))
             eval_id = int(cur.lastrowid)
             for v in per_model:
                 bias = float(getattr(v, "bias", 0.0))
+                # A FAILED CALL IS NOT AN ABSTENTION (2026-07-25). `abstained`
+                # used to be derived from the bias alone, so an errored row and
+                # a considered hold read identically and only `source` told
+                # them apart. It now means "answered, and held".
+                errored = is_error(v)
+                abstained = (not errored) and abs(bias) <= 1e-9
                 conn.execute(
                     "INSERT INTO council_eval_provider (eval_id, slot, "
                     "model_id, source, direction, bias, confidence, edge, "
-                    "abstained, rationale, extra_json) "
-                    "VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                    "abstained, errored, rationale, extra_json) "
+                    "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
                     (eval_id, str(getattr(v, "model", "")),
                      str(getattr(v, "model_id", "")),
                      str(getattr(v, "source", "")),
                      _direction_of(bias), bias,
                      float(getattr(v, "confidence", 0.0)),
                      float(getattr(v, "edge", 0.0)),
-                     1 if abs(bias) <= 1e-9 else 0,
+                     1 if abstained else 0,
+                     1 if errored else 0,
                      str(getattr(v, "rationale", ""))[:1000],
                      json.dumps(getattr(v, "extra", {}) or {})))
             conn.commit()
@@ -185,16 +220,35 @@ def load_evaluation(db_path: str, eval_id: int) -> dict | None:
         from .evidence import _resolve_db
         conn = sqlite3.connect(f"file:{_resolve_db(db_path)}?mode=ro", uri=True)
         try:
+            # The read is opened READ-ONLY, so it cannot migrate. A database
+            # written before the split simply lacks the columns, and the query
+            # is built to match what is actually there rather than assuming.
+            def has(table: str, column: str) -> bool:
+                return any(r[1] == column for r in conn.execute(
+                    f"PRAGMA table_info({table})").fetchall())
+
+            # COALESCE, not a DEFAULT on the column: a row written before the
+            # split genuinely does not know how many of its "abstentions" were
+            # failed calls, and 0 reads as "none recorded", the honest answer.
+            errors_expr = ("COALESCE(errors, 0)" if has("council_eval", "errors")
+                           else "0")
+            # Fall back to the source string for a pre-migration provider row,
+            # which is exactly how the 17 historical errors stayed identifiable.
+            errored_expr = (
+                "COALESCE(errored, CASE WHEN source='error' THEN 1 ELSE 0 END)"
+                if has("council_eval_provider", "errored")
+                else "CASE WHEN source='error' THEN 1 ELSE 0 END")
             row = conn.execute(
                 "SELECT ts, symbol, mode, prompt_version, state_json, "
                 "system_prompt, user_prompt, bias, confidence, edge, verdict, "
-                "agreement_count, directional_count, abstentions "
-                "FROM council_eval WHERE id=?", (eval_id,)).fetchone()
+                "agreement_count, directional_count, abstentions, "
+                f"{errors_expr} FROM council_eval WHERE id=?",
+                (eval_id,)).fetchone()
             if not row:
                 return None
             providers = conn.execute(
                 "SELECT slot, model_id, source, direction, bias, confidence, "
-                "edge, abstained, rationale, extra_json "
+                f"edge, abstained, rationale, extra_json, {errored_expr} "
                 "FROM council_eval_provider WHERE eval_id=? ORDER BY id",
                 (eval_id,)).fetchall()
         finally:
@@ -208,10 +262,20 @@ def load_evaluation(db_path: str, eval_id: int) -> dict | None:
         "bias": row[7], "confidence": row[8], "edge": row[9],
         "verdict": row[10], "agreement_count": row[11],
         "directional_count": row[12], "abstentions": row[13],
+        "errors": row[14],
+        # How many providers actually answered, so a two-handed round reads as
+        # one without the caller doing arithmetic.
+        "responded_count": (row[12] or 0) + (row[13] or 0),
         "providers": [{
             "slot": p[0], "model_id": p[1], "source": p[2], "direction": p[3],
             "bias": p[4], "confidence": p[5], "edge": p[6],
-            "abstained": bool(p[7]), "rationale": p[8],
+            # abstained means ANSWERED AND HELD. errored means the call failed.
+            # A pre-migration row derives errored from source, and its
+            # abstained flag is corrected the same way rather than left saying
+            # a failed call was a considered read.
+            "abstained": bool(p[7]) and not bool(p[10]),
+            "errored": bool(p[10]),
+            "rationale": p[8],
             "extra": json.loads(p[9] or "{}"),
         } for p in providers],
     }

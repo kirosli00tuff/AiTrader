@@ -272,7 +272,16 @@ private:
                                   const std::string& asset_class,
                                   const std::string& reason,
                                   const std::string& severity,
-                                  const std::string& ts);
+                                  const std::string& ts,
+                                  const std::string& outcome = "");
+    // Write the `discovery_pass` completion event from the row Python recorded,
+    // exactly once per pass. Sourced from the TABLE rather than the HTTP
+    // response, because the two are different facts: a pass can complete and
+    // record itself while the response is lost. Before 2026-07-25 the journal
+    // held 99 pass starts and zero completions for precisely that reason.
+    void journal_pass_completion(const std::string& asset_class,
+                                 const std::string& ts,
+                                 const std::string& transport);
     // Consume the runtime feed-mode + clock-mode toggle from controls.json each
     // loop iteration (Task 3). A clock switch applies immediately. A feed switch
     // rebuilds the feed source, but a switch AWAY from alpaca_paper with an open
@@ -514,14 +523,19 @@ private:
     // 0 means never asked, which is also how an off->on toggle asks immediately
     // instead of making the operator wait out a trigger interval.
     long last_discovery_trigger_ = 0;
-    // In-flight passes, asset_class -> pending response body. Bounded at one per
-    // asset class: a class already running is never started again, so a slow pass
-    // can never pile up threads or double-spend the discovery budget.
-    std::map<std::string, std::future<std::optional<std::string>>>
-        discovery_inflight_;
+    // In-flight passes, asset_class -> pending transport result. Bounded at one
+    // per asset class: a class already running is never started again, so a slow
+    // pass can never pile up threads or double-spend the discovery budget.
+    // Carries the full HttpResult, not just the body, so a pass that did not
+    // land is reported by the outcome the transport MEASURED (2026-07-25).
+    std::map<std::string, std::future<bridge::HttpResult>> discovery_inflight_;
     // Last logged skip/block state per asset class, so a steady reason is logged
     // once on entry rather than every trigger.
     std::map<std::string, std::string> discovery_last_state_;
+    // Newest discovery_pass row id already journalled per asset class. Seeded at
+    // construction so a restart never re-journals the pass before it, and
+    // checked on every completion so the event is written exactly once.
+    std::map<std::string, long long> discovery_journalled_pass_;
     // Symbols this run onboarded from the watchlist, so onboarding is idempotent
     // across iterations and re-logs nothing.
     std::vector<std::string> discovery_symbols_;

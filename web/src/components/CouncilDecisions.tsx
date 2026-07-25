@@ -1,4 +1,4 @@
-import type { CouncilDecision, CouncilDecisions as Decisions } from "../api/types";
+import type { CouncilDecision, CouncilDecisions as Decisions, DecisionProvider } from "../api/types";
 import Explain from "./Explain";
 
 const PROVIDER_LABEL: Record<string, string> = {
@@ -17,8 +17,14 @@ function num(numbers: Record<string, unknown>, k: string): number | null {
 
 // A hold with zero confidence is an abstention: it is scored and logged but
 // does not dilute the directional vote.
-const isAbstention = (verdict: string | null, confidence: number | null) =>
-  (verdict ?? "hold") === "hold" && (confidence ?? 0) === 0;
+//
+// A FAILED CALL IS NOT AN ABSTENTION (2026-07-25). It also lands as a hold at
+// zero confidence, so this predicate alone read 17 failed Gemini calls as
+// considered holds. `errored` comes from the council's own per-provider rows
+// and is the only thing that can tell them apart.
+const isErrored = (p: DecisionProvider) => p.errored === true;
+const isAbstention = (p: DecisionProvider) =>
+  !isErrored(p) && (p.verdict ?? "hold") === "hold" && (p.confidence ?? 0) === 0;
 
 function Outcome({ d }: { d: CouncilDecision }) {
   if (d.kind === "trade_entry" || d.kind === "trade")
@@ -48,9 +54,11 @@ function FailedBy({ d }: { d: CouncilDecision }) {
 }
 
 function DecisionCard({ d, benched }: { d: CouncilDecision; benched: boolean }) {
+  const errored = d.providers.filter(isErrored);
+  const abstainedRows = d.providers.filter(isAbstention);
   const directional = d.providers.filter(
-    (p) => !isAbstention(p.verdict, p.confidence));
-  const abstained = d.providers.length - directional.length;
+    (p) => !isAbstention(p) && !isErrored(p));
+  const abstained = abstainedRows.length;
   return (
     <div className="decision" data-testid="decision">
       <div className="decision-head">
@@ -77,7 +85,9 @@ function DecisionCard({ d, benched }: { d: CouncilDecision; benched: boolean }) 
                 <td className="mono">{fmt(p.edge, 4)}</td>
                 <td className="mono">{fmt(p.weight)}</td>
                 <td className="dim">
-                  {isAbstention(p.verdict, p.confidence) ? "abstained" : ""}
+                  {isErrored(p)
+                    ? <span className="chip chip-block" data-testid="provider-errored">call FAILED</span>
+                    : isAbstention(p) ? "abstained" : ""}
                 </td>
               </tr>
             ))}
@@ -86,6 +96,7 @@ function DecisionCard({ d, benched }: { d: CouncilDecision; benched: boolean }) 
       )}
       <div className="decision-compose mono dim" data-testid="composition">
         {directional.length} directional · {abstained} abstained
+        {errored.length > 0 && ` · ${errored.length} call(s) FAILED`}
         {num(d.numbers, "agreement") !== null &&
           ` · agreement ${num(d.numbers, "agreement")}`}
         {num(d.numbers, "confidence") !== null &&

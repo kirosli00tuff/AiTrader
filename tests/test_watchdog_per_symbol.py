@@ -234,11 +234,38 @@ def test_capture_before_restart_fires_on_feed_substitution(
     assert list((tmp_path / "diag").glob("feed_substitution-*.json"))
 
 
-def test_capture_before_restart_noop_when_neither_condition(monkeypatch):
+def test_capture_before_restart_noop_when_nothing_is_wrong(monkeypatch):
+    """No fd snapshot on a healthy stack. The fd snapshot answers "is the bridge
+    leaking", and asking it about a healthy stack is noise."""
     called = []
     monkeypatch.setattr(watchdog, "bridge_fd_snapshot",
                         lambda: called.append(True) or {})
     snap, note = watchdog.capture_before_restart(
-        {"bridge_status": "down", "feed_substitution": False})
+        {"engine": True, "bridge": True, "backend": True,
+         "bridge_status": "ok", "feed_substitution": False})
     assert snap is None and note == ""
-    assert called == []                  # a plain crash captures nothing
+    assert called == []
+
+
+def test_a_plain_crash_now_captures_the_component_it_crashed(monkeypatch,
+                                                             tmp_path):
+    """CHANGED DELIBERATELY 2026-07-25. This case used to capture NOTHING, on
+    the reasoning that a plain crash had no fd story to tell. It also had no
+    story of any other kind, which is why the validation run's `backend_down`
+    teardown was unexplainable afterwards. A down component is now captured with
+    its pid, its start time, its log tail, and a final health probe."""
+    monkeypatch.setenv("MAL_RUN_DIR", str(tmp_path))
+    fd_calls, captured = [], []
+    monkeypatch.setattr(watchdog, "bridge_fd_snapshot",
+                        lambda: fd_calls.append(True) or {})
+    monkeypatch.setattr("ops.evidence.capture",
+                        lambda cond, detail=None, **kw: (
+                            captured.append(cond) or "x"))
+    snap, note = watchdog.capture_before_restart(
+        {"engine": True, "bridge": False, "backend": True,
+         "bridge_status": "down", "feed_substitution": False})
+    assert captured == ["component_failure-bridge"]
+    assert "bridge" in note
+    # Still no fd snapshot: "down" is not "degraded", and the fd question only
+    # applies to a bridge that is still answering.
+    assert fd_calls == [] and snap is None

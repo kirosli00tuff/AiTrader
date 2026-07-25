@@ -298,11 +298,17 @@ int main(int argc, char** argv) {
             bool st_bridge_up = false, st_council_real = false,
                  st_dnn_real = false, st_whale_real = false, st_sec = false,
                  st_whale_alert = false;
+            std::string st_bridge_why;
             if (opts.use_bridge) {
-                auto s = mal::bridge::http_post_json(
+                auto probe = mal::bridge::http_post(
                     opts.bridge_host, opts.bridge_port, "/status", "{}",
                     cfg.council.engine_bridge_call_timeout_ms);
-                if (s) {
+                // Say WHY the probe failed. "bridge DOWN" with no reason sent
+                // the 2026-07-25 diagnosis looking for a dead bridge when the
+                // bridge was healthy and only the deadline was wrong.
+                if (!probe.ok()) st_bridge_why = probe.describe();
+                auto s = std::optional<std::string>(probe.body);
+                if (probe.ok()) {
                     st_bridge_up = true;
                     st_models = mal::bridge::json_get_string(*s, "council_models", "");
                     st_gate = mal::bridge::json_get_string(*s, "council_gate", "");
@@ -320,7 +326,9 @@ int main(int argc, char** argv) {
                 if (!enabled) return "off";
                 if (!real) return "on-mock (by choice)";
                 if (!opts.use_bridge) return "on-real but NO --bridge (mock)";
-                if (!st_bridge_up) return "on-real but bridge DOWN";
+                if (!st_bridge_up)
+                    return "on-real but bridge DOWN" +
+                           (st_bridge_why.empty() ? "" : " (" + st_bridge_why + ")");
                 return avail ? "on-real (available)" : "on-real but UNAVAILABLE";
             };
             const auto& rk = cfg.risk;

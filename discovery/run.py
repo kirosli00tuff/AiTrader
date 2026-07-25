@@ -431,6 +431,11 @@ def run_once(asset_class: str, *, db_path: str = _DEFAULT_DB,
 
         return {
             "status": payload.get("status", "ok"),
+            # The status can be non-ok on this path (budget_exhausted,
+            # no_survivors), and the engine prints "<status>: <reason>". With
+            # no reason key it printed the status TWICE, 48 times, while the
+            # real sentence sat unread in the discovery_pass row (2026-07-25).
+            "reason": payload.get("reason", ""),
             "asset_class": asset_class,
             "pass_id": pass_id,
             "onboarded": onboarded.get("onboarded", []),

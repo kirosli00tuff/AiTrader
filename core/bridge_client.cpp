@@ -2,41 +2,132 @@
 
 #include <arpa/inet.h>
 #include <netdb.h>
+#include <poll.h>
 #include <sys/socket.h>
 #include <unistd.h>
 
 #include <cctype>
+#include <cerrno>
+#include <chrono>
 #include <cstring>
 #include <sstream>
 
 namespace mal::bridge {
 
-std::optional<std::string> http_post_json(const std::string& host, int port,
-                                          const std::string& path,
-                                          const std::string& body,
-                                          int timeout_ms) {
-    int fd = ::socket(AF_INET, SOCK_STREAM, 0);
-    if (fd < 0) return std::nullopt;
+namespace {
 
-    timeval tv{};
-    tv.tv_sec = timeout_ms / 1000;
-    tv.tv_usec = (timeout_ms % 1000) * 1000;
-    ::setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
-    ::setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
+long now_ms() {
+    using namespace std::chrono;
+    return duration_cast<milliseconds>(steady_clock::now().time_since_epoch())
+        .count();
+}
+
+// errno as a short stable token, so a payload field stays greppable.
+std::string errno_token() {
+    switch (errno) {
+        case ECONNREFUSED: return "ECONNREFUSED";
+        case EHOSTUNREACH: return "EHOSTUNREACH";
+        case ENETUNREACH:  return "ENETUNREACH";
+        case ETIMEDOUT:    return "ETIMEDOUT";
+        case ECONNRESET:   return "ECONNRESET";
+        case EPIPE:        return "EPIPE";
+        case EAGAIN:       return "EAGAIN";
+        case EMFILE:       return "EMFILE";
+        case ENFILE:       return "ENFILE";
+        default:           return std::string("errno=") + std::to_string(errno);
+    }
+}
+
+// Parse "HTTP/1.1 200 OK" -> 200. Returns 0 when the line is not a status line.
+int status_from(const std::string& resp) {
+    if (resp.size() < 12 || resp.compare(0, 5, "HTTP/") != 0) return 0;
+    auto sp = resp.find(' ');
+    if (sp == std::string::npos) return 0;
+    try {
+        return std::stoi(resp.substr(sp + 1, 3));
+    } catch (...) {
+        return 0;
+    }
+}
+
+}  // namespace
+
+std::string HttpResult::label() const {
+    switch (outcome) {
+        case HttpOutcome::kOk:            return "ok";
+        case HttpOutcome::kConnectFailed: return "connect_failed";
+        case HttpOutcome::kSendFailed:    return "send_failed";
+        case HttpOutcome::kTimedOut:      return "timed_out";
+        case HttpOutcome::kIncomplete:    return "incomplete_response";
+        case HttpOutcome::kHttpError:     return "http_error";
+    }
+    return "unknown";
+}
+
+std::string HttpResult::describe() const {
+    const std::string took = " after " + std::to_string(elapsed_ms) + " ms";
+    switch (outcome) {
+        case HttpOutcome::kOk:
+            return "ok" + took;
+        case HttpOutcome::kConnectFailed:
+            // The ONLY outcome that means unreachable. Say so here and nowhere
+            // else, because this is the only one that measured it.
+            return "bridge unreachable: connect failed (" + detail + ")" + took;
+        case HttpOutcome::kSendFailed:
+            return "the request could not be sent (" + detail + ")" + took;
+        case HttpOutcome::kTimedOut:
+            return "no response within the " + std::to_string(deadline_ms) +
+                   " ms deadline (waited " + std::to_string(elapsed_ms) +
+                   " ms, " + detail +
+                   "), the bridge was reachable but had not answered";
+        case HttpOutcome::kIncomplete:
+            return "the bridge closed the connection without completing the "
+                   "response (" + detail + ")" + took;
+        case HttpOutcome::kHttpError:
+            return "the bridge answered HTTP " + std::to_string(status) + took;
+    }
+    return "unknown outcome" + took;
+}
+
+HttpResult http_post(const std::string& host, int port, const std::string& path,
+                     const std::string& body, int timeout_ms) {
+    HttpResult r;
+    r.deadline_ms = timeout_ms;
+    const long started = now_ms();
+    const long deadline = started + timeout_ms;
+    auto finish = [&](HttpOutcome o, const std::string& detail) {
+        r.outcome = o;
+        r.detail = detail;
+        r.elapsed_ms = now_ms() - started;
+        return r;
+    };
+
+    int fd = ::socket(AF_INET, SOCK_STREAM, 0);
+    if (fd < 0) return finish(HttpOutcome::kConnectFailed, errno_token());
 
     sockaddr_in addr{};
     addr.sin_family = AF_INET;
     addr.sin_port = htons(static_cast<uint16_t>(port));
     if (::inet_pton(AF_INET, host.c_str(), &addr.sin_addr) != 1) {
-        // Resolve hostname (e.g. "localhost").
-        hostent* he = ::gethostbyname(host.c_str());
-        if (!he) { ::close(fd); return std::nullopt; }
+        hostent* he = ::gethostbyname(host.c_str());  // e.g. "localhost"
+        if (!he) {
+            ::close(fd);
+            return finish(HttpOutcome::kConnectFailed, "resolve failed");
+        }
         std::memcpy(&addr.sin_addr, he->h_addr, he->h_length);
     }
 
+    // Send gets the whole budget. A localhost connect either lands or refuses
+    // immediately, so a blocking connect costs nothing and reports errno.
+    timeval tv{};
+    tv.tv_sec = timeout_ms / 1000;
+    tv.tv_usec = (timeout_ms % 1000) * 1000;
+    ::setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
+
     if (::connect(fd, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) != 0) {
+        const std::string why = errno_token();
         ::close(fd);
-        return std::nullopt;
+        return finish(HttpOutcome::kConnectFailed, why);
     }
 
     std::ostringstream req;
@@ -46,23 +137,77 @@ std::optional<std::string> http_post_json(const std::string& host, int port,
         << "Content-Length: " << body.size() << "\r\n"
         << "Connection: close\r\n\r\n"
         << body;
-    std::string r = req.str();
-    if (::send(fd, r.data(), r.size(), 0) < 0) { ::close(fd); return std::nullopt; }
+    const std::string raw = req.str();
+    size_t sent = 0;
+    while (sent < raw.size()) {
+        ssize_t n =
+            ::send(fd, raw.data() + sent, raw.size() - sent, MSG_NOSIGNAL);
+        if (n <= 0) {
+            if (n < 0 && errno == EINTR) continue;
+            const std::string why = errno_token();
+            ::close(fd);
+            return finish(HttpOutcome::kSendFailed, why);
+        }
+        sent += static_cast<size_t>(n);
+    }
 
+    // TOTAL deadline, recomputed before every receive. This is the whole point
+    // of the 2026-07-25 change: a funnel that legitimately thinks for 90 s is
+    // not a transport failure, and a peer that dribbles one byte a minute is.
     std::string resp;
     char buf[4096];
-    ssize_t n;
-    while ((n = ::recv(fd, buf, sizeof(buf), 0)) > 0)
+    while (true) {
+        const long remaining = deadline - now_ms();
+        if (remaining <= 0) {
+            ::close(fd);
+            return finish(HttpOutcome::kTimedOut,
+                          std::to_string(resp.size()) + " bytes received");
+        }
+        pollfd pfd{fd, POLLIN, 0};
+        int pr = ::poll(&pfd, 1, static_cast<int>(remaining));
+        if (pr == 0) {
+            ::close(fd);
+            return finish(HttpOutcome::kTimedOut,
+                          std::to_string(resp.size()) + " bytes received");
+        }
+        if (pr < 0) {
+            if (errno == EINTR) continue;
+            const std::string why = errno_token();
+            ::close(fd);
+            return finish(HttpOutcome::kIncomplete, why);
+        }
+        ssize_t n = ::recv(fd, buf, sizeof(buf), 0);
+        if (n == 0) break;  // peer closed: Connection: close, response complete
+        if (n < 0) {
+            if (errno == EINTR) continue;
+            const std::string why = errno_token();
+            ::close(fd);
+            return finish(HttpOutcome::kIncomplete, why);
+        }
         resp.append(buf, static_cast<size_t>(n));
+    }
     ::close(fd);
 
-    auto pos = resp.find("\r\n\r\n");
-    if (pos == std::string::npos) return std::nullopt;
-    // Only return body for 2xx responses.
-    if (resp.compare(0, 12, "HTTP/1.1 200") != 0 &&
-        resp.compare(0, 12, "HTTP/1.0 200") != 0)
-        return std::nullopt;
-    return resp.substr(pos + 4);
+    const auto pos = resp.find("\r\n\r\n");
+    if (pos == std::string::npos)
+        return finish(HttpOutcome::kIncomplete,
+                      std::to_string(resp.size()) +
+                          " bytes received, no header terminator");
+    r.status = status_from(resp);
+    if (r.status != 200)
+        return finish(HttpOutcome::kHttpError,
+                      "status " + std::to_string(r.status));
+    r.body = resp.substr(pos + 4);
+    return finish(HttpOutcome::kOk, "");
+}
+
+std::optional<std::string> http_post_json(const std::string& host, int port,
+                                          const std::string& path,
+                                          const std::string& body,
+                                          int timeout_ms) {
+    HttpResult r = http_post(host, port, path, body, timeout_ms);
+    if (!r.ok()) return std::nullopt;
+    return r.body;
 }
 
 namespace {

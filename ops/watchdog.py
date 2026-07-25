@@ -522,22 +522,92 @@ def attempt_restart(reason: str = "") -> dict:
             "detail": detail}
 
 
+def _failing_components(h: dict) -> list[str]:
+    """Which supervised components the health check found DOWN."""
+    return [name for name in ("engine", "bridge", "backend") if not h.get(name)]
+
+
+def _component_evidence(name: str) -> dict:
+    """Everything obtainable about one component, without touching it.
+
+    A COMPONENT THAT DIES MUST LEAVE ENOUGH BEHIND TO EXPLAIN ITSELF
+    (2026-07-25). The validation run ended on `backend_down` and the cause was
+    unknowable afterwards: nothing had captured the backend's output, its pid,
+    or a last health answer. Each piece here is best-effort and independent, so
+    one unavailable source never costs the others.
+    """
+    out: dict = {"component": name}
+    try:
+        pid = (stack.read_pids() or {}).get(name)
+        out["pid"] = pid
+        if pid:
+            from ops import evidence
+            epoch = evidence.process_start_epoch(int(pid))
+            out["process_start_epoch"] = epoch
+            if epoch is not None:
+                out["age_seconds"] = round(max(0.0, time.time() - epoch), 1)
+            out["alive"] = os.path.isdir(f"/proc/{int(pid)}")
+    except Exception as e:  # noqa: BLE001
+        out["pid_error"] = type(e).__name__
+    # Its last words. The whole reason ops/logpipe.py exists.
+    try:
+        from ops import logpipe
+        out["log_path"] = logpipe.log_path(name)
+        out["log_tail"] = logpipe.tail(name)
+    except Exception as e:  # noqa: BLE001
+        out["log_error"] = type(e).__name__
+    # A final health answer, if one can still be had. A component that is dying
+    # rather than dead often still answers, and what it says is the difference
+    # between "it crashed" and "it was sick and said so".
+    url = {"bridge": stack.bridge_health_url(),
+           "backend": stack.api_health_url()}.get(name)
+    if url:
+        out["health_url"] = url
+        try:
+            with urllib.request.urlopen(url, timeout=3) as r:
+                out["final_health"] = r.read().decode()[:2000]
+        except Exception as e:  # noqa: BLE001
+            out["final_health_error"] = f"{type(e).__name__}: {e}"
+    return out
+
+
 def capture_before_restart(h: dict) -> tuple[dict | None, str]:
-    """Root-cause evidence for a degraded bridge or a feed substitution,
-    gathered BEFORE any restart, because the restart destroys it (2026-07-17:
-    caught, restarted, never root-caused). Returns (snapshot, notification
-    note). No triggering condition returns (None, "")."""
+    """Root-cause evidence gathered BEFORE any restart, because the restart
+    destroys it (2026-07-17: caught, restarted, never root-caused). Returns
+    (snapshot, notification note). No triggering condition returns (None, "").
+
+    Two families now. A degraded bridge or a feed substitution captures the fd
+    snapshot that found the 2026-07-19 keystore leak. A component that is DOWN
+    captures its pid, its start time, the tail of its log, and a final health
+    probe: the 2026-07-25 teardown had none of that and was therefore
+    unexplainable, which is the failure this exists to stop repeating.
+    """
+    from ops import evidence
+    down = _failing_components(h)
     degraded = h.get("bridge_status") == "degraded"
     substitution = bool(h.get("feed_substitution"))
-    if not degraded and not substitution:
+    if not degraded and not substitution and not down:
         return None, ""
-    snap = bridge_fd_snapshot()
-    from ops import evidence
-    condition = "bridge_degraded" if degraded else "feed_substitution"
-    evidence.capture(condition, {"health": h, "bridge": snap})
-    note = (f" Bridge fds {snap.get('fd_count', '?')}, sockets "
-            f"{snap.get('socket_count', '?')} (pid "
-            f"{snap.get('bridge_pid', '?')}), captured before restart.")
+    note = ""
+    snap: dict | None = None
+    if down:
+        components = {name: _component_evidence(name) for name in down}
+        for name in down:
+            evidence.capture(f"component_failure-{name}",
+                             {"health": h, "component": components[name]})
+        first = components[down[0]]
+        note = (f" Captured before restart: {', '.join(down)} down"
+                f" ({down[0]} pid {first.get('pid', '?')},"
+                f" {len(first.get('log_tail') or '')} bytes of log,"
+                f" health "
+                f"{'answered' if first.get('final_health') else 'silent'}).")
+    if degraded or substitution:
+        snap = bridge_fd_snapshot()
+        condition = "bridge_degraded" if degraded else "feed_substitution"
+        evidence.capture(condition, {"health": h, "bridge": snap})
+        note += (f" Bridge fds {snap.get('fd_count', '?')}, sockets "
+                 f"{snap.get('socket_count', '?')} (pid "
+                 f"{snap.get('bridge_pid', '?')}), captured before restart.")
     return snap, note
 
 

@@ -78,7 +78,18 @@ class ConsensusResult:
     # abstentions how many held. per_model stays raw and complete, so nothing
     # is hidden by the aggregation.
     directional_count: int = 0
+    # A CONSIDERED HOLD ONLY (2026-07-25). This used to be
+    # len(verdicts) - len(directional), which counted a provider that never
+    # answered as one that read the evidence and held. Across the recorded
+    # history 17 of 57 llm_tertiary rows were failed calls recorded as
+    # abstentions, and council_eval 1 reads "2 directional, 1 abstained,
+    # strong_buy" when the third provider errored.
     abstentions: int = 0
+    # Providers whose call FAILED. Excluded from abstentions, excluded from
+    # directional, and contributing nothing to bias, confidence, edge, or
+    # agreement, exactly as before. This field changes what the record says,
+    # never what the council decides.
+    errors: int = 0
     # Why no call was made (2026-07-25). Set only when the pre-call evidence
     # check refused: the providers were never contacted and no prompt was ever
     # rendered, so per_model is empty and the budget is charged nothing. None
@@ -95,6 +106,10 @@ class ConsensusResult:
             "agreement_count": self.agreement_count,
             "directional_count": self.directional_count,
             "abstentions": self.abstentions,
+            "errors": self.errors,
+            # How many providers actually answered. A two-handed round is now
+            # visible without joining the per-provider rows.
+            "responded_count": self.directional_count + self.abstentions,
             "per_model": [vars(m) for m in self.per_model],
         }
         if self.gate is not None:
@@ -137,8 +152,14 @@ def verdict_from_payload(model: str, obj: dict, *, source: str = "real",
 
 
 def flat_verdict(model: str, rationale: str, *, source: str = "error",
-                 model_id: str = "") -> ModelVerdict:
-    """Neutral/flat verdict used when a real call errors or can't be parsed."""
+                 model_id: str = "", extra: dict | None = None) -> ModelVerdict:
+    """Neutral/flat verdict used when a real call errors or can't be parsed.
+
+    `source` is what separates this from a considered hold, everywhere it
+    matters. The bias is 0.0 in both cases and always will be, because a
+    provider that never answered has no direction to contribute, so no
+    downstream count may key off the bias alone (2026-07-25).
+    """
     return ModelVerdict(
         model=model,
         bias=0.0,
@@ -148,4 +169,17 @@ def flat_verdict(model: str, rationale: str, *, source: str = "error",
         rationale=rationale,
         source=source,
         model_id=model_id,
+        extra=dict(extra or {}),
     )
+
+
+def is_error(v: ModelVerdict) -> bool:
+    """Whether this verdict is a FAILED CALL rather than a considered read.
+
+    One predicate, shared by the composer, the persister, and the API, so
+    "errored" cannot come to mean three slightly different things in three
+    places. A failed call and a hold are both non-directional and must stay
+    that way in the math. They are not the same event and must stop reading
+    the same in the record.
+    """
+    return str(getattr(v, "source", "")) == "error"

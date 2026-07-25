@@ -210,7 +210,7 @@ class Supervisor:
             self._bridge = stack.spawn(
                 stack.bridge_cmd(),
                 env=stack.bridge_env(),
-                log_path=os.path.join(logdir, "bridge.log"))
+                log_name="bridge")
             stack.record_pid("bridge", self._bridge.pid)
             # Readiness gate: wait for the bridge to pass a REAL health probe
             # before the engine starts, so the engine's on-real check never races
@@ -234,7 +234,7 @@ class Supervisor:
                 # Attribution: the engine records its launcher in
                 # continuous_start, pairing every restart with its stop.
                 env={"MAL_LAUNCHER": "gui_supervisor"},
-                log_path=os.path.join(logdir, "engine.log"))
+                log_name="engine")
             stack.record_pid("engine", self._engine.pid)
             stack.sleep(ENGINE_SETTLE_SECONDS)
             if self._engine.poll() is not None:

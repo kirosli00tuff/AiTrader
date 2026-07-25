@@ -248,6 +248,31 @@ public:
     // table is absent (a DB predating discovery), so an old DB is never a crash.
     std::vector<std::string> watchlist_symbols(const std::string& sleeve = "");
 
+    // The newest discovery pass Python recorded for an asset class. READ-ONLY:
+    // `discovery_pass` is Python's table, the same as `watchlist` and `bars`.
+    //
+    // The engine needs this because the funnel's completion and the engine's
+    // knowledge of it are two different facts (2026-07-25). A pass can finish,
+    // write this row, and add a watchlist member while the engine's HTTP read
+    // times out, which is exactly what happened 44 times. Reading the row lets
+    // the journal record a completion the response failed to deliver.
+    // Returns nullopt when the table is absent (a DB predating discovery) or no
+    // pass exists, so an old DB is never a crash.
+    struct DiscoveryPassRow {
+        long long id = 0;
+        std::string ts;
+        std::string status;
+        std::string reason;
+        int universe_count = 0;
+        int finalists_count = 0;
+        int survivors_count = 0;
+        int evaluated_count = 0;
+        int council_calls = 0;
+        double est_cost_usd = 0.0;
+    };
+    std::optional<DiscoveryPassRow> latest_discovery_pass(
+        const std::string& asset_class);
+
     // One queued defensive request from the adaptive real-time layer.
     // `action` is a raw string here on purpose: this struct is the untrusted
     // WIRE shape, straight off a row. core/adaptive_actions.hpp is what turns it

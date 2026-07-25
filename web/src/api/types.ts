@@ -623,6 +623,10 @@ export interface DecisionProvider {
   confidence: number | null;
   edge: number | null;
   weight: number | null;
+  // The provider's call FAILED. Distinct from an abstention, which is a read
+  // that reached a hold. Both land in model_outputs as verdict "hold" at
+  // confidence 0, so this comes from the council's own per-provider rows.
+  errored?: boolean;
 }
 export interface CouncilDecision {
   id: number;

@@ -259,6 +259,12 @@ council:
   # verdict, and nothing trades (the no-trade stall). These are the real fix.
   engine_council_call_timeout_ms: 60000   # engine wait for /score/llm (full council)
   engine_bridge_call_timeout_ms: 8000     # engine wait for a fast call (dnn/whale/rl/status)
+  # Whole discovery funnel pass (/discovery/run_once), NOT one round trip: Stage A
+  # over the universe through a rate-limited Finnhub client, Stage B gate calls,
+  # then up to max_council_calls_per_pass council rounds. Must be >= the council
+  # timeout. The engine peeks this call off its loop thread and never blocks, so
+  # a generous value costs nothing.
+  engine_discovery_call_timeout_ms: 300000
   provider_timeout_seconds: 30            # bridge per-provider call; one slow provider fails alone
   gate_timeout_seconds: 15                # bridge Haiku base-check gate call
   # Two-tier execution (cost control). A candidate is FAST tier (native + RiskGate,

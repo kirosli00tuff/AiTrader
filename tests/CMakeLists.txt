@@ -251,3 +251,12 @@ target_link_libraries(test_feed_no_fabrication PRIVATE mal_market_data
                       mal_signal_engine mal_bridge mal_util)
 add_test(NAME feed_no_fabrication COMMAND test_feed_no_fabrication
          WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+# The transport reports the outcome it MEASURED (2026-07-25). Four distinct
+# failure modes must report four distinct labels, and a slow-but-healthy server
+# must read as a timeout rather than "bridge unreachable". Binds only loopback
+# ephemeral ports.
+add_executable(test_bridge_transport test_bridge_transport.cpp)
+target_link_libraries(test_bridge_transport PRIVATE mal_bridge pthread)
+add_test(NAME bridge_transport COMMAND test_bridge_transport
+         WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
