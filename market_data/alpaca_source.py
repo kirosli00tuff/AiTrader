@@ -264,16 +264,28 @@ _BARS_DDL = (
     "id INTEGER PRIMARY KEY AUTOINCREMENT, venue TEXT NOT NULL, symbol TEXT NOT NULL,"
     " timeframe TEXT NOT NULL, timestamp TEXT NOT NULL, open REAL NOT NULL,"
     " high REAL NOT NULL, low REAL NOT NULL, close REAL NOT NULL, volume REAL NOT NULL,"
-    " source TEXT DEFAULT 'unknown',"
+    " source TEXT DEFAULT 'unknown', volume_source TEXT,"
     " UNIQUE(venue, symbol, timeframe, timestamp))"
 )
 
-# Tolerant provenance migration for a DB created before the column existed.
-# Existing rows land 'unknown', never a guess at real. Mirrors the C++
-# storage.cpp migration, so whichever side opens the DB first migrates it.
+# Tolerant provenance migrations for a DB created before the columns existed.
+# Mirrors the C++ storage.cpp migration list, so whichever side opens the DB
+# first migrates it, and both sides must be changed together.
+#
+# source: existing rows land 'unknown', never a guess at real.
+# volume_source: NO column default, so existing rows stay NULL. They were
+# written before any path stated its volume provenance, and NULL is the true
+# answer for them; back-stamping 'unknown' would claim a judgment nobody made.
 _BARS_MIGRATIONS = (
     "ALTER TABLE bars ADD COLUMN source TEXT DEFAULT 'unknown'",
+    "ALTER TABLE bars ADD COLUMN volume_source TEXT",
 )
+
+# THE volume provenance of every bar this module writes. They all come from
+# Alpaca's historical bar endpoints, whose volume is the venue's own reported
+# aggregate for that bar, so it is venue_backfill and nothing else. Mirrors
+# mal::provenance::volume::for_bar_source(kBackfill) in core/provenance.hpp.
+BACKFILL_VOLUME_SOURCE = "venue_backfill"
 
 
 def ensure_bars_schema(conn: sqlite3.Connection) -> None:
@@ -316,6 +328,12 @@ def _fetch_bars(url_base: str, headers: dict[str, str], symbols: list[str],
 
 def _upsert_bars(conn: sqlite3.Connection, venue: str, symbol: str,
                  timeframe: str, bars: list) -> int:
+    """Write venue historical bars, stating BOTH provenance axes (2026-07-25).
+
+    source is 'backfill' and volume_source is BACKFILL_VOLUME_SOURCE, both
+    written literally on every row rather than left to a column default,
+    because a default is a claim nobody made.
+    """
     written = 0
     for b in bars:
         ts, o, h, l, c = b.get("t"), b.get("o"), b.get("h"), b.get("l"), b.get("c")
@@ -323,13 +341,14 @@ def _upsert_bars(conn: sqlite3.Connection, venue: str, symbol: str,
             continue
         conn.execute(
             "INSERT INTO bars(venue,symbol,timeframe,timestamp,open,high,low,"
-            "close,volume,source) VALUES(?,?,?,?,?,?,?,?,?,'backfill') "
+            "close,volume,source,volume_source) "
+            "VALUES(?,?,?,?,?,?,?,?,?,'backfill',?) "
             "ON CONFLICT(venue,symbol,timeframe,timestamp) DO UPDATE SET "
             "open=excluded.open, high=excluded.high, low=excluded.low, "
             "close=excluded.close, volume=excluded.volume, "
-            "source=excluded.source",
+            "source=excluded.source, volume_source=excluded.volume_source",
             (venue, symbol, timeframe, ts, float(o), float(h), float(l),
-             float(c), float(b.get("v", 0) or 0)))
+             float(c), float(b.get("v", 0) or 0), BACKFILL_VOLUME_SOURCE))
         written += 1
     return written
 

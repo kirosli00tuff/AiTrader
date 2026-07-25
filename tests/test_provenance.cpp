@@ -91,6 +91,52 @@ int main() {
         maltest::check(rows[2].source == "unknown",
                        "empty source lands as unknown");
 
+        // --- 4. VOLUME provenance, the second axis (2026-07-25) ---------
+        // The column was added by the 2026-07-23 quarantine and populated by
+        // nothing, so a real venue volume and an unestablished one were
+        // indistinguishable. These pin the mapping and the write.
+        namespace vol = provenance::volume;
+        maltest::check(vol::for_bar_source("real_feed") == "venue_bar",
+                       "a live bar's volume is the venue's minute bars");
+        maltest::check(vol::for_bar_source("backfill") == "venue_backfill",
+                       "a backfill bar's volume is the venue's history");
+        maltest::check(vol::for_bar_source("synthetic") == "synthetic",
+                       "a generated bar's volume is generated");
+        maltest::check(vol::for_bar_source("replay") == "replay",
+                       "a replayed bar's volume is replayed");
+        maltest::check(vol::for_bar_source("") == "unknown",
+                       "an unestablished source gives unestablished volume");
+        maltest::check(vol::is_venue("venue_bar") &&
+                       vol::is_venue("venue_backfill"),
+                       "both venue labels read as venue-reported");
+        maltest::check(!vol::is_venue("") && !vol::is_venue("unknown") &&
+                       !vol::is_venue("fabricated_zeroed") &&
+                       !vol::is_venue("synthetic"),
+                       "nothing else reads as venue-reported");
+        maltest::check(vol::normalize("nonsense") == "unknown",
+                       "junk volume provenance normalizes to unknown");
+
+        // Every write states its volume provenance, and an empty one lands as
+        // unknown rather than claiming the venue reported it.
+        storage::BarRow vb{"alpaca", "ETH/USD", "5min",
+                           "2026-07-18T10:00:00Z", 1, 2, 0.5, 1.5, 10};
+        vb.source = "real_feed";
+        vb.volume_source = vol::for_bar_source(vb.source);
+        st.upsert_bar(vb);
+
+        storage::BarRow vblank{"alpaca", "ETH/USD", "5min",
+                               "2026-07-18T10:05:00Z", 1, 2, 0.5, 1.5, 10};
+        vblank.source = "real_feed";
+        vblank.volume_source = "";
+        st.upsert_bar(vblank);
+
+        auto eth = st.recent_bars("ETH/USD", "5min", 10);
+        maltest::check(eth.size() == 2, "two volume-provenance bars round-trip");
+        maltest::check(eth[0].volume_source == "venue_bar",
+                       "a stated volume provenance persists");
+        maltest::check(eth[1].volume_source == "unknown",
+                       "an empty volume provenance lands unknown, never venue");
+
         // A trade row carries the bar it executed against; empty lands unknown.
         storage::TradeRow tr;
         tr.ts = "2026-07-18T10:10:00Z";

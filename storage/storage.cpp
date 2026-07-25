@@ -105,6 +105,12 @@ void Storage::init_schema(const std::string& schema_sql_path) {
         // scripts/quarantine_synthetic_bars_20260717.py, from diagnostic
         // evidence, not from here.
         "ALTER TABLE bars ADD COLUMN source TEXT DEFAULT 'unknown'",
+        // VOLUME provenance, the second axis (2026-07-25). Deliberately NO
+        // column default: an existing row was written before any path stated
+        // its volume provenance, so NULL is the true answer for it and
+        // back-stamping 'unknown' would claim a judgment nobody made. New
+        // writes always bind a value, so NULL can only ever mean historical.
+        "ALTER TABLE bars ADD COLUMN volume_source TEXT",
         // Provenance of the bar each trade executed against. Same posture.
         "ALTER TABLE trades ADD COLUMN bar_source TEXT DEFAULT 'unknown'",
         // Exit state on the position (2026-07-23), so a restart can rehydrate
@@ -405,18 +411,22 @@ long long Storage::insert_sleeve_snapshot(const SleeveSnapshotRow& r) {
 }
 
 void Storage::upsert_bar(const BarRow& b) {
-    // source is written on every path. An empty string still lands as
-    // 'unknown' (BarRow defaults it), so no write can default to real.
+    // BOTH provenance axes are written on every path (2026-07-25). An empty
+    // string on either lands as 'unknown' (BarRow defaults both), so no write
+    // can default to real or to venue-reported. volume_source was added to
+    // the schema by the 2026-07-23 quarantine and populated by nothing, which
+    // left a real venue volume indistinguishable from an unestablished one.
     Stmt s(db_,
            "INSERT INTO bars(venue,symbol,timeframe,timestamp,open,high,low,"
-           "close,volume,source) VALUES(?,?,?,?,?,?,?,?,?,?)"
+           "close,volume,source,volume_source) VALUES(?,?,?,?,?,?,?,?,?,?,?)"
            " ON CONFLICT(venue,symbol,timeframe,timestamp) DO UPDATE SET"
            " open=excluded.open, high=excluded.high, low=excluded.low,"
            " close=excluded.close, volume=excluded.volume,"
-           " source=excluded.source");
+           " source=excluded.source, volume_source=excluded.volume_source");
     s.bind(1, b.venue).bind(2, b.symbol).bind(3, b.timeframe).bind(4, b.timestamp)
         .bind(5, b.open).bind(6, b.high).bind(7, b.low).bind(8, b.close)
-        .bind(9, b.volume).bind(10, b.source.empty() ? "unknown" : b.source);
+        .bind(9, b.volume).bind(10, b.source.empty() ? "unknown" : b.source)
+        .bind(11, b.volume_source.empty() ? "unknown" : b.volume_source);
     s.step_done();
 }
 
@@ -425,7 +435,7 @@ std::vector<BarRow> Storage::recent_bars(const std::string& symbol,
                                          int limit) {
     Stmt s(db_,
            "SELECT venue,symbol,timeframe,timestamp,open,high,low,close,volume,"
-           "COALESCE(source,'unknown')"
+           "COALESCE(source,'unknown'),COALESCE(volume_source,'unknown')"
            " FROM bars WHERE symbol=? AND timeframe=?"
            " ORDER BY timestamp DESC LIMIT ?");
     s.bind(1, symbol).bind(2, timeframe).bind(3, limit);
@@ -446,6 +456,10 @@ std::vector<BarRow> Storage::recent_bars(const std::string& symbol,
         b.close = sqlite3_column_double(s.raw(), 7);
         b.volume = sqlite3_column_double(s.raw(), 8);
         b.source = col_text(9);
+        // NULL reads as 'unknown' here: a row written before the volume label
+        // existed cannot prove where its number came from, and unknown is the
+        // only honest answer for it (2026-07-25).
+        b.volume_source = col_text(10);
         rows.push_back(std::move(b));
     }
     std::reverse(rows.begin(), rows.end());  // oldest-first for indicator math

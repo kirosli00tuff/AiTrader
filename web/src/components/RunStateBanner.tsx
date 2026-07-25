@@ -46,6 +46,27 @@ export default function RunStateBanner() {
           blocked until the real feed returns. Check the bridge.
         </div>
       )}
+      {data.gate_enabled === false && (
+        // A DISABLED BASE-CHECK GATE IS A CONDITION (2026-07-25). Off means
+        // every candidate reaches all three providers unscreened, which is
+        // the amplification the gate exists to prevent. It used to render as
+        // one quiet boolean on the Controls page, so 44 recorded discovery
+        // rounds carried "gate disabled" with nobody noticing.
+        <div
+          className="runstate"
+          data-testid="gate-disabled-warning"
+          style={{
+            background: "#3a2a12",
+            border: "1px solid #e59a24",
+            color: "#ffca7a",
+            fontWeight: 600,
+          }}
+        >
+          BASE-CHECK GATE DISABLED: {data.gate_status ||
+            "every candidate reaches the full council unscreened"}. Council
+          spend is uncapped by the cheap screen.
+        </div>
+      )}
     <div className="runstate">
       <span className="runstate-item">Loop <b className="mono">{data.feed_mode}</b></span>
       {/* Off is the shipped default, so a grey dot here is expected, not a

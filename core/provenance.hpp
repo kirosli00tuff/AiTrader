@@ -57,4 +57,61 @@ inline bool allows_entry(const std::string& feed_mode,
     return is_real(source);
 }
 
+// VOLUME PROVENANCE (2026-07-25). Where a bar's VOLUME came from, which is a
+// separate question from where its prices came from.
+//
+// The two axes genuinely differ on the live path: a real_feed bar takes its
+// prices from the venue's latest TRADE and its volume from the venue's latest
+// completed MINUTE BAR (market_data::consume_latest_bar). The 2026-07-23
+// quarantine proved the axes have to be recorded separately, marking 3,443
+// live volumes fabricated_zeroed while their prices stayed real and tradeable.
+//
+// The column existed from that quarantine onward and nothing populated it: of
+// 97,127 bars, 3,443 carried the quarantine mark and 93,684 carried NULL, so
+// a real venue volume and an unestablished one were indistinguishable. Every
+// write path now states its volume provenance explicitly, and NULL keeps its
+// only honest meaning: written before the label existed, provenance unknown,
+// never to be read as venue-reported.
+namespace volume {
+
+inline constexpr const char* kVenueBar = "venue_bar";            // live minute bars
+inline constexpr const char* kVenueBackfill = "venue_backfill";  // historical bars
+inline constexpr const char* kSynthetic = "synthetic";           // generated
+inline constexpr const char* kReplay = "replay";                 // replayed history
+inline constexpr const char* kUnknown = "unknown";               // not established
+// Written by scripts/quarantine_fabricated_volume_20260723.py, never by a
+// live write path. Listed so the set is closed and the label is not reinvented.
+inline constexpr const char* kFabricatedZeroed = "fabricated_zeroed";
+
+inline std::string normalize(const std::string& s) {
+    if (s == kVenueBar || s == kVenueBackfill || s == kSynthetic ||
+        s == kReplay || s == kUnknown || s == kFabricatedZeroed)
+        return s;
+    return kUnknown;
+}
+
+// True when the volume is the venue's own reported number. Must match
+// market_data.tradeable.VENUE_VOLUME_SOURCES on the Python side.
+inline bool is_venue(const std::string& volume_source) {
+    const std::string n = normalize(volume_source);
+    return n == kVenueBar || n == kVenueBackfill;
+}
+
+// THE derivation: a bar's volume provenance follows from its price
+// provenance, because the same poll that produced the prices produced the
+// volume. One function so the mapping is stated once and is testable without
+// an Engine. A real_feed bar's volume is the venue's minute-bar aggregate, a
+// backfill bar's is the venue's historical bar, and everything else carries
+// the provenance of whatever generated it.
+inline std::string for_bar_source(const std::string& bar_source) {
+    const std::string n = provenance::normalize(bar_source);
+    if (n == provenance::kRealFeed) return kVenueBar;
+    if (n == provenance::kBackfill) return kVenueBackfill;
+    if (n == provenance::kSynthetic) return kSynthetic;
+    if (n == provenance::kReplay) return kReplay;
+    return kUnknown;
+}
+
+}  // namespace volume
+
 }  // namespace mal::provenance

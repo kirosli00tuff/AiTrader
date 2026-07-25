@@ -846,6 +846,11 @@ void Engine::on_closed_bar(const market_data::MarketState& ms,
                             closed.high, closed.low, closed.close,
                             closed.volume};
     bar_row.source = current_bar_source_;
+    // The volume rode in on the same polls as the prices, so its provenance
+    // follows from theirs through the one mapping (2026-07-25). Stated
+    // explicitly on the write, never defaulted.
+    bar_row.volume_source =
+        provenance::volume::for_bar_source(current_bar_source_);
     storage_->upsert_bar(bar_row);
 
     // Append to bounded in-memory history (oldest-first).

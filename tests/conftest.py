@@ -3,6 +3,7 @@ hermetic against the host credential keystore."""
 import atexit
 import os
 import shutil
+import sqlite3
 import sys
 import tempfile
 
@@ -61,6 +62,142 @@ os.environ["MAL_DIAGNOSTICS_DIR"] = tempfile.mkdtemp(prefix="mal_test_diag_")
 # MAL_RUN_DIR per test, which overrides this.
 os.environ["MAL_RUN_DIR"] = tempfile.mkdtemp(prefix="mal_test_run_")
 
+# --- NO TEST READS OR WRITES THE PRODUCTION DATABASE (2026-07-25) ------------
+#
+# Two mechanisms, because the per-module fixture approach demonstrably leaks.
+# The 2026-07-24 session added an autouse MAL_DB_PATH fixture to the three
+# watchdog modules after four spurious watchdog_restart events reached
+# production, and 108 of them are in the journal anyway: a fixture fixes the
+# modules someone remembered, and the class re-opens the moment a new module
+# calls a journaling path. So the isolation is now global and the guard is
+# active rather than advisory.
+#
+# 1. MAL_DB_PATH points at a temp database for the WHOLE session. Every module
+#    that resolves the operational database through the env (ops.watchdog,
+#    api_server.store, rl_advisory.service, adaptive.run, ml_factor) lands
+#    there instead of production, with no per-module fixture to remember.
+#    Tests that need their own database still set MAL_DB_PATH per test, and
+#    the several that delenv it to assert the repo-anchored DEFAULT still
+#    resolve that default, because they only inspect the path.
+#
+# 2. sqlite3.connect REFUSES the production path outright. That is what makes
+#    it a guard instead of a convention: a module with a hardcoded default, a
+#    cwd-relative resolution, or a path the env never reached fails LOUDLY, in
+#    the test that did it, naming the file. Reads are refused alongside writes:
+#    a test reading the operator's live database is not hermetic either, and
+#    its result silently depends on this machine.
+_PRODUCTION_DB = os.path.join(_ROOT, "market_ai_lab.db")
+
+os.environ["MAL_DB_PATH"] = os.path.join(
+    tempfile.mkdtemp(prefix="mal_test_db_"), "isolated.db")
+
+
+class ProductionDatabaseAccess(BaseException):
+    """A test opened the operator's production database.
+
+    BaseException, NOT Exception, and the distinction is the whole guard. The
+    call sites that leak are precisely the ones wrapped in ``except
+    Exception: pass`` — the watchdog's journaling says so in a comment
+    ("journaling must never break remediation"), and so do controls._audit and
+    every advisory-layer writer. A guard raising Exception is caught by the
+    swallow, the write is blocked, and the test passes green with nobody told.
+    Measured: the first version of this guard raised RuntimeError, blocked
+    every production write in the suite, and reported 917 passed.
+
+    Violations are ALSO recorded below, so a handler catching BaseException
+    still cannot hide one.
+    """
+
+
+def _resolves_to_production(database) -> bool:
+    """Whether a sqlite3.connect target names the production database.
+
+    Handles every shape the codebase passes: an absolute path, a cwd-relative
+    path (which is how the leak happened, the bare default "market_ai_lab.db"
+    resolved against a repo-root cwd), a pathlib.Path, and a file: URI with
+    query parameters (the evidence renderer's read-only open). ":memory:" and
+    an integer fd are not paths and pass through.
+    """
+    if isinstance(database, int):
+        return False
+    try:
+        text = os.fspath(database)
+    except TypeError:
+        return False
+    if isinstance(text, bytes):
+        text = text.decode()
+    if text.startswith("file:"):
+        text = text[5:].split("?", 1)[0]
+    if not text or text == ":memory:":
+        return False
+    return (os.path.realpath(os.path.abspath(text))
+            == os.path.realpath(_PRODUCTION_DB))
+
+
+_real_sqlite_connect = sqlite3.connect
+
+# Every refused open, with the test that made it. Written even when the raise
+# is caught, so a swallowing handler still cannot hide a violation.
+PRODUCTION_DB_VIOLATIONS: list[str] = []
+
+
+def _guarded_connect(database=":memory:", *args, **kwargs):
+    if _resolves_to_production(database):
+        where = os.environ.get("PYTEST_CURRENT_TEST", "<outside a test>")
+        PRODUCTION_DB_VIOLATIONS.append(where)
+        raise ProductionDatabaseAccess(
+            f"{where} opened the production database ({_PRODUCTION_DB}). "
+            "Point the code under test at a tmp_path database, or set "
+            "MAL_DB_PATH for this test. Production is the operator's live "
+            "journal and no test may read or write it.")
+    return _real_sqlite_connect(database, *args, **kwargs)
+
+
+sqlite3.connect = _guarded_connect
+
+
+# Belt and braces for what the connect guard cannot see: a subprocess with its
+# own interpreter (the mal_engine tests) writes through its own sqlite. The
+# file's size and mtime are recorded at session start and checked at the end,
+# so a subprocess touching production fails the RUN even though it cannot fail
+# an individual test.
+def _production_fingerprint():
+    try:
+        st = os.stat(_PRODUCTION_DB)
+        return (st.st_size, st.st_mtime_ns)
+    except FileNotFoundError:
+        return None
+
+
+_PRODUCTION_FINGERPRINT_AT_START = _production_fingerprint()
+
+
+def pytest_sessionfinish(session, exitstatus):  # noqa: ARG001 - pytest hook
+    """Fail the RUN on any production access, however it was handled.
+
+    Two independent conditions. The recorded violations catch an open a
+    handler swallowed; the fingerprint catches a subprocess with its own
+    interpreter, which the connect guard cannot see at all.
+    """
+    problems = []
+    if PRODUCTION_DB_VIOLATIONS:
+        seen = sorted(set(PRODUCTION_DB_VIOLATIONS))
+        problems.append(
+            f"{len(PRODUCTION_DB_VIOLATIONS)} refused open(s) of the "
+            f"production database from {len(seen)} test(s):\n  "
+            + "\n  ".join(seen))
+    after = _production_fingerprint()
+    if after != _PRODUCTION_FINGERPRINT_AT_START:
+        problems.append(
+            f"the production database file changed during the run: "
+            f"{_PRODUCTION_FINGERPRINT_AT_START} -> {after}. A subprocess "
+            "under test wrote to the operator's live journal.")
+    if problems:
+        session.exitstatus = 1
+        raise ProductionDatabaseAccess(
+            f"production database ({_PRODUCTION_DB}) was accessed by the "
+            "test suite.\n" + "\n".join(problems))
+
 
 # The temp dirs above are process-scoped, so remove them when the run ends
 # rather than leaving one of each per invocation under /tmp forever.
@@ -71,3 +208,5 @@ def _cleanup_test_dirs() -> None:
         path = os.environ.get(var, "")
         if "mal_test_" in path:
             shutil.rmtree(path, ignore_errors=True)
+    shutil.rmtree(os.path.dirname(os.environ.get("MAL_DB_PATH", "")),
+                  ignore_errors=True)

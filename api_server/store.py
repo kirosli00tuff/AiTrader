@@ -934,11 +934,27 @@ def runstate() -> dict:
         " ORDER BY id DESC LIMIT 1")
     feed_substituted = bool(substitution
                             and substitution.get("kind") == "feed_substitution")
+    # A DISABLED BASE-CHECK GATE IS A CONDITION, NOT A FIELD (2026-07-25).
+    # Two problems, both fixed here. It was read from CONFIG only, so the
+    # banner showed the SHIPPED value while the engine and the council obeyed
+    # the operator's controls.json override (the precedence rule): the two
+    # halves could disagree silently, in the direction that spends money. And
+    # it rendered as a quiet boolean beside eight other booleans, so an
+    # unscreened council, the exact amplification the gate exists to prevent,
+    # looked like any other setting.
+    try:
+        from llm_consensus.config_access import gate_enabled as _resolved_gate
+        gate_on = bool(_resolved_gate())
+    except Exception:  # noqa: BLE001 - the banner must never fail on a read
+        gate_on = bool(llm.get("gate_enabled", True))
     return {"feed_mode": _feed,
             "clock_mode": _clock,
             "market_data_source": md.get("source", "mock"),
             "use_real_council": use_real,
-            "gate_enabled": bool(llm.get("gate_enabled", True)),
+            "gate_enabled": gate_on,
+            "gate_status": ("on" if gate_on else
+                            "DISABLED: every candidate reaches the full "
+                            "council unscreened"),
             "council_mode": council_mode,
             "bridge": bridge,
             "live_enabled": bool(ap.get("live_enabled")),

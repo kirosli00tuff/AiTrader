@@ -79,6 +79,12 @@ class ConsensusResult:
     # is hidden by the aggregation.
     directional_count: int = 0
     abstentions: int = 0
+    # Why no call was made (2026-07-25). Set only when the pre-call evidence
+    # check refused: the providers were never contacted and no prompt was ever
+    # rendered, so per_model is empty and the budget is charged nothing. None
+    # on every round that actually ran, and on a gate decline, which is a
+    # different event with a different reason.
+    refusal: dict | None = None
 
     def to_dict(self) -> dict:
         d = {
@@ -93,6 +99,8 @@ class ConsensusResult:
         }
         if self.gate is not None:
             d["gate"] = self.gate
+        if self.refusal is not None:
+            d["refusal"] = self.refusal
         return d
 
 

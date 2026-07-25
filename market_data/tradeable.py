@@ -31,6 +31,15 @@ import sqlite3
 # Storage::has_real_bars (storage/storage.cpp) and core/provenance.hpp.
 REAL_SOURCES = ("real_feed", "backfill")
 
+# The VOLUME provenances that count as venue-reported (2026-07-25). A bar's
+# volume provenance is a separate axis from its price provenance: the live
+# path takes prices from the venue's trades and volume from the venue's minute
+# bars, so a real_feed bar can carry a quarantined volume beside a real price.
+# Must match mal::provenance::volume in core/provenance.hpp. Anything else,
+# including NULL on a row written before the label existed, is NOT
+# venue-reported and never renders as measured volume.
+VENUE_VOLUME_SOURCES = ("venue_bar", "venue_backfill")
+
 
 def symbol_is_tradeable(conn: sqlite3.Connection, symbol: str) -> bool:
     """Whether ``symbol`` has real bar history. THE predicate.
@@ -65,8 +74,8 @@ def untradeable_symbols(conn: sqlite3.Connection,
 
 def real_bar_rows(conn: sqlite3.Connection, symbol: str,
                   timeframe: str = "5min", limit: int = 288) -> list[tuple]:
-    """Newest-first (timestamp, close, volume, source) rows with REAL
-    provenance, for consumers that must show only real market data (the
+    """Newest-first (timestamp, close, volume, source, volume_source) rows with
+    REAL provenance, for consumers that must show only real market data (the
     council evidence renderer). Lives here so the provenance source set stays
     in this one module, per the tradeable invariant's guard.
 
@@ -74,12 +83,22 @@ def real_bar_rows(conn: sqlite3.Connection, symbol: str,
     "real venue bars" must never rest on unprovable provenance. That is
     deliberately stricter than symbol_is_tradeable's fallback, which answers a
     different question.
+
+    ``volume_source`` is the bar's VOLUME provenance, a separate question from
+    its price provenance (2026-07-25): a real_feed bar's prices come from the
+    venue's trades while its volume comes from the venue's minute bars, and
+    the 2026-07-23 quarantine marked 3,443 historical live volumes
+    fabricated_zeroed while their prices stayed real. A DB predating the
+    column reports None, which every consumer reads as "provenance not
+    established", never as venue-reported.
     """
-    try:
-        return conn.execute(
-            "SELECT timestamp, close, volume, source FROM bars "
-            "WHERE symbol=? AND timeframe=? AND source IN (?,?) "
-            "ORDER BY timestamp DESC LIMIT ?",
-            (symbol, timeframe, *REAL_SOURCES, int(limit))).fetchall()
-    except sqlite3.OperationalError:
-        return []
+    for volume_source in ("volume_source", "NULL"):
+        try:
+            return conn.execute(
+                f"SELECT timestamp, close, volume, source, {volume_source} "
+                "FROM bars WHERE symbol=? AND timeframe=? AND source IN (?,?) "
+                "ORDER BY timestamp DESC LIMIT ?",
+                (symbol, timeframe, *REAL_SOURCES, int(limit))).fetchall()
+        except sqlite3.OperationalError:
+            continue
+    return []

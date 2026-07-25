@@ -11,10 +11,11 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from datetime import datetime, timedelta, timezone
 
 from llm_consensus import consensus
-from llm_consensus.evidence import (ALLOWED_FIELDS, gather_evidence,
-                                    render_user_prompt)
+from llm_consensus.evidence import (ALLOWED_FIELDS, build_state,
+                                    gather_evidence, render_user_prompt)
 from llm_consensus.gate import GATE_SYSTEM_PROMPT, AlwaysProceedGate
 from llm_consensus.persist import load_evaluation, replay_prompt
 from llm_consensus.prompts import (long_term_system, prompt_mode,
@@ -33,11 +34,30 @@ ENGINE_STATE = {
 }
 
 
-def _seed_db(path, *, source="real_feed", bars=300, with_position=False):
+# The series a seeded database carries ends one minute before "now", because
+# a series is only evidence while it is CURRENT (2026-07-25). The old fixture
+# used fixed 2026-07-20 stamps, which the freshness bound now correctly
+# refuses; keeping a hardcoded stale tape would have meant testing the exact
+# defect LDO/USD eval 49 shipped.
+_NEWEST_BAR_AGE_SECONDS = 60
+_SERIES_STEP_SECONDS = 300
+
+
+def seeded_newest_close(bars: int = 300) -> float:
+    """The newest close a _seed_db series ends on, so a caller can quote a
+    price consistent with it. Ascending by a cent per bar from 100.0."""
+    return round(100.0 + (bars - 1) * 0.01, 6)
+
+
+def _seed_db(path, *, source="real_feed", bars=300, with_position=False,
+             volume_source="venue_bar", now=None):
+    now = now or datetime.now(timezone.utc)
+    newest = now - timedelta(seconds=_NEWEST_BAR_AGE_SECONDS)
     conn = sqlite3.connect(path)
     conn.execute("CREATE TABLE bars (id INTEGER PRIMARY KEY, venue TEXT, "
                  "symbol TEXT, timeframe TEXT, timestamp TEXT, open REAL, "
-                 "high REAL, low REAL, close REAL, volume REAL, source TEXT)")
+                 "high REAL, low REAL, close REAL, volume REAL, source TEXT, "
+                 "volume_source TEXT)")
     conn.execute("CREATE TABLE regime_state (symbol TEXT PRIMARY KEY, "
                  "regime TEXT, adx REAL, rvol REAL, updated_ts TEXT, "
                  "active_factor TEXT)")
@@ -46,14 +66,18 @@ def _seed_db(path, *, source="real_feed", bars=300, with_position=False):
                  "qty REAL, avg_price REAL, notional REAL, opened_ts TEXT, "
                  "unrealized_pnl REAL, sleeve TEXT)")
     for i in range(bars):
-        ts = f"2026-07-20T{i // 12:02d}:{(i % 12) * 5:02d}:00Z"
-        px = 100.0 + i * 0.01
+        stamp = newest - timedelta(
+            seconds=(bars - 1 - i) * _SERIES_STEP_SECONDS)
+        ts = stamp.strftime("%Y-%m-%dT%H:%M:%SZ")
+        px = round(100.0 + i * 0.01, 6)
         conn.execute("INSERT INTO bars (venue, symbol, timeframe, timestamp, "
-                     "open, high, low, close, volume, source) "
-                     "VALUES ('alpaca','BTC/USD','5min',?,?,?,?,?,?,?)",
-                     (ts, px, px + 0.1, px - 0.1, px, 10.0, source))
+                     "open, high, low, close, volume, source, volume_source) "
+                     "VALUES ('alpaca','BTC/USD','5min',?,?,?,?,?,?,?,?)",
+                     (ts, px, px + 0.1, px - 0.1, px, 10.0, source,
+                      volume_source))
     conn.execute("INSERT INTO regime_state VALUES ('BTC/USD','trending',"
-                 "31.2,0.0021,'2026-07-20T19:00:00Z','momentum')")
+                 "31.2,0.0021,?,'momentum')",
+                 (newest.strftime("%Y-%m-%dT%H:%M:%SZ"),))
     if with_position:
         conn.execute("INSERT INTO positions (venue, symbol, market, category, "
                      "side, qty, avg_price, notional, opened_ts, "
@@ -113,10 +137,11 @@ def test_no_measured_fields_says_so_instead_of_zeros():
 def test_bar_regime_position_evidence_rendered_with_units(tmp_path):
     db = str(tmp_path / "e.db")
     _seed_db(db, with_position=True)
-    ev = gather_evidence("BTC/USD", db)
-    prompt = render_user_prompt({"symbol": "BTC/USD", "price": 103.0,
+    price = seeded_newest_close()
+    ev = gather_evidence("BTC/USD", db, price=price)
+    prompt = render_user_prompt({"symbol": "BTC/USD", "price": price,
                                  "_evidence": ev})
-    assert "closes_5min" in prompt and "newest 2026-07-20" in prompt
+    assert "closes_5min" in prompt and "newest 20" in prompt
     assert "return_24h:" in prompt
     assert "regime: trending" in prompt and "adx 31.2" in prompt
     assert "momentum" in prompt
@@ -128,16 +153,29 @@ def test_bar_regime_position_evidence_rendered_with_units(tmp_path):
         assert phrase in legend, phrase
 
 
-def test_volume_only_from_backfill_provenance(tmp_path):
-    live = str(tmp_path / "live.db")
-    _seed_db(live, source="real_feed")
-    assert "volume_24h_base" not in gather_evidence("BTC/USD", live)
-    back = str(tmp_path / "back.db")
-    _seed_db(back, source="backfill")
-    ev = gather_evidence("BTC/USD", back)
-    assert "volume_24h_base" in ev
-    assert "volume_24h" in render_user_prompt(
-        {"symbol": "BTC/USD", "_evidence": ev})
+def test_volume_only_from_venue_reported_volume_provenance(tmp_path):
+    """Volume renders on its OWN provenance axis, not the price axis.
+
+    Before 2026-07-25 this keyed off source=='backfill', which said a live
+    bar's volume is never trustworthy and a backfill bar's always is. Neither
+    half survived contact: the live path now carries the venue's own minute-bar
+    volume (2026-07-23), and the same quarantine marked 3,443 live volumes
+    fabricated while their prices stayed real. volume_source answers the
+    question directly, and a NULL label is unestablished, never venue.
+    """
+    for volume_source in ("venue_bar", "venue_backfill"):
+        db = str(tmp_path / f"{volume_source}.db")
+        _seed_db(db, source="real_feed", volume_source=volume_source)
+        ev = gather_evidence("BTC/USD", db, price=seeded_newest_close())
+        assert "volume_24h_base" in ev, volume_source
+        assert "volume_24h" in render_user_prompt(
+            {"symbol": "BTC/USD", "_evidence": ev})
+
+    for volume_source in (None, "fabricated_zeroed", "synthetic"):
+        db = str(tmp_path / f"no_{volume_source}.db")
+        _seed_db(db, source="backfill", volume_source=volume_source)
+        ev = gather_evidence("BTC/USD", db, price=seeded_newest_close())
+        assert "volume_24h_base" not in ev, volume_source
 
 
 def test_no_position_is_a_real_statement(tmp_path):
@@ -185,11 +223,24 @@ def test_gate_prompt_carries_absence_rule_and_reason_first():
 # --- TASK 4: names match contents ----------------------------------------------
 
 def test_field_names_match_contents():
-    out = market_state_from({"price": 100.0, "change_pct": 4.0,
-                             "high": 110.0, "low": 95.0})
-    assert out["daily_return_pct"] == 4.0
-    assert out["intraday_range_pct"] == 15.0
-    prompt = render_user_prompt({"symbol": "X", **out})
+    """The adapter names the observation, THE builder renders it (2026-07-25).
+
+    market_state_from used to compute daily_return_pct and intraday_range_pct
+    itself, a second assembler beside the one the trading path used. It now
+    emits canonical observation keys and build_state does the arithmetic, so
+    both council paths render the same field from the same code.
+    """
+    observation = market_state_from({"price": 100.0, "change_pct": 4.0,
+                                     "high": 110.0, "low": 95.0})
+    assert observation["daily_change_pct"] == 4.0
+    assert observation["day_high"] == 110.0 and observation["day_low"] == 95.0
+    assert "daily_return_pct" not in observation
+    assert "intraday_range_pct" not in observation
+
+    built = build_state({"symbol": "X", **observation})
+    assert built["daily_return_pct"] == 4.0
+    assert built["intraday_range_pct"] == 15.0
+    prompt = render_user_prompt(built)
     assert "daily_return: +4.00" in prompt
     assert "intraday_range: 15 (low 95, high 110)" in prompt
 
@@ -329,8 +380,9 @@ def test_per_provider_state_persists_and_replays(tmp_path):
     providers = [_StubProvider("llm_primary", 0.7, 0.7, "clear up trend"),
                  _StubProvider("llm_secondary", 0.0, 0.6, "no edge"),
                  _StubProvider("llm_tertiary", -0.55, 0.55, "fading")]
-    state = {"symbol": "BTC/USD", "venue": "alpaca", "price": 103.0,
-             "daily_return_pct": 2.0, "mode": "short_term", "db": db}
+    state = {"symbol": "BTC/USD", "venue": "alpaca",
+             "price": seeded_newest_close(),
+             "daily_change_pct": 2.0, "mode": "short_term", "db": db}
     result = consensus(state, providers=providers, gate=AlwaysProceedGate(),
                        cfg_path=CFG)
     conn = sqlite3.connect(db)

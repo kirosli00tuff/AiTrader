@@ -69,7 +69,15 @@ class GateDecision:
 
 
 class AlwaysProceedGate:
-    """No-op gate used when the gate is disabled by config."""
+    """No-op gate used when the gate is disabled by config.
+
+    The defaults say "gate disabled" / source "disabled" because that is what
+    this gate means when CONFIG disables the screen. Do not construct it bare
+    to express "already screened elsewhere": that is what PriorScreenGate is
+    for, and using this one instead is exactly how 44 discovery evaluations
+    came to record an unscreened-looking round for a candidate a real Haiku
+    call had screened one stage earlier (2026-07-25).
+    """
 
     def __init__(self, reason: str = "gate disabled", source: str = "disabled",
                  model: str = "") -> None:
@@ -79,6 +87,41 @@ class AlwaysProceedGate:
 
     def should_review(self, state: dict) -> GateDecision:
         return GateDecision(True, self._reason, self._model, self._source)
+
+
+class PriorScreenGate:
+    """Reports a screen that ALREADY HAPPENED, without calling anything.
+
+    The discovery funnel screens once per stage: Stage B pays a real
+    claude-haiku-4-5 call per finalist, and Stage C must not pay a second one
+    for the same question (it also must not run the TRADING gate, whose prompt
+    renders an order book free Finnhub data does not have, which rejected 12
+    of 12 finalists on every pass before 2026-07-20).
+
+    So Stage C does not screen. It REPORTS. This gate carries the Stage-B
+    decision forward verbatim, so the persisted round names the model that
+    screened the candidate and the reason it gave, instead of a bare
+    "disabled" that reads as unscreened. It costs nothing and calls nobody.
+
+    A survivor with no recorded decision (the fail-open path, where the gate
+    itself errored) proceeds and says so, because that is the truth about it.
+    """
+
+    UNSCREENED = GateDecision(
+        True, "stage B gate failed open, this candidate was not screened",
+        "", "stage_b_failed_open")
+
+    def __init__(self, decision: GateDecision | None) -> None:
+        self._decision = decision
+
+    def should_review(self, state: dict) -> GateDecision:
+        if self._decision is None:
+            return self.UNSCREENED
+        return GateDecision(
+            bool(getattr(self._decision, "proceed", True)),
+            f"screened at stage B: {getattr(self._decision, 'reason', '')}"[:200],
+            str(getattr(self._decision, "model", "")),
+            f"stage_b_{getattr(self._decision, 'source', 'unknown')}")
 
 
 @dataclass

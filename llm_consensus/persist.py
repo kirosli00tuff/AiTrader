@@ -45,6 +45,19 @@ _SCHEMA = (
         slot TEXT, model_id TEXT, source TEXT,
         direction TEXT, bias REAL, confidence REAL, edge REAL,
         abstained INTEGER, rationale TEXT, extra_json TEXT)""",
+    # Every round the pre-call evidence check REFUSED (2026-07-25). A separate
+    # table rather than a council_eval row, because the two records answer two
+    # questions: council_eval is "what did the council say", this is "what did
+    # we decline to ask, and why". No prompt was rendered and no provider was
+    # contacted, so there is nothing to replay and no verdict to store.
+    """CREATE TABLE IF NOT EXISTS council_refusal (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        ts TEXT NOT NULL,
+        symbol TEXT NOT NULL,
+        mode TEXT NOT NULL,
+        reason TEXT NOT NULL,
+        detail TEXT,
+        state_json TEXT NOT NULL)""",
 )
 
 
@@ -114,6 +127,56 @@ def record_evaluation(db_path: str, state: dict, result,
     except Exception as e:  # noqa: BLE001 - record-keeping never breaks a verdict
         log.warning("council persistence failed: %s", type(e).__name__)
         return None
+
+
+def record_refusal(db_path: str, state: dict, refusal,
+                   cfg_path: str | None = None) -> int | None:
+    """Persist one round the evidence check refused. Returns the id or None.
+
+    Never raises, same posture as record_evaluation: record-keeping must never
+    break a verdict, and here it must never break a REFUSAL either, or a
+    failing writer would turn a saved call back into a spent one.
+    """
+    try:
+        from .evidence import _resolve_db
+        from .prompts import prompt_mode
+        ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        conn = sqlite3.connect(_resolve_db(db_path), timeout=5.0)
+        try:
+            for ddl in _SCHEMA:
+                conn.execute(ddl)
+            cur = conn.execute(
+                "INSERT INTO council_refusal (ts, symbol, mode, reason, "
+                "detail, state_json) VALUES (?,?,?,?,?,?)",
+                (ts, str(state.get("symbol", "?")), prompt_mode(state),
+                 str(getattr(refusal, "reason", "")),
+                 str(getattr(refusal, "detail", "")),
+                 json.dumps(state, default=str)))
+            conn.commit()
+            return int(cur.lastrowid)
+        finally:
+            conn.close()
+    except Exception as e:  # noqa: BLE001 - record-keeping never breaks a refusal
+        log.warning("council refusal persistence failed: %s", type(e).__name__)
+        return None
+
+
+def recent_refusals(db_path: str, limit: int = 50) -> list[dict]:
+    """The most recent refusals, newest first, for the operator surfaces."""
+    try:
+        from .evidence import _resolve_db
+        conn = sqlite3.connect(f"file:{_resolve_db(db_path)}?mode=ro", uri=True)
+        try:
+            rows = conn.execute(
+                "SELECT id, ts, symbol, mode, reason, detail FROM "
+                "council_refusal ORDER BY id DESC LIMIT ?",
+                (int(limit),)).fetchall()
+        finally:
+            conn.close()
+    except Exception:  # noqa: BLE001 - a missing table reads as no refusals
+        return []
+    return [{"id": r[0], "ts": r[1], "symbol": r[2], "mode": r[3],
+             "reason": r[4], "detail": r[5]} for r in rows]
 
 
 def load_evaluation(db_path: str, eval_id: int) -> dict | None:

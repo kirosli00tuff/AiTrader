@@ -283,6 +283,10 @@ export interface EngineState {
 export interface RunState {
   feed_mode: string; clock_mode: string; market_data_source: string;
   use_real_council: boolean; gate_enabled: boolean; council_mode: string;
+  // Resolved through the controls.json precedence, not the shipped config, and
+  // carrying the CONSEQUENCE when off: a disabled base-check gate sends every
+  // candidate to all three providers unscreened (2026-07-25).
+  gate_status?: string;
   bridge: { reachable: boolean; url: string; status: string | null };
   live_enabled: boolean; layers?: Record<string, boolean>;
   layer_sources?: Record<string, string>;

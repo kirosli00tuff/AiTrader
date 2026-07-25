@@ -108,6 +108,19 @@ def _flat_consensus(gate: GateDecision) -> ConsensusResult:
         agreement_count=0, per_model=[], gate=gate.to_dict())
 
 
+def _refused_consensus(refusal) -> ConsensusResult:
+    """Neutral verdict returned when the evidence cannot answer the question.
+
+    Structurally identical downstream to any other flat result (per_model
+    empty, so the discovery budget charges zero and build_verdict lands on
+    avoid), and distinguishable from every other flat result by carrying the
+    reason. A refusal is not a hold: nobody was asked.
+    """
+    return ConsensusResult(
+        bias=0.0, confidence=0.0, edge=0.0, verdict=bias_to_verdict(0.0),
+        agreement_count=0, per_model=[], refusal=refusal.to_dict())
+
+
 # The system's only equities (native-strategy whitelist). The market-hours cost
 # cut targets exactly these; crypto (BTC/USD, ETH/USD) trades 24/7.
 _EQUITY_SYMBOLS = frozenset({"SPY", "QQQ"})
@@ -204,16 +217,31 @@ def consensus(state: dict, providers: list[LLMProvider] | None = None,
     if mh_skip is not None:
         return _flat_consensus(mh_skip)
 
-    # Evidence enrichment (2026-07-20): when the caller passed an explicit db
-    # path, gather the recorded evidence (real-provenance bars, the engine's
-    # regime read, position state) ONCE and hand it to the gate and every
-    # provider through the state. No db key means no enrichment and no
-    # persistence, which is what keeps unit tests hermetic. A new dict is
-    # built rather than mutating the caller's.
-    if state.get("db") and state.get("symbol") and "_evidence" not in state:
-        from .evidence import gather_evidence
-        state = {**state, "_evidence": gather_evidence(str(state["symbol"]),
-                                                       str(state["db"]))}
+    # THE EVIDENCE BUILDER, ONE FOR BOTH COUNCIL PATHS (2026-07-25). Every
+    # council call, trading or discovery, assembles its evidence here and
+    # nowhere else: the quote fields under their declared units and scales,
+    # then the recorded sections (real-provenance bars checked against that
+    # price, the engine's regime read, position state). The gate and every
+    # provider then read the SAME assembled state. No db key means no
+    # enrichment and no persistence, which is what keeps unit tests hermetic.
+    # A new dict is built rather than mutating the caller's.
+    from .evidence import build_state, evidence_refusal
+    state = build_state(state, db_path=state.get("db"))
+
+    # REFUSE TO ASK A QUESTION THE EVIDENCE CANNOT ANSWER (2026-07-25). Ten
+    # consecutive discovery rounds spent three provider calls each to be told,
+    # by all three providers in writing, that the evidence lacked what a read
+    # needs. The minimum is defined in evidence.py; falling below it is a
+    # refusal recorded with its reason, not a purchased abstention. This can
+    # only skip spend: a state that clears the minimum reaches the gate and
+    # the providers exactly as before.
+    refusal = evidence_refusal(state)
+    if refusal is not None:
+        result = _refused_consensus(refusal)
+        if state.get("db"):
+            from .persist import record_refusal
+            record_refusal(str(state["db"]), state, refusal, cfg_path=cfg_path)
+        return result
 
     g = gate if gate is not None else build_gate(cfg_path)
     decision = g.should_review(state)
@@ -298,7 +326,12 @@ def council_status_line(cfg_path: str | None = None) -> str:
     if gate_enabled(cfg_path):
         gate = f"base-check gate ON ({names.get('llm_gate', 'claude-haiku-4-5')})"
     else:
-        gate = "base-check gate OFF"
+        # A CONDITION, NOT A SETTING (2026-07-25). Off means every candidate
+        # reaches all three providers unscreened, which is the amplification
+        # the gate exists to prevent, so the startup block states the
+        # consequence rather than a quiet "OFF" nobody reads twice.
+        gate = ("base-check gate DISABLED -> every candidate reaches the full "
+                "three-provider council unscreened")
     return f"LLM council: {council}; {gate}"
 
 

@@ -11,6 +11,82 @@ Model:
 Prompt summary: one line.
 Changes: what changed.
 
+## Prompt: Discovery Stage-C evidence parity, stale periphery bars, refusal gate, base-check gate, volume_source, test isolation
+
+Date: 2026-07-25
+Model: Opus 5 (claude-opus-5[1m]), xhigh effort. The prompt did not name a model; the session runs on Opus 5 and this line records that.
+Prompt summary: nine tasks. Bring the discovery Stage-C council call to evidence parity with the trading path through one builder. Find and fix why a watchlist periphery symbol carried frozen 5-minute closes beside an advancing price. Add a pre-call refusal when the assembled evidence cannot answer the question or the bar series contradicts the price. Establish why every discovery round records the base-check gate as disabled and make a disabled gate a visible condition. Populate volume_source on every bar write path. Isolate every test module from the production database and guard the class. Verify with a live discovery Stage-C pass against real market data. Tests including mutation tests on evidence parity and staleness refusal. Document, commit, push.
+
+Constraints honored: no RiskGate logic, no live-trading gate, no adaptive limit-weakening invariant, no Level 1 risk value, no promotion criteria, no RL fill gate, no min_directional_votes, no threshold of any kind. Live trading stays off. Run autonomously, safest option when ambiguous, noted here.
+
+**HEADLINE: the all-abstain cause was ORDERING, not model behaviour. Stage C judged a candidate BEFORE onboarding fetched its bars, and only non-avoid candidates were ever onboarded, so an "avoid" guaranteed the evidence a real read needs would never exist and the next pass asked the same unanswerable question. With the backfill moved ahead of Stage C and one builder serving both paths, the live verification pass turned 15 provider calls and 15 abstentions into 3 free refusals and 2 real rounds: ARB/USD 2 directional 1 abstain, LDO/USD 3 directional 0 abstain, both sell. 5 of 6 provider reads directional against 0 of 30 before. No threshold was changed.**
+
+TASK 1, EVIDENCE PARITY, AND WHERE THE TWO PATHS ACTUALLY DIVERGED. Both paths already called `gather_evidence`, so the divergence was not a separate thin builder for the DB sections. It was two things.
+
+*The field-level divergence, measured from the recorded rows.* The quote-level fields were assembled twice. The trading path sent whatever the C++ engine put on `/score/llm` (`price`, plus the never-rendered `catalyst`, `imbalance`, `ret_5`, `volatility`), so of the allowlist only `price` rendered. The discovery path computed its own in `discovery.evaluate.market_state_from`, so it rendered `daily_return` and `intraday_range` as well. The divergence was BIDIRECTIONAL: **discovery omitted `closes_5min`, `return_1h`, `return_4h`, `return_24h`, `volume_24h`, and `regime`; the trading path omitted `daily_return`, `intraday_range`, and `news_sentiment`.** The intraday-range arithmetic existed in two places. `market_state_from` is now a key ADAPTER emitting canonical observation names and computing nothing rendered; `evidence.build_state` is THE assembler and `consensus()` calls it on every path. Proven: the same observation plus the same database renders byte-identically down both paths (`test_both_council_paths_assemble_evidence_through_one_builder`).
+
+*The structural divergence, which is the real one.* The six fields discovery omitted are all derived from the bar series, and a discovery candidate had no bars because `discovery/run.py` ran `onboard()` AFTER the pass, on non-avoid candidates only. Chicken and egg with no exit: no bars, so all three providers abstain citing exactly that, so the verdict is avoid, so the bars are never fetched. The backfill now runs between Stage B and Stage C via a new `funnel.run_pass(prepare_survivors=...)` hook, which keeps the funnel pure orchestration and puts the I/O in `run.py`. It costs free venue data calls for at most `max_survivors` symbols, and the post-pass onboarding reuses the result rather than pulling 30 days twice.
+
+TASK 2, THE STALENESS CAUSE. Three findings, and the first is the answer.
+
+1. **Why the closes were frozen: LDO/USD was pruned from the watchlist at 2026-07-23T01:13:57Z** (`watchlist_event` id 25, reason "signal stale, no pass in 48h"), so the engine correctly stopped polling it. Its last bar is 2026-07-24T01:05:05Z, and eval 49 ran at 2026-07-25T00:00:42Z: the series was 22h55m old. **Periphery symbols ARE polled on the same cadence as core** — `market_data.universe.resolve` merges active watchlist members into the traded universe and the engine's `Engine::tradeable_universe` mirrors it — so the cadence was never the defect. Leaving the universe was correct; the defect was that leaving it did not stop the old rows being presented as current.
+2. **Why the closes were flat even while polled:** LDO/USD is thin on Alpaca and the live feed anchors price to the latest TRADE. On 2026-07-23 its 288 real_feed bars carry only 7 distinct closes; on 2026-07-24, 1 across 14 bars. When no trade prints, consecutive bars carry an identical OHLC. That is a true statement about a venue with no prints, and rendered without its age it reads as a live flat tape. It is also what produced ADX 97.1 beside rvol 0.
+3. **The evidence builder read a stale row:** `real_bar_rows` took the newest N rows with NO recency bound and no comparison to the price beside them.
+
+Fixed with two named bounds and a rule. `MAX_BAR_AGE_SECONDS` 1800 and `MAX_PRICE_DIVERGENCE_PCT` 1.0 (plus `MIN_SERIES_CLOSES` 8). A series failing either is OMITTED whole, together with the three window returns, the 24h volume, and the regime read computed from the same tape; the reason is recorded under `bars_refused` and is in no legend, so it never renders. The regime block carries the same freshness bound for the same reason. Verified live: LDO's regime row is still the stale 2026-07-24T01:05:05Z / ADX 97.1 / rvol 0 read, and it correctly did NOT render in the new prompt.
+
+TASK 3, THE MINIMUM, STATED. **A council call is made only when the assembled evidence carries: a positive price; a real-provenance 5-minute close series; that series at least 8 closes long; fresh within 30 minutes; and within 1.0 percent of the price.** Refusal reasons: `no_price`, `no_series`, `bar_series_too_short`, `bar_series_stale`, `bar_series_price_inconsistent`. The set is not invented — it is the floor of what all three providers named as missing across the ten all-abstain rounds, and the series is the root because the window returns and the regime derive from it. Volume, regime, news sentiment, and position are deliberately EXCLUDED from the minimum: each is genuinely absent for some serviceable instrument, so refusing on them would suppress calls the evidence can answer. Refusals persist to a new Python-owned `council_refusal` table with the reason, the detail, and the full state. A refusal is structurally a short-circuit (per_model empty, so `_budget_cost` charges 0 and the verdict is avoid) and its rationale says nobody was asked. Two guards against it becoming a wall: adequate evidence must reach every provider unchanged, pinned with the recorded SPY numbers from eval 29; and a state carrying no `_evidence` is never refused, because every path that can spend passes a db.
+
+TASK 4, THE GATE CAUSE: A CODE PATH, AND THE LABEL WAS THE DEFECT. Not config (`llm.gate_enabled` is true in the shipped yaml AND in the operator's controls.json) and not a swallowed failure. `discovery/evaluate.py` passed a bare `AlwaysProceedGate()` to express "Stage B already screened this", and that constructor's DEFAULT arguments are `reason="gate disabled"`, `source="disabled"`. **The candidates were screened.** Pass 101 records `gate_calls` 5 with 5 survivors, the Stage-B drops read `survivor_ceiling_reached` rather than gate rejections, and the trading-path evals from the same key show real `claude-haiku-4-5` gate decisions. So the round was screened by a real Haiku call one stage earlier and the eval row threw that decision away and printed a word that means the opposite. New `PriorScreenGate` carries the Stage-B decision through verbatim (source `stage_b_real`, the model id, the gate's own reason), costs nothing and calls nobody; a fail-open survivor reports `stage_b_failed_open` rather than claiming a screen. `AlwaysProceedGate` keeps its defaults, since they are correct for a config disable, with a docstring forbidding the bare-construction idiom. A genuinely disabled gate is now visible in both required places: the startup block states the consequence instead of a quiet OFF, and the GUI renders a banner. A second real bug found on the way: `/runstate` read `gate_enabled` from CONFIG only, so the banner could show the shipped value while the council obeyed the operator's override, silently, in the direction that spends money. It now resolves through the precedence.
+
+TASK 5, VOLUME_SOURCE, EVERY WRITE PATH FIXED. Volume provenance is a separate axis from price provenance (a live bar's prices come from the venue's trades, its volume from the venue's minute bars), defined once in `mal::provenance::volume` and mirrored by `market_data.tradeable.VENUE_VOLUME_SOURCES`, with the mapping from price provenance in one function (`volume::for_bar_source`). Write paths fixed: **(1)** `Storage::upsert_bar` (storage.cpp) binds it, with `Engine::on_closed_bar` deriving it; **(2)** `market_data.alpaca_source._upsert_bars`, the backfill, writes `venue_backfill`; **(3)** `scripts/deep_history_20260724.py::pull_symbols`, the analysis loader, the same. Schema in three places: `storage/schema.sql`, the C++ migration list, and the Python `_BARS_MIGRATIONS`, all with NO column default, so an existing row stays NULL and NULL keeps its only honest meaning. `Storage::recent_bars` now reads it back. Measured after the live pass: 17,424 rows carry `venue_backfill`, and the evidence renderer now sums volume only from venue-reported provenance (which is why ARB rendered `volume_24h: 5711.61` and LDO, whose 288-bar window still mixes fresh labelled rows with older NULL ones, correctly did not). One honest side effect: the fresh backfill superseded 10 previously quarantined `fabricated_zeroed` rows with the venue's real historical volume (3,443 to 3,433), which is the upsert working as designed.
+
+TASK 6, THE UNISOLATED MODULES. Found empirically by removing the new global default and re-running the suite under the guard. **Three modules were never isolated: `tests/test_feed_integrity.py`, `tests/test_dnn_pipeline.py`, `tests/test_discovery_funnel.py`.** All three make READ-ONLY (`mode=ro`) opens of production — `ops.watchdog.check_health` reaching `feed_ok`/`tradeable_symbols`/`universe.resolve` over production `bars` and `watchlist`, and `ml_factor.factor.score_state` reaching `real_dataset.serve_window` and `champion_is_real_trained` over production `bars` and `model_registry`. Non-hermetic, but not writers. The four WRITE-capable modules (`test_ops_week`, `test_watchdog_recency`, `test_watchdog_remediation`, `test_control_precedence`) were already contained by their per-module fixtures. **On the 108 rows: all of them predate the fixture.** Converting git local time (-0700) to the DB's UTC: the journaling code landed at 2026-07-24T07:19:26Z, the rows span 07:15:20Z to 07:28:20Z, and the isolation fixture landed at 07:50:13Z. No module was missed after the fix and no later run escaped it; the previous session simply undercounted 108 as four. The rows are LEFT IN PLACE and documented here and in PROGRESS.md, because `events` is an append-only audit journal. THE GUARD: `MAL_DB_PATH` is session-wide in conftest, and `sqlite3.connect` refuses the production path in every shape. It raises **BaseException, not Exception**, and that detail is the whole guard: the leaking call sites are wrapped in `except Exception: pass` by design, and the first version of this guard raised RuntimeError, blocked every production write, and reported 917 passed with nobody told. Every refused open is also recorded with the offending test, and `pytest_sessionfinish` fails the run on a recorded violation or on any change to the production file's size or mtime (the only way to catch a subprocess).
+
+TASK 7, THE LIVE VERIFICATION, AND THE COMPARISON. Discovery pass 102, crypto, 2026-07-25T01:20Z, real Finnhub and real Alpaca data, real providers. 48 symbols, 12 finalists, 5 survivors. **3 refused before any provider call** (NEAR/USD, SUI/USD, ALGO/USD, all `no_series`: Alpaca serves no bars for them), saving 9 provider calls. **2 evaluated.**
+
+| | before (10 rounds, 2026-07-24/25) | after (pass 102) |
+|---|---|---|
+| gpt-5.5 | flat, abstained, "the evidence lacks 5-minute closes, volume, regime, and multi-hour returns" | ARB **short** conf 0.57 edge 0.004; LDO **short** conf 0.58 edge 0.006 |
+| claude-opus-4-8 | flat, abstained, "without momentum fields, news sentiment, volume, or regime data, I cannot confirm" | ARB **short** conf 0.55 edge 0.008; LDO **short** conf 0.55 edge 0.008 |
+| gemini-3.1-pro-preview | flat, abstained, "without short-term price action, volume data, or regime context, it is impossible to determine" | ARB **flat** conf 0.70 (abstained on measured thin liquidity); LDO **short** conf 0.65 edge 0.015 |
+| composed | directional_count 0, abstentions 3, verdict hold, x10 | ARB 2 directional 1 abstain **sell**; LDO 3 directional 0 abstain **sell** |
+
+**Do providers now express directions: YES.** 5 of 6 provider reads are directional, against 0 of 30 before. **Do the rationales still cite missing evidence: NO, not as a blocker.** They now reason from the tape ("aligned downside momentum across the 1h, 4h, and 24h windows", "the 5-min closes show consistent lower highs and lower lows", "price sits near the intraday low (0.0821 low vs 0.0824 last)") and mention absent fields only as a stated caveat while still committing. The one abstention is a genuine MARKET read, not a data complaint: Gemini abstained on ARB because the volume it was given (5,711.61 base units over 24h) is measurably thin, which is the omission rule working in reverse — it could only say that because the volume was there. Assembled prompts, for the record:
+
+```
+Instrument: ARB/USD (crypto) on venue alpaca
+Question: immediate setup, the next few hours on 5-minute bars
+
+Evidence (absent fields were not measured):
+price: 0.0824
+daily_return: -4.30
+intraday_range: 5.95 (low 0.0821, high 0.087)
+closes_5min: [0.082993, 0.082889, 0.082739, 0.082539, 0.082497, 0.082532, 0.082135, 0.08259, 0.082623, 0.082528, 0.082404, 0.082307] newest 2026-07-25T01:15:00Z
+return_1h: -0.83
+return_4h: -1.43
+return_24h: -4.28
+volume_24h: 5711.61
+open_position: none
+
+Instrument: LDO/USD (crypto) on venue alpaca
+...
+closes_5min: [0.37605, 0.3759, 0.37585, 0.37593, 0.37572, 0.37574, 0.37544, 0.37644, 0.37622, 0.37644, 0.37537, 0.3741] newest 2026-07-25T01:15:00Z
+return_1h: -0.52  return_4h: -1.18  return_24h: -3.16
+```
+
+The three confirmations. **No prompt carries a stale series:** both newest bars are 2026-07-25T01:15:00Z against evals at 01:20:32Z and 01:20:39Z, roughly 5m35s old inside the 30-minute bound, and LDO's newest close 0.3741 sits 0.05 percent from its price 0.3743 where eval 49 was 3.0 percent apart. LDO's closes MOVE now instead of twelve identical 0.3863. **The gate participates:** both rows record `{"proceed": true, "reason": "screened at stage B: ...", "model": "claude-haiku-4-5", "source": "stage_b_real"}` with the real screen reason, no "disabled" anywhere. **volume_source is populated:** 17,424 rows written `venue_backfill`. No threshold was changed to reach any of this.
+
+TASK 8, TESTS. New: `tests/test_evidence_parity_and_refusal.py` (23) and `tests/test_production_db_isolation.py` (11), plus volume-provenance cases in ctest `provenance`. Covered: one builder for both paths, omission over zeroing in both directions, staleness and price-inconsistency detection and refusal, the refusal firing with its reason and recording it, adequate evidence never suppressed, a disabled gate as a visible condition, volume_source on every write path, and the production-DB guard in every path shape. **Four mutation tests, each failing when the property is reverted:** the discovery adapter re-computing rendered fields; widening `MAX_BAR_AGE_SECONDS` (the frozen tape comes straight back); widening `MAX_PRICE_DIVERGENCE_PCT`; and the guard raising `Exception` instead of `BaseException`. Verified: pytest 951 (917 + 34), ctest 30/30, vitest 136, tsc and build clean. No real network call in any test; the Task 7 pass is the only live one. Bind stays loopback.
+
+AMBIGUITIES RESOLVED, THE SAFEST OPTION TAKEN, per the prompt's instruction. (1) The C++ engine sends no day high/low/change, so the trading path still omits `daily_return` and `intraday_range`. Adding them means changing MarketState and the live feed payload, which is beyond a parity fix and touches the money path, so it is REPORTED here rather than done. (2) The refusal is scoped to states that actually carry gathered evidence, so a hermetic caller that offered no database is never refused. (3) The 108 contaminated rows and the 10 superseded quarantine rows are left in place and documented rather than edited.
+
+Changes: llm_consensus/evidence.py (rewritten as THE builder, with the integrity bounds and the refusal), llm_consensus/consensus.py, llm_consensus/gate.py (PriorScreenGate), llm_consensus/persist.py (council_refusal), llm_consensus/verdicts.py, discovery/evaluate.py, discovery/funnel.py, discovery/run.py, market_data/tradeable.py, market_data/alpaca_source.py, core/provenance.hpp, core/engine.cpp, storage/storage.hpp, storage/storage.cpp, storage/schema.sql, scripts/deep_history_20260724.py, api_server/store.py, web/src/api/types.ts, web/src/components/RunStateBanner.tsx, tests/conftest.py, tests/test_council_evidence.py, tests/test_provenance.cpp, tests/test_evidence_parity_and_refusal.py (new), tests/test_production_db_isolation.py (new), PROGRESS.md, CONTEXT.md.
+
+Commit message: Bring discovery Stage-C evidence to parity with the trading path, fix stale periphery bars, refuse calls the evidence cannot answer, restore the base-check gate, populate volume_source, isolate tests from production, live trading untouched
+
+---
+
 ## Prompt: Deep history load and validation
 
 Date: 2026-07-24
@@ -3963,3 +4039,14 @@ $ git diff --cached --stat
 | Gemini 3.1 Pro | failing | HTTPError: HTTP Error 429: Too Many Requests | 288.2 ms |
 | Alpaca paper market data | working | one quote ok | 241.0 ms |
 | Alpaca paper order-auth (validation-only) | working | paper account auth ok | 244.1 ms |
+
+### Run 2026-07-24T23:59:27Z
+
+| Integration | Result | Detail | Latency |
+| --- | --- | --- | --- |
+| OpenAI GPT-5.5 | working | - | 1955.9 ms |
+| Anthropic Opus 4.8 | working | - | 1123.5 ms |
+| Anthropic Haiku 4.5 (gate path) | working | - | 541.3 ms |
+| Gemini 3.1 Pro | working | - | 3707.6 ms |
+| Alpaca paper market data | working | one quote ok | 280.7 ms |
+| Alpaca paper order-auth (validation-only) | working | paper account auth ok | 287.6 ms |

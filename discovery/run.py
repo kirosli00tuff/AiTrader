@@ -287,6 +287,34 @@ def run_once(asset_class: str, *, db_path: str = _DEFAULT_DB,
 
         prices = {s["symbol"]: s.get("price", 0.0) for s in snapshots}
         by_symbol = {str(s.get("symbol", "")): s for s in snapshots}
+
+        # THE SURVIVORS ARE ONBOARDED BEFORE THEY ARE JUDGED (2026-07-25).
+        # Filled by prepare(), below, which funnel.run_pass calls between
+        # Stage B and Stage C. Held here so the evaluator closure reads them.
+        screens: dict = {}
+        prepared: dict = {"status": "noop", "onboarded": [], "bars_written": {}}
+
+        def prepare(survivors: list[str], decisions: dict) -> None:
+            """Backfill the survivors' bars and record their Stage-B screens.
+
+            The order used to be verdict THEN backfill, and the order was the
+            defect. A candidate reached the council with no bars, so its
+            evidence carried a price and nothing else; all three providers
+            abstained citing exactly that; the verdict came back avoid; and
+            only non-avoid candidates were ever onboarded. So the bars a real
+            read needed were fetched only for symbols that had already
+            cleared a read without them, and the next pass asked the same
+            unanswerable question about the same symbol.
+
+            Backfilling first costs free Alpaca data calls for at most
+            max_survivors symbols and buys two things: a candidate is judged
+            on the same fields a held position is, and a symbol the venue
+            cannot serve is refused for free by the evidence minimum instead
+            of costing a three-provider round.
+            """
+            screens.update(decisions)
+            prepared.update(onboard(list(survivors), db_path))
+
         if evaluator is None:
             evaluator = evaluate.four_level_evaluator(
                 price_for=lambda s: prices.get(s, 0.0),
@@ -297,9 +325,15 @@ def run_once(asset_class: str, *, db_path: str = _DEFAULT_DB,
                 category_for=_category_for, cfg_path=cfg_path,
                 # db turns on evidence enrichment (real bars, regime, position)
                 # and per-provider persistence for replay (2026-07-20).
-                db_path=db_path)
+                db_path=db_path,
+                # The Stage-B screen this candidate already passed, so the
+                # persisted round names the model that screened it.
+                screen_for=screens.get)
 
         ts = now.strftime("%Y-%m-%dT%H:%M:%SZ")
+        # The backfill inside prepare() writes bars, so release this
+        # connection's write lock before Stage B hands over to it.
+        conn.commit()
         result = funnel.run_pass(
             asset_class, snapshots=snapshots, gate=gate, evaluator=evaluator,
             calls_used_today=store.council_calls_today(
@@ -307,7 +341,8 @@ def run_once(asset_class: str, *, db_path: str = _DEFAULT_DB,
             cfg_path=cfg_path, ts=ts,
             # The per-class allocation (equity reservation) inside the
             # unchanged daily total. See effective_daily_budget.
-            daily_budget=effective_daily_budget(asset_class, now, cfg_path))
+            daily_budget=effective_daily_budget(asset_class, now, cfg_path),
+            prepare_survivors=prepare)
 
         payload = result.to_dict()
         pass_id = store.record_pass(conn, payload)
@@ -337,7 +372,21 @@ def run_once(asset_class: str, *, db_path: str = _DEFAULT_DB,
                       if c.get("verdict") != "avoid"]
         conn.commit()  # release the write lock before backfill's own writes
         cand_symbols = [str(c.get("symbol", "")) for c in candidates]
-        onboarded = onboard(cand_symbols, db_path)
+        # The backfill already ran, before Stage C, for every survivor
+        # (prepare(), above). Re-running it here would pull the same 30 days
+        # of bars a second time in the same pass, so the earlier result is
+        # reused and only a candidate that never reached preparation is
+        # fetched now.
+        missing = [s for s in cand_symbols
+                   if s not in (prepared.get("bars_written") or {})]
+        onboarded = (onboard(missing, db_path) if missing else dict(prepared))
+        if missing and prepared.get("status") == "ok":
+            merged = dict(prepared.get("bars_written") or {})
+            merged.update(onboarded.get("bars_written") or {})
+            onboarded = {**prepared, "bars_written": merged,
+                         "onboarded": sorted(
+                             set(prepared.get("onboarded") or [])
+                             | set(onboarded.get("onboarded") or []))}
         verified = onboarded.get("status") == "ok"
         # THE serviceability judgment, shared with the startup core check
         # (market_data.universe.judge_serviceable, 2026-07-21). Backfill

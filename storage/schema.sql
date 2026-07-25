@@ -450,6 +450,16 @@ CREATE TABLE IF NOT EXISTS bars (
     low       REAL NOT NULL,
     close     REAL NOT NULL,
     volume    REAL NOT NULL,
+    -- Price provenance: real_feed | backfill | synthetic | replay | unknown.
+    source    TEXT DEFAULT 'unknown',
+    -- VOLUME provenance, a separate axis (2026-07-25): venue_bar |
+    -- venue_backfill | synthetic | replay | unknown | fabricated_zeroed. A
+    -- real_feed bar takes its prices from the venue's trades and its volume
+    -- from the venue's minute bars, so the two can differ, and the 2026-07-23
+    -- quarantine marked 3,443 volumes fabricated while their prices stayed
+    -- real. No column default on purpose: every write path binds a value, so
+    -- NULL can only mean a row written before the label existed.
+    volume_source TEXT,
     UNIQUE(venue, symbol, timeframe, timestamp)
 );
 CREATE INDEX IF NOT EXISTS idx_bars_lookup ON bars(symbol, timeframe, timestamp);

@@ -361,8 +361,8 @@ def gate_state(f: Finalist) -> dict:
     }
 
 
-def gate_finalists(finalists: list[Finalist], gate,
-                   max_survivors: int) -> tuple[list[str], list[Drop], int]:
+def gate_finalists(finalists: list[Finalist], gate, max_survivors: int
+                   ) -> tuple[list[str], list[Drop], int, dict]:
     """Stage B. Screen the finalists down to the few worth a full council.
 
     ``gate`` is any object with ``should_review(state) -> GateDecision`` (the
@@ -372,9 +372,18 @@ def gate_finalists(finalists: list[Finalist], gate,
     Fail-open on a gate error matches the council's posture: a flaky cheap gate
     must never silently suppress a real candidate. The hard ``max_survivors``
     ceiling still bounds cost, so fail-open cannot blow the budget.
+
+    THE SURVIVOR'S SCREEN IS RETURNED, NOT DISCARDED (2026-07-25). A survivor
+    reached Stage C carrying no record of the screen it had passed, so Stage C
+    persisted its round labelled ``{"proceed": true, "reason": "gate
+    disabled", "source": "disabled"}`` on all 44 discovery evaluations ever
+    recorded. The base-check gate was never disabled: a real claude-haiku-4-5
+    screen ran one stage earlier and its decision was thrown away. The fourth
+    return value carries it forward so the record can say what happened.
     """
     survivors: list[str] = []
     drops: list[Drop] = []
+    decisions: dict = {}
     calls = 0
     for f in finalists:
         if len(survivors) >= max(0, max_survivors):
@@ -389,12 +398,13 @@ def gate_finalists(finalists: list[Finalist], gate,
             log.debug("discovery: gate error on %s, failing open", f.symbol)
             survivors.append(f.symbol)
             continue
+        decisions[f.symbol] = decision
         if getattr(decision, "proceed", True):
             survivors.append(f.symbol)
         else:
             reason = getattr(decision, "reason", "") or "gate_rejected"
             drops.append(Drop(f.symbol, STAGE_B, f"gate: {reason}"[:200], f.score))
-    return survivors, drops, calls
+    return survivors, drops, calls, decisions
 
 
 # --- Stage C: four-level evaluation on survivors only ------------------------
@@ -552,8 +562,8 @@ def build_snapshots(symbols: list[str], client, *,
 
 def run_pass(asset_class: str, *, snapshots: list[dict], gate, evaluator,
              calls_used_today: int = 0, cfg_path: str | None = None,
-             ts: str | None = None,
-             daily_budget: int | None = None) -> PassResult:
+             ts: str | None = None, daily_budget: int | None = None,
+             prepare_survivors=None) -> PassResult:
     """Run one full funnel pass over one asset class.
 
     Takes prepared snapshots, so the fetching stays the caller's business and
@@ -609,7 +619,7 @@ def run_pass(asset_class: str, *, snapshots: list[dict], gate, evaluator,
         return result
 
     # Stage B: cheap gate, finalists only.
-    survivors, drops_b, gate_calls = gate_finalists(
+    survivors, drops_b, gate_calls, screens = gate_finalists(
         finalists, gate, settings.max_survivors(cfg_path))
     result.survivors = survivors
     result.drops.extend(drops_b)
@@ -618,6 +628,23 @@ def run_pass(asset_class: str, *, snapshots: list[dict], gate, evaluator,
         result.status = "no_survivors"
         result.reason = "the gate rejected every finalist"
         return result
+
+    # BETWEEN STAGE B AND STAGE C, THE SURVIVORS ARE PREPARED (2026-07-25).
+    # The caller owns what preparation means, so this module stays pure
+    # orchestration and opens no sockets. discovery/run.py uses it to backfill
+    # the survivors' bars from the venue BEFORE they are judged, and to hand
+    # each survivor's Stage-B screen to the evaluator. Both fix the same
+    # defect from opposite ends: a candidate used to be judged on evidence
+    # that did not exist yet, because onboarding ran only AFTER the verdict,
+    # so an "avoid" guaranteed the bars were never fetched and the next pass
+    # asked the same unanswerable question again. A pass with no callback
+    # behaves exactly as before.
+    if prepare_survivors is not None:
+        try:
+            prepare_survivors(survivors, screens)
+        except Exception:  # noqa: BLE001 — preparation is best effort, never fatal
+            log.debug("discovery: survivor preparation failed, evaluating "
+                      "on whatever evidence already exists")
 
     # Stage C: the only paid stage, bounded twice over. (The remaining <= 0
     # case can no longer reach here: it short-circuits before Stage B above.)

@@ -113,6 +113,12 @@ struct BarRow {
     // default is unknown, NEVER real: a caller that does not know where its
     // prices came from must not claim they are real (core/provenance.hpp).
     std::string source = "unknown";
+    // VOLUME provenance, a separate axis from the price provenance above:
+    // venue_bar | venue_backfill | synthetic | replay | unknown |
+    // fabricated_zeroed. Same default and the same reason. Derive it from the
+    // price provenance with mal::provenance::volume::for_bar_source rather
+    // than writing a literal, so the mapping keeps one home.
+    std::string volume_source = "unknown";
 };
 
 // RAII SQLite wrapper. Non-copyable.

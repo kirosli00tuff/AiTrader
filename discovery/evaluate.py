@@ -123,17 +123,28 @@ def build_verdict(*, symbol: str, council, dnn: dict, whale: dict,
     # both of which can only reduce this, never raise it.
     size_pct = round(conviction * 0.5, 4) if verdict != "avoid" else 0.0
 
-    parts = []
-    for v in (getattr(council, "per_model", None) or []):
-        parts.append(f"{getattr(v, 'model', 'model')}={getattr(v, 'verdict', '')}")
-    rationale = (
-        f"Council {getattr(council, 'verdict', '?')} on {symbol}: bias "
-        f"{council_bias:.2f}, conviction {council_conf:.2f} among "
-        f"{directional_count} directional voter(s), {abstentions} abstained, "
-        f"agreement {agreement}. Advisory dnn {dnn_bias:+.2f}, whale "
-        f"{whale_bias:+.2f} -> conviction {conviction:.2f} ({adj:+.3f}). "
-        + "; ".join(parts)
-    )[:1000]
+    # A REFUSAL IS NOT A HOLD (2026-07-25). When the pre-call evidence check
+    # declined, nobody was asked, so the rationale says that instead of
+    # reporting zero directional voters as though three had deliberated.
+    refusal = getattr(council, "refusal", None)
+    if refusal:
+        rationale = (
+            f"No council call on {symbol}: the assembled evidence is below "
+            f"the council minimum ({refusal.get('reason', '?')}). "
+            f"{refusal.get('detail', '')}")[:1000]
+    else:
+        parts = []
+        for v in (getattr(council, "per_model", None) or []):
+            parts.append(
+                f"{getattr(v, 'model', 'model')}={getattr(v, 'verdict', '')}")
+        rationale = (
+            f"Council {getattr(council, 'verdict', '?')} on {symbol}: bias "
+            f"{council_bias:.2f}, conviction {council_conf:.2f} among "
+            f"{directional_count} directional voter(s), {abstentions} abstained, "
+            f"agreement {agreement}. Advisory dnn {dnn_bias:+.2f}, whale "
+            f"{whale_bias:+.2f} -> conviction {conviction:.2f} ({adj:+.3f}). "
+            + "; ".join(parts)
+        )[:1000]
 
     return {
         "symbol": symbol,
@@ -157,23 +168,37 @@ def build_verdict(*, symbol: str, council, dnn: dict, whale: dict,
         # zero spend. A ConsensusResult always carries per_model: scored
         # verdicts on a real run, [] on a short-circuit.
         "provider_calls": len(getattr(council, "per_model", None) or []),
+        # Why no call was made, when none was. None on every round that ran.
+        "refusal": refusal,
     }
 
 
 def market_state_from(snapshot: dict) -> dict:
-    """The market fields the council renderer reads, honestly named.
+    """Stage-A Finnhub snapshot -> the canonical market OBSERVATION.
 
-    Renamed 2026-07-20 after the field-semantics audit: the old ret_5 carried
-    the FULL DAY move and the old volatility was the intraday range fraction.
-    The renderer (llm_consensus/evidence.py) reads the *_pct names, each
-    rendered with its units. A field whose input is absent is OMITTED, never
-    zeroed: the renderer's omission rule depends on that.
+    AN ADAPTER, NOT AN ASSEMBLER (2026-07-25). This maps Finnhub's key names
+    onto llm_consensus.evidence.OBSERVATION_FIELDS and stops. It computes no
+    rendered field, applies no unit conversion to a council field, and decides
+    nothing about what a model sees. THE builder (evidence.build_state) does
+    all of that, once, for both council paths.
+
+    It used to do its own: it computed daily_return_pct and intraday_range_pct
+    here, so the discovery path rendered two fields the trading path never
+    sent while the trading path rendered bar-window returns discovery never
+    had. Two assemblers under one prompt template is how a candidate came to
+    be judged on a different field set than a held position.
+
+    A field whose input is absent is OMITTED, never zeroed: the builder's
+    omission rule depends on that starting here.
 
     The legacy keys (ret_5, volatility, catalyst) are still emitted for the
-    OFFLINE deterministic mocks and the Stage-B gate prompt, which read them by
-    name. They never render in a council prompt: the renderer's allowlist does
-    not contain them.
+    OFFLINE deterministic mocks and the Stage-B gate prompt, which read them
+    by name. They never render in a council prompt: the renderer's allowlist
+    does not contain them. They are derived from the canonical fields rather
+    than recomputed, so there is still only one home for the arithmetic.
     """
+    from llm_consensus.evidence import intraday_range_pct
+
     def _f(key: str) -> float:
         try:
             return float(snapshot.get(key) or 0.0)
@@ -186,18 +211,18 @@ def market_state_from(snapshot: dict) -> dict:
     if price > 0:
         out["price"] = price
     if snapshot.get("change_pct") is not None:
-        out["daily_return_pct"] = round(_f("change_pct"), 4)
+        out["daily_change_pct"] = round(_f("change_pct"), 4)
     if price > 0 and high > low > 0:
-        out["intraday_range_pct"] = round((high - low) / price * 100.0, 4)
         out["day_high"] = high
         out["day_low"] = low
     if snapshot.get("sentiment_score") is not None:
         out["news_sentiment"] = _f("sentiment_score")
         out["catalyst"] = _f("sentiment_score")  # legacy, mocks only
-    # Legacy keys for the offline mocks and the Stage-B gate. Never rendered.
+    # Legacy keys for the offline mocks and the Stage-B gate. Never rendered,
+    # and derived from the one arithmetic home rather than recomputed here.
     out["ret_5"] = _f("change_pct") / 100.0
-    out["volatility"] = round(((high - low) / price)
-                              if price > 0 and high > low else 0.0, 6)
+    span = intraday_range_pct(price, high, low)
+    out["volatility"] = round((span or 0.0) / 100.0, 6)
     return out
 
 
@@ -206,7 +231,8 @@ def four_level_evaluator(*, price_for=None, category_for=None,
                          cfg_path: str | None = None, providers=None,
                          db_path: str | None = None,
                          mode: str = "short_term",
-                         extra_state: dict | None = None):
+                         extra_state: dict | None = None,
+                         screen_for=None):
     """Build the Stage-C evaluator callable the funnel invokes per survivor.
 
     Returns callable(symbol) -> verdict dict. Imports the layer modules lazily so
@@ -224,6 +250,11 @@ def four_level_evaluator(*, price_for=None, category_for=None,
     ``db_path`` turns on evidence enrichment and per-provider persistence
     inside consensus. ``extra_state`` carries mode-specific real evidence
     (fundamentals, catalyst detail) into the renderer.
+
+    ``screen_for`` maps a symbol to the Stage-B GateDecision it already
+    passed, so the persisted round names the model that screened it and the
+    reason it gave (2026-07-25). Without it the round is recorded as
+    unscreened, which is the honest reading when nobody supplies the screen.
     """
     from llm_consensus.config_access import (council_min_confidence,
                                              min_directional_votes)
@@ -249,8 +280,8 @@ def four_level_evaluator(*, price_for=None, category_for=None,
         if extra_state:
             state.update(extra_state)
 
-        # Level 2: the council. STAGE B ALREADY GATED THIS SYMBOL, so consensus
-        # must not gate it again.
+        # Level 2: the council. STAGE B ALREADY SCREENED THIS SYMBOL, so
+        # consensus must not screen it again.
         #
         # It used to. consensus() runs the trading base-check gate by default,
         # and that gate renders an order book and a news catalyst the free
@@ -260,16 +291,24 @@ def four_level_evaluator(*, price_for=None, category_for=None,
         # "council calls" and 5 avoid verdicts per pass while the council never
         # actually ran: the funnel could not surface a candidate in any market.
         #
-        # Passing an always-proceed gate here is not a loosened cost control. It
-        # restores the funnel's own design, where each stage screens ONCE and
-        # narrows: Stage A ranks for free, Stage B is the cheap gate, Stage C is
-        # the paid council on what survived. Spend stays bounded by
-        # max_survivors, max_council_calls_per_pass, and the separate daily
-        # discovery budget, none of which changed.
+        # Not screening twice is not a loosened cost control. It restores the
+        # funnel's own design, where each stage screens ONCE and narrows:
+        # Stage A ranks for free, Stage B is the cheap gate, Stage C is the
+        # paid council on what survived. Spend stays bounded by max_survivors,
+        # max_council_calls_per_pass, and the separate daily discovery budget,
+        # none of which changed.
+        #
+        # THE SCREEN IS REPORTED, NOT ERASED (2026-07-25). This used to pass a
+        # bare AlwaysProceedGate(), whose defaults say "gate disabled" /
+        # source "disabled". Every one of the 44 recorded discovery rounds
+        # therefore looks unscreened in the journal while a real
+        # claude-haiku-4-5 Stage-B call had in fact screened it. PriorScreenGate
+        # carries that decision through, costs nothing, and calls nobody.
         from llm_consensus import consensus as _consensus
-        from llm_consensus.gate import AlwaysProceedGate
+        from llm_consensus.gate import PriorScreenGate
+        screen = screen_for(symbol) if screen_for else None
         council = _consensus(state, providers=providers, cfg_path=cfg_path,
-                             gate=AlwaysProceedGate())
+                             gate=PriorScreenGate(screen))
 
         # Level 3: DNN advisory. A failure degrades to neutral, never fatal.
         dnn: dict = {}

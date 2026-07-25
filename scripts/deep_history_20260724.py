@@ -222,7 +222,9 @@ def pull_symbols(conn: sqlite3.Connection, base: str, symbols: list[str],
                  start: str, extra: str) -> dict[str, int]:
     """Paginate one multi-symbol pull into the bars table. Upsert mirrors
     market_data.alpaca_source._upsert_bars: venue alpaca, timeframe 5min,
-    source backfill, raw Alpaca timestamps."""
+    source backfill, volume_source venue_backfill, raw Alpaca timestamps."""
+    from market_data.alpaca_source import BACKFILL_VOLUME_SOURCE
+
     written = {s: 0 for s in symbols}
     page_token: str | None = None
     for page in range(3000):
@@ -237,15 +239,16 @@ def pull_symbols(conn: sqlite3.Connection, base: str, symbols: list[str],
                     continue
                 conn.execute(
                     "INSERT INTO bars(venue,symbol,timeframe,timestamp,open,"
-                    "high,low,close,volume,source) "
-                    "VALUES(?,?,?,?,?,?,?,?,?,'backfill') "
+                    "high,low,close,volume,source,volume_source) "
+                    "VALUES(?,?,?,?,?,?,?,?,?,'backfill',?) "
                     "ON CONFLICT(venue,symbol,timeframe,timestamp) DO UPDATE "
                     "SET open=excluded.open, high=excluded.high, "
                     "low=excluded.low, close=excluded.close, "
-                    "volume=excluded.volume, source=excluded.source",
+                    "volume=excluded.volume, source=excluded.source, "
+                    "volume_source=excluded.volume_source",
                     ("alpaca", sym, "5min", b["t"], float(b["o"]),
                      float(b["h"]), float(b["l"]), float(b["c"]),
-                     float(b.get("v", 0) or 0)))
+                     float(b.get("v", 0) or 0), BACKFILL_VOLUME_SOURCE))
                 written[sym] = written.get(sym, 0) + 1
         conn.commit()
         page_token = resp.get("next_page_token")
