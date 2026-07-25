@@ -11,6 +11,202 @@ Model:
 Prompt summary: one line.
 Changes: what changed.
 
+## Prompt: Diagnose the discovery bridge-unreachable transient and the provider error path (OBSERVATIONAL ONLY, validation week running)
+
+Date: 2026-07-25
+Model: Opus 5 (claude-opus-5[1m]), xhigh effort. The prompt did not name a model; the session runs on Opus 5 and this line records that.
+Prompt summary: six tasks, diagnosis only. Explain what emits the `discovery_blocked` "bridge unreachable" event, whether either affected pass lost work, why a healthy bridge would read unreachable, whether the blocks cost anything, and how often provider calls have errored per provider with confirmation that an error is never mistaken for a hold. Report findings in RETURN.md and PROGRESS.md, recommend fixes ordered by severity, apply none.
+
+CRITICAL CONSTRAINT HONORED: a validation week is running. No process started, stopped, killed, or signalled. No port bound. No write to `market_ai_lab.db` or any table in it. No change to `.control/controls.json`, `config/default_config.yaml`, or any file the running engine reads. No test suite run. No rebuild. No threshold, config value, or behavior changed. Reads only: files, `SELECT` against the production DB opened read-only, logs, code, and read-only HTTP GETs to the already-running bridge and backend.
+
+Changes: RETURN.md (this entry, findings below), PROGRESS.md (dated diagnostic session entry). No code, config, or control file touched.
+
+## DIAGNOSTIC FINDINGS
+
+**HEADLINE: the message is wrong about its own cause. The bridge was never unreachable. `discovery_blocked: bridge unreachable` is what the engine prints when its 60,000 ms socket read deadline expires before the Python funnel finishes, and the funnel finishes late whenever it makes a council call. Proven by a single join: of 18 passes that made at least one council call, 18 blocked. Of 74 passes that made none, 48 were read successfully. The discriminator is wall-clock duration against a fixed deadline and nothing else. The engine has recorded 99 `discovery_pass_start` events and zero `discovery_pass` END events in its entire history, so this has never once worked.**
+
+**SECOND HEADLINE, UNPROMPTED AND MORE URGENT: the validation stack is DOWN. It tore itself down at 2026-07-25T03:37:50Z, partway through this read-only session. This session did not cause it and the cause is fully attributed in the audit journal.** See "THE STACK IS DOWN" below.
+
+### THE STACK IS DOWN
+
+Evidence, all read-only:
+
+- `events` id 5190, 2026-07-25T03:37:50Z: `engine_stop_requested`, "Engine stop requested by watchdog: condition backend_down: engine=up bridge=up backend=DOWN feed=fresh (supervisor pid 2459034)".
+- Then ids 5191 to 5195: the engine (pid 2458942 and 2458915) SIGTERMed, `continuous_stop` after 221 iterations and 0 trades, the api (2459034) stopped by the watchdog, and the watchdog (2459058) stopping itself.
+- `.run/engine_heartbeat.json` frozen at 2026-07-25T03:37:32Z, pid 2458942, iteration 220. That pid no longer exists.
+- `market_ai_lab.db-wal` is gone. It was 10,489,552 bytes when this session started. SQLite removes the WAL when the last connection closes cleanly, so the engine closed its database properly.
+- `curl` to 127.0.0.1:8765/health and 127.0.0.1:8000/runstate both return connection refused. Only vite on 5173, 5174, and 5175 still listens.
+- Every pid in `.run/pids` except vite is gone.
+
+The trigger was the watchdog's `backend_down` condition, meaning the api_server on port 8000 stopped answering. The watchdog then executed its documented remediation, which stops the engine and tears the stack down. **Why the backend went down cannot be established.** The current run redirected no process stderr to a file. `.run/bridge.log` and `.run/start.log` are both from the 2026-07-20 run, and no file under `.run/` or `diagnostics/` was written after 2026-07-24 18:43 local except the heartbeat and pids. There is no api_server log for this run to read.
+
+Note what the watchdog itself recorded in the same sentence: `bridge=up`. The bridge was healthy at the moment of teardown, which is one more independent confirmation that "bridge unreachable" in the discovery event never described the bridge.
+
+This session ran only read commands: `ls`, `wc`, `git log`, `git status`, `head`, `cat`, `grep`, `find`, `ps`, `pgrep`, `ss`, `curl` GET, `sqlite3 -readonly` against `file:market_ai_lab.db?mode=ro`, file Reads, and one Edit to RETURN.md. None of those can stop a process or bind a port. Restarting was not attempted, because the prompt forbids starting processes and the operator should decide.
+
+### TASK 1: WHAT EXACTLY EMITS THAT EVENT
+
+**Proven.** Two call sites in `core/engine.cpp` emit that exact string, and they are distinguishable in the record.
+
+**Site A, `Engine::collect_discovery_passes`, core/engine.cpp:1629-1633.** This is the one that fired at 02:26:35Z and 03:28:43Z.
+
+- Condition tested: `if (!resp)` where `resp` is the `std::optional<std::string>` returned by the async `bridge::http_post_json(host, port, "/discovery/run_once", body, timeout_ms)`.
+- What it considers evidence of unreachability: nothing. It never measures reachability. `http_post_json` (core/bridge_client.cpp:14-66) collapses **four distinct outcomes** into the same `std::nullopt`: a failed `socket`/`gethostbyname`/`connect`, a failed `send`, a receive loop that ended without a complete `\r\n\r\n` header block, and any response whose status line is not `HTTP/1.1 200` or `HTTP/1.0 200`. The caller cannot tell which happened and picks one name for all four.
+- Timeout: `cfg_.council.engine_council_call_timeout_ms`, **60000 ms**, shipped in `config/default_config.yaml:260` and not overridden in `.control/controls.json`. It is applied as `SO_RCVTIMEO` and `SO_SNDTIMEO`, so it is a **per-`recv` deadline, not a total budget**. With a server that writes nothing until its handler returns, the first `recv` is the whole story and 60 s is the effective wall-clock limit.
+- Retries: **none.** The block is logged and the loop `continue`s. The future is erased from `discovery_inflight_` first, so the pass is dropped, not retried. Python owns the cadence, so the next attempt is the next hourly pass.
+- Cadence: **once per collected pass, per asset class.** `collect_discovery_passes` is called unconditionally at the top of `consume_discovery` (engine.cpp:1817), before the enabled check and before the 300 s trigger gate, so it PEEKS on every loop iteration with `wait_for(0)` and never blocks. It emits at most one event per launched pass.
+
+**Site B, `Engine::consume_discovery`, core/engine.cpp:1860-1864.** Same message, different call: the `/discovery/due` POST, timeout `engine_bridge_call_timeout_ms` = **8000 ms**. Also no retry. Runs once per asset class per 300 s trigger.
+
+The two are separable in the record without reading code: **site A always follows a `discovery_pass_start` within about 60 to 96 seconds. Site B never does.** Of 50 `bridge unreachable` events (29 crypto, 21 equity), 44 pair to a preceding `discovery_pass_start` and are site A. The rest, including both events at 2026-07-24T07:32:56Z, are site B firing at startup before the bridge was listening.
+
+Both are wrapped by `log_discovery_state_once` (engine.cpp:1559-1576), which dedupes on `kind + ":" + reason` per asset class.
+
+### TASK 2: DID THE PASS LOSE ANY WORK
+
+**Proven. No funnel work was lost. Both passes ran to completion and recorded everything.**
+
+| | pass 103 | pass 104 |
+|---|---|---|
+| `discovery_pass.ts` | 2026-07-25T02:24:59Z | 2026-07-25T03:27:10Z |
+| status | `ok` | `ok` |
+| universe / finalists / survivors / evaluated | 48 / 12 / 5 / 5 | 48 / 12 / 5 / 5 |
+| council_calls / gate_calls | 2 / 5 | 2 / 5 |
+| est_cost_usd | 0.112 | 0.112 |
+| budget_remaining | 8 | 6 |
+
+**Five was the intended survivor count.** `max_survivors: 5` in `.control/controls.json` and in `config/default_config.yaml:412`. Both passes recorded `survivors_count = 5` and `evaluated_count = 5`.
+
+**No candidate was skipped.** All five survivors are individually accounted for in Stage C:
+
+- Pass 103: `council_refusal` SEI/USD 02:26:05Z, NEAR/USD 02:26:14Z, ZEC/USD 02:26:22Z, all `no_series`. `council_eval` 54 AAVE/USD 02:26:14Z verdict sell, 55 LDO/USD 02:26:21Z verdict hold.
+- Pass 104: `council_refusal` SEI/USD 03:28:09Z, NEAR/USD 03:28:10Z, ZEC/USD 03:28:16Z, all `no_series`. `council_eval` 56 AAVE/USD 03:28:16Z verdict hold, 57 LDO/USD 03:28:25Z verdict hold.
+
+3 refused plus 2 evaluated equals the 5 survivors. `council_calls = 2` matches the 2 evaluations that contacted a provider, and the 3 refusals correctly cost nothing.
+
+**The block fired strictly AFTER the funnel finished.** Pass 104's last Stage C write is 03:28:25Z and the block is 03:28:43Z, 18 s later. Pass 103's last is 02:26:22Z and the block is 02:26:35Z, 13 s later. In both cases the remaining seconds are the post-Stage-C onboarding and the pass-row write.
+
+**Budget was charged once, not twice.** `budget_remaining` runs 10, 8, 6 across passes 102, 103, 104, decrementing by exactly the `council_calls` of each. The engine's failure to read the response does not refund, double-charge, or re-run. The `discovery_skip` "not due (last pass 5m ago, interval 60m)" logged 3 to 4 minutes after each block proves Python's `due()` saw the recorded pass and held the cadence.
+
+**Nothing was lost inside the funnel. Something was lost outside it.** See Task 4.
+
+### TASK 3: WHY WOULD A HEALTHY BRIDGE READ UNREACHABLE
+
+**Proven cause: a timeout shorter than the work it guards.** Taking the prompt's five candidates in order.
+
+**1. A timeout shorter than a slow council round trip. SUPPORTED. This is the cause.**
+
+`engine_council_call_timeout_ms` is 60,000 ms and is sized for one `/score/llm` round trip. The same constant is reused for `/discovery/run_once`, which is not one round trip. It runs Stage A over 48 to 119 symbols through a rate-limited Finnhub client, Stage B gate calls, and then up to `max_council_calls_per_pass` (5) full council rounds at roughly 6 to 9 s each. The endpoint's own docstring at server.py:421 says it is "SLOW (tens of seconds once council calls run)".
+
+Three independent measurements:
+
+*The join.* Grouping every pass row against the engine's outcome for that pass:
+
+| council_calls | engine outcome | passes |
+|---|---|---|
+| 0 | response read (status reported) | **48** |
+| 0 | `bridge unreachable` | 26 |
+| 2 | `bridge unreachable` | 6 |
+| 3 | `bridge unreachable` | 1 |
+| 4 | `bridge unreachable` | 1 |
+| 5 | `bridge unreachable` | 10 |
+
+Every pass that made a council call failed, 18 of 18. Most passes that made none succeeded. A bridge fault cannot be selective by how much work the request asked for. A deadline is exactly that selective.
+
+*The floor.* The gap from `discovery_pass_start` to its `bridge unreachable` block, over all 44 site-A events: 60 s (1), 61 s (5), 62 s (2), 69 s (1), 91 s (14), 92 s (18), 93 s (2), 96 s (1). **Not one is below 60 s.** The two clusters are 60 s and 60 s plus one loop tick. `continuous_start` records `interval=30s`, and the measured iteration is 31.07 s (iteration 116 at 02:43:41Z, iteration 220 at 03:37:32Z, 3231 s over 104 iterations). 60 + 31 = 91. The clusters are the 60 s deadline expiring and then being observed at the next `wait_for(0)` peek.
+
+*The counter-example.* The 48 passes with 0 council calls that WERE read produced `discovery_blocked: budget_exhausted: budget_exhausted` at gaps of 61 s (43), 62 s (4), 92 s (1). Those responses arrived and were parsed. The engine is fully capable of reading this endpoint. It only fails when the work runs long.
+
+**2. A connection attempted while the bridge is occupied with a provider call. RULED OUT.** The bridge is a `ThreadingHTTPServer` (server.py:26, 593), one thread per connection, and server.py:423 states the design intent. Independently: the engine's own `/score/llm` and `/marketdata/alpaca` calls kept succeeding on other connections throughout every pass, and the operator's `/health` probe answered during the same window.
+
+**3. A different host, port, or path than the health probe. RULED OUT for host and port, TRUE and irrelevant for path.** The engine uses `opts_.bridge_host` and `opts_.bridge_port`, defaulting to 127.0.0.1:8765 (core/engine.hpp:45-46) and set once from the `--bridge` argument. Every engine call to the bridge uses that same pair. The path does differ (`POST /discovery/run_once` versus `GET /health`), but that is not the failure: `_handle` routes `/discovery/run_once` correctly and the endpoint ran, which the completed `discovery_pass` rows prove.
+
+**4. A check running in a process without the bridge address configured. RULED OUT, conclusively.** A `discovery_pass_start` event is only written by `launch_discovery_pass`, which is only reached after `POST /discovery/due` to the same host and port returned a parseable body with `enabled=true` and `due=true`. That call has an 8 s timeout and it succeeded, in the same process, seconds before. The address was right and the bridge was answering at T0.
+
+**5. A stale or cached reachability flag. RULED OUT.** There is no reachability flag. `resp` is a fresh `std::future` per pass, erased from `discovery_inflight_` on collection. `discovery_last_state_` is a per-asset-class dedupe key for LOGGING only and is never consulted as state. Its effect would be to SUPPRESS a repeat, not create one, and the record shows every pass got its own block.
+
+**Hypothesis, not proven.** Which of the four `nullopt` branches fired on these two specific passes. The gap histogram makes the 60 s `recv` timeout by far the best explanation, and the alternative (a late non-200 response) is hard to reconcile with a hard floor at exactly 60 s and quantization to the loop's peek grid. But the current run captured no bridge stderr to a file, so there is no server-side record for 2026-07-25 to confirm it directly. `.run/bridge.log`, from the 2026-07-20 run, does contain four instances of `bridge client disconnected before response on /discovery/run_once: [Errno 32] Broken pipe`, which is `Handler._send` (server.py:497-499) reporting the client hung up first. That is the server-side signature of exactly this failure, observed on this endpoint, in a prior run. It is strong corroboration and it is not the same day.
+
+**What would establish it:** log the elapsed milliseconds and the failure branch in `collect_discovery_passes`, or make the supervisor redirect the bridge's stderr to a file so the `Broken pipe` line is retained. Either would settle it on the next pass, and neither requires stopping anything to reason about, though applying them does.
+
+### TASK 4: IS IT COSTING ANYTHING
+
+**Proven. One real cost, one cosmetic cost, and three things that are NOT costs.**
+
+**Not a cost: no candidate is skipped.** All 5 survivors were processed both times (Task 2).
+
+**Not a cost: no budget is wasted or double-spent.** `budget_remaining` decrements exactly once per council call (Task 2). The engine's failed read does not re-trigger the pass.
+
+**Not a cost: the watchdog does not react.** `ops/watchdog.py` contains no reference to `discovery_blocked` and no severity-based rule. A `warn` event here does not feed a health condition, a restart, or a notification.
+
+**Not a cost: the GUI is intact.** `api_server/store.py:254,284` and `controls.py:1068,1072,1111` read the `discovery_pass` TABLE, which Python writes and which is complete. The dashboard's pass history, spend, and budget are correct.
+
+**REAL COST: `onboard_discovered_symbols` never runs after a pass.** It is called from exactly two places, `core/engine.cpp:228` (engine construction) and `core/engine.cpp:1684` (immediately after the pass END event). Line 1684 sits after the `continue` that the block takes, so it has never executed. Proof from the record: all 43 `discovery_onboard` events in history share a timestamp with a `startup` event, to the second. 2026-07-21T08:01:01Z, 2026-07-22T09:55:56Z, 2026-07-22T19:17:28Z are all engine starts.
+
+The consequence is the exact failure the function's own comment (engine.cpp:1688-1695) says it exists to prevent: "a symbol surfaced at 14:00 sat unusable until a restart, which is much of why an enabled discovery layer looked dead." The fix was written and is unreachable, because the only path to it requires a successfully collected pass.
+
+Measured instance: LDO/USD was added to the watchlist at 2026-07-21T00:54:44Z (`watchlist_event` 21, `applied=1`) and first onboarded at 2026-07-21T08:01:01Z, an engine restart. **7 hours 6 minutes 17 seconds during which a discovered symbol was on the watchlist and outside the engine's traded universe.**
+
+This cost is currently **latent, not active**. All 7 `watchlist` rows are `status='removed'`, the last add was 2026-07-21 and the last event was a removal on 2026-07-23. Neither the 02:24:59Z nor the 03:27:10Z pass added anything: pass 103 gave AAVE/USD `sell` at conviction 0.56, below the 0.60 floor, and the other three verdicts were `hold`. So for these two specific passes the skipped onboarding would have been a no-op, and nothing was lost. The defect is real, it has cost 7 hours once, and it will cost again the next time a pass produces a watchlist add.
+
+**COSMETIC COST: the pass END event and its whole payload never reach the audit journal.** `events` holds 99 `discovery_pass_start` and **0** `discovery_pass`. The narrative line ("universe 48 to finalists 12 to survivors 5 to evaluated 5, 2 council call(s)") and its payload (`universe_count`, `finalists`, `survivors`, `evaluated`, `council_calls`, `est_cost_usd`, `onboard_status`) are lost from the append-only journal on every pass. The same numbers survive in the `discovery_pass` table, so nothing is unrecoverable, but the journal shows every pass starting and none finishing.
+
+**Side effect, harmless in practice:** the block also skips `discovery_last_state_.erase(asset_class)`, which re-arms the dedupe. In practice a `discovery_skip` with a different key always intervenes within 5 minutes and overwrites the key, so no block has ever been suppressed. All 44 site-A blocks are present.
+
+### TASK 5: THE GEMINI ERROR PATH
+
+First, a reconciliation. `council_eval_provider` **id 56** is `llm_secondary` / `claude-opus-4-8`, a genuine abstention with confidence 0.55 and a written rationale. The row the prompt describes is **eval_id 56**, which is provider row **id 168**: `llm_tertiary`, `gemini-3.1-pro-preview`, source `error`, direction `flat`, confidence 0.0, abstained 1, rationale "flat: Gemini call error", from the AAVE/USD evaluation at 2026-07-25T03:28:16Z in pass 104.
+
+**How often provider calls have errored, over the whole recorded history. Proven.**
+
+| slot | model_id | calls | errors | error rate | recorded abstentions | of which are errors |
+|---|---|---|---|---|---|---|
+| llm_primary | gpt-5.5 | 57 | **0** | 0.0% | 37 | 0 |
+| llm_secondary | claude-opus-4-8 | 57 | **0** | 0.0% | 43 | 0 |
+| llm_tertiary | gemini-3.1-pro-preview | 57 | **17** | **29.8%** | 53 | **17** |
+
+All 17 errors are Gemini. 14 fall in one burst on 2026-07-21 between 05:46:39Z and 06:13:39Z. The rest are 2026-07-22T11:59:11Z, 2026-07-23T02:16:19Z, and 2026-07-25T03:28:16Z. `.run/bridge.log` names the causes seen in the 2026-07-20 run: HTTP 503 "This model is currently experiencing high demand" (3 lines) and `Read timed out. (read timeout=30.0)` (2 lines).
+
+**There is no retry.** `providers.py:198-204` makes one attempt and converts any exception to `flat_verdict(..., source="error")`. `http_json.post_json` is a single `requests.post` with `timeout=provider_timeout_seconds` (30 s). `_score_all` maps `score()` once per provider. So roughly 30% of council rounds silently run on two providers instead of three.
+
+**Is an errored call recorded distinctly from a genuine abstention, everywhere it matters?**
+
+- **The directional count: YES, correctly.** `directional = [(v, p) for v, p in zip(verdicts, prov) if abs(v.bias) > 1e-9]` (consensus.py:275-276). An error verdict has `bias = 0.0`, so it is excluded, which is right. It also cannot inflate the count. `directional_count` is the only one of these fields that feeds a decision (`discovery/evaluate.py:114`, `directional_count < max(1, min_directional)`), and it is unaffected.
+- **The composed conviction: YES in effect.** `bias`, `confidence`, `edge`, and `agreement_count` are all computed over directional voters only (consensus.py:278-290). An errored verdict contributes no number to any of them. **No verdict in the recorded history has ever been moved by an error.**
+- **The abstention count: NO. This is the conflation.** `abstentions = len(verdicts) - len(directional)` (consensus.py:277) is derived from bias alone and never consults `source`. Every one of the 17 errors is counted as an abstention, both in `ConsensusResult.abstentions` and in the persisted `council_eval.abstentions`.
+- **The persisted record: YES, but only in one column.** `persist.py:116` writes `source`, so the 17 error rows carry `source='error'` and the 36 genuine tertiary flats carry `source='real'`, and the rationale text says "flat: Gemini call error". But `direction` is `_direction_of(bias)` = `'flat'` and `abstained` is `1 if abs(bias) <= 1e-9 else 0` (persist.py:117,120). **Both of those read identically for an error and for a considered hold.**
+
+**Stated plainly: an error can never be mistaken for a hold in any number that decides anything, and it has never changed a verdict. It IS routinely mistaken for a hold in the record a human reads.**
+
+The clean provable example is `council_eval` id 1, AAVE/USD, 2026-07-21T05:46:39Z: `directional_count 2, abstentions 1, verdict strong_buy`. Read alone, that says three providers were asked, two took a direction, and one read the evidence and held. The truth is two were asked and answered and the third never returned. The only way to know is to join `council_eval_provider` and check `source`. Recent example, `council_eval` id 56, AAVE/USD, 2026-07-25T03:28:16Z: recorded `abstentions 3`, actually 2 abstentions and 1 failed call.
+
+### RECOMMENDED FIXES, BY SEVERITY. NONE APPLIED.
+
+**1. HIGH. `http_post_json` reports a cause it never measured.** Four distinct outcomes collapse to one `std::nullopt`, and the caller names all four "bridge unreachable". Every diagnosis that starts from this event starts from a false statement. Return a typed result (`unreachable` / `timed_out(elapsed_ms)` / `http_error(code)` / `truncated`) and let `collect_discovery_passes` report what happened. *Confirmed when:* a long pass records a timeout with its elapsed milliseconds, and `bridge unreachable` appears only when `connect` actually fails. The 61 s and 92 s clusters vanish from the unreachable bucket.
+
+**2. HIGH. The 60,000 ms deadline is structurally too short for the endpoint it guards.** `engine_council_call_timeout_ms` is sized for one `/score/llm` round trip and reused for a whole funnel run. 18 of 18 passes with any council call exceeded it. Give `/discovery/run_once` its own budget, or make it asynchronous: return a pass id immediately and let the engine poll `/discovery/status` or the `discovery_pass` table. Asynchronous is the better fix, because the funnel's duration scales with `max_council_calls_per_pass` and any fixed number will be wrong again when that changes. *Confirmed when:* `discovery_pass` END events start appearing in `events`, where there are currently 0 against 99 starts.
+
+**3. HIGH. Post-pass onboarding is unreachable, and it is the fix for a known 7-hour defect.** `onboard_discovered_symbols` at engine.cpp:1684 has never run. Until fix 2 lands, call it on the block path too. It reads `storage_->watchlist_symbols()` from the database, which Python has already written, so it does not need the HTTP response at all. *Confirmed when:* a `discovery_onboard` event appears whose timestamp does NOT coincide with a `startup` event. All 43 to date do.
+
+**4. MEDIUM. An errored provider call is counted as an abstention.** Add an `errors` field to `ConsensusResult`, computed from `source == "error"`, exclude those from `abstentions`, and persist it as a `council_eval.errors` column. Keep `directional_count` exactly as it is. *Confirmed when:* eval 56 reads `abstentions 2, errors 1` instead of `abstentions 3`, and a query for rounds where the council ran short-handed becomes possible without joining the provider table.
+
+**5. MEDIUM. Gemini fails 30% of calls with no retry and no visibility.** 17 of 57 against 0 of 57 for both other providers. Add one bounded retry on 503 and on read timeout, and record the number of providers actually reached on each round so a two-provider consensus is visible as such. *Confirmed when:* the `source='error'` rate for `llm_tertiary` falls, and each `council_eval` states how many providers answered.
+
+**6. MEDIUM. The current run persists no process stderr.** The backend went down and there is no log to say why, which is why the most urgent question in this report is unanswerable. Redirect each supervised process's stderr to a file under `.run/`. *Confirmed when:* an api_server log exists and covers the window of the next teardown.
+
+**7. LOW. A non-ok discovery status prints itself twice.** 48 events read `Discovery crypto: budget_exhausted: budget_exhausted` because `json_get_string(*resp, "reason", status)` finds no top-level `"reason"` in the run_once response and falls back to the status. The real sentence, "discovery daily council budget 12 spent, no council call made this pass", is in the `discovery_pass` table but not in the journal. *Confirmed when:* the event message carries the sentence.
+
+### WHAT COULD NOT BE ESTABLISHED, AND WHAT WOULD ESTABLISH IT
+
+1. **Why the api_server backend went down at 2026-07-25T03:37:50Z.** No stderr was captured for this run. Fix 6 would establish it.
+2. **Which of the four `nullopt` branches fired on the two named passes.** The evidence points hard at the 60 s `recv` timeout and rules nothing else in, but the direct server-side record does not exist for 2026-07-25. Fix 1 would establish it on the next pass.
+
+Both are consequences of the same gap: the running stack keeps no durable log of its own failures.
+
+### WHAT WAS NOT TOUCHED
+
+No process started, stopped, killed, or signalled. No port bound. Zero writes to `market_ai_lab.db`: every query ran through `sqlite3 -readonly` against `file:market_ai_lab.db?mode=ro`, which cannot write or checkpoint. `.control/controls.json`, `config/default_config.yaml`, and every other file the engine reads are unmodified. No test run, no rebuild, no threshold or config value changed. Files changed: RETURN.md and PROGRESS.md only.
+
 ## Prompt: Discovery Stage-C evidence parity, stale periphery bars, refusal gate, base-check gate, volume_source, test isolation
 
 Date: 2026-07-25
@@ -4050,3 +4246,14 @@ $ git diff --cached --stat
 | Gemini 3.1 Pro | working | - | 3707.6 ms |
 | Alpaca paper market data | working | one quote ok | 280.7 ms |
 | Alpaca paper order-auth (validation-only) | working | paper account auth ok | 287.6 ms |
+
+### Run 2026-07-25T01:43:01Z
+
+| Integration | Result | Detail | Latency |
+| --- | --- | --- | --- |
+| OpenAI GPT-5.5 | working | - | 1421.5 ms |
+| Anthropic Opus 4.8 | working | - | 747.3 ms |
+| Anthropic Haiku 4.5 (gate path) | working | - | 641.6 ms |
+| Gemini 3.1 Pro | failing | TimeoutError: The read operation timed out | 6134.5 ms |
+| Alpaca paper market data | working | one quote ok | 257.9 ms |
+| Alpaca paper order-auth (validation-only) | working | paper account auth ok | 239.5 ms |
