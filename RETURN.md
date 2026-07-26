@@ -35,6 +35,34 @@ CAPACITY (Task 6): expected dollars per year at 100,000 equity, reported at Leve
 
 RESOURCE RULE: computation through backtest/sweep.py, probe-measured RSS, MemoryMax scope, sizing verified before launch. Fit computed and inspected first, holdout evaluated once after, no specification change in between.
 
+### FINDINGS
+
+**HEADLINE, negative first: H-A properly specified FAILS. On the hindsight-free universe with night-clustered errors, the holdout reads +5.41 bp per night at z=1.87 (fills A) and +5.06 at z=1.77 (fills B), both under the pre-registered 2.24 bar, both intervals spanning zero. The verdict is cannot-be-distinguished-from-no-edge, on a holdout that was already contaminated and was read as weaker than a first look by construction. The P28 pass is now fully explained as two artifacts: the per-trade specification (which this session's data would still score at z=2.59, over 1.96, while the correct night unit scores 1.87) and NVDA's hindsight-selected history (the secondary universe's holdout effect is +7.88 bp WITH NVDA contributing 151 percent of the sum, and +0.03 bp at z=0.01 without it). The recommendation is to return to hypothesis generation. No repairs are proposed.**
+
+Committed specification hash: d66647a, before any run. Fit inspected first, holdout evaluated once, nothing changed in between. Both runs through backtest/sweep.py, probe 24 MB, width 18, MemoryMax scope.
+
+PRIMARY TABLE (per-night portfolio net bp, fee model equity RT 1.3 bp inside):
+
+| universe / fill | fit n | fit bp [CI] (z) | hold n | hold bp [CI] (z) | per-trade z, INCORRECT spec | verdict |
+|---|---|---|---|---|---|---|
+| U1 SPY+QQQ, A naive | 1,258 | +1.60 [-3.51, +6.70] (0.61) | 640 | +5.41 [-0.27, +11.08] (1.87) | 2.59 | fails 2.24 bar |
+| U1 SPY+QQQ, B conservative | 1,258 | +2.28 [-2.76, +7.31] (0.89) | 640 | +5.06 [-0.54, +10.67] (1.77) | 2.45 | fails 2.24 bar |
+| U2 top-cap names, A | 1,258 | +2.40 (0.75) | 640 | +7.88 [-0.41, +16.17] (1.86), without NVDA +0.03 (0.01) | 2.42 | secondary, NVDA is the entire effect |
+| U2 top-cap names, B | 1,258 | +5.44 (1.70) | 640 | +7.19 (1.69), without NVDA -0.52 (-0.14) | 2.14 | secondary, same |
+
+THE CLUSTERING CORRECTION IS THE DIFFERENCE. Every holdout cell would clear 1.96 under P28's per-trade unit and none clears the correct night unit at the raised bar. The effective number of independent observations is the night count (640 holdout), half to a third of the raw trade count (1,280 to 1,920), exactly as the pre-registration predicted.
+
+FILLS: A and B agree within 0.4 bp everywhere, so the edge does not live in the auction-fill assumption. Both models are reported, the strategy is unconditional (a clock), and market-on-close plus market-on-open orders make fills A approximately executable, stated with the bar-print-versus-auction-print approximation.
+
+MECHANISM (Task 5): the data does not behave like the mechanism. In fit, the premium concentrated in LOW-volatility nights (+4.7 against -0.9 in the high tercile) and weekend-holiday nights, the maximum-gap-risk holds, were NEGATIVE (-9.9 bp). In holdout both flip: high-vol +10.6 against low-vol -0.8, weekends +6.9. A compensation-for-gap-risk premium should be larger where gap risk is larger in EVERY period, not alternate. Regime persistence also fails in fit: 2022 ran -9.0 bp per night. A pattern that contradicts its own mechanism in one period and reverses it in the next is a pattern, not an edge.
+
+CAPACITY (Task 6), computed from the holdout point estimate as registered, with the caveat that the estimate is not distinguished from zero: at Level 1 harness sizing (about 500 USD per symbol-night, 2 symbols) the point estimate is worth about 136 USD per year on 100,000 equity. At full deployment (100,000 split across SPY and QQQ every night, far outside Level 1 exposure limits and stated only as the ceiling) about 13,600 USD per year. Even taken at face value, the Level 1 expression of this effect is two orders of magnitude below operating relevance.
+
+VERDICT, in the pre-registered language: H-A cannot be distinguished from no edge under correct specification with the data available, its P28 pass is attributed to the two disclosed faults, and the mechanism checks argue the residual point estimate is not the documented premium behaving as documented. Hypothesis generation should resume elsewhere. Nothing applied.
+
+Changes: RETURN.md (pre-registration at d66647a, findings), PROGRESS.md, queue/002 marked DONE and moved to queue/done/. Research script under gitignored build/research_20260726/.
+Commit message: H-A follow-up with night-clustered errors, hindsight-free universe, and auction-fill realism, findings only, nothing applied
+
 Date: 2026-07-26
 Model: Fable 5 (claude-fable-5)
 Prompt summary: add a Queue section to CLAUDE.md recording the prompt-queue convention: queue/ holds inbound NNN-short-name.md prompt files written by chat Claude, each naming its model and carrying a Status line. Sessions pick up the lowest-numbered PENDING file, execute it as a normal prompt with RETURN.md logging, mark it DONE, and move it to queue/done/. Chat Claude writes only prompt files and the queue README. CLAUDE.md wins conflicts, reported not silently resolved.
