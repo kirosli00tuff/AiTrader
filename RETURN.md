@@ -11,6 +11,16 @@ Model:
 Prompt summary: one line.
 Changes: what changed.
 
+## Prompt: Record the queue convention in CLAUDE.md
+
+Date: 2026-07-26
+Model: Fable 5 (claude-fable-5)
+Prompt summary: add a Queue section to CLAUDE.md recording the prompt-queue convention: queue/ holds inbound NNN-short-name.md prompt files written by chat Claude, each naming its model and carrying a Status line. Sessions pick up the lowest-numbered PENDING file, execute it as a normal prompt with RETURN.md logging, mark it DONE, and move it to queue/done/. Chat Claude writes only prompt files and the queue README. CLAUDE.md wins conflicts, reported not silently resolved.
+Changes: CLAUDE.md (new Queue section), this entry.
+Commit message: Record the prompt-queue convention in CLAUDE.md
+
+---
+
 ## Prompt: Cost every fill and every backtest from published live fee schedules
 
 Date: 2026-07-26

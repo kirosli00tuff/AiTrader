@@ -38,3 +38,14 @@ See `AUDIT.md` for the current honest state of each layer (what is real vs. scaf
 - Before adding a feature, confirm the vertical slice above is stable
 - Keep the architecture modular so layers can be added cleanly
 - Prefer established libraries over hand-rolled code for backtesting, market-data normalization, and ML
+
+## Queue
+
+A `queue/` directory at the repo root holds inbound prompt files written by chat Claude, named `NNN-short-name.md`. Each file names its model at the top and carries a Status line.
+
+- At the start of a session, read the lowest-numbered file whose Status is PENDING and execute it as a normal prompt, including logging it to RETURN.md before work begins.
+- Files whose Status is not PENDING are not picked up.
+- On completion, set Status to DONE and move the file to `queue/done/`.
+- Execute in numerical order unless a file states otherwise.
+- Chat Claude writes only prompt files and the queue README, never code, config, or the four tracking files. Anything outside `queue/` remains Claude Code's alone to change.
+- If a queue file conflicts with CLAUDE.md, CLAUDE.md wins and the conflict gets reported rather than resolved silently.
