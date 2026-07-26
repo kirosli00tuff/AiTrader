@@ -11,6 +11,60 @@ Model:
 Prompt summary: one line.
 Changes: what changed.
 
+## Prompt: Establish buy and hold as the benchmark and re-score everything against it
+
+Date: 2026-07-26
+Model: Fable 5 (claude-fable-5), as the prompt names.
+Prompt summary: the bar has been zero and the real bar is buy and hold after costs. Task 1 construct SPY and BTC benchmarks over the P26/P28 fit and holdout periods with the fee model, dividends stated. Task 2 exposure-adjusted comparison for the default strategy and H-A, H-B, H-C beside the benchmarks, the fair reading stated. Task 3 re-score every tested hypothesis as excess over benchmark with intervals. Task 4 a capacity table (1 to 25 bp edge x 1 to 100 trades per day at Level 1 sizing, net of the class fee) and a stated capacity floor as a permanent research gate. Task 5 where the benchmark is not the right comparison, without rescuing anything. Task 6 report, docs, commit, push. Measurement only, no hypothesis, nothing applied.
+
+CONSTRAINTS HONORED: research only against analysis_bars.db and existing session artifacts, live trading off, no engine file or behavior changed, computation sized through backtest/sweep.py, queue/ untouched and unread (pasted prompt path).
+
+### FINDINGS
+
+**HEADLINE: nothing tested beats buy and hold. The default strategy loses to both benchmarks decisively (equity book z=-4.7, crypto book z=-25.5 on paired daily excess in holdout). H-C loses decisively (z=-9.9). H-B cannot be distinguished from its benchmark (z=0.03) while carrying 4.5x its volatility. H-A, the best thing this project has measured, roughly MATCHES buy and hold per unit of capital and does not beat it: fair paired excess -2.2 bp per day in holdout, z=-0.47. The bar for every future hypothesis is now buy and hold after costs, not zero, and the capacity floor below makes most small edges not worth operating regardless of significance.**
+
+TASK 1, BENCHMARKS. SPY: the investable broad-equity default, deepest liquidity, the natural passive use of the equity sleeve. BTC/USD: the dominant crypto asset, the natural passive use of the crypto sleeve. Daily closes from analysis_bars.db, one entry and one exit at the class fee (SPY 1.3 bp, BTC 50 bp). DIVIDENDS: the bars are split-adjusted only, so SPY excludes dividends and the SPY benchmark is UNDERSTATED by roughly 1.2 to 1.5 percent per year. Sharpe uses rf 0, stated. Drawdowns on cumulative-sum paths (comparable to the strategy convention below, not compounded).
+
+| benchmark / period | total ret | ann ret | ann vol | Sharpe | max DD | longest underwater |
+|---|---|---|---|---|---|---|
+| SPY fit (2019-2023) | +89.9% | +13.5%/yr | 20.5% | 0.72 | -38.2% | 709 days |
+| SPY holdout (2024+) | +56.3% | +17.7%/yr | 15.6% | 1.13 | -21.6% | 121 days |
+| BTC fit (2021-2023) | +43.2% | +12.7%/yr | 65.0% | 0.51 | -122.4% (sum path) | 783 days |
+| BTC holdout (2024+) | +46.5% | +16.1%/yr | 47.9% | 0.55 | -67.5% | 291 days |
+
+TASK 2 AND 3, THE COMPARISON. Strategy series convention, stated: sum of per-trade net returns at one unit of notional per trade, so multi-trade days run more than one unit while the benchmark runs exactly one. That mismatch inflates strategy magnitudes, so the table carries BOTH readings and the FAIR one is the unit-normalized paired excess. Idle-capital note: every strategy below is out of the market most of the time, and idle capital modeled at cash earns zero here, which FLATTERS the strategies against a benchmark that is always invested. Excess = strategy minus benchmark, paired by day.
+
+| strategy / period | time in market | n trades | excess vs benchmark (per day, paired) | z | verdict vs buy and hold |
+|---|---|---|---|---|---|
+| default, fit | 11.7% | 9,245 | equity book -25.6 bp [-32.8, -18.4], crypto book -256 bp [-279, -233] | -6.9 / -21.7 | LOSES, both books |
+| default, holdout | 12.0% | 7,323 | equity book -21.8 bp [-30.9, -12.7], crypto book -288 bp [-310, -266] | -4.7 / -25.5 | LOSES, both books |
+| H-A, fit | ~50% | 6,290 | raw convention +14.1 (z 0.85), FAIR unit-normalized -4.33 [-13.46, +4.80] | -0.93 | does not beat, indistinguishable from match |
+| H-A, holdout | ~50% | 3,200 | raw +27.4 (z 1.54), FAIR -2.20 [-11.33, +6.92] | -0.47 | does not beat, indistinguishable from match |
+| H-B, fit | ~100% | 1,848 | +70.6 bp [-120, +262] vs 50/50 mix, vol 350%/yr | 0.72 | indistinguishable at 4.5x benchmark vol |
+| H-B, holdout | ~100% | 1,146 | +2.2 bp [-121, +125] | 0.03 | indistinguishable, Sharpe 0.07 vs 0.84 mix |
+| H-C, fit | 27% | 3,088 | -132.8 bp [-174.6, -91.1] vs BTC | -6.2 | LOSES |
+| H-C, holdout | 27% | 2,530 | -160.3 bp [-192.2, -128.4] vs BTC | -9.9 | LOSES |
+
+The fair reading, stated plainly: the default strategy and H-C lose to buy and hold under any sizing convention because their per-trade expectancy is negative while the benchmark drifts up. H-B matches its benchmark only by carrying enormous variance. H-A earns about +5.4 bp per night against SPY's +7.0 bp per average day: even the survivor of every prior session is a rough MATCH to passive holding, achieved with more machinery, and its raw-convention z of 1.54 is a leverage artifact of five units against one.
+
+TASK 4, CAPACITY. Annual dollars at 100,000 equity, Level 1 harness sizing (about 500 USD notional per trade), NET edge per trade, 252 trading days. To net these figures the gross edge must first clear the class hurdle: crypto 50 bp, equity 1.3 bp.
+
+| net edge | 1 trade/day | 10 trades/day | 100 trades/day |
+|---|---|---|---|
+| 1 bp | $13 | $126 | $1,260 |
+| 5 bp | $63 | $630 | $6,300 |
+| 10 bp | $126 | $1,260 | $12,600 |
+| 25 bp | $315 | $3,150 | $31,500 |
+
+THE CAPACITY FLOOR, stated as a permanent gate: 2,500 USD per year, 2.5 percent of equity, the minimum that plausibly covers execution risk, infrastructure failure, and operator time. At Level 1 sizing that requires roughly a 20 bp NET edge at 10 trades per day, or 100 trades per day at 10 bp, and for crypto the gross edge behind those numbers is 70 bp and 60 bp respectively. Below the floor an edge is real but not worth operating, and every candidate in this project's history is far below it. A future hypothesis must state, before testing, how it would clear this floor at permitted sizing.
+
+TASK 5, WHERE THE BENCHMARK IS NOT THE RIGHT COMPARISON, without rescuing anything. Buy and hold's fit-period drawdowns were -38 percent over 709 underwater days (SPY) and worse for BTC: an operator who cannot hold through that realizes worse than the benchmark, and a lower-return strategy with shallow drawdowns can be rational for real drawdown tolerance. Correlation matters the same way: a return stream uncorrelated to the operator's other exposures has value a same-direction benchmark does not, and H-A's overnight-only stream is the one measured object here with a structurally different exposure window, though it failed its own significance bar. And a strategy that survives conditions the benchmark does not (a 2022 for equities, a crypto winter) has insurance value no average captures. None of this changes today's verdict: nothing tested cleared the bar, and these considerations become relevant only after something does.
+
+Changes: RETURN.md (this entry), PROGRESS.md, CONTEXT.md (two Key Decisions). Research script under gitignored build/research_20260726/.
+Commit message: Establish buy and hold as the benchmark, re-score every tested hypothesis against it, and set a capacity floor for future research, findings only, nothing applied
+
+---
+
 ## Prompt: Revise the queue convention in CLAUDE.md to opt-in
 
 Date: 2026-07-26
