@@ -92,6 +92,7 @@ struct OpenPos {
     double entry_fee = 0.0;
     double atr_z_at_entry = 0.0;
     double signal_close = 0.0;  // the signal bar close (fill-gap reporting)
+    std::string regime;         // regime at the signal bar (research emission)
 };
 
 struct Book {
@@ -258,6 +259,7 @@ int main(int argc, char** argv) {
     std::map<std::string, std::optional<strategy::StrategySignal>> pending;
     std::map<std::string, double> pending_atr_z;
     std::map<std::string, double> pending_close;
+    std::map<std::string, std::string> pending_regime;
     Book book{cfg.system.starting_paper_balance,
               cfg.system.starting_paper_balance, "", 0.0, 0, 0, {}};
     risk::PortfolioState ps;
@@ -337,6 +339,7 @@ int main(int argc, char** argv) {
                 op.entry_fee = notional * kFeeRate;
                 op.atr_z_at_entry = pending_atr_z[sym];
                 op.signal_close = pending_close[sym];
+                op.regime = pending_regime[sym];
                 book.open[sym] = op;
             }
             p.reset();
@@ -399,7 +402,10 @@ int main(int argc, char** argv) {
                      << (op.signal_close > 0
                              ? (op.pos.entry_price / op.signal_close - 1.0)
                              : 0.0)
-                     << ",\"equity\":" << book.equity << "}\n";
+                     << ",\"equity\":" << book.equity
+                     << ",\"regime\":\"" << jesc(op.regime)
+                     << "\",\"stop\":" << op.pos.stop_price
+                     << ",\"target\":" << op.pos.target_price << "}\n";
                 book.open.erase(it);
             }
         }
@@ -420,16 +426,35 @@ int main(int argc, char** argv) {
             pending[sym] = d.signal;
             pending_atr_z[sym] = tr.atr_z;
             pending_close[sym] = bar.close;
+            pending_regime[sym] = tr.regime;
             *out << "{\"t\":\"signal\",\"ts\":\"" << jesc(r.timestamp)
                  << "\",\"symbol\":\"" << jesc(sym) << "\",\"factor\":\""
                  << jesc(d.signal.factor) << "\",\"regime\":\""
                  << jesc(tr.regime) << "\",\"atr_z\":" << tr.atr_z << "}\n";
         } else if (emit_rejections) {
+            // Research emission (2026-07-25, additive): the FULL per-family
+            // condition sets the trace already records, so each gate's
+            // marginal rejected set (all other conditions pass) is
+            // identifiable offline. Recording only, never decisive.
             *out << "{\"t\":\"reject\",\"ts\":\"" << jesc(r.timestamp)
                  << "\",\"symbol\":\"" << jesc(sym)
                  << "\",\"first_reject\":\"" << jesc(tr.first_reject)
                  << "\",\"atr_z\":" << tr.atr_z << ",\"rsi2\":" << tr.rsi2
-                 << ",\"vol_ok\":" << (tr.vol_ok ? 1 : 0) << "}\n";
+                 << ",\"vol_ok\":" << (tr.vol_ok ? 1 : 0)
+                 << ",\"regime\":\"" << jesc(tr.regime)
+                 << "\",\"mom_reject\":\"" << jesc(tr.momentum_first_reject)
+                 << "\",\"rev_reject\":\"" << jesc(tr.reversion_first_reject)
+                 << "\",\"trend_ok\":" << (tr.trend_ok ? 1 : 0)
+                 << ",\"rsi2_trigger\":" << (tr.rsi2_trigger ? 1 : 0)
+                 << ",\"atr_band_ok\":" << (tr.atr_band_ok ? 1 : 0)
+                 << ",\"volume_present\":" << (tr.volume_present ? 1 : 0)
+                 << ",\"cross_up\":" << (tr.cross_up ? 1 : 0)
+                 << ",\"cross_down\":" << (tr.cross_down ? 1 : 0)
+                 << ",\"adx_ok\":" << (tr.adx_ok ? 1 : 0)
+                 << ",\"atr_floor_ok\":" << (tr.atr_floor_ok ? 1 : 0)
+                 << ",\"dual_ma_ok\":" << (tr.dual_ma_ok ? 1 : 0)
+                 << ",\"atr_v\":" << tr.atr_v
+                 << ",\"close\":" << bar.close << "}\n";
         }
     }
 
