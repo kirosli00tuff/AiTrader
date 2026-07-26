@@ -11,6 +11,16 @@ Model:
 Prompt summary: one line.
 Changes: what changed.
 
+## Prompt: Revise the queue convention in CLAUDE.md to opt-in
+
+Date: 2026-07-26
+Model: Fable 5 (claude-fable-5)
+Prompt summary: replace the Queue section in CLAUDE.md. The queue is now OPT-IN and never read at session start. It runs only when the operator asks in words like "run the queue". A pasted prompt is the normal path and means queue/ is ignored entirely, not opened, scanned, or listed. One exception: a pasted prompt recognisably matching a queue file gets that file marked DONE and moved to queue/done/ at the end, nothing else. Pickup, Status, ownership, and the CLAUDE.md-wins conflict rule stay as before.
+Changes: CLAUDE.md (Queue section replaced), this entry.
+Commit message: Make the prompt queue opt-in: never read at session start, run only on request, pasted prompts ignore it
+
+---
+
 ## Prompt: QUEUE 002, H-A equity overnight premium, properly specified
 
 Date: 2026-07-26
