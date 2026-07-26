@@ -11,7 +11,29 @@ Model:
 Prompt summary: one line.
 Changes: what changed.
 
-## Prompt: Record the queue convention in CLAUDE.md
+## Prompt: QUEUE 002, H-A equity overnight premium, properly specified
+
+Date: 2026-07-26
+Model: Fable 5 (claude-fable-5), as the queue file names.
+Prompt summary: retest H-A with the faults P28 disclosed fixed in the specification. Task 0 pre-register and commit before looking. Task 1 night-clustered errors as the PRIMARY, per-trade reported beside it labelled incorrect. Task 2 a hindsight-free universe rule with as-of membership, effect with and without the largest contributor. Task 3 auction-fill realism beside the naive fills, fee model equity rate. Task 4 the holdout contamination stated honestly. Task 5 mechanism checks: gap-risk scaling, breadth, regime persistence. Task 6 capacity in dollars at this account's scale. Task 7 negatives first, apply nothing.
+
+CONSTRAINTS HONORED: research only against analysis_bars.db, live trading off, no engine file, threshold, parameter, or behavior changed, computation through backtest/sweep.py with verified sizing, nothing applied.
+
+### PRE-REGISTRATION (Task 0) — committed before any run, specification closed at commit
+
+PRIMARY HYPOTHESIS, one test. The equity overnight premium, expressed as the per-NIGHT equal-weight portfolio net return across the held universe, is positive. The unit of independent observation is the night. Five symbols across one night share one market move: P28's per-trade errors treated them as five draws, which is the disclosed specification error this session fixes.
+
+UNIVERSE RULE, hindsight-free. PRIMARY universe U1: US-listed broad index ETFs among the two largest by assets at each January formation date. That rule, applied with information available at each formation date since 2019, selects SPY and QQQ at every formation date in the span. Membership is constant, performance of the funds never enters the rule, and no single company's realized history can dominate admission. SECONDARY universe U2 (reported beside, no verdict authority): single names admitted by top-5 US market capitalization as of each January 1, from public record: AAPL and MSFT at every formation date 2019-2026, NVDA only from the 2024-01 formation. NVDA's 2019-2023 history, the engine of P28's concentration, is excluded by the rule because NVDA was not top-5 cap at those formation dates. Membership is stated from public record because the analysis DB carries no capitalization data, and that provenance is a stated limitation. Difference from the P28 set: P28 pooled all five names over the full span with NVDA's whole history inside.
+
+FILL MODELS, both reported side by side. FILLS A (naive): enter long at the last RTH bar's close (the closing auction region print), exit at the next session's first RTH bar OPEN (the opening auction print). The strategy is unconditional (a clock, not a signal), so market-on-close and market-on-open orders submitted before their cutoffs receive auction prints without lookahead: fills A approximates auction execution and is stated as the OPTIMISTIC bound, since bar prints and official auction prints differ by microstructure. FILLS B (conservative): enter at the last RTH bar's close, exit at the first RTH bar's CLOSE (09:35 ET), which models missing the opening auction and selling into early continuous trading. FEES: the published-live-schedule model, equity round trip 1.3 bp per symbol per night (includes the 1.0 bp spread component and 0.3 bp regulatory), never a flat figure.
+
+METRIC AND BAR. Per-night portfolio net return in bp: mean across held symbols of (exit/entry - 1) minus 1.3 bp, then t statistics over NIGHTS. Effective n is the night count (fit about 1,258, holdout about 640), reported beside the raw trade count. THE HOLDOUT IS CONTAMINATED AND SAID SO: P28 already evaluated close-to-open on these symbols over the same 2024+ holdout, and no untouched period exists in this database. Handling, stated in advance: the same FIT (before 2024-01-01) and HOLDOUT (2024-01-01 on) split is used, the bar is RAISED to |z| >= 2.24 (family alpha 0.05 split across the two looks this holdout has now had for this hypothesis), and the result is read as weaker than a first look regardless of outcome. POWER, stated in advance: night-level overnight portfolio SD is roughly 60 to 90 bp, so the holdout minimum detectable effect at 2.24 is roughly 6 to 8 bp per night. A true premium smaller than that lands as cannot-be-distinguished, and that is the expected outcome. VERDICT RULE: edge requires holdout night-clustered net mean > 0 at |z| >= 2.24 on U1 under BOTH fill models, with fit the same sign. Interval spanning zero: cannot be distinguished. Interval at or below zero: no edge. The per-trade specification is computed and reported LABELLED INCORRECT, never decisive.
+
+MECHANISM CHECKS (Task 5, descriptive, pre-registered, no correction spent, fit-designed and reported for both periods): (1) gap-risk scaling: nights split by prior-session realized volatility terciles, and weekend-or-holiday nights (longer closure) against single nights. The mechanism predicts larger premium where gap risk is larger. (2) Breadth: U1 and U2 with and without each period's largest contributor. The mechanism predicts survival without the top name. (3) Regime persistence: calendar-year means. The mechanism predicts broad positivity, not one era carrying the total.
+
+CAPACITY (Task 6): expected dollars per year at 100,000 equity, reported at Level 1 harness sizing (about 500 USD notional per symbol-night) and at full deployment (equity split evenly across U1), both computed from the holdout point estimate whatever it is.
+
+RESOURCE RULE: computation through backtest/sweep.py, probe-measured RSS, MemoryMax scope, sizing verified before launch. Fit computed and inspected first, holdout evaluated once after, no specification change in between.
 
 Date: 2026-07-26
 Model: Fable 5 (claude-fable-5)
