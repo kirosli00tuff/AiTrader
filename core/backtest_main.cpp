@@ -140,7 +140,7 @@ int main(int argc, char** argv) {
                      "[--start ISO] [--end ISO] [--mode backtest|calibrate] "
                      "[--out FILE] [--set-rsi2-entry-equity N] "
                      "[--set-atr-band-std X] [--strip-volume] "
-                     "[--emit-rejections]\n";
+                     "[--emit-rejections] [--hold-tape]\n";
         return 2;
     }
     const std::string cfg_path =
@@ -152,6 +152,10 @@ int main(int argc, char** argv) {
     const std::string out_path = arg_value(argc, argv, "--out", "");
     const bool strip_volume = arg_flag(argc, argv, "--strip-volume");
     const bool emit_rejections = arg_flag(argc, argv, "--emit-rejections");
+    // --hold-tape keeps the pre-streaming in-memory tape (1.13 GB on the
+    // deep-history DB). It exists so the streaming path's output identity
+    // stays testable. Streaming is the default.
+    const bool hold_tape = arg_flag(argc, argv, "--hold-tape");
 
     config::Config cfg = config::load_config(cfg_path, profile);
     // Registered parameter levers ONLY (P24 pre-registration): each mutates
@@ -207,22 +211,94 @@ int main(int argc, char** argv) {
     }
     *out << "}\n";
 
-    // ---- Load the provenance-clean tape, merged chronologically ----------
-    std::vector<storage::BarRow> tape;
-    std::map<std::string, int> usable;
-    for (const auto& sym : symbols) {
-        auto rows = store.real_bars_in_range(sym, cfg.strategy.bar_timeframe,
-                                             start, end);
-        usable[sym] = static_cast<int>(rows.size());
-        for (auto& r : rows) tape.push_back(std::move(r));
-    }
-    std::sort(tape.begin(), tape.end(),
-              [](const storage::BarRow& a, const storage::BarRow& b) {
-                  return a.timestamp < b.timestamp;
-              });
-    for (const auto& [sym, n] : usable)
-        *out << "{\"t\":\"bars\",\"symbol\":\"" << jesc(sym)
-             << "\",\"usable\":" << n << "}\n";
+    // ---- Tape source (2026-07-25): STREAM monthly windows by default, or
+    // hold the whole tape with --hold-tape. Both paths read through
+    // Storage::real_bars_in_range BY IDENTITY, so the provenance filter
+    // cannot drift between them. Both use the same DEFINED order,
+    // (timestamp, symbol). The old comparator sorted on timestamp alone and
+    // left equal stamps in std::sort's unspecified order, which no
+    // streaming merge can replicate. The held tape measured 1.13 GB RSS on
+    // the deep-history DB and a 14-way sweep of it OOM-killed the live
+    // stack on 2026-07-25. Streaming holds one month at a time.
+    auto bar_order = [](const storage::BarRow& a, const storage::BarRow& b) {
+        if (a.timestamp != b.timestamp) return a.timestamp < b.timestamp;
+        return a.symbol < b.symbol;
+    };
+    std::map<std::string, long> usable;
+    for (const auto& sym : symbols) usable[sym] = 0;
+    auto for_each_bar = [&](auto&& fn) {
+        const std::string& tf = cfg.strategy.bar_timeframe;
+        if (hold_tape) {
+            std::vector<storage::BarRow> tape;
+            for (const auto& sym : symbols) {
+                auto rows = store.real_bars_in_range(sym, tf, start, end);
+                for (auto& r : rows) tape.push_back(std::move(r));
+            }
+            std::sort(tape.begin(), tape.end(), bar_order);
+            for (const auto& r : tape) {
+                ++usable[r.symbol];
+                fn(r);
+            }
+            return;
+        }
+        // Window bounds from the DB's own span (bounds only, read-only),
+        // clamped to --start/--end. Windows outside the data are empty.
+        std::string lo, hi;
+        {
+            sqlite3* bdb = nullptr;
+            if (sqlite3_open_v2(db_path.c_str(), &bdb, SQLITE_OPEN_READONLY,
+                                nullptr) == SQLITE_OK) {
+                sqlite3_stmt* st = nullptr;
+                if (sqlite3_prepare_v2(
+                        bdb, "SELECT MIN(timestamp), MAX(timestamp) FROM bars",
+                        -1, &st, nullptr) == SQLITE_OK &&
+                    sqlite3_step(st) == SQLITE_ROW) {
+                    const auto* a = sqlite3_column_text(st, 0);
+                    const auto* b = sqlite3_column_text(st, 1);
+                    if (a) lo = reinterpret_cast<const char*>(a);
+                    if (b) hi = reinterpret_cast<const char*>(b);
+                }
+                sqlite3_finalize(st);
+            }
+            sqlite3_close(bdb);
+        }
+        if (!start.empty() && (lo.empty() || start > lo)) lo = start;
+        if (!end.empty() && (hi.empty() || end < hi)) hi = end;
+        if (lo.empty() || hi.empty() || lo > hi) return;  // no bars
+        int y = std::stoi(lo.substr(0, 4));
+        int m = lo.size() >= 7 ? std::stoi(lo.substr(5, 2)) : 1;
+        std::string wstart = lo;      // inclusive lower edge of this window
+        std::string prev_bound;       // rows at or before this are processed
+        std::vector<storage::BarRow> window;
+        while (wstart <= hi) {
+            const int ny = m == 12 ? y + 1 : y;
+            const int nm = m == 12 ? 1 : m + 1;
+            char ub[32];
+            std::snprintf(ub, sizeof ub, "%04d-%02d-01T00:00:00Z", ny, nm);
+            const std::string wend = std::string(ub) < hi ? ub : hi;
+            window.clear();
+            for (const auto& sym : symbols) {
+                auto rows = store.real_bars_in_range(sym, tf, wstart, wend);
+                for (auto& r : rows) {
+                    // The window edges are inclusive on both sides, so a bar
+                    // exactly at the previous bound was already processed.
+                    if (!prev_bound.empty() && r.timestamp <= prev_bound)
+                        continue;
+                    window.push_back(std::move(r));
+                }
+            }
+            std::sort(window.begin(), window.end(), bar_order);
+            for (const auto& r : window) {
+                ++usable[r.symbol];
+                fn(r);
+            }
+            if (wend == hi) break;
+            prev_bound = wend;
+            wstart = wend;
+            y = ny;
+            m = nm;
+        }
+    };
 
     // ---- Calibrate mode: replay each recorded decision's bar --------------
     if (mode == "calibrate") {
@@ -230,13 +306,13 @@ int main(int argc, char** argv) {
         // tape and ask the SAME strategy at every warm bar; report.py joins
         // these against the recorded decisions by (symbol, ts).
         std::map<std::string, std::vector<strategy::Bar>> hist;
-        for (const auto& r : tape) {
+        auto calib_step = [&](const storage::BarRow& r) {
             auto& h = hist[r.symbol];
             h.push_back({r.open, r.high, r.low, r.close, r.volume});
             if (h.size() > kHistoryCap) h.erase(h.begin());
             if (!strategy::indicators_warm(static_cast<int>(h.size()),
                                            cfg.strategy))
-                continue;
+                return;
             strategy::EvalTrace tr;
             auto d = strategy::evaluate(h, cfg.strategy,
                                         is_crypto_symbol(r.symbol), &tr);
@@ -249,7 +325,11 @@ int main(int argc, char** argv) {
                  << "\",\"stop\":" << d.signal.stop_price
                  << ",\"target\":" << d.signal.target_price
                  << ",\"strength\":" << d.signal.strength << "}\n";
-        }
+        };
+        for_each_bar(calib_step);
+        for (const auto& [sym, n] : usable)
+            *out << "{\"t\":\"bars\",\"symbol\":\"" << jesc(sym)
+                 << "\",\"usable\":" << n << "}\n";
         *out << "{\"t\":\"summary\",\"mode\":\"calibrate\"}\n";
         return 0;
     }
@@ -265,7 +345,7 @@ int main(int argc, char** argv) {
     risk::PortfolioState ps;
     long trades = 0, ambiguous = 0, gate_blocks = 0;
 
-    for (const auto& r : tape) {
+    auto step = [&](const storage::BarRow& r) {
         const std::string& sym = r.symbol;
         const bool crypto = is_crypto_symbol(sym);
         const std::string day =
@@ -416,9 +496,9 @@ int main(int argc, char** argv) {
         if (h.size() > kHistoryCap) h.erase(h.begin());
         if (!strategy::indicators_warm(static_cast<int>(h.size()),
                                        cfg.strategy))
-            continue;
-        if (book.open.count(sym)) continue;   // one position per symbol
-        if (pending[sym].has_value()) continue;
+            return;
+        if (book.open.count(sym)) return;     // one position per symbol
+        if (pending[sym].has_value()) return;
 
         strategy::EvalTrace tr;
         auto d = strategy::evaluate(h, cfg.strategy, crypto, &tr);  // IDENTITY
@@ -456,7 +536,11 @@ int main(int argc, char** argv) {
                  << ",\"atr_v\":" << tr.atr_v
                  << ",\"close\":" << bar.close << "}\n";
         }
-    }
+    };
+    for_each_bar(step);
+    for (const auto& [sym, n] : usable)
+        *out << "{\"t\":\"bars\",\"symbol\":\"" << jesc(sym)
+             << "\",\"usable\":" << n << "}\n";
 
     *out << "{\"t\":\"summary\",\"mode\":\"backtest\",\"trades\":" << trades
          << ",\"ambiguous\":" << ambiguous
