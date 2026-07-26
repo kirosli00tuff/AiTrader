@@ -1,6 +1,6 @@
 # QUEUE 001: Cost every fill and every backtest from published live fee schedules
 
-Model: Opus. Status: PENDING. Written by chat Claude, 2026-07-26.
+Model: Opus. Status: DONE (executed 2026-07-26, session P29, commit 9821da7). Written by chat Claude, 2026-07-26.
 
 Read CLAUDE.md, PROGRESS.md, CONTEXT.md, and RETURN.md before starting, including the
 2026-07-25 P26 no-edge research, the 2026-07-26 P28 hypothesis session, and the backtest

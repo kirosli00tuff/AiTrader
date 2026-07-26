@@ -19,6 +19,8 @@ Prompt summary: the 2 bp round-trip figure came from paper fills and is wrong fo
 
 Constraints honored: no RiskGate logic, no live-trading gate, no adaptive limit-weakening invariant, no Level 1 risk value, no strategy parameter, no threshold, no entry or exit logic. Live trading stays off. Ambiguities resolved to the safest option and noted below.
 
+STAGING NOTE, disclosed: a failed `git add -A` attempt staged two operator files this session's explicit list never named, queue/README.md and queue/001-fee-model.md, and they went out in commit 9821da7. Inspected after the fact: they are the operator's own prompt-queue workflow (001 is the exact prompt this session executed, verbatim, no secrets). Kept rather than reverted, and the queue protocol the README defines was completed: 001 marked DONE with its commit and moved to queue/done/, so no future session re-executes it.
+
 ### FINDINGS
 
 **HEADLINE: the fee model now comes from published live schedules, and it inverts the cost picture the project has been using. A live crypto round trip costs 50 bp (market orders pay the 0.25 percent base-tier taker rate each way), not 2. A live equity round trip costs about 1.3 bp, not 2. The paper venue has been reporting about 1 bp per side on every fill regardless of class, understating live crypto cost 25x and overstating equity cost 1.5x. Every fill now records the model figure beside the venue figure, the harness prices per class, the hurdle prints at startup, in runstate, in the GUI banner, and in every harness report. Re-measured: P26's crypto expectancy is -48.8 bp net per trade against its real hurdle, and P28's H-C collapses to -56 bp in holdout. No conclusion reverses. The no-edge finding gets 25x worse for crypto.**
