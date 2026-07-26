@@ -11,6 +11,51 @@ Model:
 Prompt summary: one line.
 Changes: what changed.
 
+## Prompt: Pre-registered deep-history research on gates, thresholds, frequency levers, and strategy diagnosis (RESEARCH ONLY, validation week running)
+
+Date: 2026-07-25
+Model: Fable 5 (claude-fable-5)
+Prompt summary: research only against analysis_bars.db while the validation week runs. Task 0 pre-register every hypothesis before looking. Task 1 measure what each native gate rejects and what those rejections would have earned. Task 2 threshold sensitivity over a pre-registered grid with out-of-sample splits. Task 3 does the momentum factor have edge at 5-minute granularity, and is the one-bar stop-out placement, timing, or luck. Task 4 the four frequency levers measured: universe size, shorts, threshold loosening, timeframe. Task 5 overall strategy diagnosis. Task 6 where the research loop itself is slow. Task 7 report, apply nothing, commit and push.
+
+CRITICAL CONSTRAINT HONORED: the running engine, bridge, backend, and watchdog were not started, stopped, restarted, or signalled. No port bound. No write to market_ai_lab.db. No change to controls.json, default_config.yaml, or any file the running engine reads. No running artifact rebuilt. Production read with SELECT only. All computation against analysis_bars.db.
+
+### PRE-REGISTRATION (Task 0) — written and committed before any backtest ran
+
+Everything below was written before the first run. Anything not on this list is exploratory and is labelled so in the findings.
+
+COMMON MACHINERY. Data: analysis_bars.db only (3,306,485 provenance-clean split-adjusted 5-minute bars, 8 symbols, SIP equity volume, bias note in analysis_meta). Profile: active_quant, the running profile. Engine: mal_backtest calling strategy::evaluate, check_exit, exit_fill_price, rsi2_exit_triggered, and RiskGate::evaluate by identity. Fills: next-bar-open, fee 0.0001 per side, stop-first intrabar. Config variants are SCRATCH COPIES of config/default_config.yaml passed via --config. The shipped file, controls.json, and every file the running stack reads stay untouched. The harness binary gains ADDITIVE emission fields only (full per-family condition sets, atr_v, close, regime on reject lines; regime and strength on trade lines). Validation before use: the modified binary re-runs a pinned slice and every decision-relevant field (trades, signals, gate blocks, summary) must be identical to the current binary's output on the same slice. Only the mal_backtest target is built. mal_engine is never rebuilt.
+
+OUT-OF-SAMPLE SPLIT, applied to every hypothesis: FIT = trades with entry_ts < 2024-01-01. HOLDOUT = entry_ts >= 2024-01-01. One full-span run per cell; trades assigned by entry timestamp. Book state (equity, loss cooldown) carries across the boundary; per-trade returns are path-independent and the cooldown interaction is reported as a limitation.
+
+STATISTICS. Mean per-trade net return in basis points with t-based 95 percent intervals, win rate with Wilson intervals (backtest/report.py conventions). Any group under 30 trades reports insufficient_sample, no conclusion. Arm deltas use z = delta / SE_delta with independent-sample SEs, noted as an approximation since arms share tape. SOL/USD trades spanning its 417-day hole are excluded and counted.
+
+H-G (Task 1, one hypothesis per gate): the gate's rejected candidates, had they been taken, perform no differently from accepted trades. Two measurements per gate where possible.
+- (a) REMOVAL DELTA where a config lever exists: volume via --strip-volume; atr_band via --set-atr-band-std 1000000; dual_ma via momentum_dual_ma_filter false; rsi2_trigger via rsi2_entry 100 both classes plus rsi2_crossback_confirm false (trigger always on). trend_filter has no honest config disable and is measured by (b) only. no_ema_cross is the momentum trigger, not a filter: without a cross there is no direction, so it gets measurement (b) descriptively in both directions and no removal arm.
+- (b) COUNTERFACTUAL WALK on the MARGINAL rejected set (all other conditions in that factor's chain pass, only this gate fails): entry next bar open, the strategy's stop/target/rsi2-exit/time-stop semantics replicated in Python FOR ANALYSIS ONLY, validated first against the accepted set: the walk re-runs every harness-accepted signal and must reproduce exit reason on >= 95 percent and mean absolute return deviation <= 0.5 bp, else its counterfactual numbers are labelled approximate with the measured error.
+- Decision metric: rejected-set counterfactual mean vs accepted-set mean, and rejected-set mean vs zero. Categories pre-declared: EARNS ITS KEEP (rejected significantly worse than accepted), COSTS FREQUENCY AND EXPECTANCY (rejected significantly better than or equal to accepted with positive mean), DOES NOTHING (indistinguishable at the bar), CANNOT TELL (insufficient sample).
+- Registered z-tests: 4 removal deltas + 6 rejected-vs-accepted = 10.
+- VOLUME CAVEAT, pre-stated: history carries SIP consolidated volume, the live feed carries IEX at roughly 5 percent of consolidated. Any volume result here describes SIP and does not transfer to the live path.
+
+H-T (Task 2, threshold grid): exactly 54 cells. rsi2 entry (equity, crypto) in {(5,10) default, (10,15), (15,25)} x trend_ma_period in {100, 200} x atr_stop_mult = crypto_atr_stop_mult in {1.0, 2.0, 3.0} x rsi2_exit in {50, 67, 80}. Procedure: full fit-period surface reported, never only the maximum. Selection: best fit-period cell by pooled mean return with n >= 30. Confirmation: selected cell vs default cell ON HOLDOUT, one z-test, |z| >= 1.96. Any other claim from the surface needs Bonferroni across 53 non-default cells: |z| >= 3.31. Pre-declared negative: selected cell inside +/-1.96 SE on holdout means threshold tuning shows no transferable edge. Note: atr_stop_mult also moves momentum stops; each cell is the joint config an operator would run.
+
+H-M (Task 3, momentum at 5-minute): from the default run, momentum trades' win rate, mean return, holding-period distribution, fraction stopped within 1, 2, 3 bars. MAE in the first bars vs the 2x ATR stop distance, computed from bars in Python (analysis only). Bar-noise floor: the unconditional probability that price dips 2x ATR(14) below a bar's close within 1, 2, 3 bars, same tape. Verdict rule pre-declared: conditional stop-rate >= 40 percent within 3 bars AND unconditional floor >= half the conditional rate reads as stop inside bar noise (placement); conditional high with unconditional low reads as adverse entry timing; momentum n too small to separate reads as cannot exclude luck.
+
+H-F (Task 4, the four levers):
+- F1 universe: per-symbol candidate and trade rates from the default run, additive projection to larger cores, descriptive only, selection bias restated.
+- F2 shorts: (a) EXACT for crypto momentum: crypto_allow_short true via config copy, one arm, delta vs default. (b) APPROXIMATE for the full mirrored stack: price-inverted derived DB (q = M^2/p per symbol, M the symbol's median close, high/low swapped, volume kept, source backfill), long-only logic on inverted tape = short logic on real tape. Exact in log space; arithmetic-indicator error second order in per-window drift; short returns recomputed exactly from mapped-back prices. Reported separately for crypto and equities. Registered z-tests: 2 (crypto exact delta, inverted pooled vs default pooled).
+- F3 threshold loosening: covered by H-T, referenced in the ranking.
+- F4 timeframe: 15-minute derived DB by exact 3:1 aggregation aligned to :00/:15/:30/:45, buckets missing any constituent dropped and counted. Same config otherwise (time_stop_bars stays 24 bars, now 6 hours, stated). One z-test: 15m pooled vs default pooled. 1-MINUTE IS UNANSWERABLE THIS SESSION: the analysis DB holds 5-minute bars only and pulling years of 1-minute history would contend with the live feed's Alpaca account rate limit mid-validation-week.
+
+MULTIPLE-COMPARISON CORRECTION. Registered z-tests outside the grid: 10 (H-G) + 2 (F2) + 1 (F4) = 13. Family alpha 0.05, Bonferroni per-comparison p < 0.00385, |z| >= 2.89. The grid uses its own selection-then-confirm procedure stated in H-T. Task 5's factor-correlation, disagreement, and regime numbers are DESCRIPTIVE (intervals, no accept/reject bar). Task 6 is measurement of the loop itself, no hypothesis.
+
+WHAT COUNTS AS NEGATIVE, stated in advance: every interval spanning zero and every |z| under its bar is a negative result and will be reported as one. A negative on every branch means the strategy cannot be distinguished from no edge on 61x the production tape, which is itself the finding.
+
+### FINDINGS
+
+(filled in after the runs)
+
+---
+
 ## Prompt: Capture process output, typed transport result, discovery deadline, onboard on block, journal pass completion, provider retry, errors distinct from abstentions
 
 Date: 2026-07-25
@@ -4368,3 +4413,14 @@ $ git diff --cached --stat
 | Gemini 3.1 Pro | failing | TimeoutError: The read operation timed out | 6134.5 ms |
 | Alpaca paper market data | working | one quote ok | 257.9 ms |
 | Alpaca paper order-auth (validation-only) | working | paper account auth ok | 239.5 ms |
+
+### Run 2026-07-25T05:36:06Z
+
+| Integration | Result | Detail | Latency |
+| --- | --- | --- | --- |
+| OpenAI GPT-5.5 | working | - | 1189.0 ms |
+| Anthropic Opus 4.8 | working | - | 817.0 ms |
+| Anthropic Haiku 4.5 (gate path) | working | - | 670.4 ms |
+| Gemini 3.1 Pro | failing | TimeoutError: The read operation timed out | 6082.0 ms |
+| Alpaca paper market data | working | one quote ok | 250.8 ms |
+| Alpaca paper order-auth (validation-only) | working | paper account auth ok | 228.7 ms |
