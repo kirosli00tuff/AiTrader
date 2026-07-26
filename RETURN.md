@@ -13,7 +13,7 @@ Changes: what changed.
 
 ## Prompt: Pre-registered hypothesis research, holdout evaluated once (RESEARCH ONLY)
 
-Date: 2026-07-25
+Date: 2026-07-26
 Model: Fable 5 (claude-fable-5)
 Prompt summary: test whether any structurally different hypothesis in this universe shows edge surviving costs, after P26 resolved the incumbent strategy at no gross edge. Task 0 pre-register the closed hypothesis list with rationales, specs, samples, and the corrected bar, commit before looking. Task 1 every hypothesis needs a mechanism, record rejected candidates. Task 2 the 2 bp round-trip cost is the hurdle, gross and net reported separately. Task 3 structurally different tests only: fee-amortizing holds, different factor families, not long-only. Task 4 the holdout is touched once, after specs lock. Task 5 measure the incumbent's two-factor redundancy, diagnosis only. Task 6 negatives first, apply nothing.
 
@@ -43,7 +43,34 @@ RESOURCE RULE: all computation runs through backtest/sweep.py with a probed RSS,
 
 ### FINDINGS
 
-(filled in after the runs)
+**HEADLINE, negatives first: nothing is demonstrated. H-C (crypto US-session drift) is a clean negative, sign-flipping from +4.1 bp net in fit to -8.2 bp in holdout. H-B (daily long-short time-series momentum) fails its bar at holdout z=1.32, its apparent strength living entirely in the selection-biased long side exactly as the pre-registration predicted. H-A (equity overnight premium) PASSES the pre-registered bar as written (holdout net +6.19 bp, z=2.91 against 2.39, fit same sign), and the same report must immediately disclose two things: the pre-registered per-symbol secondaries locate the effect in NVDA, the universe's most hindsight-selected name, and the registered per-trade standard error was mis-specified for five correlated same-night trades, an error in this session's own registration. The labelled exploratory night-clustered estimate reads z=1.73 with an interval spanning zero. H-A is therefore reported as: passed its stated bar, bar too weak, not demonstrated, and the only candidate worth a properly specified follow-up.**
+
+Registered: 3 hypotheses, closed list, Bonferroni family alpha 0.05, per-test |z| >= 2.39 on a holdout touched once. Both invocations ran through backtest/sweep.py (sizing verified by dry run, probes measured 27 to 28 MB per run, width 18, MemoryMax scope). The holdout was computed once, after fit inspection, with zero specification changes, and none of the numbers below were revisited.
+
+PER-HYPOTHESIS TABLE (primary metric: mean net bp per round trip, 2 bp fee inside):
+
+| hypothesis | hold | n fit | fit gross | fit net [95% CI] | n hold | hold gross | hold net [95% CI] | hold z | verdict |
+|---|---|---|---|---|---|---|---|---|---|
+| H-A equity overnight | ~17.5h | 6,290 | +5.30 | +3.30 [+0.03, +6.58] | 3,200 | +8.19 | +6.19 [+2.02, +10.36] | +2.91 | passes the written bar, see disclosure, NOT demonstrated |
+| H-B daily TSMOM long-short | 5 sessions | 1,848 | +35.38 | +33.38 [-0.12, +66.88] | 1,146 | +24.87 | +22.87 [-11.17, +56.90] | +1.32 | cannot be distinguished from no edge |
+| H-C crypto US session | 6.5h | 3,088 | +6.07 | +4.07 [-6.60, +14.74] | 2,530 | -6.21 | -8.21 [-17.34, +0.91] | -1.76 | NO EDGE, fit lean did not transfer |
+
+H-A DISCLOSURE, in full. The verdict rule was committed before any run and its letter is met. Two defects in the evidence, both visible inside pre-registered outputs: (1) concentration: per-symbol secondaries put NVDA at +22.9 net (z=3.06) while AAPL is -2.2, MSFT +0.8, QQQ +5.9 (z=1.77), SPY +3.5 (z=1.39), so four of five symbols individually show nothing and the pooled pass leans on the one name whose 2026 selection most overstates history. (2) specification error, owned: the registered SE treats each (symbol, night) as independent, but the five equities' overnight moves are strongly cross-correlated within a night. EXPLORATORY, LABELLED AS SUCH: re-aggregating the identical holdout trades into 640 equal-weight nights gives the same +6.19 bp mean with z=1.73 and interval [-0.82, +13.21], spanning zero. A correctly clustered primary would not have passed. H-A is not claimed as edge.
+
+H-B, negative, as the bias analysis predicted. Holdout long side +55.8 net (z=2.56, secondary), short side -18.7 (z=-0.67). A long-side-only pass on a universe chosen in 2026 for having gone up is the textbook shape of survivorship, which is why the side split was pre-declared descriptive with no verdict authority. The primary long-short spec, the only one that would have meant something, fails. Crypto secondary +39.0 (z=1.18), equity +9.9 (z=0.60), neither resolves.
+
+H-C, negative, and the most instructive: +4.1 net in fit, -8.2 in holdout, all three symbols negative in holdout (BTC -4.6, ETH -11.3, SOL -8.8). A three-year fit lean vanished out of sample. This is what a coincidence with a plausible-sounding mechanism looks like, and it is why the holdout is touched once.
+
+TASK 5, THE INCUMBENT'S REDUNDANCY, measured from the P26 emission (diagnosis, no correction spent). The two factors are NOT redundant by co-timing: among 10,970 symbol-days with any signal, both fired on 35.2 percent, momentum alone on 3,048, reversion alone on 4,059, and their daily fire-count correlation is -0.19. The redundancy is CONDITIONAL: both factors require price above MA200 and long direction, so both are silent on the same 48.8 percent of the tape, both express the same conditional bet, and P26 measured both earning the same -2 bp net. Two clocks that ring at different times but only ever ring in daylight. AN INDEPENDENT SECOND FACTOR MUST: (1) be able to hold risk below MA200, meaning a short side or an input that is not this price series, (2) operate at a horizon whose gross move clears 2 bp, which 5-minute holds structurally do not, and (3) show outcome-level correlation near zero with the incumbent, verified on data, not asserted from construction.
+
+WORTH PURSUING, ranked by holdout evidence, applied to NOTHING:
+1. H-A, and only H-A, justifies a follow-up, under a NEW pre-registration whose primary is the night-clustered portfolio return (the correct unit), on instruments not selected by 2026 hindsight (broad index ETFs alone, or an externally fixed historical universe), with the auction-fill question addressed (this spec fills at the last RTH bar boundary, not the closing auction). CONFIRMING OBSERVABLE: night-clustered holdout z >= 2.39 on that bias-reduced spec.
+2. Nothing else measured this session earns a follow-up. H-C is closed negative. H-B could only be re-examined on a survivorship-free universe, which this database cannot provide.
+
+Everything in this session was computed against analysis_bars.db, production read only for the stack-state check (stack DOWN throughout, 0 processes). No engine file, threshold, or parameter changed. Nothing applied.
+
+Changes: RETURN.md (pre-registration committed at 255279b before any run, findings after), PROGRESS.md (dated entry). Research scripts under gitignored build/research_20260726/.
+Commit message: Pre-registered hypothesis research against deep history, holdout evaluated once, findings only, nothing applied
 
 ---
 
