@@ -113,6 +113,8 @@ void Storage::init_schema(const std::string& schema_sql_path) {
         "ALTER TABLE bars ADD COLUMN volume_source TEXT",
         // Provenance of the bar each trade executed against. Same posture.
         "ALTER TABLE trades ADD COLUMN bar_source TEXT DEFAULT 'unknown'",
+        "ALTER TABLE trades ADD COLUMN fee_model_cost REAL",
+        "ALTER TABLE trades ADD COLUMN fee_order_type TEXT",
         // Exit state on the position (2026-07-23), so a restart can rehydrate
         // open positions instead of stranding them. NULL on existing rows:
         // "never recorded" is distinct from any value and is never guessed at.
@@ -143,14 +145,17 @@ long long Storage::insert_trade(const TradeRow& t) {
     Stmt s(db_,
            "INSERT INTO trades(ts,venue,symbol,market,category,side,qty,price,"
            "notional,fee,mode,pnl,outcome,combined_conf,combined_edge,sleeve,"
-           "origin,bar_source) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)");
+           "origin,bar_source,fee_model_cost,fee_order_type) "
+           "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)");
     s.bind(1, t.ts).bind(2, t.venue).bind(3, t.symbol).bind(4, t.market)
         .bind(5, t.category).bind(6, t.side).bind(7, t.qty).bind(8, t.price)
         .bind(9, t.notional).bind(10, t.fee).bind(11, t.mode);
     if (t.pnl) s.bind(12, *t.pnl); else s.bind_null(12);
     s.bind(13, t.outcome).bind(14, t.combined_conf).bind(15, t.combined_edge)
         .bind(16, t.sleeve).bind(17, t.origin)
-        .bind(18, t.bar_source.empty() ? "unknown" : t.bar_source);
+        .bind(18, t.bar_source.empty() ? "unknown" : t.bar_source)
+        .bind(19, t.fee_model_cost)
+        .bind(20, t.fee_order_type);
     s.step_done();
     return sqlite3_last_insert_rowid(db_);
 }

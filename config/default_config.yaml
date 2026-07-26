@@ -768,3 +768,39 @@ data_sources:
     endpoint: "/form-13f/holdings"
     note: "DELAYED institutional holdings disclosure — NOT live trade flow."
     api_key_env: SEC_API_KEY
+
+# -----------------------------------------------------------------------------
+# Fee model (2026-07-26). Costs come from PUBLISHED LIVE SCHEDULES, never from
+# paper fills. A paper venue is an execution simulator whose fee reporting is
+# not evidence. The engine records this model's cost on every fill beside the
+# venue's reported figure, and the backtest harness prices every trade with it.
+# The engine sends market orders, which pay the taker rate.
+# -----------------------------------------------------------------------------
+fees:
+  # Alpaca crypto: volume-tiered maker/taker on notional. Base tier applies
+  # under 100000 USD of 30-day crypto volume. Sizing at 0.5 percent of 100k
+  # equity keeps this account in the base tier indefinitely.
+  # Source: Alpaca published crypto fee schedule, read 2026-07-26. Tier table
+  # (30-day volume USD, maker pct / taker pct), recorded so a tier change is
+  # visible: <100k 0.15/0.25, 100k-500k 0.12/0.22, 500k-1M 0.10/0.20,
+  # 1M-10M 0.08/0.18, 10M-25M 0.05/0.15, 25M-50M 0.02/0.10.
+  # The machine-readable tier table lives in backtest/fees.py.
+  alpaca_crypto_maker_pct: 0.15
+  alpaca_crypto_taker_pct: 0.25
+  alpaca_crypto_tier_volume_threshold_usd: 100000
+  # Crypto spread beyond the taker fee: not established from any schedule.
+  # Recorded 0 with this note rather than guessed.
+  alpaca_crypto_spread_bp_per_side: 0.0
+  # Alpaca US equities: commission free. Regulatory (SEC fee plus FINRA TAF,
+  # sells only, about 0.3 bp averaged over both sides) and a spread component.
+  # The spread figure is an estimate, stated as one, not a schedule value.
+  # Source: Alpaca published equity fee disclosure, read 2026-07-26.
+  alpaca_equity_commission_bp: 0.0
+  alpaca_equity_regulatory_bp_per_side: 0.15
+  alpaca_equity_spread_bp_per_side: 0.5
+  # IBKR (live-only path): US equities Pro pricing is tiered 0.0035 USD/share
+  # (min 0.35 USD) or fixed 0.005 USD/share (min 1 USD). WHICH PLAN THIS
+  # ACCOUNT USES COULD NOT BE ESTABLISHED this session. Recorded as not
+  # established rather than guessed. Source: IBKR published pricing page,
+  # read 2026-07-26.
+  ibkr_established: false

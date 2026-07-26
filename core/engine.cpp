@@ -1,5 +1,9 @@
 #include "core/engine.hpp"
 
+#include <iostream>
+
+#include "core/fees.hpp"
+
 #include <unistd.h>
 
 #include <algorithm>
@@ -149,6 +153,15 @@ Engine::Engine(config::Config cfg, EngineOptions opts)
     // only, IBKR live stays gated off.
     feed_mode_ = !opts_.feed_mode.empty() ? opts_.feed_mode
                                           : cfg_.simulation.feed_mode;
+    // The hurdle, visible at startup (2026-07-26): the round-trip cost live
+    // trading would pay, from published schedules. Market orders pay taker.
+    std::cout << "  fees:   round trip crypto "
+              << fees::round_trip_fraction(cfg_.fees, true,
+                                           fees::OrderType::Taker) * 1e4
+              << " bp / equity "
+              << fees::round_trip_fraction(cfg_.fees, false,
+                                           fees::OrderType::Taker) * 1e4
+              << " bp (market orders = taker; live schedule model)\n";
 
     // Instrument universe. Alpaca is the only trading venue in the loop and its
     // instruments are the native-strategy core (crypto + equities). Alpaca
@@ -1082,6 +1095,7 @@ void Engine::handle_bar_close(const market_data::MarketState& ms,
         auto exit_verdict = signal_engine::combine(ap.entry_signals, weights_);
         tr.combined_conf = exit_verdict.confidence;
         tr.combined_edge = exit_verdict.edge;
+        fees::apply_fee_model(cfg_.fees, tr);
         storage_->insert_trade(tr);
         // Mark the position flat (qty 0) in the positions table.
         storage_->upsert_position(ms.venue, ms.symbol, ap.pos.market,
@@ -1453,6 +1467,7 @@ void Engine::handle_bar_close(const market_data::MarketState& ms,
     // real path. Recorded anyway: on offline modes it is synthetic/replay, and
     // the real-fill gates read it.
     tr.bar_source = current_bar_source_;
+    fees::apply_fee_model(cfg_.fees, tr);
     const long long entry_trade_id = storage_->insert_trade(tr);
     record_entry_decision(
         "entered", "",
@@ -2120,6 +2135,7 @@ bool Engine::apply_defensive_action(const core::DefensiveAction& a,
     // strategy fills only, so tagging it keeps an event-driven exit from
     // counting toward "the policy has traded enough to learn from".
     tr.origin = "adaptive_react";
+    fees::apply_fee_model(cfg_.fees, tr);
     storage_->insert_trade(tr);
 
     const double remaining_qty = ap.pos.qty - qty;
@@ -2538,6 +2554,7 @@ int Engine::run_iteration() {
         tr.fee = fill.fee; tr.mode = "paper"; tr.pnl = pnl;
         tr.outcome = win ? "win" : "loss";
         tr.combined_conf = verdict.confidence; tr.combined_edge = verdict.edge;
+        fees::apply_fee_model(cfg_.fees, tr);
         storage_->insert_trade(tr);
         storage_->upsert_position(o.venue, o.symbol, o.market, o.category, o.side,
                                   o.qty, o.price, o.notional, ts);
@@ -2973,6 +2990,7 @@ void Engine::maybe_rebalance(const std::string& ts, long now_epoch) {
         // predates the adaptive layer; the discriminator fixes both at once.
         tr.origin = "rebalance";
         tr.bar_source = current_bar_source_;
+        fees::apply_fee_model(cfg_.fees, tr);
         storage_->insert_trade(tr);
         storage_->upsert_position(ap.pos.venue, ap.pos.symbol, ap.pos.market,
                                   ap.pos.category, side, 0.0, px, 0.0, ts, ap.sleeve);
@@ -3167,6 +3185,7 @@ void Engine::maybe_run_research_pass(const market_data::MarketState& ms,
     tr.outcome = "open"; tr.combined_conf = conviction; tr.combined_edge = 0.02;
     tr.sleeve = "research_satellite";
     tr.bar_source = current_bar_source_;
+    fees::apply_fee_model(cfg_.fees, tr);
     storage_->insert_trade(tr);
     storage_->upsert_position(o.venue, o.symbol, o.market, o.category, "buy", o.qty,
                               o.price, o.notional, ts, "research_satellite");

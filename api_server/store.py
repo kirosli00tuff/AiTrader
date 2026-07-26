@@ -947,8 +947,17 @@ def runstate() -> dict:
         gate_on = bool(_resolved_gate())
     except Exception:  # noqa: BLE001 - the banner must never fail on a read
         gate_on = bool(llm.get("gate_enabled", True))
+    # The hurdle, visible where decisions are made (2026-07-26): round-trip
+    # cost per asset class from the published-live-schedule fee model. Never
+    # silent: a read failure is reported in the field, not swallowed.
+    try:
+        from backtest import fees as _fees
+        fee_summary = _fees.summary()
+    except Exception as exc:  # noqa: BLE001 - surfaced, not swallowed
+        fee_summary = {"error": f"fee model unreadable: {exc}"}
     return {"feed_mode": _feed,
             "clock_mode": _clock,
+            "fees": fee_summary,
             "market_data_source": md.get("source", "mock"),
             "use_real_council": use_real,
             "gate_enabled": gate_on,

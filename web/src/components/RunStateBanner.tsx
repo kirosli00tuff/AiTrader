@@ -69,6 +69,18 @@ export default function RunStateBanner() {
       )}
     <div className="runstate">
       <span className="runstate-item">Loop <b className="mono">{data.feed_mode}</b></span>
+      {/* The round-trip cost hurdle (2026-07-26): a strategy whose expected
+          move is below this number loses by construction. From published
+          live schedules, market orders = taker. */}
+      {data.fees && !data.fees.error && (
+        <span className="runstate-item" data-testid="fee-hurdle">
+          RT cost <b className="mono">
+            crypto {data.fees.crypto_round_trip_bp}bp / equity{" "}
+            {data.fees.equity_round_trip_bp}bp
+          </b>{" "}
+          <span className="dim" style={{ fontSize: 11 }}>taker</span>
+        </span>
+      )}
       {/* Off is the shipped default, so a grey dot here is expected, not a
           fault. When on, the operator sees the funnel working. */}
       <span className="runstate-item" data-testid="runstate-discovery">

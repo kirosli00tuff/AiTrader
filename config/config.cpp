@@ -208,6 +208,17 @@ Config load_config(const std::string& path,
     r.hard_stop_live_if_loss_breach = get_bool(root, "risk.hard_stop_live_if_loss_breach", r.hard_stop_live_if_loss_breach);
     r.manual_resume_required_after_kill_switch = get_bool(root, "risk.manual_resume_required_after_kill_switch", r.manual_resume_required_after_kill_switch);
 
+    // fees (published live schedules; see yaml for sources and dates)
+    auto& fe = c.fees;
+    fe.alpaca_crypto_maker_pct = get_double(root, "fees.alpaca_crypto_maker_pct", fe.alpaca_crypto_maker_pct);
+    fe.alpaca_crypto_taker_pct = get_double(root, "fees.alpaca_crypto_taker_pct", fe.alpaca_crypto_taker_pct);
+    fe.alpaca_crypto_tier_volume_threshold_usd = get_double(root, "fees.alpaca_crypto_tier_volume_threshold_usd", fe.alpaca_crypto_tier_volume_threshold_usd);
+    fe.alpaca_crypto_spread_bp_per_side = get_double(root, "fees.alpaca_crypto_spread_bp_per_side", fe.alpaca_crypto_spread_bp_per_side);
+    fe.alpaca_equity_commission_bp = get_double(root, "fees.alpaca_equity_commission_bp", fe.alpaca_equity_commission_bp);
+    fe.alpaca_equity_regulatory_bp_per_side = get_double(root, "fees.alpaca_equity_regulatory_bp_per_side", fe.alpaca_equity_regulatory_bp_per_side);
+    fe.alpaca_equity_spread_bp_per_side = get_double(root, "fees.alpaca_equity_spread_bp_per_side", fe.alpaca_equity_spread_bp_per_side);
+    fe.ibkr_established = get_bool(root, "fees.ibkr_established", fe.ibkr_established);
+
     // sizing
     auto& s = c.sizing;
     s.default_position_sizing_method = get_str(root, "sizing.default_position_sizing_method", s.default_position_sizing_method);

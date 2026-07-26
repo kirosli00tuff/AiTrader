@@ -40,6 +40,11 @@ struct TradeRow {
     // the two non-strategy paths set it. Read by the real-fill gates, which
     // count strategy fills only.
     std::string origin = "strategy";
+    // Fee model (2026-07-26): the published-live-schedule cost of this fill
+    // and the order type it assumed. tr.fee stays the VENUE-reported figure,
+    // so both are recorded and the divergence is measurable.
+    double fee_model_cost = 0.0;
+    std::string fee_order_type;
     // Provenance of the bar this trade executed against (same five values as
     // BarRow.source). Default unknown, never real. The real-fill gates exclude
     // proven-synthetic fills: a trade against walk prices exercised nothing.

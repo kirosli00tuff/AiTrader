@@ -11,6 +11,68 @@ Model:
 Prompt summary: one line.
 Changes: what changed.
 
+## Prompt: Cost every fill and every backtest from published live fee schedules
+
+Date: 2026-07-26
+Model: Fable 5 (claude-fable-5). The prompt said Opus. The session runs on Fable 5 and this line records that.
+Prompt summary: the 2 bp round-trip figure came from paper fills and is wrong for live crypto. Alpaca's live crypto schedule is volume-tiered maker/taker, base tier 0.15 percent maker and 0.25 percent taker, the engine sends market orders (taker), and this account stays in the base tier, so a live crypto round trip is roughly 50 bp while equities are roughly 1 to 2 bp. Task 1 an explicit fee model sourced from published live schedules with sources and dates, tiers recorded, IBKR included, gaps stated not guessed. Task 2 paper fills costed by the model with both figures recorded, divergence measured on existing fills, no historical row altered. Task 3 the harness prices what live trading would pay, P26 and P28 re-measured, before and after reported. Task 4 order type is part of the cost, maker and taker explicit. Task 5 the hurdle visible in the startup block, the GUI, and research reports. Task 6 tests including mutation tests on the crypto taker and equity rates. Task 7 document, commit, push.
+
+Constraints honored: no RiskGate logic, no live-trading gate, no adaptive limit-weakening invariant, no Level 1 risk value, no strategy parameter, no threshold, no entry or exit logic. Live trading stays off. Ambiguities resolved to the safest option and noted below.
+
+### FINDINGS
+
+**HEADLINE: the fee model now comes from published live schedules, and it inverts the cost picture the project has been using. A live crypto round trip costs 50 bp (market orders pay the 0.25 percent base-tier taker rate each way), not 2. A live equity round trip costs about 1.3 bp, not 2. The paper venue has been reporting about 1 bp per side on every fill regardless of class, understating live crypto cost 25x and overstating equity cost 1.5x. Every fill now records the model figure beside the venue figure, the harness prices per class, the hurdle prints at startup, in runstate, in the GUI banner, and in every harness report. Re-measured: P26's crypto expectancy is -48.8 bp net per trade against its real hurdle, and P28's H-C collapses to -56 bp in holdout. No conclusion reverses. The no-edge finding gets 25x worse for crypto.**
+
+TASK 1, THE RATE TABLE. Single source of truth: the fees block in config/default_config.yaml, parsed by the C++ engine and harness (config::FeesConfig, core/fees.hpp) and by Python (backtest/fees.py). Every value carries its source and read date in the yaml. NETWORK VERIFICATION NOTE, stated honestly: the schedules were recorded this session from the published tables as known and from the operator's stated figures, dated 2026-07-26. The operator should reverify against the live pages before any live decision, and the model makes a changed rate a one-line yaml edit that every consumer picks up.
+
+| venue / class | component | rate | order type | source, date read |
+|---|---|---|---|---|
+| Alpaca crypto | taker fee | 0.25 pct per side (25 bp) | market = taker | Alpaca published crypto fee schedule, 2026-07-26 |
+| Alpaca crypto | maker fee | 0.15 pct per side | maker (not what the engine sends) | same |
+| Alpaca crypto | tier threshold | base tier under 100,000 USD 30-day volume. Full table machine-readable in backtest/fees.py: <100k 0.15/0.25, 100k-500k 0.12/0.22, 500k-1M 0.10/0.20, 1M-10M 0.08/0.18, 10M-25M 0.05/0.15, 25M-50M 0.02/0.10 | | same. Sizing at 0.5 pct of 100k equity keeps this account in the base tier indefinitely |
+| Alpaca crypto | spread beyond fee | 0.0 bp, NOT ESTABLISHED from any schedule, recorded 0 with that note rather than guessed | | none exists |
+| Alpaca US equity | commission | 0 | | Alpaca published equity fee disclosure, 2026-07-26 |
+| Alpaca US equity | regulatory (SEC + FINRA TAF, sells) | 0.15 bp per side (0.3 bp on sells, averaged) | | same |
+| Alpaca US equity | spread component | 0.5 bp per side, an ESTIMATE, stated as one, not a schedule value | | estimate |
+| IBKR US equity (live path) | plan | tiered 0.0035 USD/share (min 0.35) or fixed 0.005 USD/share (min 1). WHICH PLAN THIS ACCOUNT USES COULD NOT BE ESTABLISHED this session. Recorded ibkr_established: false, never guessed | | IBKR published pricing page, 2026-07-26 |
+
+Round trips the model returns: crypto taker 50.0 bp, crypto maker 30.0 bp, equity 1.3 bp.
+
+TASK 2, BOTH FIGURES ON EVERY FILL. TradeRow and the trades table gain fee_model_cost and fee_order_type (migration, additive). tr.fee stays the VENUE-reported figure. The engine costs every insert site (6) through fees::apply_fee_model. SAFEST-OPTION NOTE: the engine's paper pnl accounting keeps the venue figure on purpose, because repricing realized pnl would change tuner and gate behavior, which this prompt forbids. The harness, where conclusions come from, prices with the model. MEASURED DIVERGENCE across the existing recorded fills (computed read-only, no historical row altered, columns stay NULL on old rows): crypto 78 fills, venue-reported 0.99 bp per side against the model's 25.0, venue total 1.48 USD against model 37.54 USD, a 25.3x understatement. Equity 6 fills, venue 1.0 bp per side against the model's 0.65, a 1.5x OVERSTATEMENT. 175 legacy polymarket rows carry no venue fee and that removed venue is outside the model's scope, stated rather than costed. Verified live on fresh synthetic fills: a 100 USD crypto fill records venue 0.01 / model 0.25, an equity fill 0.01 / 0.0065, order type market_taker on every row.
+
+TASK 3, P26 AND P28 RE-MEASURED. The harness now prices per class (fee_side resolved from cfg.fees once, fee_rt_bp emitted on every trade line, the hurdle in every meta line).
+
+P26 default strategy, before (flat 2 bp) against after (class model):
+
+| group | before net bp [95% CI] | after net bp [95% CI] | verdict movement |
+|---|---|---|---|
+| pooled | -1.97 [-2.68, -1.27] (n 19,740) | -30.28 [-31.14, -29.43] (n 16,568) | no edge, now 15x worse |
+| crypto | -1.08 [-2.09, -0.07] | -48.78 [-49.96, -47.61], win 10.6 pct | no edge, now 25x worse: gross is still ~zero, the real fee decides |
+| equity | -3.49 [-4.31, -2.67] | -2.73 [-3.60, -1.86] | slightly less bad: true equity RT is 1.3 bp, not 2 |
+| momentum | -2.36 | -25.51 | worse (crypto-heavy) |
+| reversion | -1.78 | -32.88 | worse (crypto-heavy) |
+
+The trade count moved (19,740 to 16,568) because fees flow into book equity, so the loss cooldown and gate fire more often (gate blocks 8,725 against 5,396). That is the live coupling working, not noise. NO CONCLUSION REVERSES: no-edge stays no-edge everywhere, and the crypto side of every past number was optimistic by roughly 48 bp per trade.
+
+P28 hypotheses, re-costed (same trades, re-priced, no specification change, labelled a re-cost not a new registration):
+
+| hypothesis | before fit net (z) | before hold net (z) | after fit net (z) | after hold net (z) | verdict movement |
+|---|---|---|---|---|---|
+| H-A equity overnight | +3.30 (1.97) | +6.19 (2.91) | +4.00 (2.39) | +6.89 (3.24) | slightly better (equity RT 1.3): still passes the written bar, still disqualified by NVDA concentration and the clustering specification error (clustered exploratory ~z 1.9, still under 2.39) |
+| H-B daily TSMOM L/S | +33.38 (1.95) | +22.87 (1.32) | +18.06 (1.06) | +1.85 (0.11) | worse: crypto legs pay 50 bp, the failure is now unambiguous |
+| H-C crypto US session | +4.07 (0.75) | -8.21 (-1.76) | -43.93 (-8.07) | -56.21 (-12.07) | far worse: against its real hurdle this was never close |
+
+TASK 4, ORDER TYPE IS PART OF THE COST. The model takes OrderType (Maker | Taker) everywhere, the engine stamps market_taker on every fill it costs, the harness meta line carries fee_order_type, and a future maker-execution study is priced by calling the same functions with Maker (crypto RT 30 bp instead of 50) without touching any of this again.
+
+TASK 5, THE HURDLE IS VISIBLE. Engine startup block prints "fees: round trip crypto 50 bp / equity 1.3 bp (market orders = taker; live schedule model)". /runstate carries a fees object (crypto and equity RT, maker RT, tier threshold, source; a read failure surfaces as an error field, never silently). The GUI RunStateBanner shows "RT cost crypto 50bp / equity 1.3bp (taker)" on every page. Every harness report carries the rates in its meta line, so no future research session can quote a hurdle without seeing the real one.
+
+TASK 6, TESTS. tests/test_fee_model.py, 11 tests: per-class per-order-type rates, cost inversion (crypto > 20x equity), tier boundary and tier-change visibility, summary and source, the startup banner printing the hurdle (subprocess), a synthetic engine run recording BOTH figures with model = notional x rate and model > 10x venue on crypto, the harness meta and per-trade fee_rt_bp per class, and runstate carrying fees. MUTATION-TESTED with restore: crypto taker reverted toward flat 2 bp fails 9 of 11, equity rates reverted toward flat 2 bp fails 5 of 11, restored 11 of 11. FULL SUITES: pytest 997 (986 + 11), ctest 31 of 31, vitest 136, tsc clean, vite build clean.
+
+Changes: config/default_config.yaml (fees block), config/config.hpp/.cpp (FeesConfig, parse), core/fees.hpp (new), storage/storage.hpp/.cpp (TradeRow fields, migration, insert), core/engine.cpp (cost every fill, startup hurdle), core/backtest_main.cpp (per-class pricing, fee emission), backtest/fees.py (new), api_server/store.py (runstate fees), web (types, RunStateBanner), tests/test_fee_model.py (new), RETURN.md, PROGRESS.md, CONTEXT.md.
+Commit message: Cost every fill and every backtest from published live fee schedules rather than paper fills, live trading untouched
+
+---
+
 ## Prompt: Pre-registered hypothesis research, holdout evaluated once (RESEARCH ONLY)
 
 Date: 2026-07-26

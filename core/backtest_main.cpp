@@ -46,6 +46,7 @@
 #include <sqlite3.h>
 
 #include "config/config.hpp"
+#include "core/fees.hpp"
 #include "core/util.hpp"
 #include "risk/risk_gate.hpp"
 #include "signal_engine/strategy.hpp"
@@ -56,7 +57,9 @@ using namespace mal;
 namespace {
 
 constexpr size_t kHistoryCap = 300;  // the engine's own kBarHistoryCap
-constexpr double kFeeRate = 0.0001;  // measured from all 77 real fills
+// Fees come from the published-live-schedule model (cfg.fees), per asset
+// class and order type. The old flat 0.0001 came from paper fills and
+// understated live crypto cost 25x. Market orders pay taker.
 
 std::string arg_value(int argc, char** argv, const std::string& flag,
                       const std::string& def) {
@@ -169,6 +172,13 @@ int main(int argc, char** argv) {
         if (!v2.empty()) cfg.strategy.atr_band_std = std::stod(v2);
     }
 
+    // Per-side fee fractions, resolved once. The harness prices what live
+    // trading would pay: market orders, taker rate.
+    const double fee_side_crypto =
+        fees::per_side_fraction(cfg.fees, true, fees::OrderType::Taker);
+    const double fee_side_equity =
+        fees::per_side_fraction(cfg.fees, false, fees::OrderType::Taker);
+
     std::vector<std::string> symbols =
         split_csv(arg_value(argc, argv, "--symbols", ""));
     if (symbols.empty()) symbols = cfg.strategy.whitelist;
@@ -209,7 +219,13 @@ int main(int argc, char** argv) {
         }
         sqlite3_close(meta_db);
     }
-    *out << "}\n";
+    *out << ",\"fee_crypto_rt_bp\":\""
+         << fees::round_trip_fraction(cfg.fees, true,
+                                      fees::OrderType::Taker) * 1e4
+         << "\",\"fee_equity_rt_bp\":\""
+         << fees::round_trip_fraction(cfg.fees, false,
+                                      fees::OrderType::Taker) * 1e4
+         << "\",\"fee_order_type\":\"market_taker\"}\n";
 
     // ---- Tape source (2026-07-25): STREAM monthly windows by default, or
     // hold the whole tape with --hold-tape. Both paths read through
@@ -416,7 +432,8 @@ int main(int argc, char** argv) {
                 op.pos.time_stop_bars = sig.time_stop_bars;
                 op.pos.bars_held = 0;
                 op.entry_ts = r.timestamp;
-                op.entry_fee = notional * kFeeRate;
+                op.entry_fee = notional * (crypto ? fee_side_crypto
+                                          : fee_side_equity);
                 op.atr_z_at_entry = pending_atr_z[sym];
                 op.signal_close = pending_close[sym];
                 op.regime = pending_regime[sym];
@@ -445,7 +462,10 @@ int main(int argc, char** argv) {
             if (reason != strategy::ExitReason::None) {
                 double exit_px =
                     strategy::exit_fill_price(op.pos, reason, bar);
-                double fee = exit_px * op.pos.qty * kFeeRate + op.entry_fee;
+                const double side_fee = op.pos.category == "crypto"
+                                            ? fee_side_crypto
+                                            : fee_side_equity;
+                double fee = exit_px * op.pos.qty * side_fee + op.entry_fee;
                 double pnl = strategy::realized_pnl(op.pos, exit_px) - fee;
                 double ret = op.pos.entry_price > 0
                                  ? (op.pos.direction ==
@@ -453,7 +473,7 @@ int main(int argc, char** argv) {
                                         ? (exit_px / op.pos.entry_price - 1.0)
                                         : (op.pos.entry_price / exit_px - 1.0))
                                  : 0.0;
-                ret -= 2 * kFeeRate;  // per-side fees in return terms
+                ret -= 2 * side_fee;  // round trip in return terms, per class
                 book.equity += pnl;
                 book.realized_today += pnl;
                 book.consecutive_losses =
@@ -483,6 +503,7 @@ int main(int argc, char** argv) {
                              ? (op.pos.entry_price / op.signal_close - 1.0)
                              : 0.0)
                      << ",\"equity\":" << book.equity
+                     << ",\"fee_rt_bp\":" << 2 * side_fee * 1e4
                      << ",\"regime\":\"" << jesc(op.regime)
                      << "\",\"stop\":" << op.pos.stop_price
                      << ",\"target\":" << op.pos.target_price << "}\n";

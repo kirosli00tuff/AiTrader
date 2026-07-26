@@ -294,6 +294,11 @@ export interface RunState {
   // (feed_substitution event newer than any feed_restored). The banner turns
   // this into an impossible-to-miss warning.
   feed_substituted?: boolean; feed_substitution_ts?: string; ts: string;
+  // Round-trip cost per asset class from the published-live-schedule fee
+  // model (2026-07-26). The hurdle every strategy must clear.
+  fees?: { order_type_assumed: string; crypto_round_trip_bp: number;
+           crypto_maker_round_trip_bp: number; equity_round_trip_bp: number;
+           crypto_tier_threshold_usd: number; source: string; error?: string };
 }
 export interface DaySummary {
   day: string; trades_today: number; wins_today: number; losses_today: number;

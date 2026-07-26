@@ -124,6 +124,19 @@ struct SizingConfig {
     double default_position_scale_cap = 1.0;
 };
 
+struct FeesConfig {
+    // Published live schedules, never paper fills. Sources and read dates in
+    // config/default_config.yaml beside each value.
+    double alpaca_crypto_maker_pct = 0.15;
+    double alpaca_crypto_taker_pct = 0.25;
+    double alpaca_crypto_tier_volume_threshold_usd = 100000.0;
+    double alpaca_crypto_spread_bp_per_side = 0.0;
+    double alpaca_equity_commission_bp = 0.0;
+    double alpaca_equity_regulatory_bp_per_side = 0.15;
+    double alpaca_equity_spread_bp_per_side = 0.5;
+    bool ibkr_established = false;
+};
+
 struct AdaptiveConfig {
     bool adaptive_learning_enabled = true;
     bool adaptive_weight_updates_enabled = true;
@@ -510,6 +523,7 @@ struct IbkrConfig {
 };
 
 struct Config {
+    FeesConfig fees;
     SystemConfig system;
     EngineConfig engine;
     MarketDataConfig market_data;
