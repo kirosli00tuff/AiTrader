@@ -11,6 +11,42 @@ Model:
 Prompt summary: one line.
 Changes: what changed.
 
+## Prompt: Pre-registered hypothesis research, holdout evaluated once (RESEARCH ONLY)
+
+Date: 2026-07-25
+Model: Fable 5 (claude-fable-5)
+Prompt summary: test whether any structurally different hypothesis in this universe shows edge surviving costs, after P26 resolved the incumbent strategy at no gross edge. Task 0 pre-register the closed hypothesis list with rationales, specs, samples, and the corrected bar, commit before looking. Task 1 every hypothesis needs a mechanism, record rejected candidates. Task 2 the 2 bp round-trip cost is the hurdle, gross and net reported separately. Task 3 structurally different tests only: fee-amortizing holds, different factor families, not long-only. Task 4 the holdout is touched once, after specs lock. Task 5 measure the incumbent's two-factor redundancy, diagnosis only. Task 6 negatives first, apply nothing.
+
+CONSTRAINTS HONORED: research only against analysis_bars.db. Production read SELECT only. No engine behavior, threshold, strategy parameter, or Level 1 value changed. Live trading stays off. Parallelism sized from measured RSS through backtest/sweep.py under the MemoryMax scope, sizing verified before launch.
+
+### PRE-REGISTRATION (Task 0) — committed before any backtest ran
+
+This list is CLOSED at commit. Three hypotheses. Anything computed beyond them is exploratory and will be labelled so. A negative on all three is the expected outcome and will be reported as the headline if it occurs.
+
+COMMON MACHINERY. Data: analysis_bars.db only (3,306,485 provenance-clean split-adjusted 5-minute bars, 8 symbols, equities 2019-2026 with extended-hours bars, crypto 2021-2026, selection bias optimistic per analysis_meta). Instrument: session Python research code reading bars directly, because these hypotheses are NOT the engine strategy and the harness charter (call the strategy, never reimplement it) does not apply to specs the engine does not contain. Fill convention inherited from the harness: entries and exits at traded bar-boundary prices, never intra-bar, no lookahead (every signal uses only data at or before the decision bar). Fee: 1 bp per side, 2 bp round trip, the measured figure. No slippage beyond bar-boundary fills, stated. Equity shorts carry no borrow cost in simulation, an optimistic bias on short results, stated. Equity sessions defined in America/New_York (RTH 09:30-16:00 ET, DST-correct via zoneinfo). Crypto days are UTC days. SOL/USD trades whose holding window overlaps the 2023-07-06 to 2024-08-26 hole are excluded and counted.
+
+SPLIT AND THE ONCE-TOUCHED HOLDOUT. FIT: entries before 2024-01-01. HOLDOUT: entries at or after 2024-01-01. Every parameter below is fixed HERE, from standard literature values, before any data is seen. Fit results are computed and inspected first. The holdout is evaluated ONCE after that inspection, with zero specification changes in between, and its result is final. A fit-positive that fails holdout is a negative.
+
+DECISION METRIC AND BAR. Per hypothesis: mean net return per round trip in bp (net = gross minus 2 bp), t-based 95 percent intervals, win rate with Wilson intervals, n stated. GROSS HURDLE (Task 2): mean gross must exceed 2 bp for net to be positive, stated per hypothesis with its hold length. Three primary tests, Bonferroni family alpha 0.05, per-test p < 0.0167 two-sided, |z| >= 2.39 ON THE HOLDOUT. VERDICT RULE: edge surviving costs requires holdout net mean > 0 at |z| >= 2.39 AND a fit net mean of the same sign. Anything else: no edge (holdout interval fully at or below zero) or cannot be distinguished (interval spans zero). Groups under 30 trades refuse conclusions. Per-class splits (crypto, equity) are pre-registered as SECONDARY descriptives: intervals reported, no verdict authority, no correction spent on them.
+
+H-A. EQUITY OVERNIGHT PREMIUM. Rationale: US equity returns concentrate overnight while intraday averages near zero, documented across decades (Cliff-Cooper-Gulen and successors). Mechanism: news and macro risk cluster outside trading hours, overnight holders demand compensation, and institutional open-auction demand pays it. Persistence claim: structural, tied to the session boundary itself. Spec: long at the CLOSE of the last RTH bar (the 15:55 ET bar's close), exit at the OPEN of the next session's first RTH bar, every session, five equities. Hold about 17.5 hours, amortizing the 2 bp fee. Expected n about 9,000 (5 equities x about 1,880 sessions). Gross hurdle: mean overnight gross > 2 bp.
+
+H-B. DAILY TIME-SERIES MOMENTUM, LONG-SHORT. Rationale: sign of the past 20-day return predicts continuation, documented across asset classes for a century (Moskowitz-Ooi-Pedersen). Mechanism: slow information diffusion and underreaction, then flow feedback. Persistence claim: behavioral plus institutional frictions, the most replicated anomaly family in existence. STRUCTURALLY UNLIKE THE INCUMBENT: it trades the short side, so it can hold positions in the 48.8 percent of tape below MA200 the incumbent cannot touch. Spec: per symbol, daily closes (equity ET session closes, crypto UTC 00:00 closes). On a fixed non-overlapping 5-session grid anchored at each symbol's first available session: signal = sign(close_t / close_t-20 - 1), zero signal skips. Enter at the next session's first traded price, hold 5 sessions, exit at the then-current session's first traded price. All 8 symbols. Expected n about 3,000. Gross hurdle: mean 5-day gross move captured > 2 bp. Selection-bias note: the 2026-chosen universe overweights past uptrends, biasing the long side up and the short side down, stated now so the per-side split cannot be re-narrated later.
+
+H-C. CRYPTO US-SESSION DRIFT. Rationale: since 2020, crypto returns concentrate during US trading hours, documented in academic and industry studies. Mechanism: US institutional flow dominates price formation while off-hours carry balanced retail flow. Persistence claim: flow concentration, weaker than H-A and H-B and stated as such. Spec: long BTC/USD, ETH/USD, SOL/USD at the open of the bar starting 09:30 ET, exit at the open of the bar starting 16:00 ET, every day including weekends. Hold 6.5 hours. Expected n about 5,500. Gross hurdle: mean session gross > 2 bp.
+
+REJECTED CANDIDATES AND WHY (Task 1): cross-sectional momentum (a cross-section of 8 names in 2 classes cannot separate relative strength from class beta), short-term reversal and multi-day pullback variants (the incumbent's own family, the prompt excludes variants), any volume-conditioned family (deep history carries SIP volume, the live path sees IEX at about 5 percent, so no result transfers to deployment), intraday time-of-day seasonality sweeps (24 hourly cells x 8 symbols is an implicit multiple-comparison scan with no single mechanism), breakout and channel systems (same underreaction mechanism as H-B, a duplicate spending correction budget), overnight gap fade or follow (the literature claims both directions depending on conditioning, which means no stated mechanism survives).
+
+TASK 5 (diagnosis, no hypothesis, no correction): from the existing P26 emission, measure the incumbent factors' candidate correlation, agreement and disagreement rates among trend-ok bars, the tape share the shared MA200 condition removes, and state what an independent second factor must look like.
+
+RESOURCE RULE: all computation runs through backtest/sweep.py with a probed RSS, sized width, and MemoryMax scope, sizing verified by dry run before launch. The stack is DOWN at session start (0 processes) and 9,624 MB is available. Production is read with SELECT only, and only for stack-state checks, not for any hypothesis.
+
+### FINDINGS
+
+(filled in after the runs)
+
+---
+
 ## Prompt: Size research parallelism from measured memory, bound research batches, stream the harness, refuse batches that would crowd a running stack
 
 Date: 2026-07-25
