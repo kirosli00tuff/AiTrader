@@ -46,7 +46,118 @@ RESOURCE RULE: single process over recorded rows, RSS probed, run inside a `syst
 
 ### FINDINGS
 
-Pending. Written after the computation.
+**HEADLINE, and the pre-registered thin-sample verdict is the honest one: THE RECORDED EVIDENCE CANNOT SETTLE WHETHER THE COUNCIL PREDICTS PRICE. 37 scorable directional calls across 9 symbol clusters, against a pre-registered floor of 10 clusters. Pooled excess over the unconditional move is +92.3 bp per call at z equals 1.706, interval spanning zero, under the 2.50 bar. That is TOO THIN TO TELL, which is a different finding from no predictive value, and the distinction was declared in advance so it could not be blurred afterwards.**
+
+**But one structural result IS decisive at this sample size, because it needs no price data at all: THE COUNCIL IS GPT-5.5. All 22 evaluations carrying a directional council verdict had GPT-5.5 directional, and there are ZERO evaluations where GPT-5.5 was flat and the council was not. The council's scored figures are numerically identical to GPT-5.5's, to every decimal: n equals 19, hit rate 73.7 percent, excess +124.8 bp, SE 57.8, z 2.157. Pooling three models produced exactly one model's calls. Gemini went flat on 71 of 75 evaluations and Opus on 61 of 75, so with `min_directional_votes: 1` the single directional voter carries the verdict and GPT-5.5 is nearly always that voter. Two thirds of the provider spend bought verdicts that never changed one.**
+
+Pre-registration committed at `8fe4b7f` before any computation. **NO PROVIDER CALL OF ANY KIND WAS MADE and this session cost nothing.** Probed at 36,540 kB RSS and re-run inside a `systemd-run` MemoryMax scope at 45,675K. Production database opened `mode=ro` and hash-verified unchanged.
+
+### TASK 1, DIRECTION AGAINST WHAT HAPPENED
+
+HORIZON: 4 hours, 48 five-minute bars. Not chosen. Every user prompt opens "Question: immediate setup, the next few hours on 5-minute bars" and renders `return_4h` as evidence.
+
+BENCHMARK: the symbol's unconditional mean 4-hour return over every overlapping window in its bar history. Excess is the primary figure, because a bullish call in a rising week looks correct without being informative.
+
+| unit | n | clusters | hit rate | mean signed | mean net of fees | **mean excess [95% CI] (z)** |
+|---|---|---|---|---|---|---|
+| pooled providers | 37 | 9 | 64.9% | +111.2 bp | +69.1 bp | **+92.3 [-13.8, +198.4] (1.706)** |
+| gpt-5.5 | 19 | 9 | 73.7% | +142.4 bp | +97.5 bp | **+124.8 [+11.4, +238.2] (2.157)** |
+| claude-opus-4-8 | 14 | 8 | 64.3% | +85.1 bp | +42.1 bp | **+63.9 [-33.0, +160.8] (1.293)** |
+| gemini-3.1-pro-preview | 4 | 4 | 25.0% | +54.9 bp | +29.3 bp | **+37.7 [-150.2, +225.6] (0.393)** |
+| composed council | 19 | 9 | 73.7% | +142.4 bp | +97.5 bp | **+124.8 [+11.4, +238.2] (2.157)** |
+
+Fees are the 50 bp crypto round trip on 24 of 26 symbols and 1.3 bp on the two equities. The 4-hour magnitude survives the fee. **The direction of every point estimate is positive, and not one reaches the corrected bar.** GPT-5.5 and the composed council clear zero at a naive 95 percent interval and fall short of 2.50, which is exactly what the multiple-comparison correction exists to catch.
+
+REGISTERED SECONDARY, 1 hour, no verdict authority: pooled excess +33.6 bp at z equals 1.256, and mean net return is **-0.9 bp**, so at the shorter horizon the 50 bp crypto round trip consumes the entire move. The reading does not depend on the horizon for significance, and it does depend on it for tradeability.
+
+### TASK 2, IS THE CONFIDENCE NUMBER CALIBRATED
+
+The prompt tells each model that 0.60 means roughly six of ten comparable setups profit and asks for an honest number. **On this sample it is decoration.**
+
+| stated confidence | n | realised hit rate | mean excess |
+|---|---|---|---|
+| below 0.55 | 1 | 100.0% | +77.0 bp |
+| 0.55 to 0.60 | 16 | 68.8% | +101.6 bp |
+| 0.60 to 0.65 | 16 | 68.8% | +97.7 bp |
+| 0.65 and above | 4 | **25.0%** | +37.7 bp |
+
+Spearman correlation between stated confidence and a hit is **0.013**. Against excess return it is **0.046**. Both are indistinguishable from zero. The two populated middle buckets are identical at 68.8 percent, and the highest-confidence bucket has the WORST hit rate in the table. That last cell is n equals 4 and all four are Gemini calls, so it is not evidence of an inverted relationship, only an absence of any relationship.
+
+Composed council conviction shows the same flatness: 0.55 to 0.60 gives 77.8 percent on n equals 9, and 0.60 to 0.65 gives 70.0 percent on n equals 10. No council verdict in the whole record carries conviction at or above 0.65, which is the observation the 2026-07-18 discovery diagnostic already made from the other direction when it found the 0.60 conviction floor sitting above what the pipeline produces.
+
+### TASK 3, DOES THE COUNCIL BEAT ITS MEMBERS
+
+**No, because on this record the council IS its best member.** Verified without price data: 22 evaluations carry a directional council verdict, GPT-5.5 was directional in all 22, and in 0 cases was the council directional while GPT-5.5 was flat. Every scored statistic matches GPT-5.5's to the decimal.
+
+Flat rates explain it: Gemini flat on 71 of 75, Opus on 61 of 75, GPT-5.5 on 53 of 75. Directional calls across all 225 provider rows number 40, split Opus 14, GPT-5.5 22, Gemini 4. With one directional vote sufficient, the composition cannot express anything GPT-5.5 did not say.
+
+AGREEMENT DID NOT PREDICT ACCURACY, and pointed the wrong way:
+
+| agreement count | n | clusters | hit rate | mean excess (z) |
+|---|---|---|---|---|
+| 1 | 5 | 2 | **100.0%** | +295.1 bp (1.545) |
+| 2 | 10 | 6 | 80.0% | +74.4 bp (1.373) |
+| 3 | 4 | 4 | **25.0%** | +37.7 bp (0.393) |
+
+The composition rules treat unanimity as the strongest case. Here unanimity was the worst cell and the lone-voter case was the best. **This is not a finding.** Five calls across two symbols cannot establish anything, and the agreement-3 cell is the same four Gemini calls that dominate the bottom confidence bucket. It is recorded because it is the opposite of what the composition assumes, and because it is cheap to check again once the sample grows.
+
+### TASK 4, THE SAMPLE'S LIMITS
+
+| constraint | value |
+|---|---|
+| total evaluations | 75 |
+| calendar span | 5 days, 2026-07-21 to 2026-07-26 |
+| distinct symbols | 26, of which 24 are crypto pairs and 2 equities |
+| symbols with any 5-minute bars | 15 of 26 |
+| provider rows | 225 |
+| flat calls, making no directional claim | 175 |
+| provider errors, excluded | 10 |
+| directional calls | 40 |
+| directional calls unscorable for want of forward bars | 3 |
+| **scorable directional calls** | **37** |
+| discovery calls on symbols never traded | 62 of 75 |
+| distinct symbols ever traded, all history | 10 |
+| near-duplicates, an evaluation within 4 hours of a prior one on the same symbol | 34 of 75 |
+| council refusals recorded | 26 |
+| trades carrying a council decision id | **0** |
+| **EFFECTIVE SAMPLE SIZE (symbol clusters)** | **9** |
+
+Concentration is severe: LDO/USD and AAVE/USD carry 10 evaluations each, UNI/USD and NEAR/USD 6 each. 34 of 75 evaluations overlap a prior window on the same symbol, so nearly half the record is not independent of the rest of it. Standard errors are clustered on symbol, which absorbs all three dependence sources at once: three providers scoring one identical window, overlapping windows on one symbol, and the concentrated symbol set.
+
+**The raw count of 37 calls flatters the sample by a factor of four. The unit that is independent is the symbol, and there are nine of them.** The pre-registered floor was 10 clusters. The sample misses it.
+
+The zero in the last row is worth stating plainly: no trade in the entire recorded history carries a council decision id, which confirms the premise the prompt started from. Nothing measured here has ever moved money.
+
+### TASK 5, WHAT WOULD BE NEEDED TO SETTLE IT
+
+Scaled on CLUSTERS, not calls. The clustered standard error shrinks with the number of independent symbols, not with the number of provider calls, because three providers scoring one window carry the same shock. A first version of this calculation scaled on calls and returned 23, fewer calls than the 37 already in hand, which is the arithmetic tell that the wrong unit was used. Corrected:
+
+| goal | clusters needed | directional calls | provider calls | evaluations | cost at 5.6c per provider call | days at 15 evals/day | days at 100 evals/day |
+|---|---|---|---|---|---|---|---|
+| confirm the observed +92.3 bp effect | 20 | 80 | 448 | **150** | **25.04 USD** | 10 | 2 |
+| establish a 50 bp effect | 66 | 272 | 1,525 | **509** | **85.39 USD** | 34 | 6 |
+
+At 5.6 cents per evaluation rather than per provider call the figures are 8.35 USD and 28.46 USD.
+
+**THE MONEY IS NOT THE CONSTRAINT. Settling this costs between 8 and 85 dollars.** The binding constraint is SYMBOL DIVERSITY: the 50 bp target needs 66 independent symbols and the record has 9. Running 500 more evaluations on LDO/USD and AAVE/USD would add calls and almost no information. A credit-funded test is worth running only if it is deliberately spread across symbols, and its design should fix the symbol count first and let the call count follow.
+
+Two further design notes fall out of the measurement and are recorded without recommending anything. The directional rate is 17.8 percent of provider rows, so most spend buys a flat answer. And at the 1-hour horizon the net return is already negative after the crypto round trip, so any future test should score the 4-hour question the prompt actually asks.
+
+### TASK 6, THE VERDICT
+
+**Does the recorded evidence show the council predicts subsequent price movement? IT IS TOO THIN TO TELL, by the rule fixed before the data was touched.** Nine symbol clusters against a floor of ten. Every point estimate is positive and none reaches the corrected bar. The most favourable single number in the entire record, GPT-5.5 and the council at z equals 2.157, sits below the 2.50 the four-test correction requires, and it rests on 19 calls across 9 symbols in 5 days of mostly-crypto tape during one market regime.
+
+**It does NOT show the council fails to predict.** Nothing here licenses that conclusion either, and reading a thin null as a refutation would be the same error in the other direction.
+
+What IS established, and needs no more data:
+1. **The council is GPT-5.5 on this record.** Three providers, one voice, zero cases where the composition added a directional call.
+2. **The stated confidence number carries no information here.** Spearman 0.013 against hits.
+3. **The council has never influenced a trade.** Zero trades carry a decision id.
+
+Apply nothing. Recommend no architecture change. The measurement says the question is open and cheap to close, and that closing it requires symbol breadth rather than money.
+
+Changes: RETURN.md (pre-registration at `8fe4b7f`, findings), PROGRESS.md (dated entry). Research script under gitignored `build/research_20260726c/council_scoring.py`.
+Commit message: Score every recorded council evaluation against subsequent price movement, no provider calls made, findings only, nothing applied
 
 ## Prompt: Fail closed on unclassified symbols so pooled vehicles cannot leak into the universe
 
