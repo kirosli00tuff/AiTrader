@@ -11,6 +11,43 @@ Model:
 Prompt summary: one line.
 Changes: what changed.
 
+## Prompt: Score every recorded council evaluation against subsequent price movement
+
+Date: 2026-07-26
+Model: Opus 5 (claude-opus-5, 1M context).
+Prompt summary: the LLM council is the layer the operator considers central and a rewrite around it is under consideration, but in 75 recorded evaluations it has never influenced a trade and its verdicts have never been scored against what price subsequently did. Establish that from data already in hand before credits are spent. Task 0 pre-register the scoring rule, horizon, benchmark, overlap handling, clustering unit, corrected bar and what counts as a negative, then commit and report the hash. Task 1 score direction against the realised move over the horizon the prompt asked about, with excess over the unconditional move as the primary figure. Task 2 test whether the stated confidence number is calibrated. Task 3 test whether the composed council beats its members and whether agreement predicts accuracy. Task 4 state the sample's limits plainly with an effective sample size. Task 5 compute what it would take to settle it, in calls, dollars and calendar time. Task 6 report negatives first and manufacture no conclusion the sample cannot support.
+
+CONSTRAINTS HONORED: research only against recorded data. **NO provider calls of any kind were made and this session cost nothing in credits.** Live trading stays off. No RiskGate logic, no live-trading gate, no adaptive limit-weakening invariant, no Level 1 risk value, no strategy parameter, no threshold, no engine behavior touched. Production database opened read-only. Nothing applied and no architecture change recommended.
+
+### TASK 0, PRE-REGISTRATION. The specification closes at this commit.
+
+WHAT EXISTS, established before writing the rule and reported because it bounds everything: 75 `council_eval` rows spanning 2026-07-21T05:46:39Z to 2026-07-26T08:23:12Z, five days, across 26 symbols of which 24 are crypto pairs and 2 are equities (one SPY, one NVDA). 225 `council_eval_provider` rows, three per evaluation. 26 `council_refusal` rows. Production `bars` carries 5-minute data for 20 symbols from 2026-06-14T08:00Z to 2026-07-26T20:50Z.
+
+HORIZON: **4 hours, 48 five-minute bars, after the evaluation timestamp.** This is not a choice, it is what the prompt asked. Every user prompt opens "Question: immediate setup, the next few hours on 5-minute bars" and renders `return_4h` as evidence. Scoring a different horizon would score a question nobody asked. REGISTERED SECONDARY, no verdict authority: the same computation at 1 hour, to show whether the reading depends on the horizon.
+
+PRICE RESOLUTION: entry is the first 5-minute close at or after the evaluation timestamp, exit is the last 5-minute close at or before entry plus 4 hours. An evaluation with no bar in either window is UNSCORABLE and is counted, never filled. No price is ever forward-filled, per the standing rule.
+
+SCORING RULE: only provider rows with `direction` in (long, short) are scored, because a flat call makes no directional claim. Signed return equals the direction sign times the realised return. A hit is a signed return above zero. Net return subtracts the fee model at the correct rate per asset class: **crypto 50 bp round trip taker, equity 1.3 bp**, per the fee-model session.
+
+BENCHMARK, and it is not zero: **the unconditional move of the same symbol over the same window length**, computed as the mean 4-hour return across every available overlapping 4-hour window in that symbol's bar history. A bullish call in a rising week looks correct without being informative. **PRIMARY FIGURE: excess equals the direction sign times (realised return minus the symbol's unconditional mean return).**
+
+OVERLAP AND NON-INDEPENDENCE, handled rather than assumed away. Three sources: the three providers score the identical window within one evaluation, evaluations on the same symbol inside 4 hours produce overlapping windows, and the symbol set is heavily concentrated (LDO/USD and AAVE/USD carry 10 evaluations each). **CLUSTERING UNIT: the symbol.** Standard errors are clustered on symbol, which is the coarsest and most conservative of the three and absorbs all of them. EFFECTIVE SAMPLE SIZE is reported as the number of distinct symbol clusters carrying at least one scorable directional call, beside the raw call count.
+
+SIGNIFICANCE BAR: 4 primary tests (pooled directional excess, per-provider excess, confidence calibration monotonicity, council against best member). Bonferroni family alpha 0.05, per-test 0.0125 two-sided, **|z| >= 2.50**.
+
+WHAT COUNTS AS A NEGATIVE, and the distinction that matters most here, declared in advance:
+- An interval spanning zero or |z| under 2.50 with an adequate sample reads as NO DEMONSTRATED PREDICTIVE VALUE.
+- **Fewer than 10 symbol clusters, or fewer than 30 scorable directional calls, reads as TOO THIN TO TELL and is reported as such, NOT as evidence of absence.** These are different findings and conflating them would be the error this session exists to avoid.
+- A calibration curve that is flat within its confidence intervals means the stated number is decoration.
+
+EXPECTED OUTCOME, stated before computing: 40 of 225 provider rows carry a directional call at all (Opus 14, GPT-5.5 22, Gemini 4), and only 40 of 75 evaluations have any forward 5-minute bars. The scorable intersection is therefore small and the honest expected result is TOO THIN TO TELL.
+
+RESOURCE RULE: single process over recorded rows, RSS probed, run inside a `systemd-run` MemoryMax scope. Production database opened `mode=ro` and hash-verified unchanged at the end. **No network call of any kind.**
+
+### FINDINGS
+
+Pending. Written after the computation.
+
 ## Prompt: Fail closed on unclassified symbols so pooled vehicles cannot leak into the universe
 
 Date: 2026-07-26
