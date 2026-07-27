@@ -9,6 +9,12 @@ import hashlib
 from dataclasses import dataclass, field
 
 
+# Provenance values for ModelVerdict.source. "real" and "mock" are reads;
+# these two are non-answers, and they are different non-answers.
+ERROR_SOURCE = "error"          # the call was made and failed
+EXHAUSTED_SOURCE = "exhausted"  # the account is out of quota or credit
+
+
 def det_unit(seed: str) -> float:
     """Deterministic pseudo-random value in [0, 1) from a string seed."""
     h = int(hashlib.sha256(seed.encode()).hexdigest(), 16)
@@ -89,7 +95,16 @@ class ConsensusResult:
     # directional, and contributing nothing to bias, confidence, edge, or
     # agreement, exactly as before. This field changes what the record says,
     # never what the council decides.
+    #
+    # DISJOINT FROM `exhausted` (2026-07-27): a transient or permanent call
+    # failure counts here, an account out of quota counts there, and
+    # directional + abstentions + errors + exhausted equals the provider count.
     errors: int = 0
+    # Providers not called, or failed, because the account is out of quota or
+    # credit. A latching condition on the ACCOUNT rather than a per-call
+    # failure, so a council running one-handed on a dry key is visible in the
+    # record instead of being inferred from a log afterwards.
+    exhausted: int = 0
     # Why no call was made (2026-07-25). Set only when the pre-call evidence
     # check refused: the providers were never contacted and no prompt was ever
     # rendered, so per_model is empty and the budget is charged nothing. None
@@ -107,6 +122,7 @@ class ConsensusResult:
             "directional_count": self.directional_count,
             "abstentions": self.abstentions,
             "errors": self.errors,
+            "exhausted": self.exhausted,
             # How many providers actually answered. A two-handed round is now
             # visible without joining the per-provider rows.
             "responded_count": self.directional_count + self.abstentions,
@@ -174,12 +190,30 @@ def flat_verdict(model: str, rationale: str, *, source: str = "error",
 
 
 def is_error(v: ModelVerdict) -> bool:
-    """Whether this verdict is a FAILED CALL rather than a considered read.
+    """Whether this verdict is a NON-ANSWER rather than a considered read.
 
     One predicate, shared by the composer, the persister, and the API, so
     "errored" cannot come to mean three slightly different things in three
     places. A failed call and a hold are both non-directional and must stay
     that way in the math. They are not the same event and must stop reading
     the same in the record.
+
+    TRUE FOR EXHAUSTION TOO (2026-07-27), deliberately. A provider skipped
+    because its account is out of quota did not answer, so counting it as an
+    abstention would say it read the evidence and held. The abstention
+    arithmetic in consensus.py subtracts non-answers, so exhaustion has to sit
+    inside this predicate. Use :func:`is_exhausted` to tell the two apart,
+    which every reporting surface does.
     """
-    return str(getattr(v, "source", "")) == "error"
+    return str(getattr(v, "source", "")) in (ERROR_SOURCE, EXHAUSTED_SOURCE)
+
+
+def is_exhausted(v: ModelVerdict) -> bool:
+    """Whether this verdict exists because the provider is out of quota.
+
+    Distinct from a transient error (which may succeed next time) and from an
+    abstention (the provider answered and held). A latched provider is not
+    called at all, so there is no attempt to retry and nothing to diagnose per
+    call: the condition belongs to the account, not to the request.
+    """
+    return str(getattr(v, "source", "")) == EXHAUSTED_SOURCE

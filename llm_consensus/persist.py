@@ -23,7 +23,7 @@ import json
 import logging
 import sqlite3
 
-from .verdicts import is_error
+from .verdicts import is_error, is_exhausted
 from datetime import datetime, timezone
 
 log = logging.getLogger("llm_consensus")
@@ -71,6 +71,13 @@ _MIGRATIONS = (
      "ALTER TABLE council_eval ADD COLUMN errors INTEGER"),
     ("council_eval_provider", "errored",
      "ALTER TABLE council_eval_provider ADD COLUMN errored INTEGER"),
+    # Provider exhaustion (2026-07-27), same no-default rule for the same
+    # reason: a row written before the distinction existed cannot know whether
+    # its failures were a dry account, and NULL says exactly that.
+    ("council_eval", "exhausted",
+     "ALTER TABLE council_eval ADD COLUMN exhausted INTEGER"),
+    ("council_eval_provider", "exhausted",
+     "ALTER TABLE council_eval_provider ADD COLUMN exhausted INTEGER"),
 )
 
 
@@ -119,8 +126,8 @@ def record_evaluation(db_path: str, state: dict, result,
                 "INSERT INTO council_eval (ts, symbol, mode, prompt_version, "
                 "state_json, system_prompt, user_prompt, bias, confidence, "
                 "edge, verdict, agreement_count, directional_count, "
-                "abstentions, errors, gate_json) "
-                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                "abstentions, errors, exhausted, gate_json) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (ts, str(state.get("symbol", "?")), prompt_mode(state),
                  PROMPT_VERSION, json.dumps(state, default=str),
                  system_prompt_for(state, cfg_path), render_user_prompt(state),
@@ -130,6 +137,7 @@ def record_evaluation(db_path: str, state: dict, result,
                  int(getattr(result, "directional_count", 0)),
                  int(getattr(result, "abstentions", 0)),
                  int(getattr(result, "errors", 0)),
+                 int(getattr(result, "exhausted", 0)),
                  json.dumps(getattr(result, "gate", None))))
             eval_id = int(cur.lastrowid)
             for v in per_model:
@@ -138,13 +146,19 @@ def record_evaluation(db_path: str, state: dict, result,
                 # used to be derived from the bias alone, so an errored row and
                 # a considered hold read identically and only `source` told
                 # them apart. It now means "answered, and held".
-                errored = is_error(v)
-                abstained = (not errored) and abs(bias) <= 1e-9
+                #
+                # AND AN EXHAUSTED ACCOUNT IS NOT A FAILED CALL (2026-07-27).
+                # The three flags are DISJOINT: a row is at most one of
+                # abstained, errored, exhausted, so counting any one of them
+                # never double-counts another.
+                exhausted = is_exhausted(v)
+                errored = is_error(v) and not exhausted
+                abstained = (not errored) and (not exhausted) and abs(bias) <= 1e-9
                 conn.execute(
                     "INSERT INTO council_eval_provider (eval_id, slot, "
                     "model_id, source, direction, bias, confidence, edge, "
-                    "abstained, errored, rationale, extra_json) "
-                    "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                    "abstained, errored, exhausted, rationale, extra_json) "
+                    "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
                     (eval_id, str(getattr(v, "model", "")),
                      str(getattr(v, "model_id", "")),
                      str(getattr(v, "source", "")),
@@ -153,6 +167,7 @@ def record_evaluation(db_path: str, state: dict, result,
                      float(getattr(v, "edge", 0.0)),
                      1 if abstained else 0,
                      1 if errored else 0,
+                     1 if exhausted else 0,
                      str(getattr(v, "rationale", ""))[:1000],
                      json.dumps(getattr(v, "extra", {}) or {})))
             conn.commit()
@@ -238,17 +253,26 @@ def load_evaluation(db_path: str, eval_id: int) -> dict | None:
                 "COALESCE(errored, CASE WHEN source='error' THEN 1 ELSE 0 END)"
                 if has("council_eval_provider", "errored")
                 else "CASE WHEN source='error' THEN 1 ELSE 0 END")
+            # A pre-2026-07-27 row has no exhaustion column and no way to know
+            # it, so it reads 0 rather than guessing from the source string.
+            eval_exh_expr = ("COALESCE(exhausted, 0)"
+                             if has("council_eval", "exhausted") else "0")
+            prov_exh_expr = (
+                "COALESCE(exhausted, CASE WHEN source='exhausted' THEN 1 "
+                "ELSE 0 END)" if has("council_eval_provider", "exhausted")
+                else "CASE WHEN source='exhausted' THEN 1 ELSE 0 END")
             row = conn.execute(
                 "SELECT ts, symbol, mode, prompt_version, state_json, "
                 "system_prompt, user_prompt, bias, confidence, edge, verdict, "
                 "agreement_count, directional_count, abstentions, "
-                f"{errors_expr} FROM council_eval WHERE id=?",
+                f"{errors_expr}, {eval_exh_expr} FROM council_eval WHERE id=?",
                 (eval_id,)).fetchone()
             if not row:
                 return None
             providers = conn.execute(
                 "SELECT slot, model_id, source, direction, bias, confidence, "
-                f"edge, abstained, rationale, extra_json, {errored_expr} "
+                f"edge, abstained, rationale, extra_json, {errored_expr}, "
+                f"{prov_exh_expr} "
                 "FROM council_eval_provider WHERE eval_id=? ORDER BY id",
                 (eval_id,)).fetchall()
         finally:
@@ -263,6 +287,7 @@ def load_evaluation(db_path: str, eval_id: int) -> dict | None:
         "verdict": row[10], "agreement_count": row[11],
         "directional_count": row[12], "abstentions": row[13],
         "errors": row[14],
+        "exhausted": row[15],
         # How many providers actually answered, so a two-handed round reads as
         # one without the caller doing arithmetic.
         "responded_count": (row[12] or 0) + (row[13] or 0),
@@ -270,11 +295,13 @@ def load_evaluation(db_path: str, eval_id: int) -> dict | None:
             "slot": p[0], "model_id": p[1], "source": p[2], "direction": p[3],
             "bias": p[4], "confidence": p[5], "edge": p[6],
             # abstained means ANSWERED AND HELD. errored means the call failed.
-            # A pre-migration row derives errored from source, and its
-            # abstained flag is corrected the same way rather than left saying
-            # a failed call was a considered read.
-            "abstained": bool(p[7]) and not bool(p[10]),
-            "errored": bool(p[10]),
+            # exhausted means the account is out of quota, so no call was made
+            # or the one made could never have succeeded. The three are
+            # DISJOINT. A pre-migration row derives them from source rather
+            # than claiming a failed call was a considered read.
+            "abstained": bool(p[7]) and not bool(p[10]) and not bool(p[11]),
+            "errored": bool(p[10]) and not bool(p[11]),
+            "exhausted": bool(p[11]),
             "rationale": p[8],
             "extra": json.loads(p[9] or "{}"),
         } for p in providers],

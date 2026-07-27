@@ -15,9 +15,36 @@ log = logging.getLogger("llm_consensus")
 
 DEFAULT_TIMEOUT = 20.0
 
+# How much of a failing response body to keep for classification. Bounded so a
+# large error page cannot bloat a log line or a persisted row, wide enough that
+# a provider's error type/status field survives (both sit past the 200-char
+# message cut that hid them during the 2026-07-27 wide run).
+MAX_ERROR_TEXT = 4000
+
 
 class LLMHTTPError(RuntimeError):
-    """Any failure talking to a provider (network, non-2xx, bad body)."""
+    """Any failure talking to a provider (network, non-2xx, bad body).
+
+    CARRIES THE OUTCOME IT MEASURED, NOT JUST A SENTENCE (2026-07-27). The
+    message stays truncated at 200 characters so logs stay bounded, but a
+    truncated sentence is not enough to classify a failure: for both providers
+    that ran dry in the wide council run, the field distinguishing a billing
+    exhaustion from a rate limit (OpenAI ``error.type``, Gemini
+    ``error.status``) sits AFTER the message and was cut off. The retry policy
+    therefore saw only the status code and retried a certain second failure.
+
+    ``status``, ``body`` and ``text`` are populated on every HTTP failure so
+    ``provider_health.classify`` reads fields instead of a truncated string.
+    All three are optional, so an exception built from a bare message (which
+    the existing tests do) behaves exactly as before.
+    """
+
+    def __init__(self, message: str, *, status: int | None = None,
+                 body: dict | None = None, text: str = "") -> None:
+        super().__init__(message)
+        self.status = status if isinstance(status, int) else None
+        self.body = body if isinstance(body, dict) else None
+        self.text = str(text or "")
 
 
 def post_json(url: str, headers: dict[str, str], payload: dict[str, Any],
@@ -39,7 +66,19 @@ def post_json(url: str, headers: dict[str, str], payload: dict[str, Any],
 
     if resp.status_code >= 400:
         # Body may carry a provider error message; keep it short, never the key.
-        raise LLMHTTPError(f"HTTP {resp.status_code}: {resp.text[:200]}")
+        # The MESSAGE stays at 200 characters for bounded logs. The structured
+        # fields carry enough to classify the failure, because the field that
+        # separates a billing exhaustion from a rate limit sits past that cut.
+        raw = resp.text or ""
+        try:
+            parsed = resp.json()
+        except Exception:  # noqa: BLE001 - an unparseable body is still evidence
+            parsed = None
+        raise LLMHTTPError(
+            f"HTTP {resp.status_code}: {raw[:200]}",
+            status=resp.status_code,
+            body=parsed if isinstance(parsed, dict) else None,
+            text=raw[:MAX_ERROR_TEXT])
 
     try:
         return resp.json()

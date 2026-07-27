@@ -18,15 +18,14 @@ from __future__ import annotations
 import logging
 import math
 import os
-import re
 import time
 from dataclasses import dataclass, replace
 from typing import ClassVar, Protocol
 
-from . import http_json
+from . import http_json, provider_health
 from .verdicts import (
-    ModelVerdict, bias_to_verdict, clamp01, det_unit, flat_verdict,
-    verdict_from_payload,
+    EXHAUSTED_SOURCE, ModelVerdict, bias_to_verdict, clamp01, det_unit,
+    flat_verdict, verdict_from_payload,
 )
 
 log = logging.getLogger("llm_consensus")
@@ -50,29 +49,21 @@ MIN_PROVIDER_RETRY_BUDGET_SECONDS = 5.0
 # server-side overload, and transport timeouts qualify. An auth failure, a
 # malformed request, and a model-not-found do not: retrying those is a second
 # certain failure that costs a round its remaining budget.
-_TRANSIENT_STATUS = (408, 409, 425, 429, 500, 502, 503, 504, 529)
-_TRANSIENT_TEXT = re.compile(
-    r"timed out|timeout|connection (?:reset|aborted|error)|temporarily "
-    r"unavailable|overloaded|high demand|try again|rate.?limit",
-    re.IGNORECASE)
+# A BILLING 429 IS NOT TRANSIENT AND WAS TREATED AS ONE UNTIL 2026-07-27. The
+# classification now lives in provider_health, which reads the response's typed
+# fields rather than a truncated message, and separates a rate limit (retry
+# once) from an account out of quota (never retry, latch the provider off).
+_TRANSIENT_STATUS = provider_health.TRANSIENT_STATUS
 
 
-def _is_transient(exc: Exception) -> bool:
+def _is_transient(exc: Exception, label: str = "") -> bool:
     """Whether a provider failure is worth exactly one more attempt.
 
-    Classified from the message because http_json collapses every failure into
-    LLMHTTPError with a formatted string ("HTTP 503: ...", "request failed:
-    ..."). Keeping the classifier here rather than widening that seam means the
-    retry policy has one home and the HTTP helper stays a helper.
+    Thin wrapper over ``provider_health.classify`` so the retry policy keeps
+    one home. ``label`` is optional: without it a bare exception still
+    classifies by status and body, which is what the existing call sites pass.
     """
-    msg = str(exc)
-    m = re.match(r"HTTP (\d{3})", msg)
-    if m:
-        return int(m.group(1)) in _TRANSIENT_STATUS
-    # A transport failure that never reached a status line.
-    if msg.startswith("request failed:") or msg.startswith("non-JSON response:"):
-        return bool(_TRANSIENT_TEXT.search(msg)) or msg.startswith("request failed:")
-    return bool(_TRANSIENT_TEXT.search(msg))
+    return provider_health.classify(exc, label=label) == provider_health.TRANSIENT
 
 
 # --- Stable, cacheable instruction prefix (per mode) -------------------------
@@ -261,7 +252,21 @@ class _RealLLMProvider:
                 return self._call(state, key, timeout=remaining), attempts
             except Exception as e:  # noqa: BLE001 - classified below
                 last = e
-                if attempts >= MAX_PROVIDER_ATTEMPTS or not _is_transient(e):
+                kind = provider_health.classify(e, label=self.LABEL)
+                if kind == provider_health.EXHAUSTED:
+                    # OUT OF QUOTA OR CREDIT. A retry is a certain second
+                    # failure, and every later call this session is too, so the
+                    # provider is latched off rather than failed call by call.
+                    provider_health.mark_exhausted(
+                        self.LABEL, model_id=self.model_id,
+                        detail=str(e)[:300])
+                    log.error(
+                        "council provider %s (%s) is EXHAUSTED (out of quota "
+                        "or credit). Not retried, and not called again this "
+                        "session: %s", self.name, self.model_id, str(e)[:200])
+                    break
+                if (attempts >= MAX_PROVIDER_ATTEMPTS
+                        or kind != provider_health.TRANSIENT):
                     break
                 left = (deadline - time.monotonic()
                         - PROVIDER_RETRY_BACKOFF_SECONDS)
@@ -286,17 +291,34 @@ class _RealLLMProvider:
             # into thesis output and the GUI, and credential identifiers do
             # not belong there (test_research_satellite pins this).
             return self._mock_verdict(state, f"no {self.LABEL} key")
+        # LATCHED OFF: this account reported exhaustion earlier in the session,
+        # so no call is made at all. Recorded distinctly from a transient error
+        # and from a considered hold, because it is neither.
+        if provider_health.is_exhausted(self.LABEL):
+            latched = provider_health.exhausted_providers().get(
+                self.LABEL.strip().lower(), {})
+            return flat_verdict(
+                self.name, f"flat: {self.LABEL} exhausted, not called",
+                source=EXHAUSTED_SOURCE, model_id=self.model_id,
+                extra={"attempts": 0, "exhausted_since": latched.get("since", ""),
+                       "error": latched.get("detail", "")[:200]})
         attempts = 1
         try:
             text, attempts = self._call_with_retry(state, key)
         except Exception as e:  # network / status / decode errors
+            kind = provider_health.classify(e, label=self.LABEL)
+            if kind == provider_health.EXHAUSTED:
+                return flat_verdict(
+                    self.name, f"flat: {self.LABEL} out of quota or credit",
+                    source=EXHAUSTED_SOURCE, model_id=self.model_id,
+                    extra={"attempts": 1, "error": str(e)[:200]})
+            tried = (MAX_PROVIDER_ATTEMPTS
+                     if kind == provider_health.TRANSIENT else 1)
             log.warning("council provider %s (%s) call failed after %d "
-                        "attempt(s): %s", self.name, self.model_id,
-                        MAX_PROVIDER_ATTEMPTS if _is_transient(e) else 1, e)
+                        "attempt(s): %s", self.name, self.model_id, tried, e)
             return flat_verdict(self.name, f"flat: {self.LABEL} call error",
                                 source="error", model_id=self.model_id,
-                                extra={"attempts": MAX_PROVIDER_ATTEMPTS
-                                       if _is_transient(e) else 1,
+                                extra={"attempts": tried,
                                        "error": str(e)[:200]})
         obj = http_json.extract_json_object(text)
         if obj is None:

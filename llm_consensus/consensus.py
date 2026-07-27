@@ -29,8 +29,12 @@ from .providers import (  # noqa: F401
     AnthropicProvider, GeminiProvider, LLMProvider, MockLLMProvider,
     OpenAIProvider,
 )
+from .provider_health import (  # noqa: F401
+    exhausted_providers, exhaustion_line, is_exhausted as provider_is_exhausted,
+)
 from .verdicts import (  # noqa: F401
     ConsensusResult, ModelVerdict, _det_unit, bias_to_verdict, is_error,
+    is_exhausted,
 )
 
 # Provider "personality" skews — kept identical to the original ensemble so the
@@ -280,8 +284,13 @@ def consensus(state: dict, providers: list[LLMProvider] | None = None,
     # contributed to bias, confidence, edge, or agreement. What changes is only
     # the COUNT a human reads. Splitting them here is why council_eval stops
     # saying three providers held when two held and one never answered.
-    errors = sum(1 for v in verdicts if is_error(v))
-    abstentions = len(verdicts) - len(directional) - errors
+    # THREE DISJOINT NON-DIRECTIONAL OUTCOMES (2026-07-27). is_error covers
+    # every non-answer so the abstention subtraction stays honest; exhaustion
+    # is then split back out, because an account out of quota is not a call
+    # that failed and is not a provider that read the evidence and held.
+    exhausted = sum(1 for v in verdicts if is_exhausted(v))
+    errors = sum(1 for v in verdicts if is_error(v)) - exhausted
+    abstentions = len(verdicts) - len(directional) - errors - exhausted
     if directional:
         dwsum = sum(p.weight for _, p in directional) or 1.0
         bias = sum(v.bias * p.weight for v, p in directional) / dwsum
@@ -306,6 +315,7 @@ def consensus(state: dict, providers: list[LLMProvider] | None = None,
         directional_count=len(directional),
         abstentions=abstentions,
         errors=errors,
+        exhausted=exhausted,
     )
     # Per-provider persistence for replay (2026-07-20): every scored round is
     # recorded with its full state, exact prompts, and one row per provider,
@@ -340,7 +350,13 @@ def council_status_line(cfg_path: str | None = None) -> str:
         # consequence rather than a quiet "OFF" nobody reads twice.
         gate = ("base-check gate DISABLED -> every candidate reaches the full "
                 "three-provider council unscreened")
-    return f"LLM council: {council}; {gate}"
+    line = f"LLM council: {council}; {gate}"
+    # A COUNCIL RUNNING ONE-HANDED MUST SAY SO (2026-07-27). When an account is
+    # out of quota the configured provider list stops describing what actually
+    # answers, so the exhaustion is appended here rather than left to be
+    # inferred from a log after the run.
+    dry = exhaustion_line()
+    return f"{line}; {dry}" if dry else line
 
 
 if __name__ == "__main__":

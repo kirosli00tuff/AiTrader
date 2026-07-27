@@ -104,17 +104,31 @@ def _council_error_facts(symbol: str, ts: str) -> tuple[set[str], dict]:
             return set(), {}
         rows = store.query(
             "SELECT slot, COALESCE(errored, CASE WHEN source='error' THEN 1 "
-            "ELSE 0 END) AS errored FROM council_eval_provider WHERE eval_id = ?",
+            "ELSE 0 END) AS errored, "
+            # Keyed off `source` alone, never the column: persist writes the
+            # source and the flag together, so they are equivalent, and a
+            # database predating the 2026-07-27 migration has no such column
+            # and would otherwise blank this whole display.
+            "CASE WHEN source='exhausted' THEN 1 ELSE 0 END AS exhausted "
+            "FROM council_eval_provider WHERE eval_id = ?",
             (row["id"],))
     except Exception:  # noqa: BLE001 - display path, never fatal
         return set(), {}
-    slots = {str(p["slot"]) for p in rows if p.get("errored")}
+    # A DRY ACCOUNT IS A FAILED SLOT TO THE OPERATOR (2026-07-27), and it is a
+    # different failure from a call that errored, so it is both inside the
+    # failed set and reported separately. A council running one-handed because
+    # a key is out of credit must be visible here, not inferred from a log.
+    exhausted_slots = {str(p["slot"]) for p in rows if p.get("exhausted")}
+    slots = {str(p["slot"]) for p in rows
+             if p.get("errored") or p.get("exhausted")}
     directional = int(row.get("directional_count") or 0)
     abstentions = int(row.get("abstentions") or 0)
     return slots, {
         "directional_count": directional,
         "abstentions": abstentions,
-        "errors": int(row.get("errors") or 0) or len(slots),
+        "errors": int(row.get("errors") or 0) or len(slots - exhausted_slots),
+        "exhausted": int(row.get("exhausted") or 0) or len(exhausted_slots),
+        "exhausted_slots": sorted(exhausted_slots),
         "responded_count": directional + abstentions,
     }
 

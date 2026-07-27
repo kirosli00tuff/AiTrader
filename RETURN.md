@@ -11,6 +11,64 @@ Model:
 Prompt summary: one line.
 Changes: what changed.
 
+## Prompt: Never retry a billing 429, latch provider exhaustion, surface it where a human reads it
+
+Date: 2026-07-27
+Model: Opus 5 (claude-opus-5, 1M context).
+Prompt summary: the wide council run disclosed that `providers.py` retries a billing 429 as though transient. A quota-exceeded response means the account is out of credit, so the retry cannot succeed and doubles the wasted calls, and it fired at scale (GPT-5.5 failed 315 of 389 calls from 03:30, Gemini 73 from 08:16). Task 1 determine how each provider signals rate limiting versus quota exhaustion, by body, code or header, handle them separately, and where a provider does not distinguish them say so plainly and default to not retrying. Task 2 make exhaustion a loud latching condition: stop calling an exhausted provider for the session, record it distinctly from a transient error and from an abstention, and surface it in the startup block, the GUI and any research report. Task 3 tests for each behaviour plus a mutation test on the no-retry rule, full suite green. Task 4 document in PROGRESS.md and CONTEXT.md, complete this entry, commit and push.
+
+CONSTRAINTS HONORED: live trading stays off. No RiskGate logic, no live-trading gate, no adaptive limit-weakening invariant, no Level 1 risk value, no threshold, no strategy parameter touched.
+
+### TASK 1, WHAT EACH PROVIDER RETURNS, AND THEY DO NOT AGREE
+
+**THE CLASSIFIER COULD NOT SEE THE ANSWER, SO THE FIX STARTS AT THE HTTP SEAM.** `post_json` raised `LLMHTTPError(f"HTTP {code}: {text[:200]}")`. For BOTH providers that ran dry, the field distinguishing a billing exhaustion from a rate limit sits AFTER the message in the JSON, so the 200-character cut discarded it on every call. The recorded rows from the wide run show exactly that: the text ends mid-sentence at the documentation URL, before `type` or `status`. `LLMHTTPError` now carries `status`, the parsed `body`, and a bounded `text` (4,000 characters), and `provider_health.classify` reads fields rather than regex-matching a truncated sentence. The message stays capped at 200 so logs stay bounded.
+
+| provider | rate limited | exhausted | separates them? |
+|---|---|---|---|
+| **OpenAI** | 429, `error.type`/`error.code` = `rate_limit_exceeded` | 429, `error.type`/`error.code` = **`insufficient_quota`**, message "You exceeded your current quota, please check your plan and billing details" | **YES**, cleanly, by a structured field inside one status |
+| **Anthropic** | 429, `error.type` = `rate_limit_error` | **400**, `error.type` = `invalid_request_error`, message "Your credit balance is too low to access the Anthropic API" | **YES**, but by STATUS, and exhaustion is not a 429 at all |
+| **Gemini** | 429, `error.status` = `RESOURCE_EXHAUSTED` | 429, `error.status` = **`RESOURCE_EXHAUSTED`**, same status, only the prose differs | **NO** |
+
+Two consequences follow, and both are decisions rather than details.
+
+**KEYING EXHAUSTION OFF THE STATUS CODE IS ITSELF THE BUG.** Anthropic reports credit exhaustion as a 400, so a classifier that only inspects 429s would miss it entirely and then retry a 400 as a malformed request. The exhaustion check therefore runs across every status, before any status-based branch.
+
+**GEMINI DOES NOT DISTINGUISH THEM, STATED PLAINLY, AND THE SAFE DEFAULT APPLIES.** Both meanings return `RESOURCE_EXHAUSTED`, so no reliable structural discriminator exists. A Gemini 429 is therefore NEVER RETRIED. It LATCHES only when an explicit billing marker is present, because latching on a per-minute limit would drop a healthy provider for the entire session, which costs more than the single retry it saves. Not retrying and latching are two separate decisions and only the first is taken on ambiguity.
+
+Anthropic's exhaustion carries no structured code at all, only prose in `error.message`, so the classifier searches the parsed body as well as the raw text. My first cut did not, and consequently misclassified both Anthropic credit exhaustion and Gemini billing exhaustion as merely unretryable. Caught by running the classifier against the providers' real error shapes before writing any test.
+
+### TASK 2, EXHAUSTION IS A LOUD, LATCHING CONDITION
+
+A provider that reports exhaustion is not called again for the rest of the process. The latch is keyed by provider LABEL, because the quota belongs to the API key, so every model behind one key is dry together. It is process state and deliberately not persisted: an account stays dry until it is funded, and a restart is the honest moment to re-check rather than inherit a stale verdict.
+
+**THREE DISJOINT NON-DIRECTIONAL OUTCOMES**, each provider landing in exactly one, so no count double-reports another:
+
+| outcome | meaning | flag |
+|---|---|---|
+| abstention | answered, and held | `abstained` |
+| error | the call was made and failed | `errored` |
+| exhausted | the account is out of quota, so no useful call exists | `exhausted` |
+
+`is_error` returns True for exhaustion **on purpose**, because the abstention arithmetic subtracts non-answers and a provider that was never asked must never read as one that considered the evidence and held. `is_exhausted` is what separates the two kinds of non-answer everywhere they are reported. New `exhausted` columns on `council_eval` and `council_eval_provider` by migration with NO default, so a historical row keeps NULL meaning "written before this distinction existed", exactly how `errored` was added in July.
+
+**SURFACED WHERE A HUMAN READS IT.** The startup block (printed by the bridge at launch) names the provider, the model, when it went dry, and states that the council is running with fewer providers than configured. The GUI reports an exhausted slot separately from an errored one, keyed off `source` rather than the new column so a database predating the migration still renders instead of blanking. `exhausted_providers()` enumerates the condition for any research report.
+
+### TASK 3, TESTS
+
+19 new tests in `tests/test_provider_exhaustion.py`, built on the providers' REAL error shapes rather than invented ones, since the defect was precisely that the classifier could not see the real field. Full suite **1,067 passed**, up from 1,048, with no existing test modified. No C++ file changed, so ctest is unaffected.
+
+Covering each required behaviour: a transient 429 is retried exactly once, a billing 429 is never retried, Anthropic's 400 exhaustion is caught despite not being a 429, a Gemini 429 is never retried while a distinguishing provider's 429 still is, exhaustion latches so no further call is made, the latch is keyed on the account rather than the model, a latched verdict records zero attempts and contributes no direction, the three outcomes are disjoint in the composed result and in the database, and the condition surfaces in the startup block, the GUI and the enumerable report.
+
+MUTATION-TESTED THREE WAYS, each caught, each restored green:
+- exhaustion detection removed (the pre-fix behaviour): 6 tests fail.
+- detection kept but the retry guard bypassed, which is the exact defect: 3 tests fail.
+- the latch never consulted, so a dry provider is called every round: 2 tests fail.
+
+Two defects in my own first cut were found before the tests were written, by running the classifier against the real shapes: `EXHAUSTED_SOURCE` used in `providers.py` but never imported, and a text extractor that ignored the parsed body and therefore missed Anthropic's and Gemini's markers entirely.
+
+Changes: `llm_consensus/provider_health.py` (new: classification and latch), `llm_consensus/http_json.py` (typed error fields), `llm_consensus/providers.py` (classification-driven retry, pre-call latch check), `llm_consensus/verdicts.py` (`EXHAUSTED_SOURCE`, `is_exhausted`, disjoint `exhausted` count), `llm_consensus/consensus.py` (disjoint accounting, startup line), `llm_consensus/persist.py` (migration and disjoint flags), `api_server/operator.py` (GUI surface), `tests/test_provider_exhaustion.py` (19 tests), PROGRESS.md, CONTEXT.md, RETURN.md.
+Commit message: Never retry a billing 429, latch provider exhaustion, and surface it where a human reads it, live trading untouched
+
 ## Prompt: Wide council evaluation across independent symbol clusters
 
 Date: 2026-07-26 (session start 2026-07-26 21:55 PDT, 2026-07-27 04:55 UTC)
