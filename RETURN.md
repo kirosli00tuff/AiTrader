@@ -11,6 +11,182 @@ Model:
 Prompt summary: one line.
 Changes: what changed.
 
+## Prompt: Load a broad hindsight-free equity universe into the analysis database
+
+Date: 2026-07-26
+Model: Opus 5 (claude-opus-5, 1M context), as the session names.
+Prompt summary: the capacity-gated round recorded the price-only space as exhausted against an 8-symbol database and named a new information axis as the thing that changes the calculus. Breadth is that axis. Task 1 define universe membership by a rule applied with information available at each formation date, never by present-day prominence, and report membership at several points in time. Task 2 include delisted, acquired, merged, and renamed symbols with an end marker, or state plainly that the source cannot supply them, quantify the bias, and record it as a permanent caveat. Task 3 adjust prices for splits and dividends consistently, state which adjustment the source provides and when it is applied, report unexplained discontinuities without smoothing. Task 4 every bar carries its source and volume source at the production standard, real or absent, with consolidated-versus-single-venue noted. Task 5 estimate the footprint first, choose the symbol-count / granularity / history tradeoff deliberately, report the configuration, rows, size, wall time. Task 6 validate before declaring usable: missing bars, gaps and causes, corporate-action continuity, insufficient history, sanity failures, gaps distinguishable from real values at query time. Task 7 report to RETURN.md, PROGRESS.md, CONTEXT.md Key Decisions, commit and push.
+
+CONSTRAINTS HONORED: live trading stays off. No RiskGate logic, no live-trading gate, no adaptive limit-weakening invariant, no Level 1 risk value, no strategy parameter, no threshold, no engine behavior touched. This session touches the analysis database and its loader only. market_ai_lab.db opened read-only and hash-frozen. Parallelism sized from measured RSS under a systemd-run MemoryMax scope, stack checked before sizing. No hypothesis tested, no signal generated. Queue untouched and unread (pasted prompt path).
+
+### FINDINGS
+
+**HEADLINE: the analysis database now carries 25,547,678 daily bars across 19,744 US equity tickers from 2016-01-04 to 2026-07-24, and 6,648 of those tickers are DEAD, each with an explicit end marker and the venue's own record of how it died. The load found and repaired a survivorship hole that would have poisoned every cross-sectional test built on it: Alpaca's asset list SILENTLY DROPS most acquired names. TWTR, SIVB, ATVI, VMW, PXD, SGEN, HES and 7,255 others appear in no asset list of either status, while the bars endpoint serves their full history to the day they stopped trading. Building the pool from the asset list alone, which is the obvious way to build it, would have excluded exactly the names that failed. The fix is a rule, not a remembered list: sweep the venue's corporate-action record for every merger, name change, redemption and worthless removal from 2016 to 2026, and pull every ticker named as an acquiree, an old symbol or a removal. That recovered 4,591 dead tickers with history and raised member deaths in 2023 and 2024 from ZERO to 35 and 31, and realised universe attrition from 1.12 to 2.17 percent per year. Nothing was tested and no signal was generated.**
+
+### TASK 1, THE UNIVERSE RULE
+
+RULE ID `U-LIQ-500-stk-w60-m40-p5`, implemented in `backtest/universe.py` as pure functions with no network, no database and no clock.
+
+FORMATION SCHEDULE: the first trading session of each calendar month, taken from the exchange trading calendar (`/v2/calendar`, 2,654 sessions), never from any symbol's own bars. 124 formation dates from 2016-04-01 to 2026-07-01. The first is the earliest month with a full trailing window behind it.
+
+TRAILING WINDOW: the 60 trading sessions ENDING ON THE SESSION BEFORE the formation date. The formation date itself is outside the window, because a window containing it would decide membership using a bar the month it governs can trade on.
+
+DATA USED TO EVALUATE THE RULE: daily close and daily volume from bars dated strictly before the formation date, and nothing else.
+
+MEMBERSHIP: rank every eligible symbol by MEDIAN daily dollar volume (close times volume per session, then the median over sessions) descending, take the top 500. Ties break on symbol ascending so the same inputs always produce the same list. The median rather than the mean, so one squeeze session cannot buy membership for a name that is otherwise untradeable.
+
+ELIGIBILITY, every test measured inside the window: at least 40 of the 60 sessions carry a bar, median close at or above 5.00 USD, and no listing-segment boundary inside the window. Funds are excluded from the primary rule because the stated purpose is an equity cross-section, and the fund-inclusive variant is the same function with one flag and a different rule id.
+
+WHAT IS NOT POINT IN TIME, STATED RATHER THAN HIDDEN: the fund classification reads a present-day instrument name and venue, and the pool is seeded from present-day asset and corporate-action records. Neither is derived from a symbol's performance or its survival, so neither can leak an outcome. An instrument's fund-ness does not change over time.
+
+MEMBERSHIP AT SEVERAL POINTS IN TIME, top ten by rank with the 500th-place dollar-volume floor:
+
+| formation date | floor median dollar volume | top ten |
+|---|---|---|
+| 2016-07-01 | 61,215,471 | AAPL META AMZN GOOGL MSFT GOOG NFLX TSLA BAC **AGN** |
+| 2019-01-02 | 95,495,199 | AMZN AAPL MSFT NFLX META TSLA GOOGL GOOG AMD BAC |
+| 2020-04-01 | 109,045,821 | AAPL TSLA AMZN MSFT META NVDA GOOGL AMD GOOG BA |
+| 2022-01-03 | 120,427,015 | TSLA NVDA AAPL AMZN MSFT AMD META GOOGL PYPL GOOG |
+| 2024-01-02 | 110,171,474 | TSLA NVDA AAPL MSFT AMZN AMD META BRK.A GOOGL GOOG |
+| 2026-07-01 | 225,462,977 | MU NVDA TSLA **SNDK** AMD INTC MSFT AAPL AMZN GOOGL |
+
+Two readings confirm the rule is not looking forward. AGN (Allergan, acquired by AbbVie in 2020) sits ninth in the 2016 universe, which is what a hindsight-free rule does and what a present-day list can never do. NVDA is absent from the 2016 and 2019 top tens and enters by 2020, so it is not retro-inserted at the strength it later earned. The queue-002 session measured NVDA at 151 percent of a hand-picked universe's effect, and this rule cannot reproduce that error.
+
+TURNOVER: 3.79 percent of the universe is new each month on average, 6.2 percent at most, 1,187 distinct names across 62,000 member-months. A rule with no turnover would be a fixed list wearing a rule's clothes.
+
+### TASK 2, DELISTED AND DEAD SYMBOLS
+
+THE SOURCE CAN SUPPLY THEM, BUT NOT THE OBVIOUS WAY. Measured, not assumed:
+
+- Alpaca's asset list returns 33,348 us_equity records, 14,137 active and 19,211 inactive. The inactive list looks like the survivorship answer and is only part of it.
+- Probed directly: TWTR returns 1,718 daily bars ending 2022-10-27, SIVB ends 2023-03-09, ATVI ends 2023-10-13, VMW ends 2023-11-21, PXD ends 2024-05-02, HES ends 2025-07-17. Every one of those tickers is ABSENT from the asset list under both statuses. XLNX and AGN are present as inactive. There is no rule in the asset list that predicts which dead name it keeps.
+- Consequence had it not been caught: the first pool built from the asset list produced ZERO member deaths in 2023 and ZERO in 2024, in a period containing the SVB collapse, the Microsoft-Activision close, the Broadcom-VMware close and the Exxon-Pioneer close. That silence is what survivorship bias looks like from the inside, and it is why the anomaly was chased rather than reported as a low attrition rate.
+
+THE REPAIR IS A RULE APPLIED TO SOURCE DATA. `/v1/corporate-actions` answers a date-range query with NO symbol filter. Swept month by month across the whole span, it yields 9,251 events that end a ticker's life or hand its name to another issuer: 3,556 name changes, 3,170 stock mergers, 1,870 cash mergers, 404 worthless removals, 235 stock-and-cash mergers, 16 redemptions. Every ticker named as an acquiree, an old symbol or a removal that was not already in the pool was added and pulled: 7,409 symbols, of which 4,591 returned history. Recovering only names that DIED cannot tilt a result optimistic, and a recovered name still has to earn membership through the same rule from the same pre-formation bars.
+
+Event kinds are kept distinct because they mean different things. `BK` ends 2026-05-20 by NAME CHANGE to BNY and the issuer continues. `ATVI` ends 2023-10-13 by CASH MERGER and the issuer does not. `PXD` ends 2024-05-02 by STOCK MERGER into XOM. `SQ` ends 2025-01-17 by name change to XYZ. An end marker records that a TICKER stopped, and `delisting_event.kind` says whether the company did.
+
+RESULT: 6,648 tickers carry an explicit `ended:<date>` marker. Among universe members, 251 are dead by the pull end and member deaths now run 24, 26, 30, 34, 35, 31, 36, 26 across 2019 to 2026. Realised in-universe attrition is 2.17 percent per year over 62,000 member-months, which is the right order for a liquidity-ranked large-cap universe where most exits are acquisitions.
+
+THE PERMANENT CAVEAT, which every result from this database must carry:
+
+1. **Deaths without a corporate-action record are still missing.** SIVB and FRC are the worked examples: SVB Financial and First Republic were seized rather than merged, so no merger record names them and no asset record retains them. They are recoverable only by naming them from memory, which is exactly the ad-hoc hindsight that makes a universe unreproducible, so they were left out. The missing class is bankruptcy, regulatory seizure and compliance delisting. Its absence biases results in the SAME direction as classic survivorship bias, optimistic, at a smaller magnitude than the M&A hole already closed.
+2. **The floor is 2016-01-04.** The venue serves no daily bar before it, on any symbol probed. Anything that left the listed venues earlier cannot appear at all.
+3. **OTC is absent by the source's choice, not this session's.** A 60-name sample of inactive OTC tickers returned zero bars from SIP. A company that migrated from a listed venue to OTC before dying is therefore truncated at the migration.
+4. **A renamed issuer keeps ONE asset record, so a reused ticker can join two unrelated listings into one series.** 235 symbols carry more than one asset id and 67 carry Alpaca's own `_DELISTED` suffix marker, which serves no bars. Listing segments detect the join and the two halves are never treated as one price series. Three current members are affected: APC (Anadarko, then ARKO Petroleum after a 1,636-session gap), GSX (1,095) and FLY (1,007).
+
+### TASK 3, CORPORATE ACTIONS
+
+WHICH ADJUSTMENT THE SOURCE PROVIDES: `adjustment=all`, which is split AND dividend. Proven on SPY around 2024-03-13, where `raw` and `split` both return 515.97 while `dividend` and `all` both return 500.84. The stored value is 500.84, so the dividend leg is genuinely applied and not merely requested. This is a change from the 2026-07-24 deep-history load, which used `adjustment=split` and left SPY understated by 1.2 to 1.5 percent per year.
+
+WHEN IT IS APPLIED: AT LOAD. The venue computes adjusted prices and the loader stores exactly what it returns, adding no arithmetic of its own.
+
+HOW A SYMBOL WHOSE ADJUSTMENT CHANGES OVER TIME IS HANDLED: the venue computes factors relative to the request date, so a split after the pull makes the stored series stale. Every row carries `bars.adjustment` and every symbol carries `universe_asset.adjusted_as_of = 2026-07-24`. A later split requires re-pulling that symbol, and the stored date is what tells a reader so. The existing 5-minute rows are labelled too, derived from what the database already recorded rather than guessed: equity `split` from the prior load's own `analysis_meta`, crypto `none` because crypto has no corporate actions. No price changed, only the axis that was missing.
+
+RECORDED ACTIONS FOR EVERY MEMBER: 23,367 cash dividends, 121 forward splits, 85 reverse splits, 12 stock dividends, keyed by ex-date.
+
+SPLIT PROOFS, five named events, all passing with no artificial gap where an unadjusted series would show one:
+
+| symbol | event | last close before | first open after | gap | unadjusted would show |
+|---|---|---|---|---|---|
+| NVDA | 10-for-1 2024-06-10 | 120.68 | 120.16 | -0.43% | -90% |
+| AAPL | 4-for-1 2020-08-31 | 121.06 | 123.56 | +2.07% | -75% |
+| AMZN | 20-for-1 2022-06-06 | 122.35 | 125.25 | +2.37% | -95% |
+| GOOGL | 20-for-1 2022-07-18 | 110.80 | 111.65 | +0.77% | -95% |
+| TSLA | 3-for-1 2022-08-25 | 297.10 | 302.36 | +1.77% | -66.67% |
+
+DISCONTINUITIES, REPORTED AND NOT SMOOTHED. Across all 1,187 members, 769 close-to-close moves exceed 50 percent. 12 sit within three sessions of a recorded corporate action. 93 land on a split-shaped ratio with no recorded action, which is the shape a failed adjustment would leave. Four were tested by re-querying the venue under `raw` and under `all`: ALNY 2016-10-06 ratio 0.5151 both ways, AMC 2021-01-27 ratio 4.012 both ways, AMRN 2018-09-24 ratio 4.147 both ways, APLD 2022-07-19 ratio 2.000 both ways. Identical under both adjustments means no adjustment is involved and these are real market events (the Alnylam revusiran failure, the AMC squeeze, the Amarin REDUCE-IT result). The remaining 664 are ordinary large moves. NOTHING WAS SMOOTHED, and the one genuine artifact in the set, APC on 2026-02-12 at ratio 0.2412, is the ticker-reuse case already caught by segmentation rather than an adjustment fault.
+
+### TASK 4, PROVENANCE AND VOLUME
+
+Every one of the 25,547,678 daily rows carries `source='backfill'` and `volume_source='venue_backfill'`, the production labels, with zero rows marked `synthetic` or `fabricated_zeroed`. A bar missing any OHLC field is skipped and recorded, never completed with an invented value. A bar whose volume field is absent would be stored with `volume_source='unknown'`, and none occurred.
+
+VENUE AND FEED: Alpaca, SIP historical, `/v2/stocks/bars`, `timeframe=1Day`, `adjustment=all`, pulled 2026-07-26, span frozen at 2016-01-01 to 2026-07-24. The asset list came from `/v2/assets`, the calendar from `/v2/calendar`, the actions from `/v1/corporate-actions`. All four endpoints are recorded in `analysis_meta`.
+
+VOLUME SCOPE, RECORDED AS A STANDING CAVEAT: this volume is CONSOLIDATED SIP, covering every US venue. The live engine path reads single-venue IEX volume, a small fraction of consolidated. The fee-model session established the two are not comparable, and `analysis_meta.volume_scope_note` now says so inside the database so no future result can quote a volume figure without meeting the warning.
+
+1,457,680 daily rows carry volume zero. These are venue-reported zeros on sessions where a listed name did not trade, not fabrications, and every volume consumer must read zero as not-measured-above-zero rather than as a measured zero.
+
+### TASK 5, THE CONFIGURATION AND WHY
+
+THE TRADEOFF, decided before pulling. The host has 14 GB of RAM and 390 GB free disk, so disk was never the binding constraint and RAM was never touched by a streaming loader. The real currencies are wall time and API calls. A calibration pull of 200 random non-OTC symbols measured 1,406 daily rows per symbol at 9,144 rows per second, projecting 22.0M rows, 4.35 GB and about 40 minutes for the whole pool. The same pool at 5-minute granularity would be roughly 78 times larger, about 340 GB, and days of pulling. Cross-sectional work ranks instruments against each other and needs hundreds of names and years of history far more than it needs intraday resolution, so DAILY BARS ACROSS THE WHOLE POOL was chosen over intraday bars across a subset. History runs to the source's floor at 2016-01-04 because there is nothing earlier to have.
+
+FINAL CONFIGURATION: daily bars, 2016-01-04 to 2026-07-24, 2,654 trading sessions. Pool of 23,029 attempted symbols made of 12,785 active plus 2,835 inactive asset-list names plus 7,409 corporate-action recoveries. 19,744 returned bars.
+
+| measure | value |
+|---|---|
+| daily rows | 25,547,678 |
+| symbols with daily bars | 19,744 |
+| dead tickers with an end marker | 6,648 |
+| listing segments | 20,008 |
+| membership rows | 62,000 over 124 formation dates |
+| corporate actions | 23,585 |
+| delisting events | 9,251 |
+| database size | 7.31 GB (was 652 MB) |
+| existing 5-minute rows, untouched | 3,306,485 |
+
+WALL TIME, measured: the main pool pull 3,804 s (63.4 min), the first recovery sweep and pull about 47 min, the second recovery pass about 5 min, segmentation 2 min 45 s, membership 13 min 50 s, corporate actions about 4 min, validation 6 min 24 s. About three hours end to end.
+
+MEMORY, sized per the 2026-07-25 convention: peak RSS measured twice on bounded runs at 99,916 kB and 99,356 kB, flat between a run that wrote no rows and one that wrote 416,401, which is the streaming design showing up in the measurement. `plan_workers` computed width 18 from 9,163 MB available with the stack down and 0 MB to reserve. WIDTH 1 WAS CHOSEN ANYWAY, and the reason is not memory: SQLite has a single writer and the work is network-bound, so a wider batch would contend rather than parallelise. Every stage ran inside `systemd-run --user --scope -p MemoryMax -p MemorySwapMax=0`, the pull at the convention's 124,195K and the analysis stages at 2 to 3 GB. Peak RSS of the analysis stages: segmentation 42,428 kB, membership 50,076 kB, validation 37,520 kB. The stack was DOWN at session start and never started, so nothing was crowded.
+
+WHERE IT LIVES AND HOW TO REBUILD IT: `analysis_bars.db` at the repo root, gitignored by the `*.db` rule, never committed. Rebuild with Alpaca credentials resolvable and the stack down:
+
+    python scripts/breadth_universe_20260726.py load
+    python scripts/breadth_universe_20260726.py recover
+    python scripts/breadth_universe_20260726.py segments
+    python scripts/breadth_universe_20260726.py universe
+    python scripts/breadth_universe_20260726.py actions
+    python scripts/validate_universe_20260726.py --expect-hash <production sha256>
+
+`load` refuses to write the production path. Both scripts open `market_ai_lab.db` read-only only.
+
+### TASK 6, VALIDATION
+
+HOW A GAP IS REPRESENTED: **by the absence of a row.** No placeholder is ever written for a session a symbol did not trade, so a gap cannot be mistaken for a price at query time. Distinguishing one from a real value is a join against `trading_calendar`, which holds all 2,654 sessions. The 2026-07-26 capacity round found a pandas pad default fabricating signals inside the 417-day SOL hole, and absence is the representation that makes that class of error impossible at the storage layer.
+
+| check | result |
+|---|---|
+| bar dates not in the trading calendar | 0 rows, 0 dates |
+| missing bars inside a listing segment, all 1,187 members | 0 |
+| symbols with a missing bar inside a segment | 0 |
+| high below open or close | 0 |
+| low above open or close | 0 |
+| high below low | 0 |
+| negative volume | 0 |
+| non-positive close | 1,420 rows, 2 symbols |
+| rows with fabricated or synthetic volume | 0 |
+| production database sha256 | 97f58dd4… matches the pre-load hash exactly, frozen |
+
+GAPS AND THEIR CAUSES: only three long gaps exist among members, all attributed to ticker reuse or relisting, all detected as segment boundaries: APC 1,636 sessions, GSX 1,095, FLY 1,007. No unexplained long gap survives.
+
+THE NON-POSITIVE CLOSES: PRSR and LDTC each carry 710 rows where open, high, low and close are all zero. These are venue-emitted placeholder bars. Neither symbol is a universe member and neither could be, because the 5.00 USD median-close floor refuses them. They are reported here and left in place unaltered rather than deleted, per the append-only rule the SOL/USD postmortem set.
+
+SYMBOLS WITH INSUFFICIENT HISTORY: 10 members carry fewer than 252 daily bars. Five are genuine recent listings (SNDK 2025 spin-off, MDLN 2025 IPO, Q 2025 spin-off, FIG, STRC, BLSH). One is a source limit worth naming: **AZN serves only 120 bars, all from 2026-02-02**, although AstraZeneca traded throughout the span. A listing-venue change truncates what the source serves, so AZN's pre-2026 history is simply not available here and the name enters the universe only in 2026.
+
+### EVERY EXCLUSION, WITH ITS REASON
+
+| stage | reason | rows | distinct symbols |
+|---|---|---|---|
+| pool | `otc_no_sip_bars`, SIP serves OTC no bars (60-name sample returned zero) | 17,490 | 17,478 |
+| pull | `invalid_symbol`, the venue refused the ticker (CUSIP-shaped placeholder, CVR, escrow, rights, contra, and Alpaca's own `_DELISTED` records, none of which serve bars) | 437 | 437 |
+| universe | `fund`, pooled vehicle excluded from an equity cross-section | 431,911 | 7,515 |
+| universe | `below_price_floor`, median window close under 5.00 USD | 159,484 | 5,559 |
+| universe | `thin_window`, fewer than 40 bars in the 60-session window | 36,938 | 15,298 |
+| universe | `listing_segment_break_in_window`, a reused ticker cannot be ranked on a joined series | 156 | 153 |
+
+3,285 pool symbols returned no bars at all: 2,818 corporate-action recoveries (mostly CUSIP-shaped acquiree placeholders), 464 inactive asset records, 3 active. Rank rejections are summarised rather than enumerated per symbol, since they are the bulk and carry no audit value.
+
+### GUARDS
+
+`tests/test_universe_rule.py`, 33 tests, all passing. The headline guard is `test_future_bars_cannot_move_an_earlier_membership`: it computes membership at a formation date, then rewrites the future so the least liquid name becomes the most traded in the market, recomputes, and asserts the earlier decision is byte-identical. MUTATION-TESTED, four mutations, each caught and each restored green: a window that includes the formation date fails the window guard, mean dollar volume instead of median fails the squeeze guard, dropping the segment-break rejection fails the reuse guard, and segmenting on calendar days instead of trading sessions makes a holiday read as a delisting and fails that guard.
+
+Full suite: pytest 1,030 passed, up from 997, no existing test touched.
+
+Live trading untouched and off. No RiskGate logic, no live-trading gate, no adaptive limit-weakening invariant, no Level 1 risk value, no strategy parameter, no threshold, no engine behavior changed. `market_ai_lab.db` opened read-only and hash-verified unchanged. No hypothesis tested, no signal generated. Queue untouched and unread.
+
+Changes: `backtest/universe.py` (new, the rule as pure functions), `scripts/breadth_universe_20260726.py` (new, loader with probe/load/recover/segments/universe/actions), `scripts/validate_universe_20260726.py` (new, validation), `tests/test_universe_rule.py` (new, 33 tests), RETURN.md, PROGRESS.md, CONTEXT.md. `analysis_bars.db` rebuilt and gitignored.
+Commit message: Load a broad hindsight-free equity universe into the analysis database with survivorship and corporate-action handling, no hypothesis tested, live trading untouched
+
 ## Prompt: Capacity-gated hypothesis round, structurally different families
 
 Date: 2026-07-26
