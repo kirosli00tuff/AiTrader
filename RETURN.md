@@ -11,6 +11,104 @@ Model:
 Prompt summary: one line.
 Changes: what changed.
 
+## Prompt: Cross-sectional hypothesis round against the breadth universe
+
+Date: 2026-07-26
+Model: Opus 5 (claude-opus-5, 1M context), as the session names.
+Prompt summary: six families have failed against buy and hold and the price-only space against 8 symbols is exhausted. Breadth now exists, so test the cross-sectional family properly. Task 0 apply the capacity gate to what can ACTUALLY be traded: Level 1 permits 5 open positions at 5 percent notional, so the tradeable implementation is a 5-name book which keeps the noise and discards the averaging the family relies on. Compute annual dollars at that size against the 2,500 USD floor before testing and reject on arithmetic, and report the textbook wide-book version alongside, labelled not tradeable, so the gap is quantified. Task 1 pre-register the closed list with mechanisms, signals, schedules, fills, metric, corrected bar and negatives, commit, then look. Task 2 use the universe machinery as built, keep delisted members in the book until they stop trading, handle terminal outcomes explicitly, distinguish a gap from a real value, and confirm realised attrition against the recorded 2.17 percent per year. Task 3 score as excess over buy and hold, paired and clustered, per unit of capital, with the leverage artifact stated. Task 4 the holdout is touched once. Task 5 negatives first, rank survivors by holdout evidence only, apply nothing.
+
+CONSTRAINTS HONORED: research only against analysis_bars.db, opened read-only. Live trading stays off. No RiskGate logic, no live-trading gate, no adaptive limit-weakening invariant, no Level 1 risk value, no strategy parameter, no threshold, no engine behavior touched. Parallelism sized from measured RSS under a systemd-run MemoryMax scope, stack checked first. Nothing applied.
+
+### TASK 0, THE CAPACITY GATE APPLIED TO WHAT CAN ACTUALLY BE TRADED
+
+LEVEL 1 AS SHIPPED, read from config/default_config.yaml: `max_open_positions_total: 5`, `max_trade_notional_cap_pct: 0.05`, `default_risk_per_trade_pct: 0.005`. At 100,000 equity that is 5,000 USD per position and 25,000 USD deployed at a full book, 25 percent of capital.
+
+THE ARITHMETIC THAT DECIDES THIS FAMILY. The floor is 2,500 USD per year. Deployed capital is 25,000. So the required return is 10.0 percent per year ON DEPLOYED CAPITAL, and it must be EXCESS, not total. The reason is the benchmark session's standing conclusion: the same 25,000 in SPY earned 17.7 percent per year over the holdout with no system and no operational risk, so a book that merely earns equity beta has produced no capacity at all. Total-return capacity is reported beside it and is not the test.
+
+FEES DO NOT DECIDE THIS FAMILY, and that is worth stating because they decided the last one. The equity round trip is 1.3 bp (0.15 bp regulatory plus 0.5 bp spread per side). A full monthly turnover of the 5-name book is 60 round trips per year on 5,000 each, 300,000 USD of round-trip notional, 39 USD per year. Against a 2,500 USD floor that is 1.6 percent of the hurdle. The crypto families died on a 50 bp round trip. This family cannot.
+
+THE TRAP, STATED BEFORE ANY CODE RUNS. A cross-sectional strategy earns its result by averaging a small per-name edge across many names. Level 1 permits 5 positions, so the tradeable implementation is the top 5 of 500, which keeps the full idiosyncratic noise and discards exactly the averaging the family depends on. Concentration does not raise the expected edge much and it multiplies the variance by an order of magnitude.
+
+REJECTIONS ON ARITHMETIC, with numbers. Generous long-leg excess over market for large-cap US names, post-2000 magnitudes:
+
+| candidate | generous documented long-leg excess | annual USD on 25,000 | verdict |
+|---|---|---|---|
+| 12-1 cross-sectional momentum | 3.0 %/yr | 750 | 3.3x BELOW the floor |
+| 1-month short-term reversal | 3.0 %/yr | 750 | 3.3x BELOW the floor |
+| low idiosyncratic volatility | 1.0 %/yr raw (the anomaly is risk-adjusted, not raw) | 250 | 10x BELOW the floor |
+| 52-week high proximity | 3.0 %/yr | 750 | 3.3x BELOW the floor |
+
+ALL FOUR FAIL THE PRE-TEST CAPACITY ARITHMETIC. Even at a doubled 6 percent per year the figure is 1,500 USD, still short. Clearing 2,500 needs 10 percent per year of excess on the long leg in large caps, which no documented cross-sectional equity anomaly delivers.
+
+THE DECISION, STATED IN ADVANCE RATHER THAN AFTER. All four are MEASURED anyway. The reason is that this round exists to test the family properly against the breadth universe that was built for it and to quantify the gap between the family's academic form and what this account can hold. A literature claim is weaker evidence than a measurement on this actual universe. The verdict rule below requires BOTH the benchmark bar AND the measured capacity floor, so nothing that failed here can become a survivor on significance alone. Significance without capacity is a finding, not a strategy.
+
+POWER, COMPUTED BEFORE RUNNING SO A NEGATIVE CANNOT BE RE-READ AFTERWARDS. A single large-cap name carries roughly 8 to 9 percent monthly idiosyncratic volatility. A 5-name equal-weight book therefore carries roughly 3.8 percent per month, about 13 percent per year of tracking error against SPY. The holdout is 2.58 years, and t equals excess divided by tracking error times the square root of years, so reaching the corrected bar of 2.50 requires about 20 percent per year of excess. Nothing in this family is within a factor of six of that. THE TRADEABLE-SIZE TEST IS UNDERPOWERED BY CONSTRUCTION. The 50-name wide book carries roughly 6 percent per year of tracking error and needs about 9 percent per year, still above documented magnitudes but closer. Realised tracking error is reported beside these estimates. This is declared now so that a null result is read as what it is, an absence of evidence at this size, and not as evidence of absence.
+
+REJECTED BEFORE TESTING, for missing data or missing mechanism, recorded per the rule:
+
+| candidate | reason |
+|---|---|
+| Value (book-to-market, earnings yield) | UNTESTABLE. No fundamentals in the database. |
+| Post-earnings announcement drift | UNTESTABLE. No earnings dates in the database. |
+| Industry or sector momentum | UNTESTABLE. No sector classification in the database. |
+| Size | UNTESTABLE. No shares outstanding, so no market capitalisation, and the universe is already truncated to the top 500 by liquidity. |
+| Turnover (volume over shares outstanding) | UNTESTABLE. No shares outstanding. Dollar volume alone is a liquidity proxy, not turnover. |
+| Betting against beta | DUPLICATE. The tradeable long-only form selects nearly the same 5 names as lowest idiosyncratic volatility, so it would spend a correction slot on the same book. |
+| Calendar seasonality (same-month historical return) | MECHANISM. No behavioural story that persists for a fee-paying participant. |
+| Cross-sectional pairs or statistical arbitrage | NOT SPECIFIABLE AT LEVEL 1. Five positions is at most two pairs, which reduces to two idiosyncratic bets, and equity borrow cost is not in the fee model so a short leg cannot be costed honestly. |
+
+### TASK 1, PRE-REGISTRATION. The list closes at this commit.
+
+FOUR HYPOTHESES. Every one is a relative ranking across the 500-name cross-section, which is the information axis that did not exist before the breadth load and the reason this round is not a repeat.
+
+**H-F. CROSS-SECTIONAL MOMENTUM, 12-1.** SIGNAL at formation date f: total return from the close 252 sessions before f to the close 21 sessions before f, skipping the most recent month so short-term reversal does not contaminate it. Rank descending, take the top 5. MECHANISM: information diffuses gradually and the disposition effect makes holders sell winners too early, so prices under-react. It persists because closing it means holding names through momentum crashes, which is career risk a professional avoids.
+
+**H-G. SHORT-TERM REVERSAL, 1 MONTH.** SIGNAL at f: total return over the 21 sessions ending the session before f. Rank ASCENDING, take the 5 worst performers. MECHANISM: compensation for supplying liquidity to selling pressure that carries no information. It persists because the provider bears the risk that the move was informational after all, which is a real and unhedgeable loss.
+
+**H-H. LOW IDIOSYNCRATIC VOLATILITY.** SIGNAL at f: standard deviation of the residual from a regression of the name's daily returns on SPY's daily returns over the 60 sessions ending the session before f. Rank ascending, take the 5 lowest. MECHANISM: investors who want return but cannot borrow bid up high-volatility names, leaving low-volatility names cheap. It persists because arbitraging it requires exactly the leverage those investors lack.
+
+**H-I. 52-WEEK HIGH PROXIMITY.** SIGNAL at f: the close on the session before f divided by the highest close over the 252 sessions ending the session before f. Rank descending, take the 5 nearest their high. MECHANISM: anchoring. The 52-week high is a salient reference point and traders under-react to news that pushes a price through it. It persists because the anchor is a cognitive bias with no clean hedge. OVERLAP DECLARED: this shares the own-price-history information source with H-F, and the claim being tested is George and Hwang's, that the anchor beats the trailing return as a ranking signal. If both pass, their book overlap and return correlation are reported.
+
+COMMON MACHINERY.
+
+UNIVERSE: `universe_membership` under rule `U-LIQ-500-stk-w60-m40-p5`, taken at each formation date, never from a present-day list. Only members at formation date f are eligible for the month beginning at f. 124 formation dates, 1,187 distinct names.
+
+FORMATION AND HOLDING SCHEDULE: monthly. Enter at the OPEN of the formation date, hold to the OPEN of the next formation date, rebalance there. The ranking signal uses closes strictly before the formation date, so the open fill carries no lookahead.
+
+ENTRY AND EXIT: equal weight across the 5 names. A name that stays in the book across a rebalance is not traded and pays no fee. Fees apply per name that actually turns over, at the equity round trip of 1.3 bp from the fee model.
+
+DEATH INSIDE A HOLD, handled explicitly because dropping it is the survivorship error the breadth load exists to prevent: a member whose last bar falls inside the hold is CLOSED AT ITS LAST AVAILABLE CLOSE and its weight becomes cash earning zero for the remainder of the month. The name is never dropped and its realised gain or loss stays in the return. This is the conservative treatment: it assumes no merger premium beyond the last printed price and it takes a bankruptcy's loss in full. 112 such events exist across the 124 formation dates and the count and P&L attribution are reported per period.
+
+GAPS: a gap is the ABSENCE of a row. A member's return is computed between consecutive sessions on which it has a bar, and no price is ever forward-filled. A session where a live member has no bar contributes zero return for that weight. The count of gap-spanning returns is reported. Validation recorded zero missing bars inside member segments, so this is expected to be zero and is measured rather than assumed.
+
+FILL MODEL: open-to-open, one model. A registered SECONDARY using the formation date's close as the fill checks fill sensitivity and carries no verdict authority.
+
+SPLIT: FIT is every formation date before 2024-01-01, 93 months. HOLDOUT is 2024-01-01 onward, 31 months. Specification, inspection and every choice happen on fit alone. The holdout is evaluated ONCE, after every specification is locked, and its result is final.
+
+BENCHMARK: SPY buy and hold from this database, one entry and one exit at the 1.3 bp equity round trip amortised. STATED CORRECTION: SPY here is now DIVIDEND-adjusted, unlike the benchmark session which used split-only bars and disclosed a 1.2 to 1.5 percent per year understatement. The benchmark is therefore HIGHER than that session reported and the bar for beating it is correspondingly higher. That is a correction applied before looking, not a goalpost moved after.
+
+PRIMARY METRIC: paired daily excess, the strategy's return per unit of DEPLOYED capital minus SPY's daily return, in bp per day. Newey-West standard error with 21 lags, matching the hold length, because a monthly-rebalanced book induces serial dependence within its holding month. CLUSTERING UNIT: the calendar day, with the Newey-West lag structure carrying the within-month dependence.
+
+UNITS, per Task 3: the strategy deploys 1 unit of capital when in market against the benchmark's 1 unit, and the per-unit figure is the primary. The ACCOUNT-LEVEL figure is reported separately: Level 1 deploys at most 25,000 of 100,000, so the account holds 0.25 units against a fully invested benchmark, and the account-level excess is roughly one quarter of the per-unit excess minus the benchmark's return on the idle 75 percent. That is stated as an arithmetic fact about the limits and is NOT used to excuse a failure.
+
+BESIDE EVERY PRIMARY: annualised return, annualised volatility, Sharpe at rf 0 stated, maximum drawdown on the cumulative-sum path, time in market, turnover, realised fee drag, and realised in-period attrition against the universe's recorded 2.17 percent per year.
+
+WIDE BOOK, REPORTED ALONGSIDE AND LABELLED NOT TRADEABLE UNDER CURRENT LIMITS: the same specification with the top 50 names (the decile of 500) equal-weighted. A long-short decile spread, top 50 minus bottom 50, is reported as a descriptive figure only, labelled market-neutral and not comparable to a long-only benchmark, and no verdict rests on either.
+
+FAMILY AND BAR: 4 primary tests. Bonferroni family alpha 0.05, per-test 0.0125 two-sided, **|z| >= 2.50 on the holdout**.
+
+HOLDOUT CONTAMINATION, stated: the 2024 onward equity period has been read by P28, by queue 002, by the benchmark session and by the breadth load's validation, for OTHER questions. It has never been read for these four hypotheses. Any pass with holdout |z| in [2.50, 3.0) is pre-declared to read as passes-the-bar-weakened-by-holdout-reuse and would require fresh data before any application.
+
+VERDICT RULE: beats buy and hold requires holdout per-unit excess above zero at |z| >= 2.50, fit carrying the same sign, AND measured holdout capacity at or above 2,500 USD per year at 5-position Level 1 sizing. An interval spanning zero reads cannot-be-distinguished. An interval at or below zero fails. Measured capacity below the floor fails capacity regardless of z.
+
+WHAT COUNTS AS A NEGATIVE, stated in advance: every holdout interval spanning zero, every |z| under 2.50, and every measured capacity under 2,500 USD per year. **A negative on all four is the EXPECTED outcome given the Task 0 arithmetic and the power calculation, and it will be reported as the headline if it occurs.**
+
+RESOURCE RULE: single process over daily aggregates, RSS probed before the run, executed inside a `systemd-run --user --scope -p MemoryMax` scope per the 2026-07-25 convention. The database is 7.31 GB and is NOT loaded whole: only the 1,187 member symbols plus SPY are read, which is roughly 2.4M rows. Stack checked DOWN at session start with 9,671 MB available.
+
+### FINDINGS
+
+Pending. Written after the fit is inspected and the holdout is evaluated once.
+
 ## Prompt: Load a broad hindsight-free equity universe into the analysis database
 
 Date: 2026-07-26
