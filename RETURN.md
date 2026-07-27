@@ -107,7 +107,136 @@ RESOURCE RULE: single process over daily aggregates, RSS probed before the run, 
 
 ### FINDINGS
 
-Pending. Written after the fit is inspected and the holdout is evaluated once.
+**HEADLINE, the pre-declared expected outcome occurred: NOTHING SURVIVES. All four hypotheses fail. The highest holdout z in the round is H-F at 1.668 against a corrected bar of 2.50, and every 95 percent interval spans zero. But the reason they fail is new and it is not the reason the last six families failed. It is not fees, which cost 6 to 16 bp per year here against a 50 bp round trip that killed the crypto families, and it is not absent signal: H-F's 5-name momentum book returned 90.3 percent per year in the holdout against the benchmark's 19.7, the largest raw outperformance this project has ever measured. It fails because the Level 1 five-position limit gives that book 66.4 percent per year of realised tracking error, so reaching z equals 2.50 over a 2.55-year holdout requires 104 percent per year of excess. It delivered 70.5 and still could not clear the bar. THE BINDING CONSTRAINT ON THIS FAMILY IS THE POSITION LIMIT, NOT THE COST MODEL AND NOT THE DATA. A cross-sectional strategy earns its result by averaging a small per-name edge across many names, and five positions is one tenth of the width the family needs.**
+
+Pre-registration committed at `00c2d17` before any backtest code ran. Fit inspected first, holdout evaluated ONCE after, no specification changed in between. Runs probed at 94,032 kB RSS, single process, inside `systemd-run --user --scope -p MemoryMax -p MemorySwapMax=0`. Stack DOWN throughout. The 7.31 GB database was never loaded whole: only the 1,187 member symbols plus SPY were read, 2.4M rows.
+
+WIDTH 1, and the reason is not memory. `plan_workers` computed width 18 from 5,702 MB available with the stack down. Four hypotheses share one loaded tape in one process, so a wider batch would reload the tape four times to buy nothing.
+
+### PRIMARY TABLE, the tradeable 5-position book at Level 1 sizing
+
+Per-unit paired daily excess over SPY buy and hold, dividend-adjusted, 1.3 bp equity round trip inside, Newey-West SE at 21 lags, bar 2.50.
+
+| hypothesis | period | excess bp/day [95% CI] (z) | strat ann / vol / Sharpe / maxDD | bench ann | tracking error | capacity USD/yr | clears floor |
+|---|---|---|---|---|---|---|---|
+| H-F momentum | fit | +12.88 [-1.7, +27.4] (1.737) | 46.7% / 55.6% / 0.84 / -74.1% | 14.2% | 49.5% | 8,116 | yes |
+| H-F momentum | **holdout** | **+27.99 [-4.9, +60.9] (1.668)** | 90.3% / 73.8% / 1.22 / -55.3% | 19.7% | 66.4% | 17,634 | yes |
+| H-G reversal | fit | +8.95 [-3.2, +21.1] (1.445) | 36.7% / 52.9% / 0.69 / -123.7% | 14.2% | 44.8% | 5,638 | yes |
+| H-G reversal | **holdout** | **+3.25 [-16.2, +22.7] (0.328)** | 27.9% / 52.8% / 0.53 / -41.8% | 19.7% | 45.8% | 2,044 | no |
+| H-H low ivol | fit | -1.67 [-4.8, +1.4] (-1.057) | 10.0% / 15.1% / 0.66 / -22.9% | 14.2% | 10.1% | -1,052 | no |
+| H-H low ivol | **holdout** | **-0.25 [-5.9, +5.4] (-0.086)** | 19.1% / 11.7% / 1.64 / -12.5% | 19.7% | 11.9% | -157 | no |
+| H-I 52w high | fit | -0.57 [-5.8, +4.6] (-0.214) | 12.8% / 23.4% / 0.55 / -42.7% | 14.2% | 18.9% | -357 | no |
+| H-I 52w high | **holdout** | **+2.35 [-7.9, +12.5] (0.451)** | 25.7% / 27.9% / 0.92 / -24.7% | 19.7% | 25.0% | 1,477 | no |
+
+### THE WIDE BOOK, 50 names, LABELLED NOT TRADEABLE UNDER CURRENT LIMITS
+
+Level 1 permits 5 open positions. A 50-name decile at 5 percent notional would require 250,000 USD of positions against 100,000 of equity. **This book cannot be held by this account. No verdict rests on it. It exists to quantify the gap.**
+
+| hypothesis | period | excess bp/day (z) | strat ann | tracking error | per-unit capacity USD/yr |
+|---|---|---|---|---|---|
+| H-F | fit | +2.38 (0.763) | 20.2% | 21.9% | 1,502 |
+| H-F | holdout | +10.04 (1.455) | 45.0% | 31.7% | 6,325 |
+| H-G | fit | +0.17 (0.051) | 14.6% | 23.4% | 104 |
+| H-G | holdout | -3.30 (-0.774) | 11.4% | 20.5% | -2,080 |
+| H-H | fit | -0.39 (-0.483) | 13.2% | 6.3% | -248 |
+| H-H | holdout | -0.94 (-0.376) | 17.4% | 11.2% | -593 |
+| H-I | fit | -1.02 (-0.636) | 11.6% | 11.5% | -645 |
+| H-I | holdout | -1.57 (-0.576) | 15.8% | 13.6% | -989 |
+
+THE GAP, QUANTIFIED. Widening from 5 names to 50 cuts H-F's tracking error from 66.4 to 31.7 percent per year and cuts its excess from 27.99 to 10.04 bp per day. Concentration adds return AND noise in roughly equal proportion, so the z barely moves (1.668 against 1.455) and NEITHER width reaches the bar. Three of the four hypotheses are WORSE in the wide book than in the concentrated one, and H-G, H-H and H-I are all negative there in holdout. The averaging the family depends on does not rescue these signals in this universe over this period. It would take about 49 percent per year of excess for the 50-name H-F book to clear the bar, against the 25.3 it delivered.
+
+PRE-REGISTERED DESCRIPTIVE FIGURE, the long-short decile spread, market-neutral, NOT comparable to a long-only benchmark and NOT tradeable at Level 1 (it needs 100 positions):
+
+| hypothesis | fit ann / z | holdout ann / z |
+|---|---|---|
+| H-F | +9.0% (0.744) | **+38.9% (1.966)** |
+| H-G | +3.2% (0.391) | -16.7% (-1.007) |
+| H-H | -2.6% (-0.216) | -14.5% (-0.582) |
+| H-I | +2.5% (0.173) | -2.4% (-0.147) |
+
+H-F's spread carries the highest z in the entire round at 1.966, and it still fails the 2.50 bar. Reported because it was pre-registered, with no verdict attached.
+
+### THE POWER FINDING, measured against the pre-registered estimate
+
+The pre-registration estimated 13 percent per year of tracking error for a 5-name book and computed that reaching the bar would need about 20 percent per year of excess. **The realised tracking error is far worse, because the top 5 of a momentum ranking are not a typical 5-name book, they are the five most violently trending names in the market.**
+
+| hypothesis | realised holdout TE | excess needed for z=2.50 over 2.55 yrs | excess delivered | shortfall |
+|---|---|---|---|---|
+| H-F | 66.4 %/yr | 104.0 %/yr | 70.5 %/yr | 1.5x |
+| H-G | 45.8 %/yr | 71.7 %/yr | 8.2 %/yr | 8.8x |
+| H-H | 11.9 %/yr | 18.7 %/yr | -0.6 %/yr | 29.6x |
+| H-I | 25.0 %/yr | 39.2 %/yr | 5.9 %/yr | 6.6x |
+
+This was declared before running so it could not be reached for afterwards. It is the structural result of the round: at the tradeable width, the noise floor sits above any edge this family can produce, and no amount of additional history inside a 2.55-year holdout changes that.
+
+### ACCOUNT-LEVEL ARITHMETIC, stated and not used as an excuse
+
+Level 1 deploys at most 25,000 of 100,000 against a fully invested benchmark. The account holds 0.25 units against the benchmark's 1.
+
+| hypothesis | account ann (25% deployed) | benchmark ann | account excess | account excess USD/yr |
+|---|---|---|---|---|
+| H-F | 22.57% | 19.74% | +2.83% | +2,828 |
+| H-G | 6.98% | 19.74% | -12.76% | -12,760 |
+| H-H | 4.78% | 19.74% | -14.96% | -14,962 |
+| H-I | 6.41% | 19.74% | -13.33% | -13,327 |
+
+Only H-F beats a fully invested SPY at the account level, and only because a 90 percent per year book on a quarter of the capital happens to out-earn a 19.7 percent book on all of it. That is a statement about one realised path with 73.8 percent volatility and a 55.3 percent drawdown, not about an edge, and its interval spans zero.
+
+### VERDICTS, in the registered language
+
+- **H-F, 12-1 cross-sectional momentum: CANNOT BE DISTINGUISHED from buy and hold.** Holdout interval spans zero at z equals 1.668, under the 2.50 bar. Fit carries the same sign, and measured capacity clears the floor at 17,634 USD per year per unit and 2,828 at the account level. It fails on the significance leg alone, which makes it the closest thing this project has measured to a survivor and still not one. Its realised volatility is 73.8 percent per year against the benchmark's, and its maximum drawdown is 55.3 percent.
+- **H-G, 1-month short-term reversal: FAILS.** Holdout interval spans zero at z equals 0.328, and measured capacity is 2,044 USD per year, under the floor. The fit estimate of +8.95 bp per day decayed to +3.25 out of sample and the wide book turned negative.
+- **H-H, low idiosyncratic volatility: FAILS, and is separately DISQUALIFIED by a disclosed defect.** Holdout point estimate is negative at z equals -0.086 with capacity -157 USD per year. See the disclosure below: 51 of its 124 books contain an S&P 500 index ETF.
+- **H-I, 52-week high proximity: FAILS.** Holdout interval spans zero at z equals 0.451 and capacity is 1,477 USD per year, under the floor. The sign flips between periods, negative in fit and positive in holdout, so there is no persistence to point at.
+
+RANKED BY HOLDOUT EVIDENCE, never by fit: H-F (1.668), H-I (0.451), H-G (0.328), H-H (-0.086). **Nothing survives to rank.**
+
+### DISCLOSURES
+
+**1. A WARMUP DEFECT WAS FOUND AND FIXED DURING FIT INSPECTION, BEFORE THE HOLDOUT WAS TOUCHED, AND IT HELPED TWO HYPOTHESES.** H-F and H-I need 252 sessions of history, so their first book forms nine months after the universe starts. Those 191 pre-inception sessions were being scored as flat against an invested benchmark, charging the strategy for a period in which it could not exist. The committed spec says the signal requires 252 sessions of history, so excluding them moves the implementation toward the registration rather than changing it. The direction is uncomfortable and is therefore stated in full: it IMPROVED both affected hypotheses. H-F went from +11.09 bp per day (z 1.649) to +12.88 (z 1.737) and H-I from -1.05 (z -0.432) to -0.57 (z -0.214). H-G and H-H have no warmup and are byte-identical. Neither change approaches the bar and neither alters a verdict.
+
+**2. H-H IS CONTAMINATED BY AN INDEX ETF, AND THE CAUSE IS IN THE UNIVERSE, NOT IN THIS ROUND.** SPLG, an S&P 500 index ETF, appears in **51 of H-H's 124 five-name books** and in 57 of its wide books. An index fund has near-zero idiosyncratic volatility against SPY BY CONSTRUCTION, so a low-IVOL ranking selects it almost by definition. ROOT CAUSE: the breadth load's recovery path inserts a symbol with an EMPTY name and exchange, because a recovered ticker is by definition absent from the asset list that carries those fields, and `classify_fund("", "")` returns False. All 164 recovery-path members are therefore unclassifiable and any fund among them leaks into an equity cross-section. Hand-identified pooled vehicles among those 164: AMJ, RSX, FNGA, SPLG, four of 1,187 members. Contamination by hypothesis: H-F 0 of 115 books, H-I 0 of 115, H-G 1 of 124 (RSX in 2022-03), **H-H 51 of 124**. Only H-H is materially affected. The direction is toward the benchmark, since an S&P 500 tracker returns what SPY returns, so it drags H-H's excess toward zero rather than inflating it. NOT FIXED HERE, because the fix belongs to the universe classifier and the source cannot supply names for symbols it does not list, and because changing the universe after seeing fit results is the specification change Task 4 forbids. Recorded as an open flag.
+
+**3. BRK.A AND BRK.B OCCUPY TWO OF FIVE SLOTS IN SOME H-H BOOKS.** They are one company in two share classes, so that book holds 40 percent of its capital in a single issuer while believing it holds five names. The rule has no issuer-level de-duplication. Recorded, not fixed.
+
+**4. THE SPECIFICATION GAP I FILLED AT IMPLEMENTATION TIME.** The pre-registration named the signals and their lookbacks but not the per-hypothesis eligibility minima. These were fixed once, before any result was computed, and never tuned: H-F requires an actual bar at both anchors, H-G at both anchors, H-H at least 55 of 60 paired sessions with SPY, H-I at least 200 bars in the 252-session window plus a bar on the session before formation. Ineligible candidate-slots ran 848 for H-F, 734 for H-I, 149 for H-H and 114 for H-G out of roughly 57,500, so under 1.5 percent everywhere.
+
+**5. SIVBQ IS PRESENT, which partially corrects the previous session's caveat.** That session recorded SVB Financial as unrecoverable because a seized bank produces no merger record. Its post-bankruptcy ticker SIVBQ came in through the corporate-action sweep anyway and is one of the 164 recovered members. The caveat stands in class, since a seizure still leaves no merger record, but at least one worked example of it is in the database after all.
+
+### TASK 2, THE UNIVERSE MACHINERY
+
+Membership came from `universe_membership` at each formation date, never from a present-day list. 124 formation dates, 1,187 distinct names, of which 919 are still active, 104 are inactive in the asset list and 164 arrived through the corporate-action recovery.
+
+A MEMBER THAT DIES MID-HOLD is closed at its LAST AVAILABLE CLOSE and its weight earns zero for the rest of the month. The name is never dropped and its realised gain or loss stays in the return, which is the conservative treatment: no merger premium is assumed beyond the last printed price and a bankruptcy's loss is taken in full. Realised counts across the whole run: H-H 25 deaths in hold, H-I 7, H-F 6, H-G 1, and 21 to 37 in the wide books.
+
+REALISED ATTRITION MATCHES THE UNIVERSE EXACTLY. 84 in-hold deaths over 46,500 fit member-months and 28 over 15,500 holdout member-months, both **2.168 percent per year**, against the universe's recorded 2.17. The test periods carry the same death rate the database records, so no period-selection effect is hiding in the split.
+
+GAPS: **zero gap-spanning returns in every hypothesis and every book width.** A member's return is computed only between consecutive sessions on which it has a bar and no price is ever forward-filled. The count being zero confirms the breadth load's validation finding of zero missing bars inside member segments, measured here through a second, independent path.
+
+### COSTS AND FILLS
+
+Total fees across the whole run: H-F 58.2 bp, H-H 81.1, H-I 136.2, H-G 155.2, which over roughly 10 years is 6 to 16 bp per year on deployed capital. Turnover ran 224 name-changes over 115 rebalances for H-F and 597 over 124 for H-G, the most and least persistent signals respectively. **Fees are not the story in this family and that is a change from every prior round.**
+
+FILL SENSITIVITY, the registered secondary with no verdict authority: switching from open fills to close fills moves H-F's holdout excess from 27.99 to 27.98 bp per day (z 1.668 to 1.683), H-G from 3.25 to 4.41, H-H from -0.25 to -0.46 and H-I from 2.35 to 0.59. No verdict changes. Fill realism is not the story either.
+
+### WHAT THIS IMPLIES, per Task 5
+
+**The question this round answers is not whether these four signals work. It is whether a cross-sectional edge is REACHABLE at this account size under these limits, and the measured answer is no, for a reason that is arithmetic rather than empirical.**
+
+Every prior round failed on cost or on absent signal. This one failed on WIDTH. The cross-sectional family produces a small per-name edge and converts it into a result by averaging across many names. Level 1 permits five positions. At five names the realised tracking error against the benchmark ran 11.9 to 66.4 percent per year, and the excess needed to clear a Bonferroni-corrected bar over a 2.55-year holdout ran 18.7 to 104.0 percent per year. No cross-sectional equity anomaly documented anywhere produces returns in that range. The test cannot be won at this width, and that was computed and committed before it was run.
+
+The gap is now quantified rather than asserted. The academic form of this family needs 50 to 100 names, which is 10 to 20 times the position limit. At 50 names H-F's tracking error falls by half, and it still needs 49 percent per year to clear the bar.
+
+Three things follow, recorded for the operator and not acted on:
+
+1. **The position limit, not the fee model and not the data, is what blocks this family.** That is genuinely new. Level 1 is a hard rule in CLAUDE.md and this session does not propose changing it. It is recorded as a measured fact about what the limit costs.
+2. **H-F is the closest measurement this project has produced and it is still not a finding.** It beat the benchmark by 70.5 percent per year in the holdout at z equals 1.668. A result that large failing to reach significance is itself the evidence that the width is wrong, not the signal.
+3. **Seven families are now resolved against buy and hold with zero survivors**: the default stack, H-A, H-B, H-C, H-D, H-E, and now the cross-sectional family in four variants. The breadth axis has been opened and used. It did not produce a survivor at the tradeable width, and the reason it did not is now measured rather than suspected.
+
+Everything ran read-only against analysis_bars.db. Stack DOWN throughout. No engine file, threshold, parameter or behavior changed anywhere. Live trading untouched and off. Queue untouched and unread. **Nothing applied.**
+
+Changes: RETURN.md (pre-registration at 00c2d17, findings), PROGRESS.md (dated entry). Research script under gitignored `build/research_20260726b/xsec_round.py`.
+Commit message: Cross-sectional hypothesis round against the breadth universe, scored as a 5-position book at Level 1 sizing, holdout touched once, findings only, nothing applied
 
 ## Prompt: Load a broad hindsight-free equity universe into the analysis database
 
