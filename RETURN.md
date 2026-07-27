@@ -61,7 +61,108 @@ RESOURCE RULE: all writes go to a gitignored research database `build/research_2
 
 AMENDMENT, 2026-07-26 22:20 PDT, committed before any scoring and before waves C2 and E ran. Wave C1's servability check found Alpaca serves only 22 of the 55 curated crypto pairs (33 excluded, against 4 expected from the record), capping the original design at 58 evaluated clusters. The equity stratification therefore widens from step 14 (36 names) to step 7 (69 names, ranks 1, 8, ..., 477), restoring the committed 91-cluster design capacity. The amendment is driven ONLY by venue servability, an exogenous constraint known before any verdict was read or any window scored; the selection stays mechanical rank stratification, the per-symbol caps, schedule, horizon, scoring rule, bar, and ceiling are unchanged. Realised wave C1 began 22:08 PDT rather than the sketched ~23:15, which is what preserves the committed stronger property that C1 and C2 window groups do not overlap (last C1 evaluation plus 4 hours precedes the 03:30 C2 start).
 
-[Findings follow after collection and scoring.]
+### FINDINGS
+
+**HEADLINE, NEGATIVE, AND FOR THE FIRST TIME NOT A THIN-SAMPLE DODGE. 274 scorable directional calls across 80 symbol clusters, against a pre-registered floor of 272 calls and 66 clusters. Both thresholds met. Pooled excess over the unconditional move is MINUS 0.5 bp per call at z equals -0.046, interval [-22.5, +21.4], hit rate 50.0 percent. By the rule fixed before the first call that reads NO DEMONSTRATED PREDICTIVE VALUE at the design scale. The interval now EXCLUDES the 50 bp effect this session was powered to detect, which is a stronger statement than any prior round could make.**
+
+**THE PRIOR SAMPLE'S APPARENT EFFECT DOES NOT REPRODUCE. The 37-call record measured +92.3 bp pooled and +124.8 bp for GPT-5.5. Both sit OUTSIDE this sample's interval. The new crypto-only three-provider subset reads -18.7 bp, so the disappearance is not an equity-versus-crypto artifact: the effect is absent in the same asset class that produced it. The thin sample's positive numbers were noise, exactly as that session's own verdict allowed for.**
+
+Pre-registration committed at `b819bf7`, servability amendment at `8eb78be`, both before any scoring. Real spend 10.87 USD against the 120 USD ceiling.
+
+### TASK 1, REALISED BREADTH
+
+| measure | value |
+|---|---|
+| evaluations persisted | 389 |
+| provider rows | 1,167 |
+| evidence refusals (no provider contacted) | 63 |
+| **distinct symbol clusters evaluated** | **90** (21 crypto, 69 equity) |
+| **scored clusters (>=1 scorable directional call)** | **80** |
+| scorable directional calls | 274 |
+| max evaluations on any one symbol | 8 |
+
+Against the prior record's 9 clusters with LDO and AAVE carrying 13 percent each, the concentration is gone: no symbol exceeds 2 percent of the design. Crypto realised 21 of 55 curated pairs because Alpaca serves no bars for the other 33 (named in the wave summaries). Equities realised 69 of 69 rank-stratified names from the 2026-07-01 formation, with BLD excluded on servability and substituted by ARES through the committed next-rank rule.
+
+### TASK 2, THE PROMPT
+
+Byte-identical, verified rather than asserted. The current `short_term_system(0.60)` render hashes to b55817f5d990ae00, matching all 70 recorded evidence-v2.1 rows in production and all 389 rows collected here. One distinct system prompt across the whole new sample. The collector re-checks the hash before every wave and aborts on drift.
+
+### TASK 3, PER PROVIDER, AND THE OUTAGE THAT SHAPED THIS RUN
+
+**TWO PROVIDERS RAN OUT OF QUOTA MID-RUN, AND THIS IS THE RUN'S LARGEST DEFECT.** GPT-5.5 began returning HTTP 429 "You exceeded your current quota" at 03:30 PDT and failed on 315 of 389 calls. Gemini hit the same condition at 08:16 and failed on 73. Claude Opus errored twice in 389. This is billing exhaustion on the operator's accounts, not model behaviour, and the GPT-5.5 error rate must never be read as a provider-quality figure.
+
+| provider | rows | errors | flat | directional | flat % | directional % |
+|---|---|---|---|---|---|---|
+| claude-opus-4-8 | 389 | 2 | 239 | 148 | 61.4 | 38.0 |
+| gemini-3.1-pro-preview | 389 | 73 | 209 | 107 | 53.7 | 27.5 |
+| gpt-5.5 | 389 | **315** | 55 | 19 | 14.1 | 4.9 |
+
+**ON THE CLEAN THREE-PROVIDER SUBSET THE RECORDED RATES REPLICATE ALMOST EXACTLY.** Restricting to the 73 evaluations where all three answered: Opus flat 82.2 percent against the recorded 81.3, Gemini flat 93.2 against 94.7, GPT-5.5 flat 75.3 against 70.7. Three independent numbers reproducing on a fresh sample is the strongest evidence in this session that the recorded abstention behaviour is real and stable.
+
+**AND THE ABSTENTION RATE IS AN ASSET-CLASS PROPERTY, WHICH IS NEW.** On crypto both models abstain heavily (Opus 82 percent flat, Gemini 93). Across the full run, three quarters of which is equities, Opus falls to 61 percent flat and Gemini to 54. Gemini's directional rate rises fivefold, from 6.8 percent on crypto to 27.5 overall. The prior record was 24 of 26 crypto symbols, so it measured the abstentive regime and generalised it. It does not generalise.
+
+### TASK 4, SCORED AT THE FOUR-HOUR HORIZON
+
+Excess over the symbol's unconditional mean 4-hour move, clustered on symbol, fees at 50 bp crypto and 1.3 bp equity round trip.
+
+| unit | n | clusters | hit rate | mean signed | mean net | **mean excess [95% CI] (z)** |
+|---|---|---|---|---|---|---|
+| **pooled providers** | **274** | **80** | **50.0%** | +8.1 bp | -1.6 bp | **-0.5 [-22.5, +21.4] (-0.046)** |
+| claude-opus-4-8 | 148 | 72 | 44.6% | -3.9 | -11.5 | **-13.3 [-39.5, +12.9] (-0.994)** |
+| gemini-3.1-pro-preview | 107 | 65 | 58.9% | +26.8 | +21.4 | **+18.6 [-7.3, +44.5] (1.410)** |
+| gpt-5.5 | 19 | 11 | 42.1% | -3.5 | -53.5 | **-8.7 [-59.7, +42.4] (-0.333)** |
+| composed council | 187 | 80 | 50.8% | +8.9 | -1.0 | **+0.8 [-23.0, +24.7] (0.069)** |
+
+A 50.0 percent hit rate on 274 calls is a coin flip to one decimal place. Gemini carries the only positive point estimate, does not approach the 2.50 bar, and its interval spans zero. Every net figure is at or below zero, so nothing here is tradeable even before significance is considered.
+
+REGISTERED SECONDARY, 1 hour, no verdict authority: hit rate 55.5 percent, excess +6.7 bp at z 1.325, mean net **-0.7 bp**. The shorter horizon looks better on direction and is still consumed entirely by the fee.
+
+**CONFIDENCE CALIBRATION, THE ONE FINDING THAT MOVED IN A POSITIVE DIRECTION.** The prior session called the number decoration, with the two populated buckets identical at 68.8 percent and the highest bucket worst at 25. On 274 calls the ordering is monotone for the first time:
+
+| stated confidence | n | realised hit rate | mean excess |
+|---|---|---|---|
+| below 0.55 | 26 | 42.3% | -23.6 bp |
+| 0.55 to 0.60 | 110 | 49.1% | +1.3 bp |
+| 0.60 to 0.65 | 77 | 50.6% | -2.3 bp |
+| 0.65 and above | 61 | **54.1%** | +8.3 bp |
+
+Spearman against hits is 0.082, roughly z 1.35, under the corrected bar. The honest statement is that the confidence number now orders outcomes correctly and the ordering is not statistically established. Worth re-testing, not yet a finding.
+
+**AGREEMENT: THE PRIOR INVERSION DOES NOT REPLICATE, AND THAT SESSION WAS RIGHT TO REFUSE TO CALL IT A FINDING.** Recorded was 100 percent at agreement 1, 80 at 2, 25 at 3. Measured here: 52.2 percent (n=115, 69 clusters), 49.3 percent (n=69, 51 clusters), 33.3 percent (n=3). Essentially flat, top cell too small to read. Agreement neither predicts accuracy nor inverts.
+
+### TASK 5, DOES THE COUNCIL BEAT GPT-5.5 ALONE
+
+**THE FULL-SAMPLE TEST WAS DESTROYED BY THE QUOTA OUTAGE AND I WILL NOT REPORT IT AS AN ANSWER.** Across all 389 evaluations the council was directional 187 times while GPT-5.5 was flat in 168 of them, which would read as the council decisively escaping GPT-5.5. It reads that way only because GPT-5.5 could not answer. Stated as a finding it would be false.
+
+On the 73 evaluations where all three providers actually answered: 22 directional council verdicts, GPT-5.5 also directional in **18**, council directional while GPT-5.5 was flat in **4**, GPT-5.5 directional while the council was flat in **0**, and **zero sign disagreements**.
+
+So the recorded claim that the council IS GPT-5.5 survives as a strong tendency and fails as an identity. The prior figure was 22 of 22 with no exceptions; here another voter carried the verdict in 4 of 22, about 18 percent. The composition still cannot contradict GPT-5.5 when it speaks, since sign disagreements remain zero, but it can speak when GPT-5.5 does not.
+
+SPEND SHARE, on wave C1 where all three billed normally: GPT-5.5 is 0.617 USD of 2.857, so **the other two providers are 78.4 percent of spend and changed 18 percent of directional verdicts**. Gemini alone is 1.618 USD, 57 percent of a three-provider round and 2.6 times Anthropic's cost per call, because it is a thinking model spending output tokens; on crypto it is also the most abstentive of the three. Reported as the number, not as a recommendation.
+
+### TASK 6, THE VERDICT
+
+**Does the evidence now show the council predicts subsequent price movement? NO, at the scale this session was designed to detect.** 80 scored clusters and 274 directional calls clear the pre-registered floor, the pooled interval is [-22.5, +21.4] bp around a point estimate of -0.5, and the hit rate is 50.0 percent. A 50 bp edge is excluded. The prior +92.3 bp does not reproduce, including within crypto alone.
+
+What this does NOT establish: that no effect of any size exists. The interval admits roughly plus or minus 22 bp, and 22 bp does not survive a 50 bp crypto round trip or clear the 2,500 USD capacity floor at Level 1 sizing, so an effect small enough to hide inside this interval is not one this system could trade. The question is closed for practical purposes and not for arbitrarily small effects.
+
+Three things are established beyond the headline. The recorded abstention rates replicate on fresh data and are an asset-class property rather than a fixed model trait. The stated confidence number orders outcomes correctly for the first time, without reaching significance. And the council-is-GPT-5.5 result is a tendency of about 82 percent rather than an identity.
+
+Apply nothing. No architecture change. Live trading untouched.
+
+### DISCLOSURES, ALL STATED RATHER THAN BURIED
+
+1. **Two providers ran out of quota mid-run.** GPT-5.5 from 03:30 (315 of 389 calls) and Gemini from 08:16 (73 of 389). Wave C1 is the only fully three-provider data this session produced, and every per-provider and council-versus-member figure is caveated accordingly.
+2. **Wave E was stopped after round 4 of 6, by my decision, not by the ceiling.** With two providers exhausted the council had collapsed to one, and rounds 5 and 6 would have added zero new clusters against a power calculation that scales on clusters rather than calls, while taking recorded spend to about 113 of 120 for no information. Every equity symbol still carries 4 evaluations.
+3. **The spend figure in the run logs is inflated roughly sevenfold; the real number is 10.87 USD.** The collector charges a flat 0.08 USD whenever a call yields no priceable usage, deliberately over-charging failures so the ceiling errs safe. Of the 73.11 recorded, 62.24 is that penalty on rejected calls that bill nothing. The split is recoverable because each row records its note. The ceiling was never approached in real terms.
+4. **A production defect observed, not fixed here.** `providers.py` classifies every HTTP 429 as transient and retries once. A billing 429 cannot recover, so each exhausted call was made twice, doubling the wasted attempts. Worth a dedicated fix; changing it mid-run was the contamination path this session was avoiding.
+5. **My own error.** Stopping wave E I used `pkill -f "collect.py --wave e"`, whose pattern matched the shell running it, so the command killed itself mid-execution. The collector did stop cleanly between rounds with no evaluation cut mid-flight, verified by PID afterwards, but the stop was sloppier than it should have been and wave E's summary JSON was never written. Totals were reconstructed from the database.
+6. **The final round's horizon is 3h55m rather than 4h00m.** The newest equity bar at scoring was 19:15 UTC against a window closing at 19:18. The scorer takes the last close at or before the target, the prior session's exact convention, so this is consistent rather than a change.
+7. **No sector classification exists in the database**, so equity independence rests on liquidity-rank stratification across the full top-500 rather than on a sector table. Stated in the pre-registration and unchanged.
+8. **Anthropic prompt caching is confirmed active at scale**: 382,261 cache-read tokens against 95,436 uncached input, about 80 percent served from cache. OpenAI and Gemini cache fields were not instrumented, so their zeros mean not measured, never absent.
+
+Changes: RETURN.md (pre-registration, amendment, findings), PROGRESS.md (dated entry). Research collector and scorer under gitignored `build/research_20260727_wide/`. No engine file, threshold, parameter or config touched. Production database opened read-only twice, for the prompt byte-check and the descriptive pooled secondary.
+Commit message: Wide council evaluation across independent symbol clusters, scored at the four-hour horizon, findings only, nothing applied
 
 ## Prompt: Score every recorded council evaluation against subsequent price movement
 
