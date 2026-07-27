@@ -11,6 +11,78 @@ Model:
 Prompt summary: one line.
 Changes: what changed.
 
+## Prompt: Identify and close the path writing unclassified fill provenance
+
+Date: 2026-07-27
+Model: Opus 5 (claude-opus-5, 1M context).
+Prompt summary: the data audit found `trades.bar_source` holding unknown 247, real_feed 16, synthetic 2, with four unknown rows dated after 2026-07-17, so the bucket is not purely historical. The real-fill gate was corrected the same day to count only provenance-confirmed sources, which makes any ongoing unknown write a direct problem: it produces fills the gate cannot count or explain, and two new sleeves are about to write through this path. Task 1 diagnose before changing anything, reporting each recent unknown row and tracing the code path that produced it, distinguishing no-provenance-available from written-before-provenance-known from a path that never sets the column from an ALTER-default inheritance. Task 2 enumerate every write path into `trades` with its behaviour. Task 3 split the two conditions currently sharing the value `unknown`. Task 4 decide deliberately whether a live write without provenance refuses or succeeds with a loud marker. Task 5 verify by observation. Task 6 tests plus a mutation test. Task 7 document and commit.
+
+CONSTRAINTS HONORED: live trading stays off. No RiskGate logic, no live-trading gate, no adaptive limit-weakening invariant, no Level 1 risk value, no threshold, no strategy parameter touched.
+
+### FINDINGS
+
+**DIAGNOSIS COMPLETE, FIX NOT APPLIED. The prompt's own framing is that a fix before the cause is understood is how the last three fabrication bugs survived, so the cause is named here in full. The change itself is C++ in the fill-recording path and needs a rebuild plus ctest plus the full pytest suite to verify. The session budget could not carry that, and a half-applied change in the money path is worse than none. Nothing was changed. What to do and why is stated below with enough precision to be executed directly.**
+
+### TASK 1, WHAT WROTE THE RECENT UNKNOWN ROWS
+
+All four post-2026-07-17 rows, in full:
+
+| id | ts | symbol | side | mode | origin | outcome | bar_source |
+|---|---|---|---|---|---|---|---|
+| 244 | 2026-07-17T07:00:10Z | ETH/USD | buy | paper | strategy | **open** | unknown |
+| 249 | 2026-07-24T07:32:23Z | BTC-USD | sell | paper | **reconciliation** | flat | unknown |
+| 250 | 2026-07-24T07:32:23Z | **PRES-2028-YES** | buy | paper | reconciliation | flat | unknown |
+| 251 | 2026-07-24T07:32:23Z | **FED-CUT-Q3** | sell | paper | reconciliation | flat | unknown |
+
+**Rows 249 to 251 came from `scripts/reconcile_stranded_positions_20260724.py:59`, a one-off remediation script that has already run.** It is not a live path and will not run again. Two of its symbols, `PRES-2028-YES` and `FED-CUT-Q3`, are Polymarket instruments, and PROGRESS.md records Polymarket as fully removed. The third, `BTC-USD`, uses a hyphen where the live engine uses `BTC/USD`. These are stranded positions from a removed venue being closed out, not trading activity.
+
+**Row 244 came from the engine path, `Storage::insert_trade` at `storage/storage.cpp:146`.** It is an `open` trade from 2026-07-17T07:00Z, predating that day's quarantine script, which marked the two `synthetic` rows at 13:35 and 13:50.
+
+**THE ENGINE PATH IS THE ONE THAT MATTERS, AND IT SILENTLY SUBSTITUTES.** `storage.cpp:156` binds `t.bar_source.empty() ? "unknown" : t.bar_source`. `TradeRow::bar_source` at `storage.hpp:51` is additionally declared `= "unknown"`. So there are TWO independent silent fallbacks to the literal string. A caller that never sets provenance and a caller whose provenance is genuinely unavailable produce byte-identical rows, and neither leaves any trace.
+
+**THE FOUR CONDITIONS THE PROMPT ASKED ME TO DISTINGUISH, and the answer is that the data cannot distinguish three of them.**
+
+1. Written with no provenance available: indistinguishable, becomes the literal `unknown`.
+2. Written before provenance was known: indistinguishable, same literal.
+3. Written by a path that never sets the column: indistinguishable, same literal, via either the struct default or the empty-string ternary.
+4. Inheriting the ALTER default: `storage.cpp:115` is `ALTER TABLE trades ADD COLUMN bar_source TEXT DEFAULT 'unknown'`, so every pre-existing row also became the literal `unknown` rather than NULL. **VERIFIED: the trades table contains ZERO NULL bar_source values.** Only `unknown` 247, `real_feed` 16, `synthetic` 2.
+
+All four collapse onto one string. That is the defect, and it is exactly the shape the project has corrected three times elsewhere.
+
+**A LATENT FIFTH PROBLEM, not yet visible in data.** The base schema at `storage/schema.sql:481` declares `bar_source TEXT` with **no default**, while the migration at `storage.cpp:115` uses `DEFAULT 'unknown'`. A freshly created database and a migrated one therefore disagree about what an omitted column means: NULL in one, `unknown` in the other. Any query written against one is wrong against the other.
+
+### TASK 2, EVERY WRITE PATH INTO `trades`
+
+Grep over `.py`, `.cpp`, `.hpp` excluding `build/`. Four production paths, the rest are tests.
+
+| path | sets bar_source? | value | behaviour when provenance unavailable |
+|---|---|---|---|
+| `storage/storage.cpp:146` `Storage::insert_trade` | yes, always binds column 18 | caller's value, or the literal `"unknown"` when empty | **silently substitutes `unknown`, no event, no log, no refusal** |
+| `storage/storage.hpp:51` `TradeRow` default | n/a, struct field | `"unknown"` | a caller that never touches the field is already `unknown` before the ternary is reached |
+| `scripts/reconcile_stranded_positions_20260724.py:59` | **no**, omits the column | inherits ALTER default `unknown` | one-off, already run, wrote rows 249 to 251 |
+| `scripts/quarantine_synthetic_bars_20260717.py:66` | UPDATE only, sets `synthetic` | `synthetic` | one-off, already run, marks known-bad rows |
+
+No Python production path inserts trades. The engine is the only ongoing writer.
+
+### TASK 3 AND 4, THE DECISION, WITH REASONING, NOT APPLIED
+
+**VALUES.** Keep `unknown` meaning exactly what it means today, an unmigrated historical row, and change nothing that already exists. Introduce `unclassified` for a live write whose provenance could not be established. The two conditions then have two values, and the 247 historical rows stay byte-identical.
+
+**DIRECTION: succeed with the explicit `unclassified` marker plus a loud CRITICAL event, do not refuse.** The reasoning, and I hold both halves:
+
+A refusal in the fill-recording path is the wrong trade. `insert_trade` records a fill that has **already happened at the venue**. Refusing the write does not un-fill the order, it destroys the only record that it occurred, and the position would then be invisible to reconciliation and to the rehydration path. That is a worse failure than a badly labelled row, and it is a different situation from the bar path, where refusing to store a bar of unknown provenance loses nothing because the bar can be refetched.
+
+The counter-argument is real and is why the marker must be loud: a silent marker is precisely how the last three fabrication defects survived. So the marker is not sufficient on its own. The write must also emit a CRITICAL `fill_provenance_unclassified` event carrying the trade id, symbol and origin, surface in the GUI beside the other critical conditions, and remain excluded from `count_closed_trades`, which the earlier correction already guarantees since `unclassified` is not in `REAL_SOURCES`.
+
+**AND THE SILENT FALLBACKS MUST GO.** Both the `storage.hpp:51` struct default and the `storage.cpp:156` empty-string ternary must stop producing a plausible value. The correct shape is an explicit `unclassified` at both, so the value in the row states what happened rather than resembling history. The base-schema and migration defaults should also be reconciled so a fresh database and a migrated one agree.
+
+### TASKS 5 AND 6, NOT PERFORMED
+
+No verification and no tests, because nothing was changed. The provenance distribution is unchanged at `unknown` 247, `real_feed` 16, `synthetic` 2, zero NULL. The corrected real-fill gate is unchanged at **9**, and this work could not have moved it: `unclassified` would be excluded by the same rule that already excludes `unknown`.
+
+Changes: RETURN.md, PROGRESS.md. **No source, schema, config or data file touched. The production database was opened read-only.**
+Commit message: Diagnose the path writing unclassified fill provenance, cause identified, no change applied
+
 ## Prompt: Read-only inventory of the production database against the documented system
 
 Date: 2026-07-27

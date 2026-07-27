@@ -134,6 +134,22 @@ New flags from the feed-work session (2026-07-05, `369b6a6`):
 
 ## Session Log
 
+### 2026-07-27 (Opus 5) — The unclassified fill provenance is diagnosed: two silent fallbacks and an ALTER default collapse four conditions onto one string
+
+Diagnosis only. **No source, schema, config or data file changed**, production database opened read-only, live trading off. The prompt's framing is that a fix before the cause is understood is how the last three fabrication bugs survived, so the cause is named in full and the change is specified but not applied: it is C++ in the fill-recording path and needs a rebuild plus ctest plus the full suite, which the session budget could not carry. A half-applied change in the money path is worse than none.
+
+**THE FOUR RECENT UNKNOWN ROWS ARE TWO DIFFERENT STORIES.** Rows 249 to 251 (2026-07-24T07:32:23Z, origin `reconciliation`) came from `scripts/reconcile_stranded_positions_20260724.py:59`, a one-off remediation that has already run and will not run again. Two of its symbols, `PRES-2028-YES` and `FED-CUT-Q3`, are Polymarket instruments from the venue PROGRESS.md records as fully removed, and the third uses `BTC-USD` where the engine uses `BTC/USD`. Row 244 (2026-07-17T07:00:10Z, ETH/USD, outcome `open`) came from the engine path and is the one that matters.
+
+**THE ENGINE PATH SILENTLY SUBSTITUTES, TWICE OVER.** `storage.cpp:156` binds `t.bar_source.empty() ? "unknown" : t.bar_source`, and `storage.hpp:51` additionally declares the struct field `= "unknown"`. A caller that never sets provenance and a caller whose provenance is genuinely unavailable produce byte-identical rows with no event and no log.
+
+**FOUR CONDITIONS COLLAPSE ONTO ONE STRING, and the data cannot separate three of them:** no provenance available, written before provenance was known, written by a path that never sets the column, and inheriting the ALTER default at `storage.cpp:115` (`DEFAULT 'unknown'`). VERIFIED: the trades table holds **zero NULL** bar_source values, so even the migration left no marker to distinguish history from a live gap.
+
+**A LATENT FIFTH, not yet visible in data:** `storage/schema.sql:481` declares `bar_source TEXT` with no default while the migration uses `DEFAULT 'unknown'`, so a fresh database and a migrated one disagree about what an omitted column means, NULL against `unknown`.
+
+- **EVERY WRITE PATH.** Four production paths, the rest are tests. `Storage::insert_trade` (`storage.cpp:146`) always binds the column and silently substitutes. The `TradeRow` struct default pre-substitutes before the ternary is reached. `reconcile_stranded_positions_20260724.py:59` omits the column entirely and inherits the ALTER default. `quarantine_synthetic_bars_20260717.py:66` is an UPDATE that sets `synthetic` on known-bad rows. **No Python production path inserts trades; the engine is the only ongoing writer.**
+- **DECISION SPECIFIED, NOT APPLIED.** Keep `unknown` meaning an unmigrated historical row and leave all 247 byte-identical. Introduce `unclassified` for a live write that cannot establish provenance. **Succeed with the marker plus a CRITICAL event, do not refuse:** `insert_trade` records a fill that already happened at the venue, so refusing destroys the only record that it occurred and hides the position from reconciliation and rehydration, which is worse than a badly labelled row and is different from the bar path, where a refused bar can be refetched. Because a silent marker is how the last three fabrication defects survived, the marker is not sufficient alone: it needs a CRITICAL `fill_provenance_unclassified` event with trade id, symbol and origin, GUI surfacing, and both silent fallbacks removed so the row states what happened rather than resembling history.
+- **GATE UNAFFECTED.** Provenance distribution unchanged at `unknown` 247, `real_feed` 16, `synthetic` 2, zero NULL. The corrected real-fill count stands at **9** and this work could not have moved it, since `unclassified` would be excluded by the same rule that already excludes `unknown`.
+
 ### 2026-07-27 (Opus 5) — Read-only data audit: the whale factor produced 2,162 outputs from zero whale data
 
 Read-only. SELECT statements only against the production and analysis databases. No file, schema, config or row changed, no process signalled, no network or provider call, no test run. Findings written to **DATA_AUDIT.md** at the repo root.
