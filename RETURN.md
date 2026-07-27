@@ -11,6 +11,48 @@ Model:
 Prompt summary: one line.
 Changes: what changed.
 
+## Prompt: Deactivate unmeasured factors by zero weight, correct the real-fill gate, remove the dead news mock, set the base-check gate's fail direction
+
+Date: 2026-07-27
+Model: Opus 5 (claude-opus-5, 1M context).
+Prompt summary: the audit found the enforced gate is not the documented one. Composed confidence is the weight-normalised mean of participating factors, so dnn_advisory and whale_signal, neither with demonstrated skill and both sitting below that mean, suppress trades while no threshold changes. The blocked removal session measured it: 716 of 716 evaluations moved and 386 crossed the 0.65 floor, all permissively, with legacy dnn_rl the largest single driver. THE APPROACH IS SHUT OFF, NOT REMOVE: every line of code stays and the layers are deactivated by weight so they stop participating in the mean, reversible if a future measurement justifies them. Task 1 pre-register the consequence honestly in both framings and commit. Task 2 establish what dnn_rl is before acting, then zero the four weights, preferring config over code. Task 3 replay against the pre-registration. Task 4 correct the RL real-fill gate, which counts 'unknown' provenance as real and reads 243 of 500 against six lifetime real-path exits. Task 5 remove the dead news mock. Task 6 decide the base-check gate's fail direction deliberately. Task 7 tests with two mutation tests. Task 8 document and commit.
+
+CONSTRAINTS HONORED: live trading stays off. No RiskGate logic, no live-trading gate, no adaptive limit-weakening invariant, no Level 1 risk value, no threshold, no strategy parameter touched. No code removed for the layer deactivation.
+
+### TASK 2 PRECONDITION, WHAT `dnn_rl` TURNED OUT TO BE. Established before Task 1 because the pre-registration depends on it.
+
+**`dnn_rl` IS A DEAD ARTIFACT OF A RENAME, NOT A LIVE WRITER.** It has **zero source references** anywhere in the tree: no Python, no C++, no config, no GUI. Its 2,100 rows run from 2026-06-30T00:42:21Z to **2026-07-02T12:59:14Z and stop**. `dnn_advisory` starts 2026-07-14T23:25:20Z. Nothing has produced a `dnn_rl` row for 25 days and nothing can, because no code emits the name.
+
+Consequences, both of which shape the pre-registration:
+- **It cannot be zeroed by config and needs no live action.** There is no `dnn_rl_factor_weight` key because there is no live factor. Setting a weight for a name nothing emits would be theatre.
+- **It contaminates the historical replay only.** The blocked session's headline of 386 floor crossings is a fact about the 2026-06-30 to 07-02 record, not about what the engine does now. The forward-looking effect is the record WITHOUT it.
+
+### TASK 1, PRE-REGISTRATION. Committed before any change.
+
+FACTORS BEING ZEROED, in `config/default_config.yaml` `model_weights`:
+- `dnn_advisory_factor_weight`: **0.15 -> 0.0**
+- `whale_signal_factor_weight`: **0.10 -> 0.0**
+- `rl_advisory_factor_weight`: already 0.0, confirmed and left, recorded so the set is complete
+- `dnn_rl`: no key exists and none is added, per the finding above
+
+EXPECTED REPLAY RESULT, stated in advance:
+
+| record | evaluations | composed confidence changes | crosses the 0.65 floor | direction |
+|---|---|---|---|---|
+| full historical record | 716 | **716** | **386** | all permissive |
+| current engine shape (no `dnn_rl`) | 58 | **58** | **42** | all permissive |
+
+**BOTH FRAMINGS ARE TRUE AND BOTH ARE RECORDED, because reporting only one would be dishonest.**
+
+1. **This makes the enforced gate match the documented one.** The Level 1 floor of 0.65 is documented as a confidence threshold on the system's judgment. Composed confidence is the weight-normalised mean of participating factors, so a factor with no demonstrated skill sitting below that mean lowers it and suppresses trades. Three measurement sessions found no skill in the council, the DNN has served a synthetic-trained champion throughout, and the whale layer has never been scored at all. Removing unmeasured drag from an average is not loosening a threshold, it is stopping the threshold from being enforced by factors that never earned a vote.
+2. **It is permissive relative to current behaviour on roughly half the historical record and on 72 percent of the current-shape record.** 386 of 716 historical evaluations, and 42 of 58 current-shape evaluations, cross the floor in the passing direction and none crosses in the failing direction. Whatever the justification, more candidates will clear the gate than would have cleared it yesterday.
+
+WHAT COUNTS AS A MISMATCH: any deviation from 716/386 on the full record or 58/42 on the current-shape record, or any evaluation crossing the floor in the FAILING direction. Per the prompt, a material difference stops the session rather than proceeding.
+
+NOT AN ARCHITECTURE CHANGE AND NOT A REMOVAL. Every code path stays. The layers remain wired, callable, and reactivatable by restoring a weight.
+
+[Findings follow.]
+
 ## Prompt: Remove the benched DNN, the whale layer, and the RL module
 
 Date: 2026-07-27
