@@ -11,6 +11,56 @@ Model:
 Prompt summary: one line.
 Changes: what changed.
 
+## Prompt: Wide council evaluation across independent symbol clusters
+
+Date: 2026-07-26 (session start 2026-07-26 21:55 PDT, 2026-07-27 04:55 UTC)
+Model: Fable 5 (claude-fable-5, 1M context).
+Prompt summary: the scoring session established that symbol diversity, not money, is the constraint on settling whether the council predicts price: 9 clusters recorded against 66 needed, LDO and AAVE carrying 10 calls each, and the council structurally identical to GPT-5.5. This session spends real credits under a hard 120 USD ceiling to collect the wide sample. Task 0 pre-register the symbol selection rule, cluster target, schedule, horizon, scoring rule, benchmark, clustering unit, significance bar, ceiling and negative criteria, commit before the first call, report the hash. Task 1 select for breadth: hindsight-free universe for equities, discovery universe for crypto, capped calls per symbol, target at least 66 clusters. Task 2 keep the evidence-v2.1 prompt and 4-hour framing byte-identical to the scored record. Task 3 call all three providers on every evaluation and record verdict, confidence, rationale and errors distinctly. Task 4 score exactly as the prior session did, clustered on symbol, with the confidence-calibration and agreement secondaries re-tested. Task 5 test the composed council against GPT-5.5 alone across the wide sample. Task 6 report negatives first, apply nothing, commit and push.
+
+CONSTRAINTS: live trading stays off. No RiskGate logic, no live-trading gate, no adaptive limit-weakening invariant, no Level 1 risk value, no strategy parameter, no threshold, no engine behavior touched. Evaluations are collected for measurement only and trade nothing. No architecture change. Hard spend ceiling 120 USD enforced before the first call.
+
+### TASK 0, PRE-REGISTRATION. The specification closes at this commit.
+
+SYMBOL SELECTION RULE, fixed before any call:
+- CRYPTO: the discovery universe's full curated list, `discovery.settings.crypto_universe` from config, 55 symbols. Eligibility is venue servability, nothing else: a symbol is included when Alpaca returns 5-minute bars for it within the last 24 hours at wave start, excluded and NAMED otherwise. No liquidity re-ranking to an active subset, because breadth is the point of this session. Known expected exclusions from the record: MANA/USD, RUNE/USD, ZEC/USD, APT/USD.
+- EQUITY: `universe_membership` under the hindsight-free rule `U-LIQ-500-stk-w60-m40-p5` at the LATEST formation date, 2026-07-01. Selection is liquidity-rank stratification across the whole book: ranks 1, 15, 29, ... step 14, giving 36 names spanning rank 1 to 491. A selected name with no fresh bars at the equity wave (delisted or halted since formation) is substituted by the next rank not already selected, and every substitution is recorded. The database carries NO sector classification (recorded by the cross-sectional round), so cross-sector independence is approximated by stratifying the full liquidity distribution rather than claimed from a sector table. Stated as a limitation up front.
+- Cap per symbol: 8 evaluations (crypto), 6 (equity). Maximum single-symbol share of the design is 8 of ~530, 1.5 percent, against LDO and AAVE's 13 percent each in the prior record.
+
+TARGET CLUSTER COUNT: at least 66 realised clusters. Design capacity 91 (55 crypto + 36 equity), expected realised 66 to 85 after servability exclusions. Distinction declared now: EVALUATED clusters (symbols receiving at least one full three-provider evaluation) will exceed SCORED clusters (symbols carrying at least one scorable directional call), because the recorded flat rate is high (175 of 225 provider rows). The 66 target is the power calculation's SCORED-cluster requirement. If flat-heavy symbols leave scored clusters short of 66, that is reported as the realised power, never papered over.
+
+EVALUATION SCHEDULE (times PDT, US equities closed until Monday 06:30):
+- Wave C1, crypto pass 1: begins ~23:15 Sun 2026-07-26. 4 evaluations per symbol, rounds spaced ~18 minutes.
+- Wave C2, crypto pass 2: begins ~03:30 Mon. Same shape. Separated from C1 by more than 4 hours so each symbol contributes two NON-OVERLAPPING window groups.
+- Wave E, equity: begins 10:15 ET Mon (07:15 PDT), after at least 8 fresh regular-hours 5-minute bars exist. 6 evaluations per symbol, rounds spaced ~20 minutes, last round no later than 12:00 ET so every 4-hour window closes inside regular hours before the 16:00 ET close.
+- Scoring runs once, after the last window closes (~13:00 PDT Mon), on a final bar backfill.
+
+CALL RULE: every evaluation calls ALL THREE providers (gpt-5.5, claude-opus-4-8, gemini-3.1-pro-preview) through the production `llm_consensus.consensus` path with production config untouched (per-provider timeout 30s, max_tokens 2048, one bounded transient retry). The Haiku base-check gate and the engine's two cost cuts are deliberately NOT consulted: they exist to SUPPRESS calls, and this session's purpose is measuring provider verdicts, so an always-proceed gate is passed and recorded as `source=measurement`. The COUNCIL EVIDENCE MINIMUM stays fully active: a call the evidence cannot answer is refused before any provider and recorded in `council_refusal`, exactly as production behaves. A provider verdict with `source=mock` (key resolution failure) aborts the run loudly; mocks are never counted.
+
+PROMPT: byte-identical to the scored record by construction, verified before this commit: the current `short_term_system(0.60)` render matches all 70 recorded evidence-v2.1 short_term rows exactly, sha256 b55817f5d990ae00. `PROMPT_VERSION` evidence-v2.1. Evidence is assembled by the same `llm_consensus.evidence.build_state` allowlist builder from a research database of real Alpaca bars (source `backfill`), with the observation fields (price from the latest venue trade, day high/low and prior close from the venue's daily bars) fetched live from Alpaca snapshots. news_sentiment is omitted (not measured), which the omission rule handles as it did on the recorded discovery evaluations.
+
+HORIZON: 4 hours, 48 five-minute bars after the evaluation timestamp, identical to the scored session. Entry is the first 5-minute close at or after the evaluation ts, exit the last close at or before entry plus 4 hours, unscorable when either is missing, no price ever forward-filled. Registered secondary at 1 hour, no verdict authority.
+
+SCORING RULE AND BENCHMARK, identical to the scored session and run by the same code lineage (`council_scoring.py` adapted only to read the research database): only provider rows with direction long or short are scored; signed return = direction sign times realised return; hit = signed above zero; net subtracts the fee model at the correct per-class rate (crypto 50 bp round trip taker, equity 1.3 bp). PRIMARY FIGURE: excess = direction sign times (realised return minus the symbol's unconditional mean 4-hour return over every overlapping window of that symbol's 30-day 5-minute research history). CLUSTERING UNIT: the symbol. Clustered standard errors with the g/(g-1) small-cluster correction. Effective sample size = scored cluster count, reported beside the raw call count. Reported per provider, pooled, and for the composed council.
+
+PRIMARY SAMPLE: this session's collection alone. A pooled reading combining the prior 37 scorable calls (same prompt version, same horizon, same rule) is reported as a REGISTERED SECONDARY labelled descriptive, because the prior record's concentration makes it a different design.
+
+SIGNIFICANCE BAR: 4 primary tests (pooled directional excess, per-provider excess, confidence calibration monotonicity, council against best member). Bonferroni family alpha 0.05, per-test 0.0125 two-sided, |z| >= 2.50.
+
+SECONDARIES RE-TESTED (no verdict authority): confidence calibration (bucketed hit rates plus Spearman), agreement-count accuracy (the prior sample's inverted 100/80/25 pattern), per-provider error, flat and directional rates against the recorded 71 of 75 flat for Gemini and 61 of 75 for Opus, and the council-equals-GPT-5.5 structural identity across the wide sample with the spend fraction the other two providers represent.
+
+WHAT COUNTS AS A NEGATIVE, declared in advance:
+- With at least 66 scored clusters and at least 272 scorable directional calls: an interval spanning zero or |z| under 2.50 reads NO DEMONSTRATED PREDICTIVE VALUE at the 50 bp design scale.
+- With 20 to 65 scored clusters: the sample is adequate only for the previously observed +92 bp scale; the verdict is limited to that scale and the 50 bp question stays open, reported as UNDERPOWERED FOR TARGET.
+- Below 20 scored clusters or 80 scorable directional calls: TOO THIN TO TELL, again, which is not evidence of absence.
+- A calibration curve flat within its intervals: the confidence number remains decoration.
+- Council directional set identical to GPT-5.5's: the council remains GPT-5.5, and the spend share of the other two is reported as the number it is.
+
+SPEND CEILING: hard 120 USD, enforced in the collector BEFORE each evaluation: if accrued spend plus a conservative 0.25 USD per-evaluation bound would exceed 120, collection stops and what was collected is reported. Accounting: every provider response's usage fields are priced per the table below; a response missing usage is charged a flat 0.08 USD, above any plausible real cost. Prices per million tokens: claude-opus-4-8 input 5.00 / output 25.00 / cache write 6.25 / cache read 0.50 (Anthropic published pricing); gpt-5.5 input 3.00 / output 15.00 (ASSUMED upper bound, deliberately conservative); gemini-3.1-pro-preview input 4.00 / output 20.00 (ASSUMED upper bound). Cross-check: the config's measured `council_est_cost_per_call_usd` 0.056 per evaluation round (measured 2026-07-21) prices the ~530-evaluation design at ~30 USD, so the ceiling carries 4x headroom. Alpaca data calls are free. No trading call of any kind is made.
+
+RESOURCE RULE: all writes go to a gitignored research database `build/research_20260727_wide/council_wide.db` (bars via the production backfill path, evaluations via the production `llm_consensus.persist` writer). The production database is opened read-only exactly twice: the prompt byte-identity check above and the pooled secondary scoring. The trading stack is not touched, no engine process is started, live trading stays off.
+
+[Findings follow after collection and scoring.]
+
 ## Prompt: Score every recorded council evaluation against subsequent price movement
 
 Date: 2026-07-26
