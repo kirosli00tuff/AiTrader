@@ -134,6 +134,25 @@ New flags from the feed-work session (2026-07-05, `369b6a6`):
 
 ## Session Log
 
+### 2026-07-27 (Opus 5) — Unmeasured factors deactivated by zero weight, and the real-fill gate was counting synthetic fills
+
+Follow-up to the blocked removal. Live trading off, no RiskGate logic, no live-trading gate, no adaptive limit-weakening invariant, no Level 1 risk value, no threshold, no strategy parameter touched. **No code removed.** pytest **1,068 passed**, up from 1,067. Pre-registered at `1d1dcac` before any change.
+
+**SHUT OFF, NOT REMOVED, AND THE REPLAY MATCHED THE PRE-REGISTRATION EXACTLY.** `dnn_advisory` 0.15 to 0.0 and `whale_signal` 0.10 to 0.0 in `model_weights`, config only. `signal_engine::combine` drops any factor at `w <= 0.0` before the numerator or the denominator, so a zero weight is precisely a deactivation and every code path stays callable. Restoring a weight reactivates the layer with no other change.
+
+| record | evals | confidence changed | floor crossings | pass / fail | matches pre-registration |
+|---|---|---|---|---|---|
+| full historical | 716 | 716 | 386 | 386 / 0 | **YES, 716/386 as registered** |
+| current engine shape | 58 | 58 | 42 | 42 / 0 | **YES, 58/42 as registered** |
+
+**BOTH FRAMINGS RECORDED, because reporting one alone would be dishonest.** This makes the enforced gate match the documented one, since a factor with no measured skill was dragging the weight-normalised mean and suppressing trades while no threshold moved. It is also permissive against yesterday's behaviour on 54 percent of the historical record and 72 percent of the current shape, every crossing in the passing direction and none failing.
+
+- **`dnn_rl` IS A DEAD RENAME ARTIFACT.** Zero source references in any language, rows running 2026-06-30 to 2026-07-02 and stopping, with `dnn_advisory` starting 2026-07-14. Nothing has written it for 25 days and nothing can, so it needed no config key and got none. Its only effect is on historical replay, which means the blocked session's headline 386 describes the June 30 to July 2 record rather than current behaviour.
+- **THE REAL-FILL GATE WAS COUNTING SYNTHETIC FILLS AND NOW READS 9, NOT 249.** Provenance of closed strategy fills is `unknown` 240, `real_feed` 9, `synthetic` 1. The old filter excluded only `synthetic` and treated `unknown` as real, but the column arrived by an ALTER defaulting every pre-existing row to `unknown` and that bucket is dominated by the offline loop. The gate was failing toward PERMITTING against a CLAUDE.md hard rule. It now counts only `real_feed` and `backfill`, imported from `market_data.tradeable.REAL_SOURCES` rather than re-declared, because the tradeable invariant test correctly fails any file that re-derives that set. **RL activation stands at 9 of 500.**
+- **TESTS.** One added (`test_an_unprovable_fill_does_not_count`), five updated to the new shape and none silenced, each named in RETURN.md with its reason. The provenance filter is mutation-tested: reverting it fails 3 tests across 3 files, restoring passes.
+- **THREE TASKS NOT COMPLETED, named rather than implied.** The news mock (`news_ingestion.hpp:29`) is untouched, being C++ and needing a rebuild the budget could not carry. The base-check gate's fail direction is unchanged, with the analysis recorded: failing closed is right in principle, since a gate that cannot run screens nothing and sends every candidate to a paid council unscreened, but the offline demo path has no gate key by design and runs free mocks, so a blanket fail-closed would change offline behaviour and the correct fix needs its own tests. The C++ zero-weight and participation tests are not added; the behaviour is verified by replay and by inspection at `factor_engine.cpp:184-196`, and the error case is already covered by `test_fast_tier_confidence.cpp` Case 4.
+- **AUDIT.md is dated 2026-07-12 and contains no Task 4 or 4B section.** Every claim attributed to it was verified directly against the code and the database instead, and each held.
+
 ### 2026-07-27 (Opus 5) — The three-layer removal was blocked by its own safety proof, and nothing was removed
 
 Removal session that did not remove. Live trading off, no RiskGate logic, no live-trading gate, no adaptive limit-weakening invariant, no Level 1 risk value, no threshold, no strategy parameter touched. **No source file, config, schema, test or GUI file was touched at all.** Production database opened read-only. Suite unchanged at 1,067.

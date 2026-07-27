@@ -51,7 +51,56 @@ WHAT COUNTS AS A MISMATCH: any deviation from 716/386 on the full record or 58/4
 
 NOT AN ARCHITECTURE CHANGE AND NOT A REMOVAL. Every code path stays. The layers remain wired, callable, and reactivatable by restoring a weight.
 
-[Findings follow.]
+### FINDINGS
+
+**HEADLINE. The deactivation is done and the replay matches the pre-registration exactly. The real-fill gate is corrected and reads 9 instead of 249. Suite green at 1,068, up 1. THREE TASKS WERE NOT COMPLETED and are named plainly below rather than implied: the news mock removal, the base-check gate's fail direction, and the C++ side of the test task. Nothing was half-done: every change landed with its tests green.**
+
+### TASK 2 RESULT, WHAT `dnn_rl` IS
+
+**A DEAD ARTIFACT OF A RENAME, NOT A LIVE WRITER.** Zero source references in the entire tree, in any language. Its 2,100 rows run 2026-06-30 to **2026-07-02 and stop**; `dnn_advisory` starts 2026-07-14. Nothing has written the name for 25 days and nothing can. It therefore needs no config key and got none, and its only effect is on historical replay. The blocked session's headline of 386 crossings is a fact about the June 30 to July 2 record, not about current engine behaviour.
+
+DEACTIVATED IN `config/default_config.yaml` `model_weights`: `dnn_advisory_factor_weight` 0.15 -> **0.0**, `whale_signal_factor_weight` 0.10 -> **0.0**, `rl_advisory_factor_weight` already 0.0 and confirmed. Config-level only, per the instruction to prefer config over code. `signal_engine::combine` drops any factor with `w <= 0.0` at line 87 before it reaches the numerator or the denominator, so a zero weight is exactly a deactivation. **No code was removed and every path stays callable: restoring a weight reactivates the layer with no other change.** The stale `# sum = 1.00` comment is corrected to 0.75 with a note that `combine` re-normalises, so the remaining factors' relative weights are untouched.
+
+### TASK 3, REPLAY AGAINST THE PRE-REGISTRATION
+
+| record | evals | confidence changed | floor crossings | pass | fail | **matches pre-registration** |
+|---|---|---|---|---|---|---|
+| full historical record | 716 | 716 | 386 | 386 | 0 | **YES, exactly 716/386** |
+| current engine shape (no `dnn_rl`) | 58 | 58 | 42 | 42 | 0 | **YES, exactly 58/42** |
+
+Registered expectation was 716/386 and 58/42, all permissive, none failing. Observed is identical on both records. **No deviation, so the session proceeded.** Every crossing is in the passing direction and zero in the failing direction, which is the honest framing recorded in advance: this makes the enforced gate match the documented one, and it is permissive relative to yesterday's behaviour on 54 percent of the historical record and 72 percent of the current-shape record. Both remain true.
+
+### TASK 4, THE REAL-FILL GATE
+
+**CORRECTED COUNT: 9, previously 249.** The provenance breakdown of closed strategy fills is `unknown` 240, `real_feed` 9, `synthetic` 1. The old filter excluded only `synthetic` and counted `unknown` as real on the reasoning that historical fills predated the column and were genuine. That reasoning was wrong: the column arrived by an ALTER that defaulted every pre-existing row to `unknown`, and that bucket is dominated by the offline synthetic loop. The gate was failing toward PERMITTING, against a CLAUDE.md hard rule.
+
+`count_closed_trades` now counts only provenance-confirmed fills (`real_feed`, `backfill`), imported from `market_data.tradeable.REAL_SOURCES` rather than re-declared, because `tests/test_tradeable_invariant.py` correctly fails any file that re-derives that set and a second literal copy is how two halves of a system come to disagree about what "real" means. A database with no provenance column can confirm nothing and now counts nothing. **RL activation stands at 9 of 500, not 243 of 500.**
+
+### TASK 7, TESTS
+
+Suite **1,067 before, 1,068 after**, no test silenced. One test added: `test_an_unprovable_fill_does_not_count`, which pins that `unknown` and NULL provenance count zero while `real_feed` and `backfill` count.
+
+FOUR EXISTING TESTS UPDATED TO THE NEW SHAPE, each named with its reason, none weakened:
+- `test_real_fill_gate.py` fixture: now applies the `bar_source` ALTER exactly as production does, because the base schema predates it and without the column every case read zero for the wrong reason, hiding the origin filter under test.
+- `test_real_fill_gate.py::test_the_default_origin_is_strategy`: sets confirmed provenance so it keeps testing the origin default, which is its actual subject.
+- `test_feed_integrity.py::test_count_closed_trades_excludes_synthetic_bar_fills`: 2 -> 1, with the reasoning for why `unknown` no longer counts.
+- `test_dnn_pipeline.py::test_real_fills_uses_the_canonical_counter`: 2 -> 1, same cause.
+- `test_config_editor.py`: the comment-preservation marker moved from `# sum = 1.00` to `# sum = 0.75`, since that comment legitimately changed.
+
+**MUTATION-TESTED, the provenance filter.** Reverting to `COALESCE(bar_source,'unknown') <> 'synthetic'` fails 3 tests across 3 files, and restoring passes. The zero-weight exclusion was NOT mutation-tested, see below.
+
+### WHAT WAS NOT DONE, STATED PLAINLY
+
+Three items were not completed. The session ran out of context budget, and I stopped rather than start changes I could not test and document. Nothing is half-applied.
+
+1. **TASK 5, the dead news mock, NOT REMOVED.** `MockCatalystProvider` at `news_ingestion/news_ingestion.hpp:29` is untouched. It is C++ and its removal needs a rebuild plus a ctest run, which the remaining budget could not carry.
+2. **TASK 6, the base-check gate's fail direction, NOT CHANGED and the analysis is recorded for whoever takes it.** The gate fails open in three places in `llm_consensus/gate.py`: missing key (line 142), call error (line 151), unparseable output (line 159). The argument for failing CLOSED is strong and matches every prior correction in this system: the gate exists as a cost control, so a gate that cannot run screens nothing, and failing open sends every candidate to the full paid council unscreened, which is the amplification the gate exists to prevent. A skipped council round is free, recoverable, and cannot cause a bad trade, since the council is advisory and a skip yields a non-directional flat. **The complication I could not resolve safely in the remaining budget:** the offline demo path has no gate key by design and runs mock providers at zero cost, so a blanket fail-closed would suppress the mock council too and change offline behaviour. The correct change is probably to fail closed only when a REAL, paid council would follow, and that distinction needs its own tests.
+3. **TASK 7, the C++ half.** The zero-weight exclusion lives in `signal_engine::combine`, so pinning it and mutation-testing it needs a C++ test and a rebuild. The behaviour is verified by the Task 3 replay and by reading line 87, but it is not pinned by a test. The participation-exclusion test for an errored or exhausted provider is likewise not added, though the mechanism is verified intact by inspection at `factor_engine.cpp:184-196` and is already covered for the error case by `tests/test_fast_tier_confidence.cpp` Case 4.
+
+Also noted: **AUDIT.md is dated 2026-07-12, not 2026-07-27**, and contains no Task 4 or 4B section. I verified every claim attributed to it directly against the code and the database rather than relying on it, and each one held.
+
+Changes: `config/default_config.yaml` (two weights to zero, sum comment corrected), `ml_factor/real_dataset.py` (provenance-confirmed counting), `tests/test_real_fill_gate.py` (fixture migration, one new test, one updated), `tests/test_feed_integrity.py`, `tests/test_dnn_pipeline.py`, `tests/test_config_editor.py`, RETURN.md, PROGRESS.md, CONTEXT.md, CLAUDE.md. No code removed. No RiskGate logic, live-trading gate, adaptive invariant, Level 1 value, threshold or strategy parameter touched.
+Commit message: Deactivate unmeasured factors by zero weight and correct the real-fill gate to provenance-confirmed fills, no code removed, live trading untouched
 
 ## Prompt: Remove the benched DNN, the whale layer, and the RL module
 
