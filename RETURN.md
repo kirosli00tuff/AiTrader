@@ -59,6 +59,8 @@ SPEND CEILING: hard 120 USD, enforced in the collector BEFORE each evaluation: i
 
 RESOURCE RULE: all writes go to a gitignored research database `build/research_20260727_wide/council_wide.db` (bars via the production backfill path, evaluations via the production `llm_consensus.persist` writer). The production database is opened read-only exactly twice: the prompt byte-identity check above and the pooled secondary scoring. The trading stack is not touched, no engine process is started, live trading stays off.
 
+AMENDMENT, 2026-07-26 22:20 PDT, committed before any scoring and before waves C2 and E ran. Wave C1's servability check found Alpaca serves only 22 of the 55 curated crypto pairs (33 excluded, against 4 expected from the record), capping the original design at 58 evaluated clusters. The equity stratification therefore widens from step 14 (36 names) to step 7 (69 names, ranks 1, 8, ..., 477), restoring the committed 91-cluster design capacity. The amendment is driven ONLY by venue servability, an exogenous constraint known before any verdict was read or any window scored; the selection stays mechanical rank stratification, the per-symbol caps, schedule, horizon, scoring rule, bar, and ceiling are unchanged. Realised wave C1 began 22:08 PDT rather than the sketched ~23:15, which is what preserves the committed stronger property that C1 and C2 window groups do not overlap (last C1 evaluation plus 4 hours precedes the 03:30 C2 start).
+
 [Findings follow after collection and scoring.]
 
 ## Prompt: Score every recorded council evaluation against subsequent price movement
