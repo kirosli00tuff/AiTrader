@@ -11,6 +11,58 @@ Model:
 Prompt summary: one line.
 Changes: what changed.
 
+## Prompt: Record unclassified fill provenance explicitly with a critical event
+
+Date: 2026-07-27
+Model: Opus 5 (claude-opus-5, 1M context).
+Prompt summary: applies the change the 2026-07-27 diagnosis specified, nothing more. Keep `unknown` meaning an unmigrated historical row with all 247 rows byte-identical. Introduce `unclassified` for a live write whose bar provenance cannot be established. Such a write SUCCEEDS with the marker rather than refusing, because `insert_trade` records a fill that already happened at the venue and refusing destroys the only record it occurred. Because a silent marker is how three prior fabrication defects survived, every unclassified write emits a CRITICAL `fill_provenance_unclassified` event carrying trade id, symbol and origin, and surfaces in the GUI. Both silent fallbacks are removed: the ternary at `storage.cpp:156` and the struct default at `storage.hpp:51`. Task 1 resolve the latent schema disagreement between `schema.sql:481` (no default) and `storage.cpp:115` (`DEFAULT 'unknown'`). Task 2 apply and rebuild. Task 3 verify both paths by observation. Task 4 full ctest and pytest with a mutation test on the fallback removal. Task 5 document and commit.
+
+SCOPE DISCIPLINE CARRIED FROM THE PROMPT: do not re-diagnose, do not widen scope, do not resolve any question the diagnosis left open. If the diagnosis and the code disagree, stop and report rather than choosing.
+
+CONSTRAINTS HONORED: live trading stays off. No RiskGate logic, no live-trading gate, no adaptive limit-weakening invariant, no Level 1 risk value, no threshold, no strategy parameter touched.
+
+### FINDINGS
+
+**STOPPED BEFORE APPLYING ANYTHING. The diagnosis and the code disagree on Task 1's entire premise, and the prompt's instruction for that case is to stop and report rather than choose. No file was changed.**
+
+### THE DISAGREEMENT
+
+The diagnosis recorded, and the prompt repeats verbatim:
+
+> "storage/schema.sql:481 declares bar_source TEXT with no default while the migration at storage.cpp:115 uses DEFAULT 'unknown', so a fresh database and a migrated one disagree about what an omitted column means, NULL against unknown."
+
+**That is wrong, and I wrote it yesterday.** VERIFIED by reading the file:
+
+- `storage/schema.sql:481` sits inside `CREATE TABLE IF NOT EXISTS entry_decision`, not `trades`. It is that table's own `bar_source` column.
+- **`grep -n "bar_source" storage/schema.sql` returns exactly one line, 481.** There is no other occurrence in the file.
+- The `CREATE TABLE IF NOT EXISTS trades` block in `schema.sql` declares `id, ts, venue, symbol, market, category, side, qty, price, notional, fee, mode, pnl, outcome, combined_conf, combined_edge, decision_id, sleeve, origin`. **It declares no `bar_source` column at all.**
+
+So the column reaches `trades` by exactly one route, the ALTER at `storage.cpp:115`, on a fresh database and a migrated one alike. Both paths run the same statement with the same `DEFAULT 'unknown'`. **There is no fresh-versus-migrated disagreement for `trades`, and therefore nothing for Task 1 to resolve.** Task 1 asks me to state which meaning I chose and why. Choosing one would mean inventing a change to reconcile a conflict that does not exist, which is precisely what the prompt forbids.
+
+The line I misattributed does describe a real column with no default, but it belongs to `entry_decision`, a different table serving a different purpose, and nothing in the diagnosis, this prompt, or the real-fill gate concerns it.
+
+### WHAT IS NOT IN DISPUTE
+
+The rest of the diagnosis matches the code exactly, verified this session before stopping:
+
+- `storage/storage.hpp:51` declares `std::string bar_source = "unknown";` with the comment "Default unknown, never real". The silent struct default is real.
+- `storage/storage.cpp:156` binds `t.bar_source.empty() ? "unknown" : t.bar_source`. The silent ternary is real.
+- `storage/storage.cpp:115` is `ALTER TABLE trades ADD COLUMN bar_source TEXT DEFAULT 'unknown'`. The migration default is real.
+- `core/provenance.hpp` holds the canonical value set and already documents that a bar whose source cannot be established is `unknown`, never real.
+
+**Tasks 2 through 5 rest only on those four facts and could have proceeded.** I did not proceed with them, for two reasons. The instruction to stop on a disagreement is not scoped to the task where the disagreement appears, and executing four of five tasks while silently dropping the fifth is the kind of partial application this sequence of sessions has repeatedly found to be worse than none. Separately, the remaining session budget could not carry a C++ change plus a rebuild plus ctest plus the full pytest suite plus the observed demonstration Task 3 requires, and an unverified change to the fill-recording path is not something to leave behind.
+
+### WHAT THE NEXT SESSION SHOULD DO
+
+Stated so the correction is mechanical, not a re-diagnosis.
+
+1. **Drop Task 1.** There is no schema disagreement for `trades`. If the intent was to give `trades.bar_source` an explicit declaration in `schema.sql` for readability, that is a new decision and needs its own justification, not this one.
+2. **Tasks 2 through 5 stand unchanged.** Every code site they name is verified present and behaves as the diagnosis says.
+3. The provenance distribution is untouched at `unknown` 247, `real_feed` 16, `synthetic` 2, zero NULL, and the corrected real-fill count still reads **9**.
+
+Changes: RETURN.md, PROGRESS.md. **No source, schema, config or data file touched. No rebuild. No row rewritten.**
+Commit message: Stop on a diagnosis-versus-code disagreement: trades has no schema-level bar_source, so Task 1 has nothing to reconcile, nothing applied
+
 ## Prompt: Identify and close the path writing unclassified fill provenance
 
 Date: 2026-07-27

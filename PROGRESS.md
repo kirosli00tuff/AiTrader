@@ -134,6 +134,16 @@ New flags from the feed-work session (2026-07-05, `369b6a6`):
 
 ## Session Log
 
+### 2026-07-27 (Opus 5) — Stopped: my own diagnosis misattributed a schema line, so Task 1 had nothing to reconcile
+
+Application session that applied nothing. **No source, schema, config or data file touched, no rebuild, no row rewritten.** Live trading off. The prompt's rule for a diagnosis-versus-code disagreement is to stop and report rather than choose, and one appeared immediately.
+
+**THE DISAGREEMENT, AND THE ERROR IS MINE FROM YESTERDAY.** The diagnosis recorded that `storage/schema.sql:481` declares `bar_source TEXT` with no default while the migration uses `DEFAULT 'unknown'`, so a fresh database and a migrated one disagree about an omitted column. VERIFIED false: **line 481 sits inside `CREATE TABLE entry_decision`, not `trades`**, and `grep -n "bar_source" storage/schema.sql` returns that one line only. The `trades` block in `schema.sql` declares no `bar_source` column at all. The column reaches `trades` by exactly one route, the ALTER at `storage.cpp:115`, identically on a fresh database and a migrated one. **There is no disagreement, so Task 1 had nothing to resolve, and resolving it would have meant inventing a change to fix a conflict that does not exist.**
+
+- **THE REST OF THE DIAGNOSIS HOLDS**, re-verified before stopping: the silent struct default at `storage.hpp:51` (`std::string bar_source = "unknown"`), the silent ternary at `storage.cpp:156` (`t.bar_source.empty() ? "unknown" : t.bar_source`), the migration default at `storage.cpp:115`, and the canonical value set in `core/provenance.hpp`. Tasks 2 through 5 rest only on those and remain executable as written.
+- **WHY I DID NOT RUN THE OTHER FOUR TASKS.** The instruction to stop is not scoped to the task where the disagreement appears, and applying four of five while silently dropping the fifth is the partial application this sequence has repeatedly found worse than none. Independently, the remaining budget could not carry a C++ change plus rebuild plus ctest plus full pytest plus the observed demonstration Task 3 requires, and an unverified change to the fill-recording path is not a thing to leave behind.
+- **NEXT SESSION, mechanically:** drop Task 1, since giving `trades.bar_source` an explicit `schema.sql` declaration would be a new decision needing its own justification rather than this one. Tasks 2 through 5 stand unchanged. Provenance distribution untouched at `unknown` 247, `real_feed` 16, `synthetic` 2, zero NULL, and the corrected real-fill count still reads **9**.
+
 ### 2026-07-27 (Opus 5) — The unclassified fill provenance is diagnosed: two silent fallbacks and an ALTER default collapse four conditions onto one string
 
 Diagnosis only. **No source, schema, config or data file changed**, production database opened read-only, live trading off. The prompt's framing is that a fix before the cause is understood is how the last three fabrication bugs survived, so the cause is named in full and the change is specified but not applied: it is C++ in the fill-recording path and needs a rebuild plus ctest plus the full suite, which the session budget could not carry. A half-applied change in the money path is worse than none.
