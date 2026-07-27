@@ -63,7 +63,105 @@ WHAT COUNTS AS A NEGATIVE, per question, declared now:
 
 RESOURCE RULE: single process over the recorded research database, opened read-only. No network call. No provider call. No write to any production file.
 
-[Findings follow.]
+### FINDINGS
+
+**HEADLINE, NEGATIVE. NOTHING SURVIVES. Two of the four committed primaries did cross the corrected bar of 2.50, and BOTH dissolve completely once decomposed by asset class. The council abstains on 87 to 94 percent of answered crypto calls against 43 to 47 percent on equity, so any pooled comparison between "it spoke" and "it stayed silent" is really a comparison between a mostly-equity group and a mostly-crypto group. Over these windows crypto fell 131 bp while equity rose 20 bp. That single fact generates both apparent results. Within crypto and within equity separately, every difference has an interval spanning zero.**
+
+Pre-registration committed at `8ef4988` before any computation. Corrected bar |z| >= 2.50, Bonferroni across the closed list of 4, family alpha 0.05. **NO provider call of any kind was made and this session cost nothing.** Effective sample size is **80 symbol clusters** against 777 scorable provider rows and 389 evaluations, reported beside every count below.
+
+**A BENCHMARK DEFECT WAS FOUND AND FIXED BEFORE ANY VERDICT WAS TAKEN, and both sets of numbers are stated.** The unconditional benchmark was implemented as a 48-BAR step, which equals four hours only for a continuously traded instrument. On an equity it crosses the overnight gap, inflating the benchmark to 118-136 bp per "four hours" against a realised window that structurally cannot span a session break. The committed specification says a 4-hour window, so this is the implementation corrected toward the spec, not the spec changed after looking. **The correction cut Task 1's pooled z from 4.974 to 2.66**, and the uncomfortable direction is stated: the uncorrected number would have looked far stronger.
+
+### TASK 1, IS ABSTENTION INFORMATIVE
+
+Committed primary: pooled difference in excess absolute move between abstained and directional calls, clustered on symbol.
+
+| comparison | abstained | directional | difference [95% CI] | z |
+|---|---|---|---|---|
+| **PRIMARY, excess absolute move** | +26.0 bp (n 503, 80 cl) | +2.8 bp (n 274, 80 cl) | **+23.2 [+6.1, +40.4]** | **2.660** |
+| within crypto | +35.2 (n 314, 21 cl) | +19.1 (n 47, 16 cl) | +16.1 [-24.0, +56.3] | 0.787 |
+| within equity | +10.8 (n 189, 59 cl) | -0.6 (n 227, 64 cl) | +11.4 [-3.2, +25.9] | 1.534 |
+| excess realised volatility | -1.1 bp | -0.8 bp | -0.3 [-1.9, +1.4] | -0.317 |
+
+**The committed primary crosses the bar, and it is an asset-mix artifact.** The abstained group is 62.4 percent crypto and the directional group 17.2 percent, and clustering on symbol cannot absorb that, because a symbol is entirely one class so the between-class difference passes through the cluster correction untouched. Split by class, neither half reaches the bar. Per provider the pooled figure repeats the same pattern (Opus +26.5 at z 2.604, Gemini +33.3 at z 2.991, GPT-5.5 -21.1 at z -1.847), which is what a mix effect looks like when every provider shares the same mix.
+
+**The sign is also the opposite of the hypothesis the question was built on.** Abstained windows moved MORE than the instrument's own typical four hours, directional windows moved about typically. A provider abstaining "precisely when the next few hours are genuinely unreadable" would show the reverse. And abstention tracks realised volatility not at all, at z -0.317.
+
+VERDICT: **NO EFFECT DEMONSTRATED.** The committed primary passes and does not survive decomposition, so it is not a usable finding.
+
+### TASK 2, DOES CONFIDENCE ORDER OUTCOMES
+
+| stated confidence | n | clusters | realised hit rate | mean excess |
+|---|---|---|---|---|
+| below 0.55 | 26 | 24 | 42.3% | -23.6 bp |
+| 0.55 to 0.60 | 110 | 62 | 49.1% | +1.3 bp |
+| 0.60 to 0.65 | 77 | 50 | 50.6% | -2.3 bp |
+| 0.65 and above | 61 | 46 | **54.1%** | +8.3 bp |
+
+Committed primary, pooled Spearman between stated confidence and a hit, 95 percent interval from a cluster bootstrap resampling symbols, 2,000 draws: **rho +0.0357, interval [-0.067, +0.145], z 0.660.** The interval does not exclude zero.
+
+**AND THE MONOTONE CURVE IS A POOLING ARTIFACT, which is the substantive result here.** Every individual provider's rank correlation is NEGATIVE: Opus -0.0996 (n 148, 72 cl), Gemini -0.1156 (n 107, 65 cl), GPT-5.5 -0.2724 (n 19, 11 cl). The pooled positive appears only because the providers differ in both their average stated confidence and their average hit rate, so aggregating across them manufactures an ordering none of them has. The composed council conviction reads rho +0.0646 at z 0.881, crypto +0.0918, equity +0.0127, and against excess rather than hits +0.0281. Not one interval excludes zero.
+
+WHAT WOULD SETTLE IT: with a bootstrap standard deviation of 0.0541 at 80 clusters, reaching the corrected bar at the observed rho needs **1,149 clusters, 14.4 times the current sample**. There are not 1,149 liquid instruments this system can evaluate, so the question is not practically settleable at this effect size.
+
+VERDICT: **SUGGESTIVE by the letter of the committed rule** (positive point estimate, interval spanning zero) **and the honest reading is that it is absent**, because the ordering reverses inside every provider and exists only in the pooled view.
+
+### TASK 3, IS REJECTION BETTER THAN SELECTION
+
+Endorsed is a composed verdict with a direction, declined is a hold.
+
+| comparison | endorsed | declined | difference [95% CI] | z |
+|---|---|---|---|---|
+| **PRIMARY, excess absolute move** | +8.0 bp (n 187, 80 cl) | +34.4 bp (n 202, 70 cl) | **-26.4 [-46.5, -6.4]** | **-2.581** |
+| naive long return | -2.1 bp | -67.2 bp | +65.1 [+35.6, +94.6] | 4.323 |
+| within crypto, naive long | -118.9 (n 33) | -134.5 (n 112) | +15.5 [-38.5, +69.5] | 0.564 |
+| within equity, naive long | +22.9 (n 154) | +16.5 (n 90) | +6.5 [-27.4, +40.4] | 0.375 |
+| within crypto, excess abs | +39.8 | +53.7 | -13.9 [-63.3, +35.4] | -0.554 |
+| within equity, excess abs | +1.1 | +10.3 | -9.2 [-29.0, +10.7] | -0.907 |
+| excess realised volatility | -0.8 bp | -0.8 bp | -0.0 [-1.7, +1.7] | -0.005 |
+
+**The committed primary crosses the bar and the naive-long gap looks spectacular at z 4.323, and both are the same artifact.** The declined set is 55.4 percent crypto against the endorsed set's 17.6 percent, and over these windows crypto returned -130.9 bp while equity returned +20.5 bp. A group weighted toward the class that fell will show a worse long return whatever it was selected on. Decomposed, the naive-long advantage collapses to +15.5 bp in crypto (z 0.564) and +6.5 bp in equity (z 0.375), and the excess-absolute-move difference collapses to z -0.554 and -0.907. The unanimous-flat subset behaves identically to declined as a whole (-27.0 at z -2.607 pooled), so nothing is hiding in the stronger form of rejection either.
+
+VERDICT: **NO EFFECT DEMONSTRATED.** There is no evidence the council identifies bad setups. It identifies crypto.
+
+### TASK 4, THE ASSET-CLASS EFFECT
+
+Committed primary, pooled crypto-minus-equity difference in excess over the unconditional move: **-0.2 bp, interval [-64.0, +63.7], z -0.005.** The cleanest null in the session.
+
+| provider | class | rows | errors | abstention rate of ANSWERED calls | scored n (clusters) | hit rate | excess (z) |
+|---|---|---|---|---|---|---|---|
+| claude-opus-4-8 | crypto | 145 | 2 | **86.7%** | 19 (11) | 31.6% | +2.1 (0.035) |
+| claude-opus-4-8 | equity | 244 | 0 | **47.1%** | 129 (61) | 46.5% | -8.6 (-0.684) |
+| gemini-3.1-pro-preview | crypto | 145 | 1 | **93.8%** | 9 (7) | 66.7% | +34.8 (0.620) |
+| gemini-3.1-pro-preview | equity | 244 | 72 | **43.0%** | 98 (58) | 58.2% | +21.1 (1.604) |
+| gpt-5.5 | crypto | 145 | 71 | 74.3% | 19 (11) | 42.1% | -8.6 (-0.329) |
+| gpt-5.5 | equity | 244 | **244** | not measurable | 0 | not measurable | not measurable |
+
+**The difference is entirely in HOW OFTEN a provider speaks, not in how well.** Opus nearly doubles its speaking rate moving from crypto to equity and Gemini roughly quadruples it, while the per-provider crypto-minus-equity excess is +10.7 bp at z 0.183 for Opus and +13.8 at z 0.255 for Gemini. GPT-5.5's equity column is not measurable at all: all 244 calls errored on the quota exhaustion disclosed in the wide run, and that absence is stated rather than filled.
+
+VERDICT: **NO EFFECT DEMONSTRATED** on predictive behaviour by class. The abstention-rate difference is real, large, and carries no measured skill with it.
+
+### TASK 5, WHAT THE PROVIDERS SAID, EXPLORATORY THROUGHOUT
+
+Mechanical phrase counting over 503 abstained and 274 directional recorded rationales. No classifier was built, no model was asked to label anything, and no provider was called. **Nothing here is a finding, whatever it shows, because the categories were chosen after seeing the data.**
+
+The stated reasons are coherent with the verdicts. "no clear" appears in 170 abstentions and 5 directional calls, "choppy" in 82 against 4, "conflicting" in 55 against 2, "mixed" in 69 against 5. The providers are describing an absence of signal and then abstaining, which is at least internally consistent.
+
+Three phrases cross |z| 2 against other abstentions: "lack" at +20.5 bp (z 2.617), "support" at -20.4 (z -2.227), "volatil" at -23.3 (z -1.909). Across 23 phrases tested, one or two crossings at that level are what chance produces, and no correction was applied because these carry no verdict authority. The most eye-catching cell is "consolidat", appearing in 53 directional rationales with a 71.7 percent hit rate. **It is not a finding.** It is one uncorrected slice of 274 calls chosen after inspection, and it is recorded only so a future pre-registered test could name it in advance.
+
+### TASK 6, THE VERDICT
+
+**Do the council's judgments carry information about anything other than direction? NO, on this evidence.** Four committed questions, four negatives. Two pooled primaries crossed the corrected bar and both decomposed into the same confound: the council abstains far more on crypto than on equity, crypto and equity moved in opposite directions over these windows, and every pooled "spoke against stayed silent" comparison is a disguised crypto-against-equity comparison. Task 4 then shows directly that predictive quality does not differ by class at z -0.005, which is what closes the loop: the class difference is in how often the layer speaks, and speaking more often buys nothing.
+
+Effective sample size is 80 symbol clusters throughout, the same unit the two prior sessions used, against 777 scorable provider rows. The direction question was not re-tested and remains where the wide run left it, a 50.0 percent hit rate across 274 calls with the interval excluding the effect it was powered to detect.
+
+**WHAT THIS MEANS FOR THE COUNCIL LAYER, stated as evidence rather than as a proposal.** Across three sessions the layer has now been measured on direction, on calibration, on abstention, on rejection, and on asset class, and nothing has been demonstrated on any axis. It has never influenced a trade, since zero trades in the whole recorded history carry a council decision id. Its measured cost is real: on a fully funded three-provider round the two non-GPT providers are 78.4 percent of spend. **No measured justification for the layer remains on this evidence.** That is a statement about what has been measured, not a proposal, and the limits are worth keeping in view: 80 clusters over two days in one market regime, with GPT-5.5 absent from the entire equity half, cannot exclude a small effect, and an effect small enough to hide inside these intervals would not clear the fee model or the capacity floor anyway.
+
+**RECOMMENDING NO ARCHITECTURE CHANGE, and applying nothing.** Whether a layer with no demonstrated value and a known cost stays in the system is an operator's decision against this evidence, not a conclusion this session is entitled to draw.
+
+DISCLOSURES: (1) the 48-bar benchmark defect, found during Task 1 and fixed toward the committed specification before any verdict, with the pre-fix pooled z of 4.974 stated beside the corrected 2.66. (2) Clustering on symbol does not absorb an asset-class mix effect, because a symbol belongs entirely to one class; the pre-registration named the symbol as the clustering unit and did not anticipate that, so the within-class decomposition is reported for every affected test. (3) GPT-5.5 is absent from the equity half entirely, so every figure involving it rests on crypto alone. (4) Task 5 is exploratory by construction and no result from it is a finding.
+
+Changes: RETURN.md (pre-registration, findings), PROGRESS.md (dated entry). Analysis script under gitignored `build/research_20260727_wide/analyse.py`. No engine file, threshold, parameter or config touched. No provider call. No network call. The production database was never opened.
+Commit message: Ask the recorded council calls what else they knew, no provider calls made, findings only, nothing applied
 
 ## Prompt: Never retry a billing 429, latch provider exhaustion, surface it where a human reads it
 
