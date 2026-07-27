@@ -11,6 +11,35 @@ Model:
 Prompt summary: one line.
 Changes: what changed.
 
+## Prompt: Read-only inventory of the production database against the documented system
+
+Date: 2026-07-27
+Model: Opus 5 (claude-opus-5, 1M context).
+Prompt summary: on 2026-07-27 a removal session found `whale_signal` carrying 2,162 production rows at nonzero weight and a legacy `dnn_rl` at 2,100 rows, neither in any architecture description, both found by accident while measuring something else. The analysis database showed zero whale rows while production showed thousands, so a claim verified against one store was false against the other. This session asks systematically what else production contains that no document mentions. The audit read code, this reads data. Task 1 inventory every table with row counts, date ranges, last write, and whether any document describes it or any code writes or reads it. Task 2 every distinct value in every categorical column that matters, naming values no document explains. Task 3 where the two databases disagree and which is authoritative for which question. Task 4 documented claims the data contradicts, the most valuable section. Task 5 rows that should not exist: contamination, orphans, impossibilities, migration defaults that silently created meaning. Task 6 write DATA_AUDIT.md, update PROGRESS.md, commit and push.
+
+CONSTRAINTS HONORED: read-only, SELECT statements only against the production and analysis databases. No file, schema or config changed. No row written. No process started, stopped or signalled. No network or provider call. No test suite run. Only the report committed.
+
+### FINDINGS
+
+Full report in **DATA_AUDIT.md** at the repo root. Headlines here.
+
+**`whale_signal` produced 2,162 weighted factor outputs from zero whale data.** `whale_activity` and `whale_signal_history` both hold 0 rows, in BOTH databases, while `model_outputs` holds 2,162 `whale_signal` rows at mean confidence 0.5466 and nonzero weight throughout. A factor with no source table was not reading one. It carried 0.10 of the ensemble weight inside the mean that decides the Level 1 floor. The zero-weight deactivation earlier the same day was better justified than the session performing it knew.
+
+**The framing that prompted this audit was itself wrong.** "Analysis showed zero whale rows and production showed thousands" compares two different tables. Whale ACTIVITY is zero in both stores. Whale SIGNAL OUTPUTS are 2,162 and production-only, because analysis holds no factor outputs. The stores never disagreed.
+
+UNDOCUMENTED TABLES: `adaptive_event`, `adaptive_interpretation`, `adaptive_poll`, all empty, zero doc references. DESCRIBED BUT EMPTY: those plus `adaptive_action`, `model_registry`, `whale_activity`, `whale_signal_history`. WRITTEN BY NOTHING: none.
+
+UNDOCUMENTED VALUE: `trades.origin = 'reconciliation'` (3 rows) against a documented enum of `strategy | adaptive_react | rebalance`, and zero `adaptive_react` or `rebalance` rows have ever existed.
+
+TWO DATABASES: production 167,680 bars / 20 symbols / one year / mixed provenance; analysis 28,854,163 bars / 19,747 symbols / ten years / 100 percent backfill plus 8 universe tables. 8 shared symbols, 12 production-only. **Analysis is authoritative for universe and market history, production for anything the engine did.**
+
+CLAIMS CONTRADICTED: the origin enum; `model_registry` empty while documented as populated (unresolved: promotion never ran, or the registry is file-based); the whale layer as an advisory input that had weight and no input; `research_thesis` 31 of 31 `flat`; all 10 `positions` rows at qty 0.
+
+CONTAMINATION CONFIRMED: 108 `watchdog_restart` events on 2026-07-24 in one-second bursts; 3,411 bars with `real_feed` price beside `fabricated_zeroed` volume. CLEAN: zero duplicate bar keys, zero orphaned provider rows, zero positions without a trade, `signals` and `model_outputs` equal at 12,967.
+
+Changes: DATA_AUDIT.md (new), PROGRESS.md, RETURN.md. No source, config, schema or data file touched. Both databases opened read-only.
+Commit message: Read-only inventory of the production database against the documented system, findings only, nothing changed
+
 ## Prompt: Deactivate unmeasured factors by zero weight, correct the real-fill gate, remove the dead news mock, set the base-check gate's fail direction
 
 Date: 2026-07-27
