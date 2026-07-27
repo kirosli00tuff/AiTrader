@@ -134,6 +134,28 @@ New flags from the feed-work session (2026-07-05, `369b6a6`):
 
 ## Session Log
 
+### 2026-07-27 (Opus 5) — The three-layer removal was blocked by its own safety proof, and nothing was removed
+
+Removal session that did not remove. Live trading off, no RiskGate logic, no live-trading gate, no adaptive limit-weakening invariant, no Level 1 risk value, no threshold, no strategy parameter touched. **No source file, config, schema, test or GUI file was touched at all.** Production database opened read-only. Suite unchanged at 1,067.
+
+**HEADLINE: TASK 2 IS THE GATE ON THE WHOLE JOB AND TASK 2 FAILED. Replaying all 716 recorded evaluations through the composition with and without dnn_advisory, whale_signal and rl_advisory returns 716 of 716 with a changed composed confidence and 386 crossing the Level 1 floor of 0.65 differently. All 386 flip the same way: they newly PASS, and none newly fails. The removal changes no threshold VALUE and changes what clears one, permissively, on 54 percent of the record. The prompt's own instruction is to stop and report rather than proceed, so nothing was removed.**
+
+| removed | evals containing it | confidence differs | floor crossings | max delta |
+|---|---|---|---|---|
+| rl_advisory only | **0** | **0** | **0** | 0.0000 |
+| dnn_advisory only | 58 | 58 | 23 | 0.1301 |
+| whale_signal only | 716 | 716 | 58 | 0.0783 |
+| dnn_rl (legacy name) only | 658 | 658 | **318** | 0.0864 |
+| all three as specified | 716 | 716 | **95** | 0.1793 |
+| all three plus legacy dnn_rl | 716 | 716 | **386** | 0.1793 |
+
+- **THE PREMISE HOLDS FOR THE RESEARCH DATABASE AND FAILS FOR THE PRODUCTION RECORD.** `analysis_bars.db` carries zero whale rows, which is what the earlier sessions reported and what the prompt relied on. Production carries **2,162 `whale_signal` factor rows, every one at a nonzero weight and a mean confidence of 0.5466**. That factor participated and expressed an opinion. It was never a benched zero.
+- **THE MECHANISM IS BEHAVING CORRECTLY AND DOES NOT COVER THIS CASE, BY DESIGN.** Composed confidence is the weight-normalised MEAN of participating factors' confidences, so deleting a factor whose confidence sits below that mean raises it. The 2026-07-23 participation rule excludes a factor reporting `participating=false` and deliberately KEEPS a participating factor reporting genuine low confidence, since excluding that one would inflate confidence on a weak setup. A benched factor and a pessimistic factor are indistinguishable in the average and are opposite cases.
+- **A FOURTH FACTOR NOBODY NAMED IS THE LARGEST SINGLE DRIVER.** Legacy `dnn_rl`, 2,100 rows at weight 0.1512 and mean confidence 0.2285, flips 318 evaluations across the floor by itself. A removal scoped by layer name would have missed it entirely.
+- **ONLY rl_advisory IS PROVABLY INERT**, at zero recorded evaluations, and it is the one layer whose removal the replay shows to be neutral. It was not removed either, because the remaining session budget could not carry a C++ rebuild and a full suite verification, and an unverified removal is the partial removal the prompt rules out.
+- **BLAST RADIUS SURVEYED AND RECORDED for whoever resumes it**: roughly 1,400 reference lines across core 83, config 128, signal_engine 3, python_bridge 28, api_server 139, ui 47, web/src 111, tests 546, ml_factor 32, rl_advisory 45, discovery 160, ops 23, scripts 17, account_manager 4, docs 70, root documents 112.
+- **CLAUDE.md AND CONTEXT.md ARCHITECTURE TEXT DELIBERATELY NOT UPDATED**, because the layers are still present and a document saying otherwise would be false. The finding is recorded in CONTEXT.md Key Decisions instead.
+
 ### 2026-07-27 (Opus 5) — The last cheap question: two primaries crossed the bar and both were the same confound
 
 Research only against recorded data. **NO provider call and no network call of any kind, so the session cost nothing.** Production database never opened. No engine file, threshold, parameter or config touched, live trading off, nothing applied, no architecture change recommended. Pre-registered at `8ef4988` before any computation, four primary tests, Bonferroni bar |z| >= 2.50, effective sample size 80 symbol clusters against 777 scorable provider rows.

@@ -11,6 +11,66 @@ Model:
 Prompt summary: one line.
 Changes: what changed.
 
+## Prompt: Remove the benched DNN, the whale layer, and the RL module
+
+Date: 2026-07-27
+Model: Opus 5 (claude-opus-5, 1M context).
+Prompt summary: three layers contribute nothing and have never influenced a decision. L3 dnn_advisory has been benched since it was found serving a synthetic-trained champion, L4 whale carries zero rows in the analysis database, and the RL module ships off behind a 500-fill gate standing at 256 and has never run. Remove all three at every surface. Task 1 remove them from the engine, bridge, composition path, config, GUI, startup block, participation endpoint, schema where a table serves only them, and the documentation, keeping recorded history and removing only the live path. Task 2 prove the composition unchanged by replaying every recorded evaluation and entry decision through both the old and new composition, reporting rows whose composed confidence, tier, or gate outcome differ, expected zero on both. Task 3 verify the participation-exclusion mechanism survives and add a test that a non-participating council provider is still excluded from the denominator. Task 4 full suite green, no test weakened, every removed test named with its reason, mutation-test the equivalence check. Task 5 document and commit.
+
+SCOPE DECISION CARRIED FROM THE PROMPT: the council path is NOT removed. Its measured justification as a price-direction signal is gone, but the plumbing, per-provider persistence, error-versus-abstention accounting, evidence provenance, and replay harness are the infrastructure a future text-based experiment would reuse. Three layers are removed, not four.
+
+CONSTRAINTS HONORED: live trading stays off. No RiskGate logic, no live-trading gate, no adaptive limit-weakening invariant, no Level 1 risk value, no threshold, no strategy parameter touched.
+
+### FINDINGS
+
+**HEADLINE: THE REMOVAL WAS NOT PERFORMED, BECAUSE TASK 2 FAILED AND TASK 2 IS THE GATE. The replay says 716 of 716 recorded evaluations change their composed confidence, and 386 of them cross the Level 1 floor of 0.65 differently. Every one of those 386 flips in the SAME direction: they newly PASS. Zero newly fail. Removing these layers does not change the value of any threshold, and it changes what clears one, permissively, on 54 percent of the recorded record. The prompt's own instruction is to stop, report, and not proceed until the cause is understood. The cause is understood and is stated below. No code was removed.**
+
+### TASK 2 FIRST, BECAUSE IT IS THE SAFETY GATE
+
+Replayed all 716 recorded evaluations in `model_outputs` (2,162 factor rows per major factor) through the composition with and without the named layers. Composed confidence is exactly reconstructible from the record, since `combine` computes it as the weight-normalised mean of the per-factor confidences and both the weight and the confidence are persisted per factor.
+
+| removed | evaluations containing it | composed confidence differs | crosses the 0.65 floor differently | max delta |
+|---|---|---|---|---|
+| rl_advisory only | **0** | **0** | **0** | 0.0000 |
+| dnn_advisory only | 58 | 58 | 23 | 0.1301 |
+| whale_signal only | **716** | **716** | 58 | 0.0783 |
+| dnn_rl (legacy factor name) only | 658 | 658 | **318** | 0.0864 |
+| **all three as specified** | **716** | **716** | **95** | **0.1793** |
+| all three plus legacy dnn_rl | 716 | 716 | **386** | 0.1793 |
+
+**DIRECTION, and it is the part that matters: of the 386 floor crossings, 386 newly PASS and 0 newly FAIL.**
+
+### THE CAUSE, UNDERSTOOD
+
+**THE PREMISE IS TRUE OF THE RESEARCH DATABASE AND FALSE OF THE PRODUCTION RECORD.** `analysis_bars.db` carries zero `whale_activity` rows, which is what the earlier sessions reported and what this prompt relied on. The production database is a different story: `whale_signal` has **2,162 recorded factor rows, every one with a nonzero weight (0.0626 to 0.1005) and a mean confidence of 0.5466**. That is a factor that participated and expressed an opinion, not a benched zero.
+
+**THE PARTICIPATION MECHANISM IS WORKING CORRECTLY AND DOES NOT COVER THIS CASE, BY DESIGN.** The 2026-07-23 rule excludes a factor whose service reports `participating=false`. It deliberately KEEPS a participating factor that legitimately reports low confidence, because dropping it "would inflate confidence on a genuinely weak setup". `whale_signal` reported participating with a real confidence around 0.55, which sits below the composed average and therefore drags it down. Deleting the factor deletes that drag. The composed confidence rises, and the Level 1 floor of 0.65 admits candidates it previously refused.
+
+So the arithmetic that made this look safe, "a factor contributing nothing is neutral to remove", does not apply. These factors were not contributing nothing. Only `rl_advisory` genuinely was, at zero evaluations.
+
+**A FOURTH FACTOR NOBODY NAMED IS THE LARGEST SINGLE DRIVER.** `dnn_rl` carries 2,100 rows at weight 0.1512 and mean confidence 0.2285, and removing it alone flips 318 of the 716 evaluations across the floor. It is a legacy factor name that predates the `dnn_advisory` / `rl_advisory` split. Any removal that names only the three layers in the prompt would leave it in place, and any removal that catches it would move the floor on 44 percent of the record on its own.
+
+### WHAT WAS AND WAS NOT DONE
+
+**TASK 1, NOT PERFORMED.** No layer was removed at any surface. Nothing was deleted, deprecated, or disabled. The blast radius was surveyed and is recorded here for whoever resumes it: roughly 1,400 reference lines across core (83), config (128), signal_engine (3), python_bridge (28), api_server (139), ui (47), web/src (111), tests (546), ml_factor (32), rl_advisory (45), discovery (160), ops (23), scripts (17), account_manager (4), docs (70), and the four root documents (112).
+
+**TASK 3, VERIFIED BY INSPECTION, NOT CHANGED.** The exclusion mechanism is intact at `signal_engine/factor_engine.cpp:184-196`: a non-participating factor is dropped from the confidence and edge subset while bias, verdict and agreement stay computed over the full set. Since nothing was removed, nothing could remove it. The test the prompt asked for, that a non-participating council provider is still excluded after the change, is not added, because there is no change for it to guard.
+
+**TASK 4, NOT PERFORMED.** No test was added, deleted, or modified. Suite count is unchanged at 1,067.
+
+**TASKS 5, PARTIALLY.** `CLAUDE.md` and `CONTEXT.md` are NOT updated to describe the layers as gone, because they are not gone and a document saying otherwise would be false. The finding is recorded in `CONTEXT.md` Key Decisions instead.
+
+### WHAT WOULD MAKE THE REMOVAL SAFE
+
+Recorded as the options, not as a recommendation, and none of them is applied here.
+
+1. **Accept the loosening deliberately and in the open.** The floor moves on 386 evaluations in the permissive direction. That is a Level 1 behaviour change and belongs to an explicit operator decision against measured evidence, not to a cleanup session.
+2. **Compensate the denominator.** Removing a factor whose confidence sat below the composed mean raises the mean by construction. Holding composed confidence fixed across the removal would need the floor or the weights restated together with it, and both are Level 1 values this session is forbidden to touch.
+3. **Remove only what is provably inert.** `rl_advisory` appears in zero recorded evaluations and is the one layer whose removal the replay proves neutral. That is a genuine, complete, safe removal of one layer, and it is a smaller job than the one specified. It was not performed here because the session's remaining budget could not carry it through a C++ rebuild and a full suite verification, and a removal that cannot be verified is the partial removal the prompt rules out.
+
+Changes: RETURN.md (prompt log, replay findings), PROGRESS.md (dated entry), CONTEXT.md (Key Decision recording the blocked removal). **No source file, config, schema, test or GUI file was touched. The production database was opened read-only.**
+Commit message: Replay blocks the three-layer removal: 386 of 716 recorded evaluations would newly clear the Level 1 floor, nothing removed, findings only
+
 ## Prompt: Ask the recorded council calls what else they knew
 
 Date: 2026-07-27
