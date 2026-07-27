@@ -11,6 +11,112 @@ Model:
 Prompt summary: one line.
 Changes: what changed.
 
+## Prompt: Fail closed on unclassified symbols so pooled vehicles cannot leak into the universe
+
+Date: 2026-07-26
+Model: Opus 5 (claude-opus-5, 1M context). The prompt names Sonnet; the session ran on Opus 5 as set by /model, recorded accurately rather than as named.
+Prompt summary: the cross-sectional round found SPLG, an S&P 500 ETF, in 51 of 124 formation books and four of 1,187 members leaking past the fund classifier, caused by the breadth load's recovery path inserting symbols with an empty name and exchange so the classifier has nothing to inspect. Task 1 find every leaked vehicle, not only the four named, with how each entered and why the classifier missed it. Task 2 the classifier must not admit by default: a symbol whose type cannot be established is excluded and recorded as unclassified, and the recovery path must carry the metadata the classifier needs. Task 3 rebuild membership across all 124 formation dates and quantify the delta, stating that the RULE is unchanged and this corrects its implementation. Task 4 do not re-score any hypothesis result. Task 5 tests for each behaviour plus a mutation test on the fail-closed default. Task 6 document, commit and push.
+
+CONSTRAINTS HONORED: live trading stays off. No RiskGate logic, no live-trading gate, no adaptive limit-weakening invariant, no Level 1 risk value, no strategy parameter, no engine behavior touched. No hypothesis tested, no signal generated, no prior result re-scored. Scope limited to the universe classifier, the recovery path, and the membership table they produce.
+
+### FINDINGS
+
+**HEADLINE: the four named leaks were not the complete set, and the classifier had three defects rather than one. SEVEN pooled vehicles reached the universe, not four. More importantly, the same name-matching that admitted them was also EXCLUDING four large caps outright: SCHW, IVZ, BEN and NTRS carried zero member-months across all 124 formation dates, because the token list matched the brand names Schwab, Invesco and Franklin and the single word Trust. The Charles Schwab Corporation is not a fund. The classifier now returns a TRI-STATE and fails closed on the unknown, the recovery path resolves the metadata it needs from an endpoint the list endpoint omits, and membership moved from 1,187 distinct names to 1,218 across 3,076 member-months. No hypothesis was re-scored.**
+
+### TASK 1, EVERY LEAKED VEHICLE
+
+Audited all 1,187 members through the shipped `classify_fund` so the audit could not disagree with the rule. Of those, 164 entered through the corporate-action recovery path carrying no name and no exchange. 116 resolved through `GET /v2/assets/{symbol}` and 48 did not.
+
+**SEVEN pooled vehicles, three more than the round named:**
+
+| symbol | member-months | exchange | name | how it entered | why the classifier missed it |
+|---|---|---|---|---|---|
+| RSX | 57 | BATS | VanEck Russia ETF | recovery path | empty name and exchange, admitted by default |
+| SPLG | 53 | ARCA | State Street SPDR Portfolio S&P 500 ETF | recovery path | same |
+| CA | 23 | NASDAQ | DBX ETF Trust Xtrackers California Municipal Bonds ETF | recovery path | same, and a reused ticker (CA was Computer Associates) |
+| GSX | 14 | BATS | Tradr 2X Long GS Daily ETF | recovery path | same, and a reused ticker (GSX was GSX Techedu) |
+| FNGA | 2 | ARCA | MicroSectors FANG+ Index 3X Leveraged ETN | recovery path | same |
+| AMJ | 1 | ARCA | JP Morgan Alerian MLP Index ETN | recovery path | same |
+| HZNP | 43 | NASDAQ | Horizon Therapeutics Ordinary Shares | recovery path | NOT a fund, see below |
+| ABCM | 1 | NASDAQ | Abcam plc American Depositary Shares | recovery path | NOT a fund, see below |
+
+The audit flagged HZNP and ABCM as pooled vehicles and both are wrong. They are operating companies whose names end in "Ordinary Shares" and "American Depositary Shares", and the token list matched the bare word "shares". That is the second defect, and it is why fixing only the missing metadata would have INTRODUCED a new false exclusion: populating HZNP's name would have got it thrown out of 43 member-months.
+
+ADRs are NOT excluded by the primary variant, deliberately. An American Depositary Share is a claim on an operating company and belongs in an equity cross-section. The old token list excluded them by accident.
+
+**THE THIRD DEFECT, larger than the leak. Scanning the whole 23,029-asset pool, 1,407 non-ETP-venue assets were classified as funds by the word "shares" alone, and they are overwhelmingly foreign-domiciled operating companies. Worse, brand tokens matched listed asset managers:**
+
+| symbol | name | matched token | member-months before |
+|---|---|---|---|
+| SCHW | The Charles Schwab Corporation | schwab | 0 |
+| IVZ | Invesco LTD | invesco | 0 |
+| BEN | Franklin Resources, Inc. | franklin | 0 |
+| NTRS | Northern Trust Corporation | trust | 0 |
+
+Their peers TROW, STT, BLK and AMP carried 96 to 124 member-months each, so a large-cap universe was missing four of its asset-manager and custody names for a reason that had nothing to do with what they are.
+
+### TASK 2, THE TWO FIXES
+
+**FIX ONE, THE CLASSIFIER FAILS CLOSED.** `classify_fund` returned a bare bool, so a symbol with no name read as "not a fund" and was admitted. It now returns `bool | None`, and **None is not False**. A symbol carrying no name is an absence of evidence, not evidence of an operating company. `rejection_reason` excludes it with the reason `unclassified`, and that branch sits BEFORE the fund branch on purpose: unclassified is an unknown, not a fund, so `include_funds` does not reach it either. This is the same failure shape the feed fixed when a missing volume stopped rendering as zero, and the council prompt fixed when an absent field stopped rendering as flat evidence.
+
+The name matching was rebuilt as strong and weak markers. A STRONG marker settles it alone (etf, etn, etp, exchange-traded, index fund, mutual fund, closed-end, fund, series trust, royalty trust, unit investment trust, plus pure-play sponsor brands that are not themselves listed issuers). A WEAK marker means nothing alone and two are required (trust, portfolio, index, series, shares, beneficial interest). That separates "Invesco QQQ Trust, Series 1" (trust plus series) from "Northern Trust Corporation" (trust alone). The brands invesco, franklin, schwab and vanguard are gone, because three of them are listed operating companies.
+
+Verified against the pool: all twelve liquid ETFs tested still classify as funds (SPY, QQQ, IVV, VOO, IWM, TQQQ, SQQQ, XLF, DIA, GLD, SOXL, ARKK), and SCHW, IVZ, BEN, NTRS, HZNP, ABCM and Vornado Realty Trust are all released.
+
+**FIX TWO, THE RECOVERY PATH CARRIES METADATA.** The recovery path wrote an empty name and exchange because a recovered ticker is by definition absent from the asset LIST. **The list is not the whole truth: `GET /v2/assets/{symbol}` still answers for many symbols the list omits.** ATVI, TWTR, VMW, PXD, AMJ and RSX all return 200 there and appear in no list. The path now resolves in three tiers: single-asset lookup, then follow a recorded NAME CHANGE to its successor and inherit that classification, then mark unclassified. Only name changes are followed, never mergers, because a name change is the same issuer under a new ticker while a merger is a different company whose type says nothing about the acquiree. SPLG resolved through its successor SPYM, and BK, MMC and SQ resolved through BNY, MRSH and XYZ.
+
+A backfill pass resolved 2,877 of 2,935 symbols on the first run. A second pass found a class the first had missed: the asset list itself returns inactive records carrying an exchange and NO name (RHT, SHPG, ESRX, GGP), and the first query required both fields empty. Keyed on the empty name instead, it resolved 262 of a further 318. **Only symbols whose single best day exceeds 10M USD of dollar volume are looked up. A symbol enters on a 60-session MEDIAN and the lowest top-500 floor in the whole history is 59.3M USD per day, and a median cannot exceed a maximum, so a symbol below the threshold cannot reach any top 500 in any window and its classification cannot move a membership row.** 4,753 were skipped on that basis and stay unclassified, which excludes them, which is the correct default anyway.
+
+### TASK 3, THE MEMBERSHIP DELTA
+
+**THE RULE IS UNCHANGED.** `U-LIQ-500-stk-w60-m40-p5` is the same rule with the same window, the same 60 sessions, the same 40-bar minimum, the same 5.00 USD floor, the same median dollar-volume ranking and the same monthly formation schedule. This is a correction to the eligibility filter's IMPLEMENTATION, which was always meant to exclude pooled vehicles and was doing it with a broken test. No new rule, no new parameter, no re-tuning.
+
+| measure | before | after |
+|---|---|---|
+| formation dates | 124 | 124 |
+| member-months | 62,000 | 62,000 |
+| distinct names | 1,187 | **1,218** |
+| member-months changed | | **3,076 left, 3,076 entered** |
+| funds remaining in membership | 6 vehicles, 150 months | **0** |
+| unclassified in membership | admitted silently | **0** |
+| names that never appeared before | | **96** |
+
+WHAT LEFT, and why:
+- **6 pooled vehicles, 150 member-months**: RSX 57, SPLG 53, CA 23, GSX 14, FNGA 2, AMJ 1. These are the leak, now closed.
+- **26 unclassified names, 452 member-months**: RHT 41, SHPG 35, ESRX 34, ETP 32, TSS 30, GGP 30, GG 29, AABA 26, FDC 24, DVMT 24, EVHC 22, DWDP 21, TSRO 18, WP 17, DATA 14, ANDV 13, SCG 9, PF 8, IDTI 6, FNSR 5, RDC 3, MDSO 3, ARRS 3, LOXO 2, CAVM 2, ELLI 1.
+- The remainder are ordinary rank churn: names sitting near rank 500 that dropped out as higher-ranked names entered.
+
+**THE HONEST COST OF FAILING CLOSED, stated rather than buried.** Those 26 unclassified names are acquired operating companies (Red Hat, Shire, Express Scripts, General Growth, Goldcorp, First Data, DowDuPont, Tableau, Andeavor), not funds. They return 404 at the single-asset endpoint and carry no name change, because they were acquired outright in 2018 and 2019. Excluding them removes 452 member-months of DEAD names, which re-adds a small amount of the survivorship bias the breadth load exists to remove. That is 0.73 percent of 62,000 member-months, against the 150 month of fund contamination it removes. The trade is accepted because admit-by-default is the worse error and because an unclassified symbol is an unknown, but the cost is real and is recorded here rather than presented as a clean win.
+
+WHAT ENTERED: 96 names that were never members. SCHW, IVZ, BEN and NTRS are among them, released from the brand-token over-match. The rest are the next-ranked names backfilling the 3,076 vacated slots, which is the rule working as written.
+
+### TASK 4, NOTHING WAS RE-SCORED
+
+**No hypothesis result was recomputed.** The cross-sectional round's holdout was touched once and its results stand exactly as recorded at commit `a0a9ef6`. Re-scoring H-F, H-G, H-H or H-I against a universe corrected after their outcome was seen is precisely the contamination that round's discipline prevented, and it would turn a clean negative into an unfalsifiable one.
+
+For the record, and carried forward:
+1. All prior results were computed under the PRE-CORRECTION universe.
+2. **H-H, low idiosyncratic volatility, was materially affected**: SPLG sat in 51 of its 124 formation books. The direction is toward the benchmark, because an S&P 500 tracker returns what SPY returns, so the contamination dragged H-H's excess toward zero rather than inflating it. H-H's recorded holdout figure of -0.25 bp per day at z equals -0.086 should be read as a number computed on a partly index-tracking book.
+3. H-F and H-I carried zero contaminated books at the tradeable width. H-G carried one of 124 (RSX in 2022-03).
+4. **Any future round uses the corrected universe from a fresh pre-registration.** Prior and future results are not comparable across the correction and must not be pooled.
+
+### TASK 5, TESTS
+
+18 new tests in `tests/test_universe_rule.py`, 51 total in that file, all passing. Full suite **1,048 passed**, up from 1,030, with no existing test modified apart from a type annotation widened to the tri-state.
+
+Covering each required behaviour: a symbol with missing metadata is unclassified rather than admitted (three shapes, including a NASDAQ listing with no name), an unclassified candidate is excluded with reason `unclassified`, unclassified is excluded even when the caller asks for funds, an unclassified symbol never reaches the book at any rank even at 1e12 dollar volume, each of the six known pooled vehicles is rejected at every formation date, seven operating companies are not mistaken for vehicles, five liquid pooled vehicles are still caught so the narrowing opened no hole, and membership is reproducible from the rule alone with the candidate order reversed.
+
+MUTATION-TESTED, four mutations, each caught and each restored green:
+- classifier returns False instead of None on an empty name: fails the metadata guard.
+- `rejection_reason` drops the unclassified branch: fails 3 tests.
+- unclassified falls through into the fund branch so `include_funds` admits it: fails 3 tests.
+- brand tokens invesco, franklin and schwab restored: fails the operating-company guard on IVZ and BEN.
+
+A fifth defect was caught by inspection rather than by a mutation: `_window_candidates` coerced the column with `bool(funds[sym])`, and `bool(None)` is False, which would have put admit-by-default straight back into the membership build after the classifier was fixed. It now preserves the tri-state.
+
+Changes: `backtest/universe.py` (tri-state classifier, strong and weak markers, fail-closed rejection), `scripts/breadth_universe_20260726.py` (single-asset lookup, successor chase, `metadata` subcommand, tri-state preserved through the membership build, `classification_source` column), `tests/test_universe_rule.py` (18 tests), RETURN.md, PROGRESS.md, CONTEXT.md. `analysis_bars.db` membership rebuilt, gitignored.
+Commit message: Fail closed on unclassified symbols and populate recovery metadata so pooled vehicles cannot leak into the universe, no result re-scored, live trading untouched
+
 ## Prompt: Cross-sectional hypothesis round against the breadth universe
 
 Date: 2026-07-26

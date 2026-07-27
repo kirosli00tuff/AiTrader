@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import argparse
 import collections
+import concurrent.futures
 import datetime as dt
 import json
 import os
@@ -167,7 +168,9 @@ CREATE TABLE IF NOT EXISTS universe_asset(
   -- pull date. A split after this date makes the stored series stale.
   adjusted_as_of TEXT,
   adjustment TEXT, feed TEXT, source TEXT, volume_source TEXT,
-  loaded_at TEXT);
+  loaded_at TEXT,
+  -- How name and exchange were obtained, so a classification is auditable.
+  classification_source TEXT);
 
 CREATE TABLE IF NOT EXISTS listing_segment(
   symbol TEXT, seg INTEGER, start_date TEXT, end_date TEXT,
@@ -294,6 +297,136 @@ def pool_from_assets(assets: list[dict]) -> tuple[list[dict], list[tuple]]:
     return pool, dropped
 
 
+def _tri(v: bool | None) -> int | None:
+    """Tri-state classification to a nullable column. NULL is unclassified."""
+    return None if v is None else int(v)
+
+
+def fetch_asset(symbol: str) -> dict | None:
+    """One asset record by symbol, or None when the venue has none.
+
+    THE LIST ENDPOINT IS NOT THE WHOLE TRUTH. `/v2/assets?status=inactive`
+    omits most acquired names, but `/v2/assets/{symbol}` still answers for
+    many of them: ATVI, TWTR, VMW, PXD, AMJ and RSX all return 200 here and
+    appear in no list. That is why the recovery path can carry metadata at
+    all, and why it stored none before this was found.
+    """
+    code, resp = get_with_retry(
+        f"{ASSETS}/{urllib.parse.quote(symbol)}", trading=True)
+    return resp if code == 200 and isinstance(resp, dict) else None
+
+
+def resolve_metadata(symbol: str, renames: dict[str, list[str]],
+                     seen: set[str] | None = None, depth: int = 0
+                     ) -> tuple[str, str, str] | None:
+    """Name and exchange for a symbol, following name changes when needed.
+
+    Only NAME CHANGES are followed, never mergers. A name change is the same
+    issuer under a new ticker, so inheriting its classification is sound. A
+    merger is a different company, and inheriting an acquirer's type would
+    label the acquiree with something it never was.
+    """
+    seen = seen or set()
+    if symbol in seen or depth > 3:
+        return None
+    seen.add(symbol)
+    a = fetch_asset(symbol)
+    if a and (a.get("name") or a.get("exchange")):
+        return (a.get("name") or "", a.get("exchange") or "",
+                "single_lookup" if depth == 0 else f"successor_depth_{depth}")
+    for succ in renames.get(symbol, ()):
+        got = resolve_metadata(succ, renames, seen, depth + 1)
+        if got:
+            return got[0], got[1], f"successor:{succ}"
+    return None
+
+
+def cmd_metadata(args) -> dict:
+    """Backfill classification metadata and recompute is_fund for every asset.
+
+    Fixes the defect the cross-sectional round found: the recovery path wrote
+    an empty name and exchange, `classify_fund` had nothing to inspect, and
+    the old bool return admitted the symbol by default. Seven pooled vehicles
+    reached the universe that way, one of them an S&P 500 tracker sitting in
+    51 of 124 formation books.
+    """
+    conn = open_analysis_db(args.analysis_db, write=True)
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(universe_asset)")}
+    if "classification_source" not in cols:
+        conn.execute("ALTER TABLE universe_asset ADD COLUMN "
+                     "classification_source TEXT")
+    renames: dict[str, list[str]] = collections.defaultdict(list)
+    for s, cp in conn.execute(
+            "SELECT symbol, counterparty FROM delisting_event "
+            "WHERE kind='name_changes' AND counterparty IS NOT NULL "
+            "AND counterparty != ''"):
+        renames[s].append(cp)
+
+    # ONLY SYMBOLS THAT COULD CHANGE MEMBERSHIP ARE LOOKED UP. A symbol
+    # enters the universe on a 60-session MEDIAN dollar volume, and the
+    # lowest top-500 floor in the whole history is 59.3M USD per day. A
+    # median can never exceed the maximum, so a symbol whose single best day
+    # is below the threshold cannot reach any top 500 in any window and its
+    # classification cannot move a membership row. Everything below stays
+    # unclassified, which excludes it, which is the correct default anyway.
+    # KEYED ON THE EMPTY NAME, WHICH IS WHAT THE CLASSIFIER READS. Requiring
+    # BOTH name and exchange to be empty missed a whole class: the asset list
+    # itself returns inactive records carrying an exchange and NO name (RHT,
+    # SHPG, ESRX, GGP), which then failed closed as unclassified. Those are
+    # acquired operating companies, and excluding them would put back exactly
+    # the survivorship bias the breadth load exists to remove.
+    todo = [r[0] for r in conn.execute(
+        "SELECT a.symbol FROM universe_asset a WHERE COALESCE(a.name,'')='' "
+        "AND EXISTS (SELECT 1 FROM bars b "
+        "WHERE b.symbol=a.symbol AND b.timeframe=? "
+        "AND b.close*b.volume >= ?) ORDER BY a.symbol",
+        (TIMEFRAME, args.min_peak_dollar_volume))]
+    skipped = conn.execute(
+        "SELECT COUNT(*) FROM universe_asset WHERE COALESCE(name,'')=''"
+    ).fetchone()[0] - len(todo)
+    print(f"  looking up {len(todo)}, skipping {skipped} that cannot reach "
+          f"any top 500", flush=True)
+
+    updates: list[tuple] = []
+    done = [0]
+
+    def work(sym: str):
+        got = resolve_metadata(sym, renames)
+        done[0] += 1
+        if done[0] % 250 == 0:
+            print(f"  {done[0]}/{len(todo)}", flush=True)
+        return (sym, got)
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
+        for sym, got in pool.map(work, todo):
+            if got:
+                updates.append((got[0], got[1], got[2], sym))
+    conn.executemany("UPDATE universe_asset SET name=?, exchange=?, "
+                     "classification_source=? WHERE symbol=?", updates)
+    conn.commit()
+    resolved, unresolved = len(updates), len(todo) - len(updates)
+
+    # Recompute is_fund for EVERY asset under the corrected classifier.
+    # NULL now means unclassified, which excludes rather than admits.
+    rows = conn.execute(
+        "SELECT symbol, name, exchange FROM universe_asset").fetchall()
+    out = [(None if (v := U.classify_fund(n or "", e or "")) is None
+            else int(v), s) for s, n, e in rows]
+    conn.executemany("UPDATE universe_asset SET is_fund=? WHERE symbol=?", out)
+    conn.execute("UPDATE universe_asset SET classification_source='asset_list'"
+                 " WHERE classification_source IS NULL AND "
+                 "COALESCE(name,'')||COALESCE(exchange,'') != ''")
+    conn.commit()
+    counts = dict(conn.execute(
+        "SELECT CASE WHEN is_fund IS NULL THEN 'unclassified' "
+        "WHEN is_fund=1 THEN 'fund' ELSE 'operating' END, COUNT(*) "
+        "FROM universe_asset GROUP BY 1"))
+    return {"looked_up": len(todo), "skipped_below_threshold": skipped,
+            "resolved": resolved, "unresolved": unresolved,
+            "min_peak_dollar_volume": args.min_peak_dollar_volume,
+            "classification": counts}
+
+
 def fetch_calendar() -> list[dict]:
     code, resp = get_with_retry(
         f"{CALENDAR}?start={PULL_START}&end={PULL_END}", trading=True)
@@ -407,7 +540,8 @@ def cmd_probe(args) -> dict:
     cal = fetch_calendar()
     by_ex = collections.Counter((a.get("exchange"), a.get("status"))
                                 for a in assets)
-    funds = sum(1 for p in pool if U.classify_fund(p["name"], p["exchange"]))
+    funds = sum(1 for p in pool
+                if U.classify_fund(p["name"], p["exchange"]) is True)
     # Footprint from the measured calibration: 1,406 daily rows per symbol
     # that returns data, 198 bytes per row including index overhead (the byte
     # figure from the existing 652 MB / 3.3M row database).
@@ -446,7 +580,7 @@ def cmd_load(args) -> dict:
         "asset_status,is_fund,n_asset_ids,adjusted_as_of,adjustment,feed,"
         "source,volume_source,loaded_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
         [(p["symbol"], p["asset_id"], p["name"], p["exchange"],
-          p["asset_status"], int(U.classify_fund(p["name"], p["exchange"])),
+          p["asset_status"], _tri(U.classify_fund(p["name"], p["exchange"])),
           p["n_asset_ids"], PULL_END, ADJUSTMENT, EQUITY_FEED, BAR_SOURCE,
           "venue_backfill", loaded_at) for p in pool])
     conn.commit()
@@ -548,8 +682,12 @@ def _window_candidates(conn: sqlite3.Connection, start: str, end: str,
     def flush() -> None:
         if sym not in funds:
             return
+        # PRESERVE THE TRI-STATE. bool(None) is False, so coercing here would
+        # put admit-by-default straight back into the membership build after
+        # the classifier was fixed to fail closed. NULL stays NULL.
+        raw = funds[sym]
         cand = U.summarize_window(
-            sym, closes, vols, is_fund=bool(funds[sym]),
+            sym, closes, vols, is_fund=None if raw is None else bool(raw),
             segment_break_in_window=U.has_segment_break_in(
                 segments.get(sym, ()), start, end))
         if cand:
@@ -755,13 +893,31 @@ def cmd_recover(args) -> dict:
 
     known = {r[0] for r in conn.execute("SELECT symbol FROM universe_asset")}
     missing = sorted({s for s, _, _ in events} - known)
+    # POPULATE THE METADATA THE CLASSIFIER NEEDS. Writing an empty name and
+    # exchange here is what let seven pooled vehicles into the universe: the
+    # classifier had nothing to inspect and its old bool return admitted them
+    # by default. The single-asset endpoint answers for symbols the list
+    # endpoint omits, and a name change is followed to its successor when it
+    # does not.
+    renames: dict[str, list[str]] = collections.defaultdict(list)
+    for (sym, day, kind), rec in events.items():
+        if kind == "name_changes" and rec[3]:
+            renames[sym].append(rec[3])
+    rows = []
+    for sym in missing:
+        got = resolve_metadata(sym, renames)
+        nm, ex, src = got if got else ("", "", "unresolved")
+        fund = U.classify_fund(nm, ex)
+        rows.append((sym, "", nm, ex, "delisted_recovered",
+                     None if fund is None else int(fund), 1, PULL_END,
+                     ADJUSTMENT, EQUITY_FEED, BAR_SOURCE, "venue_backfill",
+                     loaded_at, src))
+        time.sleep(0.02)
     conn.executemany(
         "INSERT OR REPLACE INTO universe_asset(symbol,asset_id,name,exchange,"
         "asset_status,is_fund,n_asset_ids,adjusted_as_of,adjustment,feed,"
-        "source,volume_source,loaded_at) VALUES(?,'','',''"
-        ",'delisted_recovered',0,1,?,?,?,?,?,?)",
-        [(s, PULL_END, ADJUSTMENT, EQUITY_FEED, BAR_SOURCE, "venue_backfill",
-          loaded_at) for s in missing])
+        "source,volume_source,loaded_at,classification_source) "
+        "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)", rows)
     conn.commit()
 
     written = 0
@@ -789,17 +945,20 @@ def cmd_recover(args) -> dict:
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("cmd", choices=["probe", "load", "recover", "segments",
-                                    "universe", "actions"])
+    ap.add_argument("cmd", choices=["probe", "load", "recover", "metadata",
+                                    "segments", "universe", "actions"])
     ap.add_argument("--analysis-db", default=ANALYSIS_DB_DEFAULT)
     ap.add_argument("--limit-symbols", type=int, default=0,
                     help="RSS probe / smoke test: pull only the first N")
     ap.add_argument("--top-n", type=int, default=U.TOP_N)
     ap.add_argument("--include-funds", action="store_true")
+    ap.add_argument("--min-peak-dollar-volume", type=float, default=10_000_000,
+                    help="metadata: skip symbols whose best day is below this, "
+                         "since they cannot reach any top 500")
     args = ap.parse_args()
     fn = {"probe": cmd_probe, "load": cmd_load, "recover": cmd_recover,
-          "segments": cmd_segments, "universe": cmd_universe,
-          "actions": cmd_actions}[args.cmd]
+          "metadata": cmd_metadata, "segments": cmd_segments,
+          "universe": cmd_universe, "actions": cmd_actions}[args.cmd]
     print(json.dumps(fn(args), indent=2, default=str))
 
 

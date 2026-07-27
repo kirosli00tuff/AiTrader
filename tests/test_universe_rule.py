@@ -33,7 +33,7 @@ def _params(**kw) -> U.RuleParams:
 
 
 def _cand(symbol: str, mdv: float, *, bars: int = 10, close: float = 50.0,
-          is_fund: bool = False, brk: bool = False) -> U.Candidate:
+          is_fund: bool | None = False, brk: bool = False) -> U.Candidate:
     return U.Candidate(symbol=symbol, window_bars=bars, median_close=close,
                        median_dollar_volume=mdv, is_fund=is_fund,
                        segment_break_in_window=brk)
@@ -260,6 +260,100 @@ def test_a_zero_or_negative_prior_close_is_skipped_not_divided_by():
 ])
 def test_fund_classifier(name, exchange, expected):
     assert U.classify_fund(name, exchange) is expected
+
+
+# ------------------------------------------------- fail closed on the unknown
+
+def test_a_symbol_with_no_metadata_is_unclassified_not_an_operating_company():
+    """THE DEFECT THIS GUARDS. The classifier used to return a bare bool, so a
+    symbol carrying no name read as "not a fund" and was ADMITTED. That is how
+    SPLG, an S&P 500 tracker, reached 51 of 124 formation books."""
+    assert U.classify_fund("", "") is None
+    assert U.classify_fund("", "NASDAQ") is None
+    assert U.classify_fund(None, None) is None
+
+
+def test_an_unclassified_candidate_is_excluded_rather_than_admitted():
+    assert U.rejection_reason(_cand("UNK", 1e9, is_fund=None),
+                              _params()) == "unclassified"
+
+
+def test_unclassified_is_excluded_even_when_the_caller_asks_for_funds():
+    """Unclassified is not a fund, it is an unknown, so include_funds does not
+    reach it. Otherwise the fund-inclusive variant would admit the very
+    symbols whose type could not be established."""
+    assert U.rejection_reason(_cand("UNK", 1e9, is_fund=None),
+                              _params(include_funds=True)) == "unclassified"
+
+
+def test_an_unclassified_symbol_never_reaches_the_book_at_any_rank():
+    """Even the most liquid name in the market is refused when its type
+    cannot be established."""
+    members, rejected = U.rank_members(
+        [_cand("HUGE", 1e12, is_fund=None), _cand("REAL", 1.0)],
+        _params(top_n=5))
+    assert [m.candidate.symbol for m in members] == ["REAL"]
+    assert ("HUGE", "unclassified") in rejected
+
+
+def test_a_known_pooled_vehicle_is_rejected_at_every_formation_date():
+    """SPLG, the vehicle that leaked, plus the other six found by the audit."""
+    leaked = [
+        ("SPDR Portfolio S&P 500 ETF", "ARCA"),
+        ("VanEck Russia ETF", "BATS"),
+        ("DBX ETF Trust Xtrackers California Municipal Bonds ETF", "NASDAQ"),
+        ("Tradr 2X Long GS Daily ETF", "BATS"),
+        ("MicroSectors FANG+ Index 3X Leveraged ETNs due January 8", "ARCA"),
+        ("JP Morgan Alerian MLP Index ETN 5/24/24", "ARCA"),
+    ]
+    for name, exch in leaked:
+        assert U.classify_fund(name, exch) is True, name
+        cand = _cand("X", 1e9, is_fund=U.classify_fund(name, exch))
+        # Rejected at every formation date because the rule is stateless:
+        # the same inputs give the same rejection every month.
+        for _ in range(3):
+            assert U.rejection_reason(cand, _params()) == "fund"
+
+
+@pytest.mark.parametrize("name,exchange", [
+    ("The Charles Schwab Corporation", "NYSE"),        # brand token "schwab"
+    ("Invesco LTD", "NYSE"),                           # brand token "invesco"
+    ("Franklin Resources, Inc.", "NYSE"),              # brand token "franklin"
+    ("Northern Trust Corporation Common Stock", "NASDAQ"),   # one weak token
+    ("Vornado Realty Trust", "NYSE"),                        # one weak token
+    ("Horizon Therapeutics Public Limited Company Ordinary Shares", "NASDAQ"),
+    ("Abcam plc American Depositary Shares", "NASDAQ"),      # an ADR
+])
+def test_operating_companies_are_not_mistaken_for_pooled_vehicles(name,
+                                                                  exchange):
+    """The over-match that excluded four large caps from the universe
+    entirely. A brand name is not a structure, and one weak marker is not
+    evidence."""
+    assert U.classify_fund(name, exchange) is False
+
+
+@pytest.mark.parametrize("name,exchange", [
+    ("State Street SPDR S&P 500 ETF Trust", "ARCA"),
+    ("Invesco QQQ Trust, Series 1", "NASDAQ"),
+    ("ProShares UltraPro QQQ", "NASDAQ"),
+    ("Direxion Daily Semiconductor Bull 3X ETF", "ARCA"),
+    ("PRINCIPAL REAL ESTATE INCOME FUND", "NYSE"),
+])
+def test_liquid_pooled_vehicles_are_still_caught(name, exchange):
+    """The narrowing must not open a hole for the funds that actually trade
+    at top-500 liquidity."""
+    assert U.classify_fund(name, exchange) is True
+
+
+def test_membership_is_reproducible_from_the_rule_alone():
+    """Same inputs, same membership, twice, with the candidate order shuffled
+    in between. Nothing in the rule reads a clock, a file, or an order."""
+    cands = [_cand(f"S{i:03d}", float(1000 - i)) for i in range(50)]
+    first, _ = U.rank_members(cands, _params(top_n=10))
+    second, _ = U.rank_members(list(reversed(cands)), _params(top_n=10))
+    assert [m.candidate.symbol for m in first] == \
+           [m.candidate.symbol for m in second]
+    assert [m.rank for m in first] == list(range(1, 11))
 
 
 # --------------------------------------------------------------------- median

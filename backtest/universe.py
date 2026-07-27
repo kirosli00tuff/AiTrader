@@ -38,16 +38,30 @@ TOP_N = 500                   # members per formation date
 SEGMENT_BREAK_SESSIONS = 20   # a hole this long ends a listing segment
 JUMP_THRESHOLD = 0.50         # |close-to-close| above this is a discontinuity
 
-# Name tokens that identify a pooled investment vehicle rather than an
-# operating company. Order does not matter; matching is case-insensitive on
-# word boundaries so "Fundamental" does not match "Fund".
-_FUND_TOKENS = (
-    "etf", "etn", "fund", "trust", "index", "portfolio", "shares",
-    "ishares", "spdr", "proshares", "invesco", "vanguard", "wisdomtree",
-    "direxion", "etracs", "ipath", "vaneck", "franklin", "schwab",
-    "closed end", "royalty", "commodity", "bull", "bear",
+# STRONG markers. Any one of these names a pooled vehicle on its own, because
+# no listed operating company carries them. Brand names are included ONLY for
+# pure-play fund sponsors that are not themselves listed issuers, which is why
+# invesco, franklin, schwab and vanguard are absent: Invesco Ltd, Franklin
+# Resources and The Charles Schwab Corporation are operating companies, and
+# matching their brand excluded all three from the universe entirely.
+_STRONG_TOKENS = (
+    "etf", "etfs", "etn", "etns", "etp", "exchange traded",
+    "exchange-traded", "index fund", "mutual fund", "closed end",
+    "closed-end", "fund", "funds", "unit investment trust", "royalty trust",
+    "series trust", "spdr", "ishares", "proshares", "direxion",
+    "wisdomtree", "vaneck", "etracs", "ipath", "xtrackers", "powershares",
 )
-_FUND_RE = re.compile(r"\b(" + "|".join(_FUND_TOKENS) + r")\b", re.IGNORECASE)
+# WEAK markers. Each one appears in operating-company names often enough that
+# one alone means nothing: "Northern Trust Corporation" is a bank, "Vornado
+# Realty Trust" is a REIT, and "Abcam plc American Depositary Shares" is an
+# ADR on an operating company. TWO are required, which is what separates
+# "Invesco QQQ Trust, Series 1" from "Northern Trust Corporation".
+_WEAK_TOKENS = ("trust", "portfolio", "portfolios", "index", "series",
+                "shares", "beneficial interest")
+
+_STRONG_RE = re.compile(r"\b(" + "|".join(_STRONG_TOKENS) + r")\b",
+                        re.IGNORECASE)
+_WEAK_RE = re.compile(r"\b(" + "|".join(_WEAK_TOKENS) + r")\b", re.IGNORECASE)
 
 # Exchanges that list essentially only exchange-traded products. Used as a
 # second, independent signal beside the name so a fund with an unhelpful
@@ -55,16 +69,31 @@ _FUND_RE = re.compile(r"\b(" + "|".join(_FUND_TOKENS) + r")\b", re.IGNORECASE)
 FUND_EXCHANGES = frozenset({"ARCA", "BATS"})
 
 
-def classify_fund(name: str, exchange: str) -> bool:
-    """True when the instrument is a pooled vehicle, not an operating company.
+def classify_fund(name: str, exchange: str) -> bool | None:
+    """Whether the instrument is a pooled vehicle rather than an operating
+    company, or None when that CANNOT BE ESTABLISHED.
 
-    Two independent signals: the listing venue and the instrument name. ARCA
-    and BATS list exchange-traded products almost exclusively, so venue alone
-    settles those. Elsewhere the name decides.
+    THE RETURN IS TRI-STATE AND None IS NOT False. A symbol carrying no name
+    is not evidence of an operating company, it is an absence of evidence,
+    and `rejection_reason` excludes it. This function used to return a bare
+    bool, so a symbol with no metadata read as "not a fund" and was ADMITTED:
+    that is how an S&P 500 tracker reached 51 of 124 formation books. It is
+    the same failure shape the feed and the council prompt already fixed,
+    where a missing measurement must never render as a real one.
+
+    Two independent signals decide the rest. ARCA and BATS list
+    exchange-traded products almost exclusively, so the venue settles those
+    without reading the name. Elsewhere one strong marker decides, or two
+    weak ones together.
     """
-    if (exchange or "").upper() in FUND_EXCHANGES:
+    if (exchange or "").strip().upper() in FUND_EXCHANGES:
         return True
-    return bool(_FUND_RE.search(name or ""))
+    nm = (name or "").strip()
+    if not nm:
+        return None
+    if _STRONG_RE.search(nm):
+        return True
+    return len(set(m.group(0).lower() for m in _WEAK_RE.finditer(nm))) >= 2
 
 
 def median(values: Sequence[float]) -> float:
@@ -103,7 +132,9 @@ class Candidate:
     window_bars: int
     median_close: float
     median_dollar_volume: float
-    is_fund: bool
+    # Tri-state, mirroring classify_fund. None means the instrument type
+    # could not be established, which excludes rather than admits.
+    is_fund: bool | None
     segment_break_in_window: bool
 
 
@@ -114,7 +145,7 @@ class Member:
 
 
 def summarize_window(symbol: str, closes: Sequence[float],
-                     volumes: Sequence[float], *, is_fund: bool,
+                     volumes: Sequence[float], *, is_fund: bool | None,
                      segment_break_in_window: bool) -> Candidate | None:
     """Reduce one symbol's window to a Candidate, or None when it has no bars.
 
@@ -146,6 +177,12 @@ def rejection_reason(cand: Candidate, params: RuleParams) -> str | None:
         return f"below_price_floor:{cand.median_close:.2f}"
     if cand.segment_break_in_window:
         return "listing_segment_break_in_window"
+    # FAIL CLOSED. An instrument whose type could not be established is
+    # excluded and says so, never admitted by default. This branch sits
+    # BEFORE the include_funds check on purpose: unclassified is not a fund,
+    # it is an unknown, so a caller asking for funds does not get it either.
+    if cand.is_fund is None:
+        return "unclassified"
     if cand.is_fund and not params.include_funds:
         return "fund"
     return None
