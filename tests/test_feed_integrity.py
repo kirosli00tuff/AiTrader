@@ -266,9 +266,13 @@ def test_count_closed_trades_excludes_synthetic_bar_fills(tmp_path):
     _trade(conn, "2026-07-17T11:00:00Z", "win", origin="rebalance",
            bar_source="real_feed")
     conn.commit()
-    # real + unknown count (historical fills predate the column and were
-    # real). synthetic excluded. rebalance excluded by the origin rule.
-    assert count_closed_trades(conn) == 2
+    # 2026-07-27: only PROVENANCE-CONFIRMED fills count. 'unknown' no longer
+    # does, because the column arrived by an ALTER that defaulted every
+    # pre-existing row to it and that bucket is dominated by the offline
+    # synthetic loop, so it cannot be read as "historical and therefore real".
+    # Only the real_feed / strategy row survives. synthetic excluded by
+    # provenance, rebalance by the origin rule.
+    assert count_closed_trades(conn) == 1
     conn.close()
 
 

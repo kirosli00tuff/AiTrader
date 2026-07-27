@@ -212,19 +212,49 @@ def count_closed_trades(conn: sqlite3.Connection) -> int:
     """
     if not _has_origin_column(conn):
         return _count_all_closed(conn)
-    # A fill against a proven-synthetic bar exercised nothing: the prices were
-    # the walk generator, not a market (2026-07-17: BTC bought at 74,335 against
-    # a real 63,000). Excluding it is the same direction as the origin filter,
-    # STRICTER only. 'unknown' still counts: historical fills predate the
-    # provenance column and were real, so excluding them would rewrite history.
-    extra = (" AND COALESCE(bar_source, 'unknown') <> 'synthetic'"
-             if _has_bar_source_column(conn) else "")
+    # PROVENANCE-CONFIRMED ONLY (2026-07-27). This used to exclude bar_source
+    # 'synthetic' and COUNT 'unknown' as real, reasoning that historical fills
+    # predated the provenance column and were genuine. Measured against the
+    # record, that reasoning was wrong and the gate was failing toward
+    # PERMITTING: the column arrived by an ALTER that left every pre-existing
+    # row at 'unknown', and that bucket is dominated by the offline synthetic
+    # loop. The counter read 249 while only 9 fills carried confirmed real
+    # provenance.
+    #
+    # A gate whose whole job is to say "not yet" must not count a fill it
+    # cannot prove. An unprovable fill is now excluded, the same shape as an
+    # unclassified symbol excluded by the universe rule and an absent field
+    # omitted from a council prompt: absence of evidence is not evidence. A
+    # database with no provenance column can confirm nothing, so it counts
+    # nothing. Strictly stricter, the safe direction for the rl_min_real_fills
+    # activation (a CLAUDE.md hard rule) and the DNN real-data trainer.
+    # COALESCE makes the NULL case explicit rather than leaning on SQL's
+    # NULL-IN-set semantics: a row with no recorded provenance is unprovable
+    # and must be excluded, and saying so in the query is clearer than relying
+    # on a three-valued-logic side effect. It also keeps this off the
+    # membership shape that tests/test_tradeable_invariant.py forbids, which
+    # is the right call twice over: that guard protects the BAR-history check
+    # on `bars.source`, and this is `trades.bar_source`, a different column
+    # answering a different question, so a false positive there would be
+    # misleading to the next reader.
+    extra = (f" AND COALESCE(bar_source, '') IN ({_REAL_BAR_SOURCE_SQL})"
+             if _has_bar_source_column(conn) else " AND 0")
     row = conn.execute(
         "SELECT COUNT(*) FROM trades WHERE outcome IN ('win','loss','flat')"
         " AND pnl IS NOT NULL AND COALESCE(origin, 'strategy') = 'strategy'"
         + extra
     ).fetchone()
     return int(row[0]) if row else 0
+
+
+# Bar provenance values that CONFIRM a fill priced against a real market.
+# IMPORTED, never re-declared: market_data.tradeable owns the provenance source
+# set, and tests/test_tradeable_invariant.py fails any file that re-derives it.
+# A second literal copy is exactly how two halves of the system come to disagree
+# about what "real" means.
+from market_data.tradeable import REAL_SOURCES as REAL_BAR_SOURCES  # noqa: E402
+
+_REAL_BAR_SOURCE_SQL = ", ".join(f"'{s}'" for s in REAL_BAR_SOURCES)
 
 
 def _count_all_closed(conn: sqlite3.Connection) -> int:

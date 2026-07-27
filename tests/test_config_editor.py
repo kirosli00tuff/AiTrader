@@ -50,11 +50,11 @@ def test_round_trip_read_edit_write(cfg):
 
 def test_write_preserves_other_blocks_and_comments(cfg):
     before = open(cfg).read()
-    assert "# sum = 1.00" in before
+    assert "# sum = 0.75" in before
     ce.write_l1_values({"min_confidence_default": 0.7}, cfg)
     after = open(cfg).read()
     # Comments / unrelated blocks survive the edit.
-    assert "# sum = 1.00" in after
+    assert "# sum = 0.75" in after
     assert "STATIC SAFETY (HARD LIMITS)" in after
     assert "model_weights:" in after
     assert ce.read_l1_values(cfg)["min_confidence_default"] == 0.7

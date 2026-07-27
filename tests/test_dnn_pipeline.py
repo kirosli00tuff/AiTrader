@@ -212,7 +212,10 @@ def test_real_fills_uses_the_canonical_counter(tmp_path, monkeypatch):
     canonical = count_closed_trades(conn)
     conn.close()
     monkeypatch.setenv("MAL_DB_PATH", str(db))
-    assert controls.real_fills() == canonical == 2
+    # 2026-07-27: only provenance-CONFIRMED fills count, so the 'unknown' row
+    # no longer does. One row survives, win / strategy / real_feed. The other
+    # four are excluded by outcome, by origin, or by unprovable provenance.
+    assert controls.real_fills() == canonical == 1
     assert store._db_path() == str(db)
 
 

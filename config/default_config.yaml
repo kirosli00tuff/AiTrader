@@ -704,9 +704,25 @@ model_weights:
   llm_secondary_weight: 0.18
   llm_tertiary_weight: 0.12
   rule_based_factor_weight: 0.18
-  dnn_advisory_factor_weight: 0.15
-  whale_signal_factor_weight: 0.10
-  # sum = 1.00 (the six factors above)
+  # DEACTIVATED BY ZERO WEIGHT, NOT REMOVED (2026-07-27). A weight of 0.0 drops
+  # the factor from `used` in signal_engine::combine, so it contributes nothing
+  # to composed confidence, edge, or bias and never sits in the denominator.
+  # Every code path stays wired and callable: restoring a weight reactivates
+  # the layer with no other change.
+  #
+  # WHY: composed confidence is the weight-normalised MEAN of participating
+  # factors, so a factor with no demonstrated skill reporting below that mean
+  # lowers it and suppresses trades while no threshold moves. Neither of these
+  # has a measured basis. dnn_advisory has served a synthetic-trained champion
+  # throughout and never passed its real-data promotion gate. The whale layer
+  # has never been scored against outcomes at all. A factor earns its weight by
+  # measurement; until then it contributes zero rather than a share of a mean.
+  dnn_advisory_factor_weight: 0.0    # was 0.15
+  whale_signal_factor_weight: 0.0    # was 0.10
+  # sum = 0.75 (was 1.00 when dnn_advisory and whale_signal carried weight).
+  # combine() re-normalises across the factors that actually produced a signal,
+  # so the sum is not required to be 1.00 and the relative weights of the
+  # remaining factors are unchanged by the deactivation.
   rl_advisory_factor_weight: 0.0         # deferred RL factor; 0.0 = non-decisive
                                          # even once rl_enabled — operator-tunable
                                          # in the UI; excluded from normalization

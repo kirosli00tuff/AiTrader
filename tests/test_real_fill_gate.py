@@ -28,14 +28,45 @@ def conn():
     c = sqlite3.connect(":memory:")
     c.executescript(
         open(SCHEMA).read().replace("PRAGMA journal_mode = WAL;", ""))
+    # The provenance column arrives by migration in production, not in the base
+    # schema, so the fixture applies it the same way. Without it the counter
+    # can confirm nothing and every case below would read zero for the wrong
+    # reason, hiding the origin filter these tests exist to check.
+    c.execute("ALTER TABLE trades ADD COLUMN bar_source TEXT")
     return c
 
 
-def _fill(conn, origin: str, outcome: str = "win", pnl: float | None = 1.0):
+def _fill(conn, origin: str, outcome: str = "win", pnl: float | None = 1.0,
+          bar_source: str = "real_feed"):
+    """A closed fill. bar_source defaults to CONFIRMED REAL so these tests keep
+    exercising the origin filter they were written for. Since 2026-07-27 the
+    counter counts only provenance-confirmed fills, so leaving it NULL would
+    make every case here read zero for the wrong reason."""
     conn.execute(
         "INSERT INTO trades(ts,venue,symbol,side,qty,price,notional,mode,pnl,"
-        "outcome,origin) VALUES('2026-07-16T00:00:00Z','alpaca','SPY','sell',"
-        "1,100,100,'paper',?,?,?)", (pnl, outcome, origin))
+        "outcome,origin,bar_source) VALUES('2026-07-16T00:00:00Z','alpaca',"
+        "'SPY','sell',1,100,100,'paper',?,?,?,?)",
+        (pnl, outcome, origin, bar_source))
+
+
+def test_an_unprovable_fill_does_not_count(conn):
+    """THE 2026-07-27 CORRECTION. The provenance column arrived by an ALTER
+    that left every pre-existing row at 'unknown', and that bucket is dominated
+    by the offline synthetic loop. Counting it read 249 against 9 confirmed
+    real fills. A gate that says "not yet" must not count what it cannot
+    prove."""
+    for _ in range(20):
+        _fill(conn, "strategy", bar_source="unknown")
+    for _ in range(5):
+        _fill(conn, "strategy", bar_source=None)
+    assert count_closed_trades(conn) == 0, (
+        "unknown and NULL provenance are unprovable, so they do not count")
+    for _ in range(3):
+        _fill(conn, "strategy", bar_source="real_feed")
+    for _ in range(2):
+        _fill(conn, "strategy", bar_source="backfill")
+    assert count_closed_trades(conn) == 5, (
+        "only real_feed and backfill are confirmed real")
 
 
 def test_only_strategy_fills_count_toward_the_gate(conn):
@@ -70,10 +101,14 @@ def test_a_rebalance_trim_does_not_count_either(conn):
 def test_the_default_origin_is_strategy(conn):
     """Every existing call site keeps its meaning without being touched: only
     the two non-strategy paths set origin, so an unset row counts."""
+    # origin is left unset on purpose, which is the point of this test. Since
+    # 2026-07-27 provenance must also be confirmed, so bar_source is set: the
+    # origin DEFAULT is what is under test here, not the provenance rule, which
+    # test_an_unprovable_fill_does_not_count covers on its own.
     conn.execute(
         "INSERT INTO trades(ts,venue,symbol,side,qty,price,notional,mode,pnl,"
-        "outcome) VALUES('2026-07-16T00:00:00Z','alpaca','SPY','sell',1,100,"
-        "100,'paper',1.0,'win')")
+        "outcome,bar_source) VALUES('2026-07-16T00:00:00Z','alpaca','SPY',"
+        "'sell',1,100,100,'paper',1.0,'win','real_feed')")
     assert count_closed_trades(conn) == 1
 
 
