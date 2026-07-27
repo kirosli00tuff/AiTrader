@@ -11,6 +11,60 @@ Model:
 Prompt summary: one line.
 Changes: what changed.
 
+## Prompt: Ask the recorded council calls what else they knew
+
+Date: 2026-07-27
+Model: Opus 5 (claude-opus-5, 1M context).
+Prompt summary: the wide run closed the direction question (274 calls, 80 clusters, hit rate 50.0 percent, interval excluding the effect it was powered for). This session asks a different question of the same data, because two secondaries hinted at something the primary test was not measuring: confidence buckets came back monotone for the first time, and abstention turned out to be an asset-class property rather than a provider trait. Task 0 pre-register the full closed list with metrics, clustering unit, corrected bar and per-question negatives, commit, report the hash. Task 1 test whether abstention carries information about subsequent absolute movement and volatility. Task 2 test the confidence ordering properly, with intervals, clustered, per provider and for the composed conviction, and if suggestive compute what would settle it. Task 3 test whether declined setups performed worse than endorsed ones, since avoidance is a different claim from direction. Task 4 report abstention, hit rate and excess per provider per asset class. Task 5 inspect the recorded rationales, labelled exploratory throughout. Task 6 report negatives first and state what remains of the council layer's justification. Recommend no architecture change.
+
+CONSTRAINTS HONORED: research only against recorded data. **NO provider call of any kind was made and this session cost nothing.** Live trading stays off. No RiskGate logic, no live-trading gate, no adaptive limit-weakening invariant, no Level 1 risk value, no threshold, no strategy parameter, no engine behavior touched. Nothing applied.
+
+### TASK 0, PRE-REGISTRATION. The list closes at this commit.
+
+DATA: the 389 evaluations and 1,167 provider rows collected 2026-07-26/27 into the gitignored research database, plus its 5-minute bars for all 90 symbols. Bars already extend past every evaluation's window (19:30Z crypto, 19:15Z equity, last window closing 19:18Z), so NO network call of any kind is needed or made. The production database is not opened.
+
+**THE DIRECTION QUESTION IS ALREADY ANSWERED AND IS NOT RE-TESTED HERE.** Pooled excess -0.5 bp, z -0.046, 80 clusters. Nothing below revisits it.
+
+CLUSTERING UNIT: the symbol, throughout, with the g/(g-1) small-cluster correction, identical to the two prior sessions. EFFECTIVE SAMPLE SIZE is the count of distinct symbol clusters, reported beside every raw count.
+
+HORIZON: 4 hours, 48 five-minute bars, identical to the scored record. Entry is the first close at or after the evaluation stamp, exit the last close at or before entry plus 4 hours. No price is ever forward-filled.
+
+FOUR PRIMARY TESTS, one per question:
+1. Pooled difference in EXCESS ABSOLUTE MOVE between abstained and directional calls.
+2. Pooled Spearman rank correlation between stated confidence and a hit, over scorable directional calls.
+3. Difference in EXCESS ABSOLUTE MOVE between the council's endorsed and declined sets.
+4. Difference in per-call EXCESS OVER THE UNCONDITIONAL MOVE between crypto and equity, pooled across providers.
+
+**SIGNIFICANCE BAR: Bonferroni across the closed list of 4, family alpha 0.05, per-test 0.0125 two-sided, |z| >= 2.50.** Every per-provider and per-asset-class breakdown is a SECONDARY, reported with its interval and carrying NO verdict authority. Task 5 is exploratory by construction and can never produce a finding.
+
+METRICS, fixed now so none can be chosen after seeing the data:
+- REALISED MOVE: the signed 4-hour return from entry close to exit close.
+- ABSOLUTE MOVE: its absolute value.
+- EXCESS ABSOLUTE MOVE, the primary for Tasks 1 and 3: absolute move minus the symbol's own unconditional mean absolute 4-hour move over every overlapping window in its bar history. Normalising by the symbol's own typical movement is what stops a crypto-heavy group beating an equity-heavy one on symbol mix alone.
+- REALISED VOLATILITY: the standard deviation of the 5-minute returns inside the window, reported beside its unconditional counterpart.
+- EXCESS OVER THE UNCONDITIONAL MOVE, the primary for Task 4: direction sign times (realised return minus the symbol's unconditional mean 4-hour return), the scored record's own primary figure.
+- HIT: signed return above zero, directional calls only.
+
+TASK 1 SPECIFICATION. For each provider, split its non-errored calls into ABSTAINED (direction flat) and DIRECTIONAL (long or short). Compare mean excess absolute move, mean absolute move, and mean realised volatility across the two groups, clustered on symbol. TWO-SIDED by design: a provider that abstains when the next four hours are unusually quiet AND one that abstains when they are unusually violent are both doing something, and the pre-registration refuses to guess which.
+
+TASK 2 SPECIFICATION. Calibration curve with counts per bucket. Spearman between stated confidence and hit, with a 95 percent interval from a CLUSTER BOOTSTRAP resampling symbols with replacement, 2,000 draws, because the plain Spearman standard error assumes independence the sample does not have. Computed for the pooled provider set, for each provider, for the composed council conviction, and separately within crypto and within equity.
+
+TASK 3 SPECIFICATION. ENDORSED is an evaluation whose composed verdict is directional (buy, strong_buy, sell, strong_sell). DECLINED is an evaluation whose composed verdict is hold, which is what a round of unanimous flats or an all-abstained round produces. A registered secondary splits declined further by whether every provider abstained. Both sets are scored on excess absolute move (the primary), on absolute move, and on a naive always-long return, since a filter claim is about whether the declined setups were worse to be in at all, not about direction.
+
+TASK 4 SPECIFICATION. Per provider and per asset class: abstention rate, directional rate, error rate, directional hit rate, and mean excess over the unconditional move, each with its raw count and cluster count. The primary is the pooled crypto-minus-equity difference in excess. The question is explicitly whether any provider differs in how WELL it speaks by class, as against how OFTEN, and the two are reported separately so they cannot be conflated.
+
+TASK 5 SPECIFICATION. Recorded rationale free text only. No classifier is built, no provider is called, and no model is asked to label anything. Recurring phrases are counted mechanically and any correlation with outcome is reported EXPLORATORY regardless of magnitude, because the categories are chosen after seeing the data.
+
+WHAT COUNTS AS A NEGATIVE, per question, declared now:
+- Tasks 1, 3, 4: an interval spanning zero, or |z| under 2.50, reads NO EFFECT DEMONSTRATED.
+- Task 2: the ordering is ESTABLISHED only if the pooled Spearman's bootstrap interval excludes zero AND |z| reaches 2.50. It is SUGGESTIVE if the point estimate is positive and the interval spans zero, in which case the sample needed to settle it is computed. It is ABSENT if the point estimate is at or below zero.
+- Task 5 cannot produce a finding under any result.
+- **A NEGATIVE ON ALL FOUR IS THE EXPECTED OUTCOME AND IS FULLY ACCEPTABLE.** It will be reported as the headline if it occurs. Nothing outside this committed list is a finding, and no architecture change is recommended whatever the result.
+
+RESOURCE RULE: single process over the recorded research database, opened read-only. No network call. No provider call. No write to any production file.
+
+[Findings follow.]
+
 ## Prompt: Never retry a billing 429, latch provider exhaustion, surface it where a human reads it
 
 Date: 2026-07-27
