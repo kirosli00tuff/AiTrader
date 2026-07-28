@@ -11,6 +11,63 @@ Model:
 Prompt summary: one line.
 Changes: what changed.
 
+## Prompt: Amendment 4, a fifth state and the delay-rolled reading confirmed
+
+Date: 2026-07-28
+Model: Opus 5 (claude-opus-5, 1M context).
+Prompt summary: **EXPERIMENT.md is ACCEPTED and BINDING. This session amends it with the operator's explicit approval, recorded in the amendment note. Collection has NOT started, so no data exists and nothing is changed after seeing a result.** Stage 2 reported three internal contradictions rather than resolving them; the operator has now decided two and left the third. Task 1 add **`excluded_pre_call`** as a fifth state, defining precisely which conditions land there and which stay on `model_failed`, since a call attempted and failed is a different fact from a row never eligible for a call, and this project has six recorded fabrications every one of which came from two conditions sharing one representation. State what each is for in analysis: model failure is an operational health metric, pre-call exclusion is a sample-composition metric. Task 2 confirm Task 4's reading that a delay-rolled headline is **scored, not excluded**, because the 20-minute delay exists to move a headline to a tradeable moment rather than to discard it, and excluding late headlines would systematically remove those arriving near the close. Remove `delay_rolled` from the exclusion reasons and confirm the implementation matches the specification rather than the reverse. Task 3 leave the rule id alone and record it as a known cosmetic defect. Task 4 implement and reconcile every downstream section, reporting how many demonstration rows would reclassify. Task 5 demonstrate the new state by producing it through the real collector under a 1 USD ceiling, using the operator's new `anthropic_experiment_key`, confirming `credential_shared=0`. Task 6 tests including a mutation test of the state separation. Task 7 amend in place with superseded definitions preserved, update PROGRESS.md, commit and push.
+
+CONSTRAINTS HONORED: live trading off. No RiskGate logic, no live-trading gate, no adaptive limit-weakening invariant, no Level 1 value, no threshold, no strategy parameter touched.
+
+### FINDINGS
+
+**AMENDED WITH THE OPERATOR'S EXPLICIT APPROVAL. NO COLLECTION DATA EXISTED**: collection has not started, not one row carries `run_kind='collection'`, no headline has been scored against a price, so nothing was changed after seeing a result. **pytest 1,183 passed, up from 1,177.** Live trading off. No RiskGate logic, no live-trading gate, no adaptive invariant, no Level 1 value, no threshold, no strategy parameter.
+
+**TASK 1, `excluded_pre_call` ADDED.** The rule is one question: **was a request sent to the provider?**
+
+```
+no publication timestamp      -> excluded_pre_call / no_publication_time
+published later than fetched  -> excluded_pre_call / clock_inconsistent
+collapsed duplicate           -> excluded_pre_call / duplicate_headline
+transport | timeout | http_status | unparseable | exhausted -> model_failed
+```
+
+**They answer different questions and are never summed.** `model_failed` is OPERATIONAL HEALTH: a rising rate means go and look at the provider. `excluded_pre_call` is SAMPLE COMPOSITION: a rising rate means the effective sample is smaller than the raw headline count and Task 5's power arithmetic is optimistic. **`error_class` remains the cause axis inside each**, so nothing distinguishable became less so.
+
+**TASK 2, DELAY-ROLLED CONFIRMED AS SCORED.** `delay_rolled` removed from the exclusion reasons; the constant and `DELAY_ROLL_IS_EXCLUSION` are deleted. **The implementation already matched, so the specification moved to the code**, which is the right direction here because the code was following Task 4's explicit prose rather than a convenience.
+
+**TASK 3, RULE ID LEFT ALONE**, recorded as a known cosmetic defect at its site and in the acceptance header.
+
+**TASK 5, DEMONSTRATED BY PRODUCING IT.** 52 symbol-days, 16 symbols, 3 sessions, $0.0033 of a $1.00 ceiling.
+
+```
+state              error_class            n
+excluded_pre_call  clock_inconsistent     2
+excluded_pre_call  no_publication_time    2
+judged             -                      6
+model_failed       transport              1
+no_news            -                     39
+source_failed      source_unreachable     2
+
+overlap excluded_pre_call<->model_failed causes : 0 in both directions
+excluded_pre_call rows carrying model output/cost: 0 of 4
+credential_shared distinct values                : [0]
+delay_rolled rows with a non-empty exclusion     : 0
+```
+
+**`credential_shared = 0` on every row.** The operator's `anthropic_experiment_key` resolved as OWN KEY, `--allow-shared-key` is no longer needed, and the credential half of Open Question 9 is closed. The latch half was already closed.
+
+**THE THIRD PRE-CALL CAUSE WAS NOT PRODUCED LIVE IN THIS RUN.** No duplicate arose naturally across 16 symbols and 3 sessions. It is covered by `test_a_duplicate_produces_excluded_pre_call` and was produced live by the stage 2 run. Stated rather than glossed.
+
+**TASK 6, TESTS.** 7 added, 1 replaced. Mutation-tested: collapsing `STATE_EXCLUDED_PRE_CALL` onto `STATE_MODEL_FAILED` reproduces the pre-amendment behaviour, both conditions land on one state, and the separation assertion fails as it must.
+
+**TASK 4, RECLASSIFICATION.** One stage 2 demonstration row (a collapsed duplicate) would move from `model_failed` to `excluded_pre_call`. **Nothing was migrated**: demonstration databases are gitignored scratch, regenerated per run, and their rows cannot count toward the pre-registered sample.
+
+**WHAT REMAINS BEFORE COLLECTION.** The tick multiple is unmeasured and is now behind a SIP-entitled market-data subscription, which is the binding blocker. The exchange calendar is stale past 2026-07-24. Open Questions 3, 6 and 8 are untouched. The strength distribution needs re-checking at scale, and this run's histogram was degenerate at n=6, which is expected at that size and is not a finding.
+
+Changes: EXPERIMENT.md (Amendment 4, Task 7 states, Task 8 schema and exclusion reasons, coverage summary, acceptance header; superseded definitions preserved), `news_experiment/spec.py`, `news_experiment/collect.py`, `tests/test_news_experiment_collector.py`, PROGRESS.md, RETURN.md. **Live trading untouched and off.**
+Commit message: Amendment 4, add excluded_pre_call as a fifth state, confirm delay-rolled headlines are scored not excluded, record the rule id as a known cosmetic defect, collection not started
+
 ## Prompt: Measure the tick multiple during RTH and update the fee model
 
 Date: 2026-07-28

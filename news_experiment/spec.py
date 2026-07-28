@@ -137,45 +137,60 @@ STORY_GROUP_WINDOW_HOURS = 24   # one story naming several tickers
 STATE_NO_NEWS = "no_news"
 STATE_JUDGED = "judged"
 STATE_MODEL_FAILED = "model_failed"
+STATE_EXCLUDED_PRE_CALL = "excluded_pre_call"   # AMENDMENT 4
 STATE_SOURCE_FAILED = "source_failed"
-STATES = (STATE_NO_NEWS, STATE_JUDGED, STATE_MODEL_FAILED, STATE_SOURCE_FAILED)
+STATES = (STATE_NO_NEWS, STATE_JUDGED, STATE_MODEL_FAILED,
+          STATE_EXCLUDED_PRE_CALL, STATE_SOURCE_FAILED)
+
+# THE ONE QUESTION THAT SEPARATES THE TWO FAILURE STATES: was a request sent to
+# the provider? `model_failed` means yes and it did not return a usable verdict.
+# `excluded_pre_call` means no, because the row was never eligible for one.
+#
+# THEY ANSWER DIFFERENT QUESTIONS AND MUST NEVER BE SUMMED. `model_failed` is an
+# OPERATIONAL HEALTH metric: it rises when the provider is unwell and the
+# response is to go and look at the provider. `excluded_pre_call` is a SAMPLE
+# COMPOSITION metric: it rises when the source serves headlines the design
+# cannot use, which means the effective sample is smaller than the raw headline
+# count and Task 5's power arithmetic is optimistic. A combined rate answers
+# neither. `error_class` remains the cause axis inside each.
+ERROR_CLASSES_MODEL_FAILED = ("transport", "timeout", "http_status",
+                              "unparseable", "exhausted")
+ERROR_CLASSES_PRE_CALL = ("no_publication_time", "clock_inconsistent",
+                          "duplicate_headline")
 
 EXCLUSION_NONE = ""
 EXCLUSION_NO_PUBLICATION_TIME = "no_publication_time"
 EXCLUSION_CLOCK_INCONSISTENT = "clock_inconsistent"
 EXCLUSION_SYMBOL_DID_NOT_TRADE = "symbol_did_not_trade"
-EXCLUSION_DELAY_ROLLED = "delay_rolled"
 EXCLUSION_DUPLICATE_HEADLINE = "duplicate_headline"
 EXCLUSION_DAY_EXCLUDED = "day_excluded_source_failures"
+# `delay_rolled` REMOVED by AMENDMENT 4. Task 4 scores a rolled headline and
+# Task 8 could not simultaneously exclude it. The operator confirmed Task 4:
+# the 20-minute delay moves a headline to a moment it could actually have been
+# traded, it does not discard it, and excluding late headlines would
+# systematically remove those arriving near the close. The roll is recorded on
+# its own `delay_rolled` boolean and `exclusion_reason` stays empty.
 EXCLUSION_REASONS = (
     EXCLUSION_NONE,
     EXCLUSION_NO_PUBLICATION_TIME,
     EXCLUSION_CLOCK_INCONSISTENT,
     EXCLUSION_SYMBOL_DID_NOT_TRADE,
-    EXCLUSION_DELAY_ROLLED,
     EXCLUSION_DUPLICATE_HEADLINE,
     EXCLUSION_DAY_EXCLUDED,
 )
 
-# A SPECIFICATION CONTRADICTION, REPORTED AND NOT RESOLVED HERE.
+# SETTLED BY AMENDMENT 4, with the operator's explicit approval. Stage 2 found
+# that Task 4 scores a delay-rolled headline while Task 8 listed `delay_rolled`
+# as an exclusion reason, and reported the contradiction rather than resolving
+# it under a binding specification. The operator confirmed TASK 4 IS CORRECT:
+# the 20-minute minimum delay exists to move a headline to a moment at which it
+# could actually have been traded, not to discard it, and excluding late
+# headlines would systematically remove those arriving near the close, a
+# non-random slice of the sample.
 #
-# Task 4 says a headline published within 20 minutes of a close "rolls to the
-# next session, SCORED open-to-close there". Task 8 lists `delay_rolled` among
-# the values of `exclusion_reason`, a field defined as "'' when scored".
-# A rolled headline cannot be both scored and excluded.
-#
-# Two readings exist and both are defensible:
-#   (a) roll and score. `exclusion_reason` stays '' and the roll is a property
-#       of the anchor, not a reason to drop the observation.
-#   (b) the observation for the ORIGINAL session is excluded as `delay_rolled`
-#       and the scoring happens against the next session's window.
-#
-# THIS PACKAGE IMPLEMENTS (a), because Task 4's prose is explicit that the
-# headline is scored, and because (b) discards an observation the design paid
-# for. The roll is recorded on its own field `delay_rolled` so nothing is lost
-# and neither reading is foreclosed. Flipping to (b) is this flag plus the
-# branch it guards in `collect`.
-DELAY_ROLL_IS_EXCLUSION = False
+# A rolled headline is SCORED. `exclusion_reason` stays empty and the roll is
+# recorded on the `delay_rolled` boolean. There is no longer a flag here,
+# because there is no longer a choice to make.
 
 # Source-failure thresholds (Task 7, "How absence is visible").
 SOURCE_FAILED_CRITICAL_FRACTION = 0.05     # emits a CRITICAL event

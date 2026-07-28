@@ -530,32 +530,159 @@ def test_a_judged_row_always_carries_a_judgment(analysis_db, tmp_path):
         "WHERE exclusion_reason='duplicate_headline'").fetchone()
     conn.close()
     assert orphans == 0, "a judged row with no judgment is a fabrication"
-    assert dup == (spec.STATE_MODEL_FAILED, "duplicate_headline",
+    assert dup == (spec.STATE_EXCLUDED_PRE_CALL, "duplicate_headline",
                    "duplicate_headline")
 
 
-def test_pre_call_exclusions_stay_distinguishable_by_error_class(analysis_db,
-                                                                 tmp_path):
-    """Task 7's four states do not cover a headline excluded before any model
-    call, so all three such cases land on `model_failed` and `error_class` is
-    what keeps them apart from a transport failure. Reported as a spec gap."""
+# --- AMENDMENT 4: the fifth state --------------------------------------------
+
+@pytest.mark.parametrize("article,error_class,exclusion", [
+    ({"id": 7, "headline": "No timestamp here", "source": "X", "datetime": 0},
+     "no_publication_time", spec.EXCLUSION_NO_PUBLICATION_TIME),
+    ({"id": 8, "headline": "From the future", "source": "X",
+      "datetime": int(datetime(2099, 1, 1, tzinfo=timezone.utc).timestamp())},
+     "clock_inconsistent", spec.EXCLUSION_CLOCK_INCONSISTENT),
+], ids=["no-publication-time", "clock-inconsistent"])
+def test_each_pre_call_condition_produces_excluded_pre_call(
+        analysis_db, tmp_path, article, error_class, exclusion):
+    """The rule is one question: was a request sent to the provider? These were
+    never eligible for one, so none of them is a provider failure."""
     day = SESSIONS[70]
+    cfg = _cfg(analysis_db, tmp_path)
+    collect.run(cfg, finnhub_client=FakeFinnhub({("AAA", day): [article]}),
+                scorer=FakeScorer({}))
+    conn = sqlite3.connect(cfg.db_path)
+    row = conn.execute(
+        "SELECT state, error_class, exclusion_reason FROM news_observation "
+        "WHERE headline=?", (article["headline"],)).fetchone()
+    conn.close()
+    assert row == (spec.STATE_EXCLUDED_PRE_CALL, error_class, exclusion)
+
+
+def test_a_duplicate_produces_excluded_pre_call(analysis_db, tmp_path):
+    day = SESSIONS[70]
+    when = datetime(2026, 3, 11, 14, 0, tzinfo=timezone.utc)
     answers = {("AAA", day): [
-        {"id": 7, "headline": "No timestamp here", "source": "X",
-         "datetime": 0},
+        _article(1, "AAA wins a contract", when),
+        _article(2, "AAA  wins a contract!", when + timedelta(hours=1)),
     ]}
     cfg = _cfg(analysis_db, tmp_path)
     collect.run(cfg, finnhub_client=FakeFinnhub(answers),
                 scorer=FakeScorer({}))
     conn = sqlite3.connect(cfg.db_path)
-    row = conn.execute(
-        "SELECT state, error_class, exclusion_reason, published_ts FROM "
-        "news_observation WHERE headline='No timestamp here'").fetchone()
+    state, ec = conn.execute(
+        "SELECT state, error_class FROM news_observation "
+        "WHERE exclusion_reason='duplicate_headline'").fetchone()
     conn.close()
-    assert row[0] == spec.STATE_MODEL_FAILED
-    assert row[1] == "no_publication_time"
-    assert row[2] == spec.EXCLUSION_NO_PUBLICATION_TIME
-    assert row[3] is None, "never assumed to have arrived at midnight"
+    assert state == spec.STATE_EXCLUDED_PRE_CALL
+    assert ec == "duplicate_headline"
+
+
+def test_excluded_pre_call_and_model_failed_never_merge(analysis_db, tmp_path):
+    """Both appear in one run and stay separate. `model_failed` is provider
+    health, `excluded_pre_call` is sample composition, and a combined rate
+    answers neither question."""
+    day = SESSIONS[70]
+    when = datetime(2026, 3, 11, 14, 0, tzinfo=timezone.utc)
+    answers = {
+        ("AAA", day): [{"id": 7, "headline": "No stamp", "source": "X",
+                        "datetime": 0}],
+        ("BBB", day): [_article(2, "BBB files", when)],
+    }
+    scorer = FakeScorer({"BBB files": ScoreResult(
+        state=spec.STATE_MODEL_FAILED, raw_response="upstream 500",
+        error_class="http_status")})
+    cfg = _cfg(analysis_db, tmp_path)
+    collect.run(cfg, finnhub_client=FakeFinnhub(answers), scorer=scorer)
+    conn = sqlite3.connect(cfg.db_path)
+    states = dict(conn.execute(
+        "SELECT state, COUNT(*) FROM news_observation GROUP BY state"))
+    conn.close()
+    assert states.get(spec.STATE_EXCLUDED_PRE_CALL) == 1
+    assert states.get(spec.STATE_MODEL_FAILED) == 1
+    assert spec.STATE_EXCLUDED_PRE_CALL != spec.STATE_MODEL_FAILED
+
+
+def test_an_excluded_pre_call_row_carries_no_model_output_and_no_cost(
+        analysis_db, tmp_path):
+    """No call was attempted, so there is nothing the provider produced and
+    nothing it charged. A cost on such a row would be a fabrication."""
+    day = SESSIONS[70]
+    cfg = _cfg(analysis_db, tmp_path)
+    collect.run(cfg, finnhub_client=FakeFinnhub({("AAA", day): [
+        {"id": 7, "headline": "No stamp", "source": "X", "datetime": 0}]}),
+        scorer=FakeScorer({}))
+    conn = sqlite3.connect(cfg.db_path)
+    row = conn.execute(
+        "SELECT judgment, strength, raw_response, cost_usd, called_ts, "
+        "latency_ms, input_tokens, output_tokens FROM news_observation "
+        "WHERE state=?", (spec.STATE_EXCLUDED_PRE_CALL,)).fetchone()
+    conn.close()
+    assert row is not None
+    assert all(v is None for v in row), f"pre-call row carries model output: {row}"
+
+
+def test_mutation_collapsing_the_two_failure_states_is_caught(analysis_db,
+                                                             tmp_path,
+                                                             monkeypatch):
+    """MUTATION TEST of the state separation.
+
+    The mutant is the pre-Amendment-4 behaviour: route a pre-call exclusion to
+    `model_failed`. Under it the two conditions share one representation, the
+    shape behind all six recorded fabrications in this project. The separation
+    check must catch it.
+    """
+    monkeypatch.setattr(spec, "STATE_EXCLUDED_PRE_CALL",
+                        spec.STATE_MODEL_FAILED)
+    day = SESSIONS[70]
+    when = datetime(2026, 3, 11, 14, 0, tzinfo=timezone.utc)
+    answers = {
+        ("AAA", day): [{"id": 7, "headline": "No stamp", "source": "X",
+                        "datetime": 0}],
+        ("BBB", day): [_article(2, "BBB files", when)],
+    }
+    scorer = FakeScorer({"BBB files": ScoreResult(
+        state=spec.STATE_MODEL_FAILED, raw_response="upstream 500",
+        error_class="http_status")})
+    cfg = _cfg(analysis_db, tmp_path)
+    collect.run(cfg, finnhub_client=FakeFinnhub(answers), scorer=scorer)
+    conn = sqlite3.connect(cfg.db_path)
+    states = dict(conn.execute(
+        "SELECT state, COUNT(*) FROM news_observation GROUP BY state"))
+    conn.close()
+    # Under the mutation both land on model_failed and the pre-call state
+    # vanishes, so the real test's assertion fails. That is what proves it works.
+    assert states.get("excluded_pre_call") is None
+    assert states.get(spec.STATE_MODEL_FAILED) == 2
+    with pytest.raises(AssertionError):
+        assert states.get("excluded_pre_call") == 1
+
+
+def test_a_delay_rolled_headline_is_scored_not_excluded(analysis_db, tmp_path):
+    """AMENDMENT 4 confirms Task 4. The 20-minute delay moves a headline to a
+    tradeable moment, it does not discard it, and excluding late headlines
+    would systematically remove those arriving near the close."""
+    assert not hasattr(spec, "EXCLUSION_DELAY_ROLLED")
+    assert "delay_rolled" not in spec.EXCLUSION_REASONS
+    day = SESSIONS[70]
+    # 15:50 ET, ten minutes before the close.
+    late = datetime(2026, 3, 11, 19, 50, tzinfo=timezone.utc)
+    cfg = _cfg(analysis_db, tmp_path, day_from=day, day_to=day)
+    collect.run(cfg, finnhub_client=FakeFinnhub(
+        {("AAA", day): [_article(1, "AAA late headline", late)]}),
+        scorer=FakeScorer({}))
+    conn = sqlite3.connect(cfg.db_path)
+    row = conn.execute(
+        "SELECT state, delay_rolled, exclusion_reason, anchor_kind, "
+        "scoring_session, judgment FROM news_observation "
+        "WHERE headline='AAA late headline'").fetchone()
+    conn.close()
+    assert row[0] == spec.STATE_JUDGED, "a rolled headline is scored"
+    assert row[1] == 1, "the roll is recorded on its own boolean"
+    assert row[2] == "", "and it is NOT an exclusion"
+    assert row[3] == spec.ANCHOR_NEXT_SESSION_OPEN
+    assert row[4] == "2026-03-12", "scored at the session it rolled to"
+    assert row[5] is not None
 
 
 # --- Credential and latch separation (Open Question 9) -----------------------

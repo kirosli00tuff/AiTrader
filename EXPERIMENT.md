@@ -18,12 +18,13 @@
 > and with a statement of what data existed at the time. The three amendments
 > below were all made before acceptance and before any data existed.
 >
-> **Known disagreements found during stage 2 implementation and reported
-> rather than resolved:** the rule id string encodes `p5` while Amendment 2
-> derived a 10.00 floor; Task 4 scores a delay-rolled headline while Task 8
-> lists `delay_rolled` as an exclusion reason; and Task 7's four states do not
-> cover a headline excluded before any model call. Each is recorded at its
-> site.
+> **The three disagreements stage 2 reported are now RESOLVED by AMENDMENT 4,
+> with the operator's explicit approval.** Task 7 gains a fifth state,
+> `excluded_pre_call`. Task 4's reading is confirmed: a delay-rolled headline is
+> scored, and `delay_rolled` is removed from the exclusion reasons. The rule id
+> keeps its stale `p5` deliberately and is recorded as a known cosmetic defect,
+> because it is a label rather than a parameter and `price_floor_at_formation`
+> carries the operative 10.00 on every row.
 >
 > This document was a proposed pre-registration written by Stage 0.
 >
@@ -129,6 +130,95 @@ experiment has ever been scored against a price.
 
 **The DeepSeek model, its pricing, its cost arithmetic, and the two-field prompt
 are preserved under SUPERSEDED in Task 3, not deleted.**
+
+## AMENDMENT 4 — 2026-07-28, a fifth state, and the delay-rolled reading settled
+
+**APPROVED EXPLICITLY BY THE OPERATOR.** This document was accepted and binding
+before this amendment. Stage 2 found three internal contradictions and reported
+them rather than resolving them, because an implementation session that adjusts
+a specification always adjusts it toward whatever makes the work easier. The
+operator has now decided two of the three and left the third alone.
+
+**NO COLLECTION DATA EXISTED AT THE TIME OF THIS CHANGE. Collection has not
+started, not one observation row has been written under `run_kind='collection'`,
+and no headline has been scored against a price. Nothing here was changed after
+seeing a result.** The only rows in existence are labelled
+`run_kind='demonstration'` and cannot count toward the pre-registered sample.
+
+**Changed, two things. A third is deliberately left alone.**
+
+### 1. A FIFTH STATE, `excluded_pre_call`
+
+Task 7 defined four states and none covered a headline that was found but
+excluded BEFORE any model call was attempted. Stage 2 landed those rows on
+`model_failed` with `error_class` as the only separator, and reported that as a
+gap.
+
+**THE GAP IS REAL AND THE PRECEDENT IS DIRECT.** `model_failed` was given the
+single meaning that the model never considered the headline, which is
+technically true of all of them. But **a call that was attempted and did not
+return a usable verdict is a different fact from a row that was never eligible
+for a call**, and this project has recorded six fabrications, every one produced
+by two conditions sharing one representation. The nearest precedent is the fill
+provenance split, where `unknown` and `unclassified` had to be separated because
+one string was carrying four conditions.
+
+**THE TWO STATES ANSWER DIFFERENT QUESTIONS, and that is why they must not
+merge:**
+
+- **`model_failed` is an OPERATIONAL HEALTH metric.** It rises when the provider
+  is erroring, timing out, rate limiting, or returning unparseable output. A
+  rising rate means go and look at the provider. It says nothing about the
+  sample.
+- **`excluded_pre_call` is a SAMPLE COMPOSITION metric.** It rises when the
+  SOURCE is serving headlines the design cannot use: no publication timestamp,
+  an inconsistent clock, a syndicated duplicate. A rising rate means the
+  effective sample is smaller than the raw headline count suggests, and the
+  power arithmetic in Task 5 is optimistic. It says nothing about the provider.
+
+Averaging them produces a number that answers neither.
+
+**`error_class` STILL SEPARATES CAUSES WITHIN EACH STATE**, and is unchanged:
+`transport`, `timeout`, `http_status`, `unparseable`, `exhausted` inside
+`model_failed`; `no_publication_time`, `clock_inconsistent`,
+`duplicate_headline` inside `excluded_pre_call`. The state answers "which
+question does this row inform", the error class answers "why".
+
+### 2. A DELAY-ROLLED HEADLINE IS SCORED, NOT EXCLUDED
+
+Task 4 said a headline published within 20 minutes of a close "rolls to the next
+session, scored open-to-close there". Task 8 listed `delay_rolled` among the
+values of `exclusion_reason`, a field defined as "'' when scored". Both could
+not hold.
+
+**THE OPERATOR CONFIRMS TASK 4 IS CORRECT.** The reasoning, recorded so it is
+not re-litigated: **the 20-minute minimum delay exists to move a headline to a
+moment at which it could actually have been traded, not to discard it.**
+Excluding late headlines would systematically remove those arriving near the
+close, which is a non-random slice of the sample and would bias it.
+
+`delay_rolled` is removed from the exclusion reasons. The roll keeps its own
+recorded boolean and `exclusion_reason` stays empty on a rolled row.
+
+### 3. THE RULE ID IS LEFT ALONE, AND IS A KNOWN COSMETIC DEFECT
+
+`U-NEWS-ADV2M-65M-stk-w60-m40-p5-s400` encodes `p5` while Amendment 2 derived a
+**10.00** price floor. **The operator's decision is to leave it.** The reasoning:
+
+- **The id is a LABEL, not a parameter.** Nothing reads `p5` to decide anything.
+  The floor that operates is `spec.MIN_MEDIAN_CLOSE`, 10.00.
+- **`price_floor_at_formation` is recorded on every row**, so the true value
+  travels with the data and no consumer has to trust the label.
+- **Changing it now would give the demonstration rows a different rule id from
+  the collection rows.** A split id is worse for comparability than a mildly
+  wrong one.
+
+**RECORDED AS A KNOWN COSMETIC DEFECT so a later reader does not mistake `p5`
+for the operative value.** It is wrong, it is harmless, and it is deliberate.
+
+**WHEN:** before any collection. **The superseded four-state definition and the
+superseded exclusion-reason list are preserved under SUPERSEDED in Task 7 and
+Task 8, not deleted.**
 
 ## Why this exists
 
@@ -1302,14 +1392,53 @@ number would make the modal case a fabrication.
 
 **Absence is a distinct recorded state and never a score.**
 
-Four states, mutually exclusive, one per symbol-day:
+**FIVE states (AMENDED 2026-07-28 from four), mutually exclusive:**
 
-| state | meaning | scored? |
+| state | meaning | a call was attempted? | scored? |
+|---|---|---|---|
+| `no_news` | the source was queried successfully and returned no headline | no headline existed | **no** |
+| `judged` | a headline was found and the model returned a parseable verdict | **yes, and it returned** | yes, unless NEUTRAL |
+| `model_failed` | a call WAS ATTEMPTED and did not return a usable verdict: it errored, timed out, was rate limited, hit an exhausted account, or returned unparseable output | **yes, and it failed** | **no** |
+| `excluded_pre_call` | a headline was found but was NEVER ELIGIBLE for a call, so none was attempted | **no** | **no** |
+| `source_failed` | the source query itself failed, so absence is **unproven** | no headline established | **no** |
+
+**WHICH CONDITIONS LAND WHERE, exhaustively.** The rule is one question: *was a
+request sent to the provider?*
+
+| condition | state | `error_class` |
 |---|---|---|
-| `no_news` | the source was queried successfully and returned no headline | **no** |
-| `judged` | a headline was found and the model returned a parseable verdict | yes, unless NEUTRAL |
-| `model_failed` | a headline was found and the model call errored, timed out, or returned unparseable output | **no** |
-| `source_failed` | the source query itself failed, so absence is **unproven** | **no** |
+| headline has no publication timestamp | `excluded_pre_call` | `no_publication_time` |
+| published later than fetched | `excluded_pre_call` | `clock_inconsistent` |
+| near-identical headline collapsed inside the window | `excluded_pre_call` | `duplicate_headline` |
+| transport fault, no status line | `model_failed` | `transport` |
+| request timed out | `model_failed` | `timeout` |
+| provider returned a non-2xx status | `model_failed` | `http_status` |
+| provider returned text carrying no parseable judgment | `model_failed` | `unparseable` |
+| provider account latched exhausted | `model_failed` | `exhausted` |
+
+**THE TWO STATES ANSWER DIFFERENT QUESTIONS AND MUST NEVER BE AVERAGED.**
+`model_failed` is an **operational health** metric: it rises when the provider is
+unwell and the response is to go and look at the provider. `excluded_pre_call`
+is a **sample composition** metric: it rises when the source serves headlines
+the design cannot use, which means the effective sample is smaller than the raw
+headline count and Task 5's power arithmetic is optimistic. A combined rate
+answers neither question.
+
+**`error_class` REMAINS THE CAUSE AXIS WITHIN EACH STATE.** The state says which
+question a row informs; the error class says why. Neither substitutes for the
+other.
+
+### SUPERSEDED — the four-state definition
+
+Before Amendment 4 there were four states, and `model_failed` read: "a headline
+was found and the model call errored, timed out, or returned unparseable
+output". A headline excluded before any call was attempted fitted none of the
+four, so Stage 2 routed those rows to `model_failed` with `error_class` as the
+only separator and reported the gap rather than inventing a state under a
+binding specification. **Why it was replaced:** a call attempted and failed is a
+different fact from a row never eligible for a call, the two support different
+decisions, and six recorded fabrications in this project all came from two
+conditions sharing one representation.
 
 **`no_news` and `source_failed` are different and must never merge.** The first
 is evidence of absence. The second is absence of evidence: the source was not
@@ -1321,16 +1450,22 @@ model that answered NEUTRAL considered the headline and held. A model that
 failed never considered it. `model_failed` carries the error class and the raw
 response text; NEUTRAL carries the model's own reason string.
 
-**A BAD `strength` IS NOT A FOURTH STATE AND MUST NOT BECOME ONE (AMENDMENT 3).**
-If `judgment` parses, the model considered the headline, so the state is
+**A BAD `strength` IS NOT A STATE OF ITS OWN AND MUST NOT BECOME ONE (AMENDMENT
+3).** If `judgment` parses, the model returned a usable verdict, so the state is
 `judged` whatever strength says. A missing, non-integer or out-of-range strength
 sets `strength` NULL and `strength_parse_ok = 0` on a `judged` row; it never
-sets `model_failed`. Routing it to `model_failed` would inflate the one state
-that means "the model never considered this headline" with rows where it plainly
-did, corrupting the denominator the coverage summary exists to keep recoverable.
-**The same rule in the other direction:** a NEUTRAL row whose strength is not 1
-is `judged`, is recorded as returned, and is counted as a format-adherence
-diagnostic in the daily coverage summary.
+sets `model_failed` and never sets `excluded_pre_call`. Routing it to
+`model_failed` would inflate an operational-health metric with rows where the
+provider worked perfectly. **The same rule in the other direction:** a NEUTRAL
+row whose strength is not 1 is `judged`, is recorded as returned, and is counted
+as a format-adherence diagnostic in the daily coverage summary.
+
+**A DELAY-ROLLED HEADLINE IS SCORED, NOT EXCLUDED (AMENDMENT 4).** The
+20-minute delay moves a headline to a moment at which it could actually have
+been traded. It does not discard it. A rolled row keeps `exclusion_reason`
+empty, records `delay_rolled = 1`, and is scored open-to-close at the session it
+rolled to. Excluding late headlines would systematically remove those arriving
+near the close, a non-random slice.
 
 **A `no_news` row emits no order, no signal, and no factor value of any kind.**
 No neutral verdict is written, no 0.0 confidence, no row in any signal table.
@@ -1342,10 +1477,12 @@ The symbol-day simply has no observation.
   always recoverable. The count of `no_news` rows is the evidence the collector
   ran.
 - **Daily coverage summary** per collection day: symbols queried, `no_news`,
-  `judged`, `model_failed`, `source_failed`, and (AMENDMENT 3) two
-  format-adherence counts, `strength_unparseable` and
+  `judged`, `model_failed`, `excluded_pre_call` (AMENDMENT 4), `source_failed`,
+  and (AMENDMENT 3) two format-adherence counts, `strength_unparseable` and
   `neutral_strength_not_one`. Both are diagnostics on a `judged` row and neither
-  changes a state.
+  changes a state. **`model_failed` and `excluded_pre_call` are reported
+  separately and never summed**: the first is provider health, the second is
+  sample composition.
 - **`source_failed` above 5 percent of a day's queries emits a CRITICAL event**,
   following the `fill_provenance_unclassified` precedent: the marker alone is
   insufficient, because a silent marker is how the prior defects survived.
@@ -1380,8 +1517,15 @@ wider than the primary test needs.
 | field | type | meaning |
 |---|---|---|
 | `query_date` | TEXT | ISO date of the symbol-day queried |
-| `state` | TEXT | `no_news` \| `judged` \| `model_failed` \| `source_failed` |
-| `exclusion_reason` | TEXT | `''` when scored; else `no_publication_time`, `clock_inconsistent`, `symbol_did_not_trade`, `delay_rolled`, `duplicate_headline`, `day_excluded_source_failures` |
+| `state` | TEXT | **AMENDED 2026-07-28 to five values:** `no_news` \| `judged` \| `model_failed` \| `excluded_pre_call` \| `source_failed` |
+| `exclusion_reason` | TEXT | `''` when scored; else `no_publication_time`, `clock_inconsistent`, `symbol_did_not_trade`, `duplicate_headline`, `day_excluded_source_failures`. **`delay_rolled` REMOVED by Amendment 4**: a rolled headline is scored, so it is not an exclusion. The roll is recorded on its own `delay_rolled` boolean. |
+
+**SUPERSEDED — the four-value `state` and the six-value `exclusion_reason`.**
+Before Amendment 4, `state` took `no_news | judged | model_failed |
+source_failed`, and `exclusion_reason` additionally took `delay_rolled`. The
+first was replaced because a pre-call exclusion fitted none of the four states.
+The second was removed because Task 4 scores a rolled headline and Task 8 could
+not simultaneously exclude it; the operator confirmed Task 4.
 
 ### The headline
 

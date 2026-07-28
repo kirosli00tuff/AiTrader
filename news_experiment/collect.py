@@ -23,15 +23,22 @@ is considered:
 no signal and no factor value of any kind. There is nothing here that could:
 this package has no execution path.
 
-A SPECIFICATION GAP, REPORTED. Task 7 defines four states, and a headline that
-is found but excluded BEFORE any model call (no publication time, an
-inconsistent clock) fits none of them cleanly: `no_news` is false because news
-existed, `source_failed` is false because the source answered, and `judged`
-is false because no verdict exists. Such a row is recorded `model_failed` with
-`error_class` naming the pre-call reason, which matches the state's meaning of
-"the model never considered this headline" and keeps `error_class` able to
-separate it from a transport failure. The operator may prefer a fifth state;
-adding one would revise an accepted specification, so it is reported instead.
+THE FIFTH STATE, AMENDMENT 4. Stage 2 reported that Task 7's four states did
+not cover a headline found but excluded BEFORE any model call, and routed those
+rows to `model_failed` rather than inventing a state under a binding
+specification. The operator has now approved `excluded_pre_call`. The rule is
+one question: WAS A REQUEST SENT TO THE PROVIDER?
+
+    no publication timestamp      -> excluded_pre_call / no_publication_time
+    published later than fetched  -> excluded_pre_call / clock_inconsistent
+    collapsed duplicate           -> excluded_pre_call / duplicate_headline
+    transport / timeout / status / unparseable / exhausted -> model_failed
+
+The two never merge and are never summed. `model_failed` is an OPERATIONAL
+HEALTH metric, so a rising rate means go and look at the provider.
+`excluded_pre_call` is a SAMPLE COMPOSITION metric, so a rising rate means the
+effective sample is smaller than the raw headline count and the power
+arithmetic is optimistic. `error_class` remains the cause axis inside each.
 """
 from __future__ import annotations
 
@@ -74,8 +81,12 @@ class Injector:
     """
     source_failures: int = 0
     model_failures: int = 0
+    strip_timestamps: int = 0        # -> excluded_pre_call/no_publication_time
+    future_timestamps: int = 0       # -> excluded_pre_call/clock_inconsistent
     _src_used: int = field(default=0, init=False)
     _mdl_used: int = field(default=0, init=False)
+    _strip_used: int = field(default=0, init=False)
+    _future_used: int = field(default=0, init=False)
 
     def fail_source(self) -> bool:
         if self._src_used < self.source_failures:
@@ -88,6 +99,28 @@ class Injector:
             self._mdl_used += 1
             return True
         return False
+
+    def corrupt_article(self, article: dict) -> dict:
+        """Damage a real article's timestamp the way a real source sometimes
+        does, so the collector's OWN branches classify it.
+
+        Nothing here writes a state. The article is handed back to the same
+        code path a healthy article takes, and the classification is the
+        production code's, not the injector's. That is the difference between
+        demonstrating a state and asserting one.
+        """
+        if self._strip_used < self.strip_timestamps:
+            self._strip_used += 1
+            out = dict(article)
+            out["datetime"] = 0          # a source that reports only a date
+            return out
+        if self._future_used < self.future_timestamps:
+            self._future_used += 1
+            out = dict(article)
+            out["datetime"] = int(
+                datetime.now(timezone.utc).timestamp()) + 86_400
+            return out
+        return article
 
 
 def _get_json(url: str, headers: dict[str, str], timeout: float = 15.0):
@@ -158,6 +191,8 @@ class RunConfig:
     analysis_db: str = ANALYSIS_DB
     inject_source_failures: int = 0
     inject_model_failures: int = 0
+    inject_strip_timestamps: int = 0
+    inject_future_timestamps: int = 0
     allow_shared_key: bool = False
 
 
@@ -211,7 +246,9 @@ def run(cfg: RunConfig, *, finnhub_client=None, scorer=None,
         injector: Injector | None = None) -> dict:
     """Execute one collector run and return its report."""
     injector = injector or Injector(cfg.inject_source_failures,
-                                    cfg.inject_model_failures)
+                                    cfg.inject_model_failures,
+                                    cfg.inject_strip_timestamps,
+                                    cfg.inject_future_timestamps)
 
     key = expcred.resolve_experiment_key(allow_shared=cfg.allow_shared_key)
     print(f"[credential] {key.describe()}")
@@ -313,6 +350,7 @@ def run(cfg: RunConfig, *, finnhub_client=None, scorer=None,
             ordered = sorted([a for a in items if isinstance(a, dict)],
                              key=lambda a: a.get("datetime") or 0)
             for article in ordered:
+                article = injector.corrupt_article(article)
                 hrow = dict(row)
                 headline = str(article.get("headline") or "").strip()
                 hrow["headline"] = headline
@@ -322,8 +360,10 @@ def run(cfg: RunConfig, *, finnhub_client=None, scorer=None,
                 epoch = article.get("datetime")
                 if not epoch:
                     # Recorded and excluded. NOT assumed to have arrived at
-                    # midnight, at the open, or at any other hour.
-                    hrow["state"] = spec.STATE_MODEL_FAILED
+                    # midnight, at the open, or at any other hour. No call was
+                    # attempted, so this is sample composition and not provider
+                    # health (AMENDMENT 4).
+                    hrow["state"] = spec.STATE_EXCLUDED_PRE_CALL
                     hrow["exclusion_reason"] = spec.EXCLUSION_NO_PUBLICATION_TIME
                     hrow["error_class"] = "no_publication_time"
                     hrow["outcome_state"] = "excluded"
@@ -334,7 +374,10 @@ def run(cfg: RunConfig, *, finnhub_client=None, scorer=None,
                 published = datetime.fromtimestamp(int(epoch), tz=timezone.utc)
                 hrow["published_ts"] = to_iso_z(published)
                 if hrow["published_ts"] > (hrow["fetched_ts"] or ""):
-                    hrow["state"] = spec.STATE_MODEL_FAILED
+                    # The source reported a publication later than the fetch, so
+                    # nothing is known about when this headline arrived. No call
+                    # attempted (AMENDMENT 4).
+                    hrow["state"] = spec.STATE_EXCLUDED_PRE_CALL
                     hrow["exclusion_reason"] = spec.EXCLUSION_CLOCK_INCONSISTENT
                     hrow["error_class"] = "clock_inconsistent"
                     hrow["outcome_state"] = "excluded"
@@ -347,15 +390,16 @@ def run(cfg: RunConfig, *, finnhub_client=None, scorer=None,
                     article_id=hrow["source_article_id"], published=published)
                 hrow["story_group_id"] = group
                 if is_dup:
-                    # A PRE-CALL EXCLUSION, handled like the other two. The
-                    # first demonstration run recorded these as `judged` with a
-                    # NULL judgment, which reads as "the model returned a
-                    # verdict" when the model was never called. `judged` has to
-                    # keep its one meaning, so a collapsed duplicate joins
-                    # no_publication_time and clock_inconsistent under the
-                    # state that means the model never considered it, with
-                    # `error_class` keeping the three distinguishable.
-                    hrow["state"] = spec.STATE_MODEL_FAILED
+                    # A PRE-CALL EXCLUSION. Stage 2's first run recorded these
+                    # as `judged` with a NULL judgment, which reads as "the
+                    # model returned a verdict" when no call was made; that was
+                    # fixed to `model_failed`, and AMENDMENT 4 moves it again to
+                    # the state that actually describes it. A collapsed
+                    # duplicate is not a provider failure, it is the source
+                    # serving the same story twice, which is a fact about the
+                    # SAMPLE. `error_class` keeps the three pre-call causes
+                    # distinguishable.
+                    hrow["state"] = spec.STATE_EXCLUDED_PRE_CALL
                     hrow["exclusion_reason"] = spec.EXCLUSION_DUPLICATE_HEADLINE
                     hrow["error_class"] = "duplicate_headline"
                     hrow["outcome_state"] = "excluded"
@@ -493,6 +537,8 @@ def main(argv: list[str] | None = None) -> int:
                    default="demonstration")
     p.add_argument("--inject-source-failures", type=int, default=0)
     p.add_argument("--inject-model-failures", type=int, default=0)
+    p.add_argument("--inject-strip-timestamps", type=int, default=0)
+    p.add_argument("--inject-future-timestamps", type=int, default=0)
     p.add_argument("--allow-shared-key", action="store_true")
     p.add_argument("--i-have-read-the-preconditions", action="store_true")
     args = p.parse_args(argv)
@@ -511,6 +557,8 @@ def main(argv: list[str] | None = None) -> int:
                     run_kind=args.run_kind, analysis_db=args.analysis_db,
                     inject_source_failures=args.inject_source_failures,
                     inject_model_failures=args.inject_model_failures,
+                    inject_strip_timestamps=args.inject_strip_timestamps,
+                    inject_future_timestamps=args.inject_future_timestamps,
                     allow_shared_key=args.allow_shared_key)
     print(json.dumps(run(cfg), indent=2, default=str))
     return 0
