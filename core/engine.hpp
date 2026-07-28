@@ -127,6 +127,11 @@ public:
     struct UniverseReport {
         std::vector<std::string> symbols;        // what the engine may trade
         std::vector<std::string> unserviceable;  // declared, held out
+        // Declared, held out on SCOPE not on data (2026-07-27). The feed
+        // serves these and their bars keep storing; the system just does not
+        // trade the asset class. Kept distinct from unserviceable so a healthy
+        // feed never reads as a broken one. See core/trading_scope.hpp.
+        std::vector<std::string> out_of_scope;
         bool enforced = false;   // real path (the invariant applies)
         bool degraded = false;   // empty or nearly empty: a LOUD condition
     };

@@ -23,6 +23,7 @@
 
 #include "core/bridge_client.hpp"
 #include "core/provenance.hpp"
+#include "core/trading_scope.hpp"
 #include "core/util.hpp"
 #include "learning/adapt_gate.hpp"
 
@@ -520,9 +521,10 @@ void Engine::report_universe(const std::string& ts) {
     // unserviceable symbols killed a run that had six trading correctly.
     const UniverseReport rep = universe_report();
     if (!rep.enforced) return;  // offline modes trade generated data by design
-    std::string syms, bad;
+    std::string syms, bad, oos;
     for (const auto& s : rep.symbols) syms += (syms.empty() ? "" : ", ") + s;
     for (const auto& s : rep.unserviceable) bad += (bad.empty() ? "" : ", ") + s;
+    for (const auto& s : rep.out_of_scope) oos += (oos.empty() ? "" : ", ") + s;
     storage_->append_event(
         {ts, "universe_resolved", "alpaca", "",
          rep.degraded ? "critical" : (rep.unserviceable.empty() ? "info"
@@ -534,6 +536,12 @@ void Engine::report_universe(const std::string& ts) {
                           : ". UNSERVICEABLE, held out of the universe: " + bad +
                                 " (no real bar history: the venue has never "
                                 "served them)") +
+             // OUT OF SCOPE is not a fault and must never read as one. The
+             // feed serves these, their bars keep storing, and the system
+             // simply does not trade the class (2026-07-27).
+             (oos.empty() ? ""
+                          : ". OUT OF TRADING SCOPE, data retained: " + oos +
+                                " (crypto is collected and never traded)") +
              (rep.degraded
                   ? ". UNIVERSE EMPTY OR NEARLY EMPTY: the engine has nothing "
                     "it may trade. Nothing is stopped and nothing is "
@@ -541,6 +549,7 @@ void Engine::report_universe(const std::string& ts) {
                     "credentials."
                   : ""),
          util::to_json({{"symbols", syms}, {"unserviceable", bad},
+                        {"out_of_scope", oos},
                         {"degraded", rep.degraded ? "true" : "false"}},
                        {{"tradeable_count",
                          static_cast<double>(rep.symbols.size())},
@@ -720,6 +729,17 @@ Engine::UniverseReport Engine::universe_report() {
     UniverseReport rep;
     rep.enforced = (feed_mode_ == "alpaca_paper");
     for (const auto& sym : cfg_.strategy.whitelist) {
+        // TRADING SCOPE FIRST (2026-07-27), and the order matters. An
+        // out-of-scope symbol is not UNSERVICEABLE: the venue serves it
+        // perfectly and its bars keep flowing and storing. It is simply not an
+        // asset class this system trades. Reporting it as unserviceable would
+        // raise a feed alarm about a healthy feed. It is excluded HERE, at the
+        // one resolution point, so every consumer inherits the exclusion
+        // instead of each path filtering for itself.
+        if (!scope::symbol_in_scope(sym)) {
+            rep.out_of_scope.push_back(sym);
+            continue;
+        }
         if (symbol_is_tradeable(sym)) rep.symbols.push_back(sym);
         else rep.unserviceable.push_back(sym);
     }
@@ -1150,6 +1170,19 @@ void Engine::handle_bar_close(const market_data::MarketState& ms,
     }
 
     // ---------- ENTRY path: consider a new native strategy entry ----------
+    // TRADING SCOPE (2026-07-27). US equities only. This sits FIRST in the
+    // entry path and above every other gate, so no ordering change downstream
+    // can let an out-of-scope class through. It is deliberately AFTER the exit
+    // block above: an existing crypto position must still be managed and
+    // closed by its own exit rules, never trapped by a scope narrowing.
+    //
+    // The bar for this symbol has ALREADY been stored by on_closed_bar before
+    // this function runs, so collection is unaffected. Nothing is logged here:
+    // an out-of-scope class is a standing configuration fact, not an event,
+    // and one row per bar per crypto symbol would flood the journal. The
+    // startup banner and universe_report name the excluded symbols instead.
+    if (!scope::symbol_in_scope(ms.symbol)) return;
+
     // THE TRADEABLE INVARIANT (2026-07-20): on the real path a symbol with no
     // real bar history is not evaluated at all. Belt-and-braces here: with
     // fabrication removed such a symbol closes no bars, so this path should
@@ -2476,6 +2509,10 @@ int Engine::run_iteration() {
         if (!venue_cfg) continue;
         // Alpaca is the only paper trading venue in the loop.
         if (ms.venue != "alpaca") continue;
+        // TRADING SCOPE (2026-07-27). US equities only, on this legacy
+        // bootstrap-sim path too. update_bars above has already ingested and
+        // stored the bar, so collection is unaffected.
+        if (!scope::symbol_in_scope(ms.symbol)) continue;
         // Skip equities while the US session is closed (crypto stays 24/7).
         if (!equity_open && ms.category == "equity") continue;
 
@@ -3053,6 +3090,12 @@ void Engine::maybe_run_research_pass(const market_data::MarketState& ms,
                                      const std::string& ts, long now_epoch) {
     if (!cfg_.sleeves.research_satellite_enabled) return;
     if (!opts_.use_bridge) return;  // no research brain offline (deterministic)
+    // TRADING SCOPE (2026-07-27). The satellite is a second ENTRY path with
+    // its own whitelist (sleeves.research_whitelist), so it needs the scope
+    // rule explicitly: it never passes through handle_bar_close's entry gate.
+    // Refusing here also saves a paid council round on a symbol that could not
+    // be bought afterwards.
+    if (!scope::symbol_in_scope(ms.symbol)) return;
     // Roll the day/month budget buckets.
     std::string day = ts.size() >= 10 ? ts.substr(0, 10) : ts;
     std::string month = ts.size() >= 7 ? ts.substr(0, 7) : ts;

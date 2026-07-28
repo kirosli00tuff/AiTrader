@@ -2057,7 +2057,14 @@ def test_warm_report_reads_bars_table(env):
     assert set(rep) >= {"need", "timeframe", "symbols", "all_warm"}
     assert rep["need"] >= 102
     assert rep["all_warm"] is False
-    assert {"BTC/USD", "SPY"} <= {s["symbol"] for s in rep["symbols"]}
+    # CHANGED 2026-07-27, stated rather than quietly relaxed. The warm report
+    # is derived from the RESOLVED universe, and crypto left it when the scope
+    # narrowed to US equities. Warmth is indicator readiness for TRADING, so a
+    # class that is never traded has no warm requirement. Asserting BTC/USD
+    # here would now assert the scope change did not happen.
+    assert {"SPY", "QQQ"} <= {s["symbol"] for s in rep["symbols"]}
+    assert not any("/" in s["symbol"] for s in rep["symbols"]), (
+        "an out-of-scope symbol reached the warm report")
 
 
 def test_engine_endpoints_bind_loopback():

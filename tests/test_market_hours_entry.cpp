@@ -173,6 +173,7 @@ int main() {
         sqlite3* h = e.storage().handle();
         sqlite3_stmt* st = nullptr;
         int eq_open = 0, eq_open_off = 0, cr_open_off = 0;
+        int cr_open = 0;
         sqlite3_prepare_v2(
             h, "SELECT ts,category,outcome FROM trades WHERE outcome='open'", -1,
             &st, nullptr);
@@ -181,7 +182,7 @@ int main() {
             std::string cat = reinterpret_cast<const char*>(sqlite3_column_text(st, 1));
             bool off = off_hours(ts);
             if (cat == "equity") { ++eq_open; if (off) ++eq_open_off; }
-            if (cat == "crypto" && off) ++cr_open_off;
+            if (cat == "crypto") { ++cr_open; if (off) ++cr_open_off; }
         }
         sqlite3_finalize(st);
 
@@ -200,8 +201,17 @@ int main() {
 
         maltest::check(eq_open > 0 && eq_open_off == 0,
                        "no equity entry fires outside US regular hours (the fix)");
-        maltest::check(cr_open_off > 0,
-                       "crypto entries fire outside US hours (unaffected, 24/7)");
+        // CHANGED 2026-07-27, stated rather than quietly deleted. This used to
+        // assert "crypto entries fire outside US hours (unaffected, 24/7)",
+        // which was correct while crypto was traded. The trading scope now
+        // narrows to US equities, so crypto takes NO entry at any hour and the
+        // assertion inverts. Its purpose is preserved and strengthened: it
+        // still proves the market-hours gate is not the thing stopping crypto.
+        // Crypto is stopped by SCOPE, everywhere and always, so a crypto entry
+        // in hours would fail this just as an out-of-hours one does.
+        maltest::check(cr_open_off == 0 && cr_open == 0,
+                       "crypto takes no entry at any hour: it is out of "
+                       "trading scope, not merely outside a session");
         maltest::check(mh > 0 && mh == mh_offhours && mh_crypto == 0,
                        "every market_hours_entry skip is an equity at an off-hours "
                        "timestamp (clean log, no crypto, no spam)");

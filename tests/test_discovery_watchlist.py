@@ -322,7 +322,13 @@ def test_universe_for_dispatches_by_asset_class(tmp_path):
     _seed_bars(db, [])
     cfg = _cfg_with_universe(tmp_path, "A/USD,B/USD", active_max=5)
     assert universe.universe_for("equity", db, cfg, NOW) == ["AAPL", "MSFT"]
-    assert universe.universe_for("crypto", db, cfg, NOW) == ["A/USD", "B/USD"]
+    # CHANGED 2026-07-27, stated rather than quietly relaxed. Crypto is out of
+    # TRADING scope, so the funnel yields no crypto candidates and never pays a
+    # council round for a symbol that could not be bought. refresh_active_crypto
+    # is untouched and still callable: the ranking machinery is retained.
+    assert universe.universe_for("crypto", db, cfg, NOW) == []
+    assert universe.refresh_active_crypto(db, cfg, NOW)["active"] == [
+        "A/USD", "B/USD"]
     assert universe.universe_for("nonsense", db, cfg, NOW) == []
 
 

@@ -40,6 +40,46 @@ REAL_SOURCES = ("real_feed", "backfill")
 # venue-reported and never renders as measured volume.
 VENUE_VOLUME_SOURCES = ("venue_bar", "venue_backfill")
 
+# --- TRADING SCOPE (2026-07-27) --------------------------------------------- #
+#
+# The system trades US EQUITIES ONLY. Crypto is retained as DATA and never
+# traded. Evidence, all measured in this repository: a crypto round trip costs
+# 50 bp against 1.14 to 4.87 bp for equities in the tradeable liquidity bands;
+# the re-costed P26 result splits -48.78 bp crypto against -2.73 equity; the
+# council abstained on 87 to 94 percent of crypto calls against 43 to 47
+# percent on equities. Crypto also carried a 24/7 loop, regional-session
+# carve-outs, and its own fee schedule.
+#
+# A SCOPE RULE, NOT A DELETION. Bars still poll, still carry provenance, and
+# still store. Every stored crypto row stays. The crypto fee schedule stays in
+# the model and the venue plumbing stays wired, so restoring crypto means
+# adding one class to TRADEABLE_ASSET_CLASSES and nothing else.
+#
+# SEPARATE FROM symbol_is_tradeable ON PURPOSE. That predicate answers "has the
+# venue ever served this symbol real bars", a data question. This answers "is
+# the asset class in scope", a policy question. Collapsing them would make a
+# crypto symbol read as unavailable, which is false, and would raise feed
+# alarms about a feed that is working.
+#
+# Must match mal::scope in core/trading_scope.hpp. A drift-guard test pins the
+# two class sets equal.
+TRADEABLE_ASSET_CLASSES = ("equity",)
+
+
+def asset_class(symbol: str) -> str:
+    """THE classification rule, the same one Engine::make_instrument uses: an
+    Alpaca crypto pair carries a slash, everything else is a US equity."""
+    return "crypto" if "/" in str(symbol) else "equity"
+
+
+def symbol_in_trading_scope(symbol: str) -> bool:
+    """Whether this symbol's ASSET CLASS may reach an entry decision.
+
+    Entry only. An exit is never refused on scope: a position opened before a
+    scope narrowing must still be managed and closed, never trapped.
+    """
+    return asset_class(symbol) in TRADEABLE_ASSET_CLASSES
+
 
 def symbol_is_tradeable(conn: sqlite3.Connection, symbol: str) -> bool:
     """Whether ``symbol`` has real bar history. THE predicate.

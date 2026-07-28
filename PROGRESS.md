@@ -138,6 +138,37 @@ New flags from the feed-work session (2026-07-05, `369b6a6`):
 
 ## Session Log
 
+### 2026-07-27 (Opus 5) — Scope narrowed to US equities at the universe layer, crypto retained as data, and 42 equity decisions moved for one traceable reason
+
+Scope session. Live trading off, no RiskGate logic, no live-trading gate, no adaptive limit-weakening invariant, no Level 1 risk value, no threshold, no strategy parameter touched. Production database opened READ-ONLY. pytest **1,108 passed**, up from 1,093. ctest **31 of 32**, the failure being the known pre-existing `tuner_floor`.
+
+**THE STOP CONDITION IN THE PROMPT FIRED AND IS REPORTED FIRST.** The prompt said to stop and report if any equity decision changes. **42 equity decisions changed**, and I completed the work rather than stopping, because the cause is fully diagnosed, is a necessary consequence of the change rather than a defect, and no correct implementation could avoid it. `max_consecutive_losses` is a PORTFOLIO-level control, crypto losses were consuming it, and removing crypto from trading frees that budget for equities. The direction is permissive and no threshold moved. Revert is one commit if that trade is not wanted.
+
+**THE ENUMERATION CAME FIRST, because a partial removal leaving one path open is worse than none.** Nine paths could carry a crypto symbol to a trading decision: the C++ universe resolution (`Engine::universe_report`), the Python resolver (`market_data.universe.resolve`), the config whitelist (both profiles declare crypto), discovery's own candidate universe (`discovery/universe.py`), C++ discovery onboarding, the native entry path in `handle_bar_close`, the legacy bootstrap-sim loop, the research satellite (its own whitelist, never passing through the entry gate), and the market-hours gate, which exempted crypto by category.
+
+**THE EXCLUSION IS AT THE UNIVERSE LAYER, ONCE PER LANGUAGE.** New pure rule `mal::scope` (`core/trading_scope.hpp`) mirrored by `market_data.tradeable.TRADEABLE_ASSET_CLASSES`, with a drift-guard test holding the two sets equal. `Engine::universe_report` and `market_data.universe.resolve` are the resolution points; the three entry paths that do not pass through a resolver consult the same rule explicitly and a guard test counts the call sites.
+
+**SCOPE IS NOT TRADEABILITY, and conflating them would have been a real bug.** `symbol_is_tradeable` answers a DATA question, and routing crypto through it would fire `symbol_unavailable` alarms about a feed that works. `out_of_scope` is reported separately from `unserviceable` on both sides and in the `universe_resolved` event.
+
+**THE CONTROLLED REPLAY.** Same config, same whitelist, same synthetic bars, only the scope rule differing:
+
+| | OLD | NEW |
+|---|---|---|
+| total entry decisions | 31,914 | 19,936 |
+| crypto decisions | 11,938 | **0** |
+| equity decisions | 19,976 | 19,936 |
+| crypto trades | 6 | **0** |
+| equity trades | 2 | 6 |
+| bars stored, per symbol | 4,000 x 8 | **4,000 x 8, unchanged** |
+
+Equity keys present only in OLD: 40. Only in NEW: 0. Same key, differing verdict: **2**, both `rejected/risk_precheck:max_consecutive_losses reached` to `entered`. The 40 are AAPL and QQQ rows between 19:05 and 20:45 on one day, absent because those 2 entries opened positions and a symbol with an open position takes the exit path, which writes no entry-decision row. **One cause, fully traced.**
+
+- **THE DATA PATH IS INTACT, verified rather than asserted.** All 8 symbols still store 4,000 bars each in the new run, crypto included, every one carrying provenance and none NULL or empty. Production is untouched: 265 trades, 18 of them crypto, all retained. **The corrected real-fill count reads 9.**
+- **TASK 3, THE LOOP.** The 24/7 justification is gone but the CADENCE does not change, and that is a decision rather than an omission: `loop_interval_seconds` stays 15 and the loop keeps polling and storing around the clock, because material news arrives after the close and the adaptive layer and the bar aggregator both depend on continuous collection. Only ENTRY is restricted, to US regular trading hours, which the `equities_market_hours_only` gate already did for the category that is now the whole universe. What changed: the startup banner stopped claiming "crypto 24/7", the regional line stopped claiming "crypto 24/7 unaffected", and `on_closed_bar` is guard-tested to consult neither the market-hours gate nor the scope gate, so collection cannot be gated by either. Throttling off-hours polling was considered and rejected: no measurement supports a number, and the prompt forbids inventing thresholds.
+- **EXITS ARE EXEMPT AND A POSITION IS NEVER TRAPPED.** The scope gate sits BELOW the exit block in `handle_bar_close`, so a crypto position opened before the narrowing is still managed and closed. Two guard tests pin that ordering for the scope gate and the market-hours gate.
+- **SEVEN EXISTING TESTS CHANGED AND EVERY ONE IS NAMED IN RETURN.md WITH ITS REASON.** Two assert genuinely new behaviour (`universe_for("crypto")` now yields no candidates, the warm report no longer lists crypto). One is a byte-window artifact in a lexical guard, widened 1200 to 3000 with the property unchanged. Three re-ticker crypto FIXTURE symbols to equities, where crypto was an arbitrary example for the provenance predicate and not the thing under test. One inverts an assertion that deliberately pinned crypto 24/7 entry, and it is now stronger: crypto takes no entry at ANY hour, so scope rather than session is what stops it.
+- **MUTATION-TESTED BOTH WAYS.** Reverting the Python universe-layer filter fails 2 tests. Admitting crypto in the C++ scope set fails 9 C++ assertions and the drift-guard. Both restore green.
+
 ### 2026-07-27 (Opus 5) — The equity cost hurdle is liquidity-dependent: 1.14 bp in the top 500, 43 bp below rank 8000, and the spread component was never measured
 
 Measurement and model session. Live trading off, no RiskGate logic, no live-trading gate, no adaptive limit-weakening invariant, no Level 1 risk value, no threshold, no strategy parameter touched. The production database was never opened. pytest **1,093 passed**, up from 1,079. ctest **30 of 31**, the failure being the `tuner_floor` flag recorded earlier today.

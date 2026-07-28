@@ -38,7 +38,8 @@ from __future__ import annotations
 import sqlite3
 from dataclasses import dataclass, field
 
-from market_data.tradeable import symbol_is_tradeable
+from market_data.tradeable import (symbol_in_trading_scope,
+                                   symbol_is_tradeable)
 
 # The feed mode that IS the real path. Mirrors Engine::symbol_is_tradeable.
 REAL_PATH_FEED_MODE = "alpaca_paper"
@@ -176,6 +177,11 @@ class Universe:
     periphery: tuple[str, ...] = ()           # discovered members that verified
     unserviceable_periphery: tuple[str, ...] = ()
     declared_core: tuple[str, ...] = ()
+    # Declared, held out on SCOPE not on data (2026-07-27). The feed serves
+    # these and their bars keep storing; the system just does not trade the
+    # asset class. Kept distinct from unserviceable_* so a healthy feed never
+    # reads as a broken one. Mirrors Engine::UniverseReport::out_of_scope.
+    out_of_scope: tuple[str, ...] = ()
     enforced: bool = False   # was the predicate applied (real path) at all
     reason: str = ""
 
@@ -256,11 +262,24 @@ def resolve(conn: sqlite3.Connection | None = None, *,
     core_declared = declared_core(cfg_path)
     enforced = real_feed_mode(cfg_path)
 
+    # TRADING SCOPE, APPLIED FIRST AND ON EVERY BRANCH (2026-07-27). THE single
+    # Python point of exclusion, so every consumer inherits it instead of
+    # filtering for itself. It sits above the tradeable predicate and above the
+    # offline exemption on purpose: the offline modes exempt the DATA rule
+    # (they trade generated bars by design), but scope is a policy about which
+    # asset classes this system trades, and that does not change because the
+    # feed is synthetic. The symbols are named in out_of_scope rather than
+    # dropped silently, and their bars keep flowing and storing.
+    scoped_out = tuple(s for s in core_declared
+                       if not symbol_in_trading_scope(s))
+    core_declared = [s for s in core_declared if symbol_in_trading_scope(s)]
+
     own = False
     if conn is None:
         if not db_path:
             return Universe(core=tuple(core_declared),
                             declared_core=tuple(core_declared),
+                            out_of_scope=scoped_out,
                             enforced=False,
                             reason="no database given, declared core only")
         try:
@@ -269,16 +288,19 @@ def resolve(conn: sqlite3.Connection | None = None, *,
         except Exception:  # noqa: BLE001
             return Universe(core=tuple(core_declared),
                             declared_core=tuple(core_declared),
+                            out_of_scope=scoped_out,
                             enforced=False,
                             reason="database unreadable, declared core only")
     try:
-        periphery_declared = declared_periphery(conn, cfg_path, discovery_on)
+        periphery_declared = [s for s in declared_periphery(
+            conn, cfg_path, discovery_on) if symbol_in_trading_scope(s)]
         if not enforced:
             return Universe(
                 core=tuple(core_declared),
                 periphery=tuple(s for s in periphery_declared
                                 if s not in core_declared),
                 declared_core=tuple(core_declared),
+                out_of_scope=scoped_out,
                 enforced=False,
                 reason="offline feed mode, the real-path invariant does not apply")
         ok_core = [s for s in core_declared if symbol_is_tradeable(conn, s)]
@@ -293,6 +315,7 @@ def resolve(conn: sqlite3.Connection | None = None, *,
                         periphery=tuple(ok_per),
                         unserviceable_periphery=tuple(bad_per),
                         declared_core=tuple(core_declared),
+                        out_of_scope=scoped_out,
                         enforced=True,
                         reason="real path, tradeable predicate enforced")
     finally:

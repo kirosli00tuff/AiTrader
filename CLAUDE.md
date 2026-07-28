@@ -2,12 +2,14 @@
 
 ## Project context
 
-AiTrader (Market AI Lab) is a **C++20-first, multi-venue algorithmic trading platform**.
+AiTrader (Market AI Lab) is a **C++20-first algorithmic trading platform that trades US EQUITIES ONLY**.
+
+**SCOPE, narrowed 2026-07-27 on measured evidence.** Crypto is **collected and never traded**. A crypto round trip costs 50 bp against 1.14 to 4.87 bp for equities in the tradeable liquidity bands, the re-costed P26 result splits -48.78 bp crypto against -2.73 equity, and the council abstained on 87 to 94 percent of crypto calls against 43 to 47 percent on equities. Crypto also carried a 24/7 loop, regional-session carve-outs, and its own fee schedule. **This is a SCOPE change, not a deletion**: bars still poll, carry provenance, and store; every stored crypto row stays; the crypto fee schedule stays in the model; the venue plumbing stays wired. Restoring crypto means adding one class to `mal::scope` (`core/trading_scope.hpp`) and `market_data.tradeable.TRADEABLE_ASSET_CLASSES`, and nothing else. The exclusion lives at the **universe layer** so every consumer inherits it rather than each path filtering separately. **The loop collects continuously and restricts ENTRY to US regular trading hours; exits are never restricted and a position is never trapped.**
 
 Read PROGRESS.md and CONTEXT.md at the start of each session. Update PROGRESS.md at the end of each session with a dated log entry, newest at top. Update CONTEXT.md when a significant decision or API quirk is discovered. Log every user prompt to RETURN.md before starting work, newest at top, recording the prompt, model, changes, and commit message.
 
 - **C++20 is the primary language** for the engine core: the deterministic risk gate, execution/mode router, signal combination, adaptive tuner, account/venue state, storage DAO, and the run loop. Python is the secondary tier: advisory services (LLM consensus, DNN factor, whale signals), the market-data/execution bridge to Alpaca, and the dashboard.
-- **Paper trading is the default and the continuous training environment.** The engine runs a 24/7 paper loop offline with deterministic mocks and needs no API keys.
+- **Paper trading is the default and the continuous training environment.** The engine runs a continuous paper loop offline with deterministic mocks and needs no API keys. **The loop collects around the clock and takes ENTRIES only inside US regular trading hours**, because material news arrives after the close and must still be recorded, while an after-hours fill is a thin-market artifact that corrupts validation data. Exits are exempt at every hour.
 - **The dashboard is a first-class control surface**, not an afterthought — a Plotly Dash app (Paper / Live / Advanced / Accounts tabs) that reads the shared SQLite database and exposes the kill switch, weight controls, the L1 risk-gate editor, and the live-approval readiness view.
 - **Live trading is disabled by default and sits behind an explicit in-app approval gate.** It is never on unless a human turns it on through that gate.
 - **Layered decision logic:** a deterministic static-safety layer has final authority; an adaptive layer tunes only within safe bounds; the DNN/RL factor and whale/smart-money signals are **advisory inputs only** and never control execution on their own.
@@ -32,6 +34,7 @@ See `AUDIT.md` for the current honest state of each layer (what is real vs. scaf
 - Never hardcode API keys; use env vars or a key-gated config
 - LLM council model strings: `claude-opus-4-8` (Anthropic), `gpt-5.5` (OpenAI), `gemini-3.1-pro-preview` (Google, the reachable id for Gemini 3.1 Pro). Base-check gate: `claude-haiku-4-5` (via the Anthropic client, shares ANTHROPIC_API_KEY). These are the only approved model strings; do not invent others. Verified reachable 2026-07-12 via `scripts/list_provider_models.sh`. OpenAI GPT-5 family request shape: use `max_completion_tokens` (not `max_tokens`) and omit `temperature` (only the default is allowed).
 - Paper trading is the continuous default training environment
+- **US equities only.** Crypto is collected and never traded, excluded at the universe layer (`core/trading_scope.hpp`, `market_data.tradeable.TRADEABLE_ASSET_CLASSES`). The data path, stored history, crypto fee schedule, and venue plumbing are all retained deliberately
 - Safety and manual user control override all intelligence layers
 
 ## Working agreement

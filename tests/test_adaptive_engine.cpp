@@ -249,18 +249,39 @@ int main() {
             // the bar steps, so queueing after this loop and running one more
             // iteration applies the trim before any bar could close the position
             // out from under it. Deterministic, not a race.
-            for (int i = 0; i < 400 && pos.symbol.empty(); ++i) {
-                e.run(5);
-                pos = first_open(db);
+            // RETRY UNTIL THE TRIM IS OBSERVABLE (2026-07-27). The original
+            // loop took the first open position and trimmed it. The trim
+            // itself is deterministic (consume_adaptive_actions runs at the
+            // TOP of an iteration, before the bar steps), but the SAME
+            // iteration then steps a bar, and if that bar triggers the
+            // position's own exit the remainder closes and qty reads 0. The
+            // trim did happen and booked exactly half; the observation simply
+            // raced the exit. So retry on a fresh position rather than relax
+            // what is asserted: both checks below stay exact.
+            //
+            // This surfaced when the trading scope narrowed to equities. The
+            // first open position used to be crypto and is now an equity with
+            // different exit timing, which is a scaffolding dependency on
+            // which symbol happens to open first, not a property of the trim.
+            double after = 0.0;
+            int trims_applied = 0;
+            for (int attempt = 0; attempt < 40; ++attempt) {
+                pos = OpenPos{};
+                for (int i = 0; i < 400 && pos.symbol.empty(); ++i) {
+                    e.run(5);
+                    pos = first_open(db);
+                }
+                if (pos.symbol.empty()) break;
+                queue_action(db, now_iso(), pos.symbol, "trim");
+                e.run(1);
+                ++trims_applied;
+                after = qty_of(db, pos.symbol);
+                if (after > 0.0) break;   // the trim is observable
             }
             maltest::check(!pos.symbol.empty(),
                            "the synthetic feed opened a position to trim");
             if (pos.symbol.empty()) return maltest::report("adaptive_engine");
 
-            queue_action(db, now_iso(), pos.symbol, "trim");
-            e.run(1);
-
-            const double after = qty_of(db, pos.symbol);
             // defensive_trim_fraction defaults to 0.50.
             maltest::check_near(after, pos.qty * 0.5, 1e-9,
                                 "a trim HALVES the open position");
@@ -280,8 +301,16 @@ int main() {
             maltest::check_near(tr.pnl, expected, 1e-6,
                                 "pnl is realized on the CLOSED PORTION only "
                                 "(price - entry) * closed_qty - fee");
-            maltest::check(count_of(adaptive_events(db), "adaptive_defensive") == 1,
-                           "the trim is logged as an adaptive_defensive action");
+            // ONE EVENT PER APPLIED TRIM. The retry loop above may have
+            // applied a trim to an earlier position whose remainder a bar then
+            // closed, so the count is the number of trims applied rather than
+            // a fixed 1. The property is unchanged and still exact: every
+            // applied trim logs exactly one adaptive_defensive event, and the
+            // count matches the number of trims the loop actually performed.
+            maltest::check(count_of(adaptive_events(db), "adaptive_defensive")
+                               == trims_applied,
+                           "every applied trim logs exactly one "
+                           "adaptive_defensive action");
 
             // ...and a follow-up exit closes the remainder, so a trimmed
             // position is left in a coherent state rather than a stuck one.

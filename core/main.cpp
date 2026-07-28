@@ -531,7 +531,7 @@ int main(int argc, char** argv) {
                 << "s) refused\n"
                 << "  cost cuts: risk pre-check ON; equities market-hours-only "
                 << (cfg.engine.equities_market_hours_only ? "ON" : "off")
-                << " (no equity entry outside US RTH, exits exempt, crypto 24/7)\n"
+                << " (no entry outside US RTH, exits exempt, collection continues)\n"
                 << "  global:    equity rotation "
                 << (cfg.regional.global_equity_rotation_enabled
                         ? "ENABLED"
@@ -555,7 +555,7 @@ int main(int argc, char** argv) {
                                                      cfg.regional)
                         ? "tradeable"
                         : "venue-unavailable")
-                << " (only reachable regions trade; crypto 24/7 unaffected)\n"
+                << " (only reachable regions trade)\n"
                 << "  rl:        "
                 << (cfg.rl.rl_enabled ? "ON" : "OFF (ships off)")
                 << " — advisory only (factor weight 0.0 until enabled), "

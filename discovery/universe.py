@@ -153,7 +153,21 @@ def full_universe(db_path: str, cfg_path: str | None = None,
 
 def universe_for(asset_class: str, db_path: str, cfg_path: str | None = None,
                  now: datetime | None = None) -> list[str]:
-    """Active symbols for one asset class ("crypto" | "equity")."""
+    """Active symbols for one asset class ("crypto" | "equity").
+
+    TRADING SCOPE (2026-07-27). A class outside scope yields NO candidates, so
+    the funnel never ranks, screens, or pays a council round for a symbol that
+    could not be bought afterwards. This is the discovery half of the
+    universe-layer exclusion, and it reads the SAME set the engine reads
+    (market_data.tradeable.TRADEABLE_ASSET_CLASSES) rather than a second list.
+
+    refresh_active_crypto above stays intact and callable: the crypto ranking
+    machinery is retained, it is simply not consulted while crypto is out of
+    scope.
+    """
+    from market_data.tradeable import TRADEABLE_ASSET_CLASSES
+    if asset_class not in TRADEABLE_ASSET_CLASSES:
+        return []
     if asset_class == "crypto":
         return refresh_active_crypto(db_path, cfg_path, now)["active"]
     if asset_class == "equity":

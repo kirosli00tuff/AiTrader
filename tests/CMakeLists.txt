@@ -260,3 +260,11 @@ add_executable(test_bridge_transport test_bridge_transport.cpp)
 target_link_libraries(test_bridge_transport PRIVATE mal_bridge pthread)
 add_test(NAME bridge_transport COMMAND test_bridge_transport
          WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+# Trading scope (2026-07-27): US equities only, crypto retained as DATA and
+# never traded. Pure header (core/trading_scope.hpp), no library link needed.
+# The Python half of the same rule is pinned by tests/test_trading_scope.py and
+# a drift-guard test holds the two class sets equal.
+add_executable(test_trading_scope test_trading_scope.cpp)
+add_test(NAME trading_scope COMMAND test_trading_scope
+         WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})

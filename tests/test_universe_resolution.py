@@ -86,13 +86,13 @@ def test_symbol_with_only_unknown_bars_is_not_in_the_universe(tmp_path,
     # THE SOL/USD shape: thousands of bars, every one 'unknown'. Real Alpaca
     # history from before the provenance migration, but unprovable, so the
     # predicate refuses it and the universe holds it out.
-    _pin(monkeypatch, ["BTC/USD", "SOL/USD"])
-    db = _mk_db(tmp_path, [("BTC/USD", "2026-07-21T07:00:00Z", "backfill")] +
-                [("SOL/USD", f"2026-07-20T{i:02d}:00:00Z", "unknown")
+    _pin(monkeypatch, ["SPY", "AAPL"])
+    db = _mk_db(tmp_path, [("SPY", "2026-07-21T07:00:00Z", "backfill")] +
+                [("AAPL", f"2026-07-20T{i:02d}:00:00Z", "unknown")
                  for i in range(20)])
     uni = universe.resolve(db_path=db)
-    assert uni.symbols == ["BTC/USD"]
-    assert uni.unserviceable_core == ("SOL/USD",)
+    assert uni.symbols == ["SPY"]
+    assert uni.unserviceable_core == ("AAPL",)
     assert uni.enforced is True
 
 
@@ -102,20 +102,20 @@ def test_a_symbol_with_only_unknown_bars_cannot_read_warm(tmp_path,
     # alone and this fails: nine bars clears a need of two, so the symbol
     # reads WARM while the engine has already ruled it out. The warm check and
     # the entry gate must never disagree.
-    _pin(monkeypatch, ["BTC/USD", "SOL/USD"])
+    _pin(monkeypatch, ["SPY", "AAPL"])
     db = _mk_db(tmp_path,
-                [("BTC/USD", f"2026-07-21T0{i}:00:00Z", "backfill")
+                [("SPY", f"2026-07-21T0{i}:00:00Z", "backfill")
                  for i in range(5)] +
-                [("SOL/USD", f"2026-07-20T0{i}:00:00Z", "unknown")
+                [("AAPL", f"2026-07-20T0{i}:00:00Z", "unknown")
                  for i in range(9)])
     monkeypatch.setattr(stack, "warm_need", lambda: 2)
     rep = stack.warm_report(db)
     by = {s["symbol"]: s for s in rep["symbols"]}
-    assert by["SOL/USD"]["bars"] >= 2          # it HAS the bars
-    assert by["SOL/USD"]["warm"] is False      # and is still not warm
-    assert by["SOL/USD"]["state"] == "unserviceable"
-    assert by["SOL/USD"]["tradeable"] is False
-    assert by["BTC/USD"]["state"] == "warm"
+    assert by["AAPL"]["bars"] >= 2          # it HAS the bars
+    assert by["AAPL"]["warm"] is False      # and is still not warm
+    assert by["AAPL"]["state"] == "unserviceable"
+    assert by["AAPL"]["tradeable"] is False
+    assert by["SPY"]["state"] == "warm"
     assert rep["all_warm"] is False
 
 
@@ -124,11 +124,11 @@ def test_the_declared_core_stays_visible_when_it_is_held_out(tmp_path,
     # A symbol held out of the universe must still be REPORTED. Dropping it
     # from the report would make an unserviceable core symbol invisible, which
     # is how it stays broken for days.
-    _pin(monkeypatch, ["BTC/USD", "SOL/USD"])
-    db = _mk_db(tmp_path, [("BTC/USD", "2026-07-21T07:00:00Z", "backfill")])
+    _pin(monkeypatch, ["SPY", "AAPL"])
+    db = _mk_db(tmp_path, [("SPY", "2026-07-21T07:00:00Z", "backfill")])
     monkeypatch.setattr(stack, "warm_need", lambda: 1)
     names = [s["symbol"] for s in stack.warm_report(db)["symbols"]]
-    assert names == ["BTC/USD", "SOL/USD"]
+    assert names == ["SPY", "AAPL"]
 
 
 # --- Core verification: the same check discovery runs ------------------------
@@ -137,13 +137,13 @@ def test_core_verification_refuses_a_symbol_the_venue_does_not_serve(
         tmp_path, monkeypatch):
     # The backfill RAN (fetch returns a result) and wrote nothing for MANA:
     # the venue does not serve it, so it is unserviceable and held out.
-    _pin(monkeypatch, ["BTC/USD", "MANA/USD"])
-    db = _mk_db(tmp_path, [("BTC/USD", "2026-07-21T07:00:00Z", "backfill")])
-    rep = universe.verify_core(db, fetch=lambda p: {"BTC/USD": 900,
-                                                    "MANA/USD": 0})
+    _pin(monkeypatch, ["SPY", "ZZZZ"])
+    db = _mk_db(tmp_path, [("SPY", "2026-07-21T07:00:00Z", "backfill")])
+    rep = universe.verify_core(db, fetch=lambda p: {"SPY": 900,
+                                                    "ZZZZ": 0})
     assert rep["verified"] is True
-    assert rep["serviceable"] == ["BTC/USD"]
-    assert rep["unserviceable"] == ["MANA/USD"]
+    assert rep["serviceable"] == ["SPY"]
+    assert rep["unserviceable"] == ["ZZZZ"]
 
 
 def test_a_backfill_that_cannot_run_verifies_nothing(tmp_path, monkeypatch):
@@ -151,7 +151,7 @@ def test_a_backfill_that_cannot_run_verifies_nothing(tmp_path, monkeypatch):
     # Refusing every core symbol here would turn a missing key into an empty
     # universe, the opposite of the safe direction. Discovery's rule since
     # 2026-07-20, now the core's rule too.
-    _pin(monkeypatch, ["BTC/USD", "MANA/USD"])
+    _pin(monkeypatch, ["SPY", "ZZZZ"])
     db = _mk_db(tmp_path, [])
     rep = universe.verify_core(db, fetch=lambda p: None)
     assert rep["verified"] is False
@@ -190,10 +190,10 @@ def test_backfill_command_requests_every_core_symbol(monkeypatch):
     # fell through to a four-name literal, so four of the eight declared core
     # symbols were never once requested.
     monkeypatch.setattr(universe, "declared_core",
-                        lambda *a, **k: ["BTC/USD", "SOL/USD", "AAPL", "NVDA"])
+                        lambda *a, **k: ["SPY", "QQQ", "AAPL", "NVDA"])
     cmd = stack.backfill_cmd("/tmp/x.db")
     assert "--symbols" in cmd
-    assert cmd[cmd.index("--symbols") + 1] == "BTC/USD,SOL/USD,AAPL,NVDA"
+    assert cmd[cmd.index("--symbols") + 1] == "SPY,QQQ,AAPL,NVDA"
 
 
 def test_backfill_default_symbols_come_from_the_core(monkeypatch):
@@ -302,7 +302,7 @@ def test_cpp_builds_its_instruments_from_the_declared_core():
     assert "cfg_.strategy.whitelist" in body, (
         "the engine no longer builds its instruments from the declared core: "
         "a configured symbol would be declared and never polled")
-    for literal in ('{"alpaca", "BTC/USD", "BTC/USD"',
+    for literal in ('{"alpaca", "SPY", "SPY"',
                     '{"alpaca", "SPY", "SPY"'):
         assert literal not in body, (
             f"the hardcoded instrument literal {literal} is back")
@@ -334,32 +334,32 @@ def test_cpp_resolves_the_universe_in_one_place():
 # --- Degrade visibly ----------------------------------------------------------
 
 def test_an_empty_universe_is_a_loud_condition(tmp_path, monkeypatch):
-    _pin(monkeypatch, ["BTC/USD", "SOL/USD"])
-    db = _mk_db(tmp_path, [("SOL/USD", "2026-07-21T07:00:00Z", "unknown")])
+    _pin(monkeypatch, ["SPY", "AAPL"])
+    db = _mk_db(tmp_path, [("AAPL", "2026-07-21T07:00:00Z", "unknown")])
     uni = universe.resolve(db_path=db)
     assert uni.symbols == []
     assert uni.degraded is True
     assert "TRADEABLE UNIVERSE EMPTY" in uni.degraded_reason
-    assert "SOL/USD" in uni.degraded_reason
+    assert "AAPL" in uni.degraded_reason
 
 
 def test_a_nearly_empty_universe_is_a_loud_condition(tmp_path, monkeypatch):
     # One symbol is below the floor: at one symbol every feed question becomes
     # all-or-nothing and the watchdog's serving scope stops meaning anything.
-    _pin(monkeypatch, ["BTC/USD", "SOL/USD", "AAPL"])
-    db = _mk_db(tmp_path, [("BTC/USD", "2026-07-21T07:00:00Z", "real_feed")])
+    _pin(monkeypatch, ["SPY", "AAPL", "AAPL"])
+    db = _mk_db(tmp_path, [("SPY", "2026-07-21T07:00:00Z", "real_feed")])
     uni = universe.resolve(db_path=db)
-    assert uni.symbols == ["BTC/USD"]
+    assert uni.symbols == ["SPY"]
     assert uni.degraded is True
     assert "NEARLY EMPTY" in uni.degraded_reason
 
 
 def test_a_healthy_universe_is_not_degraded(tmp_path, monkeypatch):
-    _pin(monkeypatch, ["BTC/USD", "ETH/USD"])
-    db = _mk_db(tmp_path, [("BTC/USD", "2026-07-21T07:00:00Z", "real_feed"),
-                           ("ETH/USD", "2026-07-21T07:00:00Z", "backfill")])
+    _pin(monkeypatch, ["SPY", "QQQ"])
+    db = _mk_db(tmp_path, [("SPY", "2026-07-21T07:00:00Z", "real_feed"),
+                           ("QQQ", "2026-07-21T07:00:00Z", "backfill")])
     uni = universe.resolve(db_path=db)
-    assert uni.symbols == ["BTC/USD", "ETH/USD"]
+    assert uni.symbols == ["SPY", "QQQ"]
     assert uni.degraded is False
     assert uni.degraded_reason == ""
 
@@ -367,10 +367,10 @@ def test_a_healthy_universe_is_not_degraded(tmp_path, monkeypatch):
 def test_offline_modes_are_exempt(tmp_path, monkeypatch):
     # The invariant is a real-path rule. Offline feed modes trade generated
     # data by design, so nothing is held out and nothing is degraded.
-    _pin(monkeypatch, ["BTC/USD", "SOL/USD"], real=False)
+    _pin(monkeypatch, ["SPY", "AAPL"], real=False)
     db = _mk_db(tmp_path, [])
     uni = universe.resolve(db_path=db)
-    assert uni.symbols == ["BTC/USD", "SOL/USD"]
+    assert uni.symbols == ["SPY", "AAPL"]
     assert uni.enforced is False
     assert uni.degraded is False
 
@@ -399,49 +399,49 @@ def test_the_watchdog_reports_the_universe_without_remediating_it(monkeypatch):
 # --- The discovered periphery joins under the same predicate -----------------
 
 def test_the_verified_periphery_joins_the_universe(tmp_path, monkeypatch):
-    _pin(monkeypatch, ["BTC/USD"], discovery=True)
+    _pin(monkeypatch, ["SPY"], discovery=True)
     db = _mk_db(tmp_path,
-                [("BTC/USD", "2026-07-21T07:00:00Z", "real_feed"),
-                 ("LDO/USD", "2026-07-21T07:00:00Z", "backfill")],
-                watchlist=[("LDO/USD", "active")])
+                [("SPY", "2026-07-21T07:00:00Z", "real_feed"),
+                 ("AMD", "2026-07-21T07:00:00Z", "backfill")],
+                watchlist=[("AMD", "active")])
     uni = universe.resolve(db_path=db)
-    assert uni.core == ("BTC/USD",)
-    assert uni.periphery == ("LDO/USD",)
-    assert uni.symbols == ["BTC/USD", "LDO/USD"]
+    assert uni.core == ("SPY",)
+    assert uni.periphery == ("AMD",)
+    assert uni.symbols == ["SPY", "AMD"]
 
 
 def test_an_unverified_periphery_member_is_held_out(tmp_path, monkeypatch):
     # The MANA/USD shape on the watchlist: added before serviceability was
     # verified, nothing but fabricated bars. Held out, and named.
-    _pin(monkeypatch, ["BTC/USD"], discovery=True)
+    _pin(monkeypatch, ["SPY"], discovery=True)
     db = _mk_db(tmp_path,
-                [("BTC/USD", "2026-07-21T07:00:00Z", "real_feed"),
-                 ("MANA/USD", "2026-07-21T07:00:00Z", "synthetic")],
-                watchlist=[("MANA/USD", "active")])
+                [("SPY", "2026-07-21T07:00:00Z", "real_feed"),
+                 ("ZZZZ", "2026-07-21T07:00:00Z", "synthetic")],
+                watchlist=[("ZZZZ", "active")])
     uni = universe.resolve(db_path=db)
-    assert uni.symbols == ["BTC/USD"]
-    assert uni.unserviceable_periphery == ("MANA/USD",)
+    assert uni.symbols == ["SPY"]
+    assert uni.unserviceable_periphery == ("ZZZZ",)
 
 
 def test_a_referred_member_never_joins(tmp_path, monkeypatch):
     # referred is a candidate the funnel has not confirmed. The engine never
     # merges it, so the universe never contains it.
-    _pin(monkeypatch, ["BTC/USD"], discovery=True)
+    _pin(monkeypatch, ["SPY"], discovery=True)
     db = _mk_db(tmp_path,
-                [("BTC/USD", "2026-07-21T07:00:00Z", "real_feed"),
+                [("SPY", "2026-07-21T07:00:00Z", "real_feed"),
                  ("XX/USD", "2026-07-21T07:00:00Z", "backfill")],
                 watchlist=[("XX/USD", "referred")])
-    assert universe.resolve(db_path=db).symbols == ["BTC/USD"]
+    assert universe.resolve(db_path=db).symbols == ["SPY"]
 
 
 def test_the_periphery_is_ignored_while_discovery_is_off(tmp_path,
                                                          monkeypatch):
-    _pin(monkeypatch, ["BTC/USD"], discovery=False)
+    _pin(monkeypatch, ["SPY"], discovery=False)
     db = _mk_db(tmp_path,
-                [("BTC/USD", "2026-07-21T07:00:00Z", "real_feed"),
-                 ("LDO/USD", "2026-07-21T07:00:00Z", "backfill")],
-                watchlist=[("LDO/USD", "active")])
-    assert universe.resolve(db_path=db).symbols == ["BTC/USD"]
+                [("SPY", "2026-07-21T07:00:00Z", "real_feed"),
+                 ("AMD", "2026-07-21T07:00:00Z", "backfill")],
+                watchlist=[("AMD", "active")])
+    assert universe.resolve(db_path=db).symbols == ["SPY"]
 
 
 # --- Nothing here binds -------------------------------------------------------

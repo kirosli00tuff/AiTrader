@@ -386,7 +386,7 @@ def test_flags_off_means_no_pass_and_no_writes(tmp_path):
     cfg = _write_cfg(tmp_path, discovery_enabled=False)
     db = os.path.join(str(tmp_path), "off.db")
 
-    out = run.run_once("crypto", db_path=db, cfg_path=cfg, now=NOW,
+    out = run.run_once("equity", db_path=db, cfg_path=cfg, now=NOW,
                        client=object(), gate=SpyGate(),
                        evaluator=SpyEvaluator(), force=True)
 
@@ -514,7 +514,7 @@ def test_run_once_persists_the_pass_and_populates_the_watchlist(tmp_path):
                      max_council_calls_per_pass=2)
     db = os.path.join(str(tmp_path), "d.db")
 
-    out = run.run_once("crypto", db_path=db, cfg_path=cfg, client=FakeClient(),
+    out = run.run_once("equity", db_path=db, cfg_path=cfg, client=FakeClient(),
                        gate=SpyGate(), evaluator=SpyEvaluator(), now=NOW)
 
     assert out["status"] == "ok"
@@ -523,7 +523,7 @@ def test_run_once_persists_the_pass_and_populates_the_watchlist(tmp_path):
     assert out["council_calls"] == 2
 
     conn = sqlite3.connect(db)
-    latest = store.latest_pass(conn, "crypto")
+    latest = store.latest_pass(conn, "equity")
     assert latest["council_calls"] == 2
     assert latest["evaluated_count"] == 2
     assert len(latest["candidates"]) == 2
@@ -539,12 +539,12 @@ def test_run_once_persists_the_pass_and_populates_the_watchlist(tmp_path):
 def test_second_pass_inside_the_interval_is_not_due(tmp_path):
     cfg = _write_cfg(tmp_path)
     db = os.path.join(str(tmp_path), "d.db")
-    first = run.run_once("crypto", db_path=db, cfg_path=cfg, client=FakeClient(),
+    first = run.run_once("equity", db_path=db, cfg_path=cfg, client=FakeClient(),
                          gate=SpyGate(), evaluator=SpyEvaluator(), now=NOW)
     assert first["status"] == "ok"
 
     ev = SpyEvaluator()
-    second = run.run_once("crypto", db_path=db, cfg_path=cfg,
+    second = run.run_once("equity", db_path=db, cfg_path=cfg,
                           client=FakeClient(), gate=SpyGate(), evaluator=ev,
                           now=NOW + timedelta(minutes=10))
     assert second["status"] == "not_due"
@@ -560,7 +560,7 @@ def test_avoid_verdicts_do_not_reach_the_watchlist(tmp_path):
         return {"symbol": symbol, "verdict": "avoid", "direction": "flat",
                 "conviction": 0.2}
 
-    out = run.run_once("crypto", db_path=db, cfg_path=cfg, client=FakeClient(),
+    out = run.run_once("equity", db_path=db, cfg_path=cfg, client=FakeClient(),
                        gate=SpyGate(), evaluator=avoid_all, now=NOW)
 
     # The funnel looked and declined: the pass records it, the watchlist does
@@ -568,7 +568,7 @@ def test_avoid_verdicts_do_not_reach_the_watchlist(tmp_path):
     # rejections.
     assert out["watchlist_added"] == []
     conn = sqlite3.connect(db)
-    assert store.latest_pass(conn, "crypto")["evaluated_count"] == 2
+    assert store.latest_pass(conn, "equity")["evaluated_count"] == 2
     from discovery import watchlist
     assert watchlist.active_symbols(conn) == []
     conn.close()
@@ -580,7 +580,7 @@ def test_no_finnhub_key_reports_unavailable_not_a_crash(tmp_path, monkeypatch):
     from discovery import finnhub_source
     monkeypatch.setattr(finnhub_source, "credentials", None)
 
-    out = run.run_once("crypto", db_path=os.path.join(str(tmp_path), "d.db"),
+    out = run.run_once("equity", db_path=os.path.join(str(tmp_path), "d.db"),
                        cfg_path=cfg, now=NOW)
     assert out["status"] == "unavailable"
     assert "FINNHUB_API_KEY" in out["reason"]
@@ -766,21 +766,21 @@ def test_a_pass_onboards_what_it_surfaces(tmp_path, monkeypatch):
 
     # Stub the Finnhub-backed snapshot build: this test is about the handoff
     # AFTER the funnel picks a candidate, not about the pre-screen.
-    snaps = [_snap("SOL/USD", change_pct=0.08, high=105.0, low=100.0)]
+    snaps = [_snap("AAPL", change_pct=0.08, high=105.0, low=100.0)]
     monkeypatch.setattr(funnel, "build_snapshots",
                         lambda symbols, client, whale=None: snaps)
 
-    out = run.run_once("crypto", db_path=db, cfg_path=cfg, now=NOW,
+    out = run.run_once("equity", db_path=db, cfg_path=cfg, now=NOW,
                        client=object(), gate=SpyGate(),
                        evaluator=SpyEvaluator(), force=True)
 
     assert out["status"] == "ok"
     # The pass surfaced a candidate, and that candidate left the pass with bars
     # already pulled. No symbol is left named-but-barless.
-    assert out["watchlist_added"] == ["SOL/USD"]
-    assert got["symbols"] == ["SOL/USD"]
+    assert out["watchlist_added"] == ["AAPL"]
+    assert got["symbols"] == ["AAPL"]
     assert out["onboard_status"] == "ok"
-    assert out["onboarded"] == ["SOL/USD"]
+    assert out["onboarded"] == ["AAPL"]
     assert out["onboard_refused"] == []
 
 
@@ -808,23 +808,23 @@ def test_a_pass_refuses_a_candidate_whose_backfill_returns_nothing(
         return {"status": "ok", "written": {f"{s}:5min": 0 for s in symbols}}
     monkeypatch.setattr(src, "backfill", fake_backfill)
 
-    snaps = [_snap("MANA/USD", change_pct=0.08, high=105.0, low=100.0)]
+    snaps = [_snap("ZZZZ", change_pct=0.08, high=105.0, low=100.0)]
     monkeypatch.setattr(funnel, "build_snapshots",
                         lambda symbols, client, whale=None: snaps)
 
-    out = run.run_once("crypto", db_path=db, cfg_path=cfg, now=NOW,
+    out = run.run_once("equity", db_path=db, cfg_path=cfg, now=NOW,
                        client=object(), gate=SpyGate(),
                        evaluator=SpyEvaluator(), force=True)
 
     assert out["status"] == "ok"
     assert out["watchlist_added"] == []
-    assert out["onboard_refused"] == ["MANA/USD"]
+    assert out["onboard_refused"] == ["ZZZZ"]
     conn = sqlite3.connect(db)
     try:
         from discovery import watchlist as wl
         assert wl.active_symbols(conn) == []
         events = wl.recent_events(conn, limit=10)
-        refusal = [e for e in events if e["symbol"] == "MANA/USD"
+        refusal = [e for e in events if e["symbol"] == "ZZZZ"
                    and not e["applied"]]
         assert refusal, events
         assert "backfill returned no bars" in refusal[0]["reason"]
@@ -847,7 +847,7 @@ def test_stage_b_hands_the_gate_a_market_snapshot_not_score_components():
     (volatility) and no others, so every finalist arrived as a zero-price,
     zero-return instrument and the gate rejected 12 of 12 on every pass.
     """
-    f = funnel.Finalist("ETH/USD", 0.48,
+    f = funnel.Finalist("QQQ", 0.48,
                         {"momentum": 0.9, "volatility": 0.5, "gap": 0.1},
                         False, "",
                         {"price": 1826.39, "change_pct": -5.12, "high": 1929.0,
@@ -910,7 +910,7 @@ def test_the_discovery_gate_prompt_never_invents_absent_fields():
     when absent. Those two zeros are what made it call a +14% move "flat".
     """
     from discovery.gate import build_discovery_prompt
-    f = funnel.Finalist("BTC/USD", 0.9, {}, False, "",
+    f = funnel.Finalist("SPY", 0.9, {}, False, "",
                         {"price": 100.0, "change_pct": 14.0, "high": 104.0,
                          "low": 90.0})
     prompt = build_discovery_prompt(funnel.gate_state(f))

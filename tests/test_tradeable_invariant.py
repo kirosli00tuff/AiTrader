@@ -212,7 +212,11 @@ def test_cpp_consumers_call_the_predicate():
         "check_feed_substitution no longer consults symbol_is_tradeable: an "
         "unavailable symbol could raise a stack-level substitution again")
     # The entry path consults the predicate.
-    entry = re.search(r"ENTRY path[\s\S]{0,1200}?allows_entry", engine)
+    # Window widened 1200 -> 3000 on 2026-07-27. The trading-scope gate and its
+    # comment block now sit between the ENTRY marker and allows_entry, so the
+    # old window ended before symbol_is_tradeable. The PROPERTY is unchanged and
+    # still asserted: the entry path consults the predicate.
+    entry = re.search(r"ENTRY path[\s\S]{0,3000}?allows_entry", engine)
     assert entry and "symbol_is_tradeable(" in entry.group(0), (
         "the entry path no longer consults symbol_is_tradeable before "
         "evaluating")
