@@ -415,6 +415,116 @@ def test_a_headline_just_before_the_open_rolls_too(cal):
     assert res.anchor_session == "2026-03-12"
 
 
+# --- The exchange calendar ---------------------------------------------------
+
+def test_a_session_beyond_coverage_raises_rather_than_being_assumed(cal):
+    """`open_utc`/`close_utc` used to default to 09:30/16:00 for ANY date, so a
+    Saturday past coverage returned a complete invented trading day. That is a
+    plausible value manufactured from absent input, the shape of all six
+    recorded fabrications."""
+    from news_experiment.horizon import UnknownSession
+    ghost = "2026-08-15"
+    assert ghost not in cal.closes
+    with pytest.raises(UnknownSession):
+        cal.close_utc(ghost)
+    with pytest.raises(UnknownSession):
+        cal.open_utc(ghost)
+
+
+def test_calendar_exhaustion_is_not_reported_as_the_symbol_not_trading(cal):
+    """The calendar's ignorance is not the symbol's silence. A symbol may have
+    traded perfectly on a session we had simply not loaded."""
+    past_coverage = datetime(2026, 3, 20, 23, 0, tzinfo=timezone.utc)
+    res = resolve_anchor(past_coverage, cal)
+    assert res.reason == spec.EXCLUSION_CALENDAR_EXHAUSTED
+    assert res.reason != spec.EXCLUSION_SYMBOL_DID_NOT_TRADE
+
+
+def test_an_unresolvable_session_is_refused_and_costs_nothing(analysis_db,
+                                                              tmp_path):
+    """No call is attempted, because a verdict whose scoring window cannot be
+    located is worth nothing and would still cost money."""
+    day = SESSIONS[-1]                      # the last session in the fixture
+    late = datetime(2026, 3, 20, 23, 0, tzinfo=timezone.utc)
+
+    class ExplodingScorer:
+        def score(self, ticker, headline):
+            raise AssertionError("an unresolvable row must never be scored")
+
+    cfg = _cfg(analysis_db, tmp_path, day_from=day, day_to=day)
+    collect.run(cfg, finnhub_client=FakeFinnhub(
+        {("AAA", day): [_article(1, "AAA after the calendar ends", late)]}),
+        scorer=ExplodingScorer())
+    conn = sqlite3.connect(cfg.db_path)
+    row = conn.execute(
+        "SELECT state, error_class, exclusion_reason, judgment, cost_usd "
+        "FROM news_observation WHERE headline LIKE 'AAA after%'").fetchone()
+    conn.close()
+    assert row[0] == spec.STATE_EXCLUDED_PRE_CALL
+    assert row[1] == "calendar_exhausted"
+    assert row[2] == spec.EXCLUSION_CALENDAR_EXHAUSTED
+    assert row[3] is None and row[4] is None
+
+
+def test_mutation_letting_the_collector_guess_a_session_is_caught(cal):
+    """MUTATION TEST of the refusal path.
+
+    The mutant is the pre-fix behaviour: fall back to the regular open and
+    close for any date. Under it a Saturday past coverage resolves to a normal
+    trading day and nothing complains, which is exactly the defect. The refusal
+    check must fail when the guess is restored.
+    """
+    from news_experiment.horizon import UnknownSession
+    ghost = "2026-08-15"
+
+    def guessing_close(session):
+        return cal._at(session, cal.closes.get(session, spec.REGULAR_CLOSE))
+
+    # The REAL path refuses.
+    with pytest.raises(UnknownSession):
+        cal.close_utc(ghost)
+    # The MUTANT returns a complete, plausible, entirely invented session and
+    # nothing complains. 16:00 ET is 20:00 UTC.
+    invented = guessing_close(ghost)
+    assert invented.hour == 20, "the mutant fabricates a 16:00 ET close"
+    assert invented.strftime("%Y-%m-%d") == ghost
+    # The two behaviours differ, which is what makes the refusal test load
+    # bearing rather than vacuous.
+
+
+def test_a_half_day_resolves_to_its_own_close():
+    """2026-11-27 closes at 13:00. A default of 16:00 would put the actionable
+    moment three hours after the bell."""
+    half = Calendar.from_rows([("2026-11-25", "09:30", "16:00"),
+                               ("2026-11-27", "09:30", "13:00"),
+                               ("2026-11-30", "09:30", "16:00")])
+    assert half.close_utc("2026-11-27").hour == 18      # 13:00 ET = 18:00 UTC
+    # 12:55 ET, five minutes before the early close, so the delay rolls it.
+    res = resolve_anchor(datetime(2026, 11, 27, 17, 55, tzinfo=timezone.utc),
+                         half)
+    assert res.delay_rolled is True
+    assert res.scoring_session == "2026-11-30"
+    # 12:30 ET, thirty minutes out, so that early close IS actionable.
+    ok = resolve_anchor(datetime(2026, 11, 27, 17, 30, tzinfo=timezone.utc),
+                        half)
+    assert ok.delay_rolled is False
+    assert ok.anchor_kind == spec.ANCHOR_SAME_SESSION_CLOSE
+    assert ok.scoring_session == "2026-11-30"
+
+
+def test_a_holiday_rolls_forward_to_the_next_real_session():
+    """The calendar is authoritative. A weekday rule would invent the holiday
+    as a session and anchor a headline to a bell that never rang."""
+    thanksgiving = Calendar.from_rows([("2026-11-25", "09:30", "16:00"),
+                                       ("2026-11-27", "09:30", "13:00")])
+    assert "2026-11-26" not in thanksgiving.closes      # the holiday
+    # 18:00 ET on the 25th, after the close, so the next OPEN anchors it.
+    res = resolve_anchor(datetime(2026, 11, 25, 23, 0, tzinfo=timezone.utc),
+                         thanksgiving)
+    assert res.anchor_session == "2026-11-27", "skips the holiday"
+    assert res.anchor_kind == spec.ANCHOR_NEXT_SESSION_OPEN
+
+
 # --- The spend ceiling -------------------------------------------------------
 
 def test_the_ceiling_refuses_before_the_call_that_would_cross_it():

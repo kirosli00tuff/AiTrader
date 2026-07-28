@@ -32,6 +32,7 @@ one question: WAS A REQUEST SENT TO THE PROVIDER?
     no publication timestamp      -> excluded_pre_call / no_publication_time
     published later than fetched  -> excluded_pre_call / clock_inconsistent
     collapsed duplicate           -> excluded_pre_call / duplicate_headline
+    calendar cannot reach forward -> excluded_pre_call / calendar_exhausted
     transport / timeout / status / unparseable / exhausted -> model_failed
 
 The two never merge and are never summed. `model_failed` is an OPERATIONAL
@@ -413,8 +414,20 @@ def run(cfg: RunConfig, *, finnhub_client=None, scorer=None,
                 hrow["scoring_session"] = anchor.scoring_session
                 hrow["delay_rolled"] = 1 if anchor.delay_rolled else 0
                 if anchor.reason:
+                    # THE CALENDAR COULD NOT ANSWER, SO THE COLLECTOR REFUSES
+                    # RATHER THAN ASSUMES. No call is attempted, because a
+                    # verdict whose scoring window cannot be located is worth
+                    # nothing and would still cost money. The row is
+                    # excluded_pre_call with its own error_class, never a
+                    # guessed date, and never `symbol_did_not_trade`: the
+                    # calendar's ignorance is not the symbol's silence.
+                    hrow["state"] = spec.STATE_EXCLUDED_PRE_CALL
                     hrow["exclusion_reason"] = anchor.reason
+                    hrow["error_class"] = anchor.reason
                     hrow["outcome_state"] = "excluded"
+                    store.insert_observation(conn, hrow)
+                    written += 1
+                    continue
 
                 if injector.fail_model():
                     hrow["state"] = spec.STATE_MODEL_FAILED

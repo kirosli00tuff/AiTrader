@@ -156,7 +156,7 @@ STATES = (STATE_NO_NEWS, STATE_JUDGED, STATE_MODEL_FAILED,
 ERROR_CLASSES_MODEL_FAILED = ("transport", "timeout", "http_status",
                               "unparseable", "exhausted")
 ERROR_CLASSES_PRE_CALL = ("no_publication_time", "clock_inconsistent",
-                          "duplicate_headline")
+                          "duplicate_headline", "calendar_exhausted")
 
 EXCLUSION_NONE = ""
 EXCLUSION_NO_PUBLICATION_TIME = "no_publication_time"
@@ -164,6 +164,13 @@ EXCLUSION_CLOCK_INCONSISTENT = "clock_inconsistent"
 EXCLUSION_SYMBOL_DID_NOT_TRADE = "symbol_did_not_trade"
 EXCLUSION_DUPLICATE_HEADLINE = "duplicate_headline"
 EXCLUSION_DAY_EXCLUDED = "day_excluded_source_failures"
+# The exchange calendar does not reach far enough to resolve this headline's
+# actionable moment. THE CALENDAR'S IGNORANCE IS NOT THE SYMBOL'S SILENCE, and
+# conflating them is why this constant exists: the code used to report
+# `symbol_did_not_trade`, which names a fact about the market when the fact is
+# about our own data. A symbol may have traded perfectly on a session we had
+# simply not loaded.
+EXCLUSION_CALENDAR_EXHAUSTED = "calendar_exhausted"
 # `delay_rolled` REMOVED by AMENDMENT 4. Task 4 scores a rolled headline and
 # Task 8 could not simultaneously exclude it. The operator confirmed Task 4:
 # the 20-minute delay moves a headline to a moment it could actually have been
@@ -177,6 +184,7 @@ EXCLUSION_REASONS = (
     EXCLUSION_SYMBOL_DID_NOT_TRADE,
     EXCLUSION_DUPLICATE_HEADLINE,
     EXCLUSION_DAY_EXCLUDED,
+    EXCLUSION_CALENDAR_EXHAUSTED,
 )
 
 # SETTLED BY AMENDMENT 4, with the operator's explicit approval. Stage 2 found

@@ -11,6 +11,61 @@ Model:
 Prompt summary: one line.
 Changes: what changed.
 
+## Prompt: Populate the exchange calendar forward and refuse an unresolvable session
+
+Date: 2026-07-28
+Model: Opus 5 (claude-opus-5, 1M context).
+Prompt summary: Stage 2 reported the exchange calendar stale at 2026-07-24 and `ret_10session` at zero of 49 as a result. **Collection has not started.** The collector resolves the next trading session to compute a headline's first actionable moment and its scoring window, so a calendar ending before today may block collection outright rather than merely degrading a field. Task 1 establish where the calendar lives, what populates it, its coverage and last write, whether it covers today and forward sessions, and how far forward the collector needs it given the horizon convention and the 20-minute delay. Task 2 trace every place the collector consults it and state, for each, whether a beyond-coverage session fails loudly, returns a wrong answer, or **silently produces a plausible value**, since this project has six recorded fabrications all of that class. State plainly whether collection can start as-is and what would be wrong with the rows. Task 3 populate forward through the 120-day hard stop from a source handling holidays and half days, and confirm the collector refuses rather than assumes an unresolvable session, recording it as `excluded_pre_call` with its own `error_class`. Task 4 verify by running: a headline inside a session, outside one, inside the 20-minute window before a close, and on the day before a holiday or half day, plus confirm `ret_10session` populates. Task 5 tests including a mutation test of the refusal path. Task 6 document and commit.
+
+CONSTRAINTS HONORED: live trading off. No RiskGate logic, no live-trading gate, no adaptive limit-weakening invariant, no Level 1 value, no threshold, no strategy parameter. **No LLM provider calls.**
+
+### FINDINGS
+
+**Collection has not started. pytest 1,193 passed, up from 1,183. No LLM provider call. Live trading untouched.**
+
+**TASK 1, COVERAGE.** `trading_calendar(date, open, close)` in `analysis_bars.db`. Written previously only by `scripts/breadth_universe_20260726.py::cmd_load`, a dated one-off that also rebuilds the symbol pool. Six other files read it.
+
+```
+BEFORE  2016-01-04 .. 2026-07-24   2,654 sessions   (run date 2026-07-28)
+AFTER   2016-01-04 .. 2027-07-28   2,907 sessions   (+253)
+half days 21 -> 23   (2026-11-27 and 2026-12-24 at 13:00)
+```
+
+It covered neither today nor any forward session. **The requirement is not "covers today": the horizon anchors at the NEXT session and `ret_10session` reaches nine beyond that, so the floor is 130 sessions past the last collection day given the 120-day hard stop.**
+
+**TASK 2, WHAT WOULD HAVE BROKEN.** Collection **could not have started**, and it would not have failed loudly.
+
+| site | behaviour beyond coverage |
+|---|---|
+| `Calendar.open_utc` / `close_utc` | **SILENT PLAUSIBLE VALUE.** Defaulted to 09:30/16:00 for any date. Measured: `close_utc('2026-08-15')`, a Saturday past coverage, returned 20:00Z as a normal session. |
+| `resolve_anchor` | **WRONG ANSWER.** Returned `symbol_did_not_trade`, naming a fact about the market when the fact was about our data. |
+| `collect.run` anchor branch | **PAID FOR NOTHING.** Set an exclusion reason and then still called the model. |
+| `outcomes.resolve_one` | Honest. Returned `pending`. |
+| `resolve_pending` horizons | Honest. NULL, which is why `ret_10session` read 0 of 49. |
+
+The first is the seventh instance of this project's recorded fabrication shape, a plausible value from absent input, produced by a `dict.get` default.
+
+**TASK 3, FIXED.** `scripts/populate_trading_calendar.py` upserts from Alpaca `/v2/calendar` (holidays absent, half days carrying their own close), scoped to one table. `open_utc`/`close_utc` raise `UnknownSession`. Exhaustion is `calendar_exhausted`, an `excluded_pre_call` row with its own `error_class`, and the collector **skips the model call**.
+
+**TASK 4, DEMONSTRATED.**
+
+```
+inside a session   15:00Z -> same_session_close 2026-07-29T20:00:00Z  score 07-30
+outside a session  23:00Z -> next_session_open  2026-07-30T13:30:00Z  score 07-30
+20-min window      19:50Z -> next_session_open  2026-07-30T13:30:00Z  rolled=True
+day before holiday        -> skips 11-26, anchors 2026-11-27T14:30:00Z
+ON the 13:00 half day, 12:55 ET -> rolled to 11-30   (only correct if 13:00 honoured)
+past calendar end         -> calendar_exhausted, no fabricated date
+ret_10session from 2026-07-29 -> 2026-08-12   (was 0 of 49)
+```
+
+**TASK 5, TESTS.** 5 added. Mutation-tested: restoring the guessing lookup returns a fabricated 20:00Z session while the real path raises.
+
+**IS COLLECTION UNBLOCKED BY THIS? Yes by this, no overall.** The calendar was a hard blocker and is cleared. The **tick multiple remains the binding blocker** and is behind a SIP-entitled market-data subscription. Open Questions 3, 6 and 8 are untouched, and the strength distribution needs re-checking at scale.
+
+Changes: `scripts/populate_trading_calendar.py` (new), `news_experiment/{spec,horizon,collect}.py`, `tests/test_news_experiment_collector.py`, CONTEXT.md, PROGRESS.md, RETURN.md. **No EXPERIMENT.md specification value changed.**
+Commit message: Populate the exchange calendar forward and refuse rather than assume an unresolvable session, live trading untouched
+
 ## Prompt: Amendment 4, a fifth state and the delay-rolled reading confirmed
 
 Date: 2026-07-28

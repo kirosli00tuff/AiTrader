@@ -34,6 +34,20 @@ from . import spec
 _MARKET = ZoneInfo(spec.MARKET_TZ)
 
 
+class UnknownSession(KeyError):
+    """A session the calendar does not carry.
+
+    RAISED RATHER THAN DEFAULTED. `open_utc` and `close_utc` used to fall back
+    to 09:30 and 16:00 for any date handed to them, so a session beyond the
+    loaded calendar produced a complete, plausible, entirely invented trading
+    day. Measured on the stale calendar: close_utc('2026-08-15'), a Saturday
+    past coverage, returned 20:00Z as though it were a normal session. That is
+    the shape of all six fabrications recorded in this project, a plausible
+    value manufactured from absent input, and a default is what made it
+    possible.
+    """
+
+
 def parse_utc(ts: str) -> datetime:
     """Parse an ISO-8601 UTC timestamp. Raises on anything else rather than
     guessing a timezone, because a guessed offset silently moves a headline
@@ -83,10 +97,18 @@ class Calendar:
         return naive.replace(tzinfo=_MARKET).astimezone(timezone.utc)
 
     def open_utc(self, session: str) -> datetime:
-        return self._at(session, self.opens.get(session, spec.REGULAR_OPEN))
+        if session not in self.opens:
+            raise UnknownSession(session)
+        return self._at(session, self.opens[session])
 
     def close_utc(self, session: str) -> datetime:
-        return self._at(session, self.closes.get(session, spec.REGULAR_CLOSE))
+        """The calendar's OWN close, so a half day is honoured. A session the
+        calendar does not carry raises rather than assuming 16:00: on
+        2026-11-27 the real close is 13:00, and a default would put the
+        actionable moment three hours after the bell."""
+        if session not in self.closes:
+            raise UnknownSession(session)
+        return self._at(session, self.closes[session])
 
     def session_on_or_after(self, day: str) -> str | None:
         for s in self.sessions:
@@ -127,7 +149,7 @@ def resolve_anchor(published: datetime, cal: Calendar) -> AnchorResolution:
             if nxt is None:
                 return AnchorResolution(
                     spec.ANCHOR_SAME_SESSION_CLOSE, day, to_iso_z(close), "",
-                    False, spec.EXCLUSION_SYMBOL_DID_NOT_TRADE)
+                    False, spec.EXCLUSION_CALENDAR_EXHAUSTED)
             return AnchorResolution(spec.ANCHOR_SAME_SESSION_CLOSE, day,
                                     to_iso_z(close), nxt, False, "")
         # Inside the 20 minutes before the close. Roll to the next session and
@@ -135,7 +157,7 @@ def resolve_anchor(published: datetime, cal: Calendar) -> AnchorResolution:
         rolled_to = cal.next_session(day)
         if rolled_to is None:
             return AnchorResolution(spec.ANCHOR_NEXT_SESSION_OPEN, "", "", "",
-                                    True, spec.EXCLUSION_SYMBOL_DID_NOT_TRADE)
+                                    True, spec.EXCLUSION_CALENDAR_EXHAUSTED)
         return AnchorResolution(spec.ANCHOR_NEXT_SESSION_OPEN, rolled_to,
                                 to_iso_z(cal.open_utc(rolled_to)), rolled_to,
                                 True, "")
@@ -154,4 +176,4 @@ def resolve_anchor(published: datetime, cal: Calendar) -> AnchorResolution:
             rolled = True
         candidate = cal.next_session(candidate)
     return AnchorResolution(spec.ANCHOR_NEXT_SESSION_OPEN, "", "", "", rolled,
-                            spec.EXCLUSION_SYMBOL_DID_NOT_TRADE)
+                            spec.EXCLUSION_CALENDAR_EXHAUSTED)
