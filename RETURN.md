@@ -11,6 +11,59 @@ Model:
 Prompt summary: one line.
 Changes: what changed.
 
+## Prompt: Measure the tick multiple during RTH and update the fee model
+
+Date: 2026-07-28
+Model: Opus 5 (claude-opus-5, 1M context). **The prompt header said "Model: Sonnet". This session actually ran on Opus 5, and the log records what ran rather than what was labelled.**
+Prompt summary: Run-and-report session. `scripts/measure_tick_multiple_rth.py` already exists and refuses outside RTH. The market is open. `alpaca_equity_spread_tick_multiple` still reads 1.0, the floor, with the yaml stating it therefore understates small caps by construction. Task 1 execute the script as built, sweeping at 14:00, 16:30 and 19:30 UTC, and **if a window has passed run what remains and report which were captured and which missed rather than substituting a different time silently**. Task 2 apply stage 1's monotonicity check before believing anything, and if it fails report the data unusable and change nothing. Task 3 report the multiple per stratum with median, distribution and high percentile, then the resulting round-trip hurdle against the one-tick floor and against the 30 bp assumed effect, stating plainly whether the design survives at the median and at the high percentile. Task 4 update the fee model **if and only if the check passed**, recording source, date, sample size and windows, and decide deliberately whether one number or a per-stratum number is defensible. Task 5 report whether the measurement implies a change to the price floor, the ADV band, the capacity arithmetic or the 30 bp assumption. **EXPERIMENT.md is ACCEPTED and BINDING: report any implied change and do not apply it.** Task 6 record the measurement in the stage 1 results section, marking clearly that no specification value changed, update PROGRESS.md, commit and push.
+
+CONSTRAINTS HONORED: live trading off. No RiskGate logic, no live-trading gate, no adaptive limit-weakening invariant, no Level 1 value, no threshold, no strategy parameter touched. **No LLM provider calls made.**
+
+### FINDINGS
+
+**THE CLOCK PROBLEM IS SOLVED, THE MEASUREMENT RAN INSIDE RTH, AND IT STILL FAILED. NOTHING WAS CHANGED. `alpaca_equity_spread_tick_multiple` STAYS 1.0.** No specification value, no Level 1 value, no threshold, no strategy parameter. No LLM provider call.
+
+**TASK 1, ALL THREE WINDOWS CAPTURED.** An earlier run started 13:35Z, five minutes after the open, and took all three. 160 symbols each, 402 rows kept.
+
+```
+14:00Z  kept 141   zero 4  stale 15    crossed 0  locked 0  no_size 0  http 0
+16:30Z  kept 130   zero 2  stale 28    crossed 0  locked 0  no_size 0  http 0
+19:30Z  kept 131   zero 3  stale 26    crossed 0  locked 0  no_size 0  http 0
+```
+
+**A REDUNDANT RUN WAS KILLED.** This session launched its own sweep at 15:41Z before noticing the earlier one. Two processes would have doubled quote volume at both remaining sweeps and risked rate-limit discards in the better run, so mine was terminated. I had also reported the 14:00Z window as missed; that was true of my run and not of the measurement, and it is corrected here.
+
+**TASK 2, THE SANITY CHECK FAILS.** Ladder **39.0, 72.0, 104.5, 62.5**. S4, the thinnest stratum, comes back NARROWER than S3.
+
+```
+stratum    n   ticks med    p75     p90    bp med   bp p90
+S1       117      39.00  853.00 2601.00    133.89  2880.56
+S2       109      72.00  648.00 3381.00     98.54  2937.78
+S3        94     104.50  605.00 1162.00    334.90  2898.00
+S4        82      62.50  280.00  590.00    323.10  2910.31
+```
+
+**The data is unusable and nothing was derived from it.** It is not merely non-monotone, it is not spreads: a p90 near 2,900 bp appears in all four strata, within 2 percent of each other across strata differing 30x in liquidity, which is an artifact signature. Only 17 to 39 percent of quotes sit inside a plausible 5-tick range.
+
+**CAUSE 1, DECISIVE: THE FEED IS ONE VENUE, NOT THE TAPE.** `feed=sip` returns **HTTP 403 "subscription does not permit querying recent SIP data"**, and the default feed is **byte-identical to `feed=iex`** on every symbol tested. IEX is roughly 2 to 3 percent of volume. AAPL 339.16/339.19, three ticks, sane. UFPT 219.09/293.36, GPI 291.55/392.02, ITIC 240.84/331.23, stable across all three sweeps. Those are an almost-empty book on a venue that barely trades those names.
+
+**AMENDMENT 2 WAS RIGHT AND STAGE 1 WAS WRONG TO FALSIFY IT.** Amendment 2 called the multiple "unmeasurable without paid quote data". Stage 1 contradicted it because the endpoint is reachable. **Reachability is not fitness.**
+
+**CAUSE 2, INDEPENDENT AND ALSO DISQUALIFYING: 42.1 PERCENT FUNDS.** The script's universe never called `classify_fund`. 64 of 152 symbols are pooled vehicles by this project's own rule. **Funds 7.5 ticks against 376.5 for operating companies**, so the median measured the mixing ratio rather than spread. The specification rejects funds, 5,387 at the 2026-07-01 formation.
+
+**TASK 3, NOT REPORTABLE.** A multiple, a hurdle, and a survives-or-not verdict all consume Task 1's data, and that data is disqualified. Producing them would be the table the prompt warned against. The arithmetic was validated against the document (10.41 bp at the floor, 30.41 at three ticks) so the machinery is ready for a real number.
+
+**TASK 4, DELIBERATELY NOT DONE.** The check failed, so the fee model is untouched. The yaml note that the 1.0 floor understates small caps by construction stands and is now better evidenced.
+
+**TASK 5, NO AMENDMENT PROPOSED.** Nothing was measured, so nothing implies a change to the price floor, the ADV band, the capacity arithmetic or the 30 bp assumption. Were the multiple later measured at or above 3, an amendment would have to choose between raising the floor above 10.00, which Amendment 2 costed at 30 percent of S4, and lowering the 30 bp effect, which re-powers the design. That is the operator's decision and it needs a number this session did not produce.
+
+**THREE SCRIPT DEFECTS FOUND AND FIXED.** (a) No fund filter; `universe()` now applies the tri-state classifier, None excluded. (b) No feed check; `main()` probes SIP entitlement and **exits 3 quoting the 403** unless `--allow-iex-only` is passed. Verified: exit 3, no file written. (c) A window already in the past was not skipped, it ran immediately and still stamped rows with the window's label, so a 15:41 sample would have been recorded as `14:00Z`; such a window now lands in `windows_missed` with how late it was.
+
+**THE POSITION IS WORSE THAN BEFORE, STATED PLAINLY.** The multiple moved from "unmeasured and one script away" to "unmeasured and behind a paid data subscription". What it now takes is a SIP-entitled market-data plan, after which the fixed script answers in one run.
+
+Changes: `scripts/measure_tick_multiple_rth.py` (three fixes), EXPERIMENT.md (stage 1 results, measurement recorded, no specification value changed), PROGRESS.md, RETURN.md, `.env.example` (documents `EXPERIMENT_ANTHROPIC_API_KEY`). **No cost-model value changed. No RiskGate logic, no live-trading gate, no adaptive invariant, no Level 1 value. Live trading untouched and off.**
+Commit message: Measure the quoted spread and tick multiple during regular trading hours, data unusable on an IEX-only feed, fee model unchanged, specification unchanged, live trading untouched
+
 ## Prompt: Stage 2, build the news collector to the accepted specification
 
 Date: 2026-07-28

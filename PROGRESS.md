@@ -138,6 +138,24 @@ New flags from the feed-work session (2026-07-05, `369b6a6`):
 
 ## Session Log
 
+### 2026-07-28 (Opus 5) — The tick multiple ran inside RTH, failed its own sanity check, and the cause is that the paper feed is one venue rather than the tape
+
+**THE CLOCK PROBLEM IS SOLVED AND THE MEASUREMENT STILL FAILED. NOTHING WAS CHANGED ON UNUSABLE DATA.** `alpaca_equity_spread_tick_multiple` stays **1.0**. No specification value, no Level 1 value, no threshold, no strategy parameter touched. No LLM provider call. Live trading off.
+
+**ALL THREE WINDOWS WERE CAPTURED**, 160 symbols each, 402 rows kept: 14:00Z kept 141, 16:30Z kept 130, 19:30Z kept 131, with zero crossed, zero locked, zero missing sizes and zero HTTP failures. The discipline worked. The data did not.
+
+**THE MONOTONICITY CHECK FAILS: ladder 39.0, 72.0, 104.5, 62.5.** S4, the thinnest stratum, comes back NARROWER than S3. Per the pre-registered rule that makes the data unusable, and it was refused rather than written into the cost model. **The numbers are not merely non-monotone, they are not spreads**: a p90 near 2,900 bp appears in all four strata, within 2 percent of each other across strata differing 30x in liquidity, which is an artifact signature rather than market structure.
+
+**CAUSE 1, DECISIVE: THE FEED IS IEX-ONLY, NOT THE CONSOLIDATED TAPE.** Probed directly: `feed=sip` returns **HTTP 403 "subscription does not permit querying recent SIP data"**, and the default feed is **byte-identical to `feed=iex`**. IEX is roughly 2 to 3 percent of volume. AAPL came back 339.16/339.19, three ticks, sane. UFPT, GPI and ITIC came back 7,400, 10,000 and 9,000 ticks wide, stable across all three sweeps. Those are an almost-empty book on a venue that barely trades those names.
+
+**AMENDMENT 2 WAS RIGHT AND STAGE 1 WAS WRONG TO FALSIFY IT.** Amendment 2 called the multiple "unmeasurable without paid quote data". Stage 1 contradicted it because the endpoint is reachable. **Reachability is not fitness.** The endpoint answers, with one venue's book. Amendment 2's claim is restored on evidence.
+
+- **CAUSE 2, INDEPENDENT AND ALSO DISQUALIFYING: 42.1 PERCENT OF THE SAMPLE WERE FUNDS.** The script's own universe never called `classify_fund`. 64 of 152 symbols are pooled vehicles by this project's own rule. **Funds measured 7.5 ticks against 376.5 for operating companies**, because an ETF is quoted continuously on IEX and a small cap is not, so the median was a number about the mixing ratio rather than about spread. The specification's rule rejects funds, 5,387 of them at the 2026-07-01 formation.
+- **BOTH DEFECTS FIXED IN THE SCRIPT, AND IT NOW REFUSES RATHER THAN PRODUCING A PLAUSIBLE TABLE.** `universe()` applies the tri-state fund classifier (None is not False, so an unestablishable type is excluded). `main()` probes SIP entitlement at startup and **exits 3 with the 403 quoted** unless `--allow-iex-only` is passed to reproduce the negative deliberately. Verified by running it: exit 3, no output file written. A third defect found and fixed in passing: a sweep window already in the past was not skipped, it ran immediately and still stamped rows with the window's label, so a 15:41 sample would have been recorded as `14:00Z`. Such a window is now recorded in `windows_missed` with how late it was.
+- **A REDUNDANT RUN WAS KILLED RATHER THAN LEFT TO CONTEND.** This session started its own sweep at 15:41Z before noticing an earlier run, launched 13:35Z, was already alive and had captured 14:00Z. Two processes would have doubled quote volume at both remaining sweeps and risked rate-limit discards in the better run, so the redundant one was terminated and the earlier one carried the measurement.
+- **THE POSITION IS NOW WORSE, STATED PLAINLY.** The multiple moved from "unmeasured and one script away" to "unmeasured and behind a paid data subscription". Amendment 2's warning stands unquantified: at three ticks the 10.00 floor puts the worst member at 30.41 bp against a 30 bp assumed effect. **No amendment is proposed, because nothing was measured.**
+- **`.env.example` documents `EXPERIMENT_ANTHROPIC_API_KEY`** with the keystore command and the reason there is deliberately no fallback to `ANTHROPIC_API_KEY`, following the operator obtaining the separate experiment key.
+
 ### 2026-07-28 (Opus 5) — Stage 2: the collector is built to the accepted specification, every state demonstrated by producing it, and collection has NOT started
 
 **EXPERIMENT.md is ACCEPTED as of 2026-07-28, before any collection**, and is now marked BINDING AND CLOSED. Stage 2 implements it. **Standalone: no engine integration, no RiskGate, no execution path, no sleeve, nothing that reaches a trading decision.** Live trading off, RiskGate logic, live-trading gate, adaptive invariant and every Level 1 value untouched. **pytest 1,177 passed, up from 1,116, 61 new and zero existing weakened. Demonstration spend 0.0256 USD of a 2.00 USD ceiling.**

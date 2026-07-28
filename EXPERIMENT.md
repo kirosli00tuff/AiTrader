@@ -1740,6 +1740,87 @@ believed. **It REFUSES to run outside RTH**, verified: exit 2.
 multiplicative with the price floor and at three ticks the 10.00 floor puts the
 worst member at 30.4 bp, the entire assumed effect.
 
+#### Tick multiple, attempt 3 (2026-07-28, INSIDE RTH): MEASURED AND UNUSABLE
+
+**THE CLOCK PROBLEM IS SOLVED AND THE MEASUREMENT STILL FAILED, for a reason
+neither earlier attempt could see. NO SPECIFICATION VALUE WAS CHANGED AND NO
+COST-MODEL VALUE WAS CHANGED. `alpaca_equity_spread_tick_multiple` STAYS AT
+1.0.**
+
+All three windows were captured inside regular hours, 160 symbols each:
+
+| window | kept | zero-price | stale | total |
+|---|---|---|---|---|
+| 14:00Z | 141 | 4 | 15 | 160 |
+| 16:30Z | 130 | 2 | 28 | 160 |
+| 19:30Z | 131 | 3 | 26 | 160 |
+
+Zero crossed, zero locked, zero missing sizes, zero HTTP failures. 402 rows.
+
+| stratum | n | ticks med | p75 | p90 | bp med | bp p90 |
+|---|---|---|---|---|---|---|
+| S1 | 117 | 39.00 | 853.00 | 2601.00 | 133.89 | 2880.56 |
+| S2 | 109 | 72.00 | 648.00 | 3381.00 | 98.54 | 2937.78 |
+| S3 | 94 | 104.50 | 605.00 | 1162.00 | 334.90 | 2898.00 |
+| S4 | 82 | 62.50 | 280.00 | 590.00 | 323.10 | 2910.31 |
+
+**THE MONOTONICITY CHECK FAILS. Ladder 39.0, 72.0, 104.5, 62.5: S4, the
+thinnest stratum, comes back NARROWER than S3.** Per the pre-registered rule the
+data is unusable and nothing may be derived from it. The table is recorded only
+so nobody repeats the run expecting a different answer.
+
+**The numbers are not merely non-monotone, they are not spreads.** A p90 near
+2,900 bp appears in all four strata, a 29 percent quoted spread, and the four
+p90s sit within 2 percent of each other across strata differing 30x in
+liquidity. That uniformity is an artifact signature, not market structure. Only
+17 to 39 percent of quotes fall inside a plausible 5-tick range. The widest:
+GPI bid 291.55 ask 392.02, ITIC 240.84/331.23, UFPT 219.09/293.36, each stable
+across all three sweeps.
+
+**CAUSE 1, AND IT IS DECISIVE: THE FEED IS ONE VENUE, NOT THE CONSOLIDATED
+TAPE.** Probed directly on 2026-07-28: `feed=sip` returns **HTTP 403,
+"subscription does not permit querying recent SIP data"**, and the default feed
+is **byte-identical to `feed=iex`** on every symbol tested. IEX carries roughly
+2 to 3 percent of volume. Its top of book is the NBBO only for names it happens
+to quote tightly: AAPL returned 339.16/339.19, three ticks, entirely sane, while
+UFPT, GPI and ITIC returned 7,400, 10,000 and 9,000 ticks. Those are not
+markets. They are an almost-empty book on a venue that barely trades those
+names.
+
+**AMENDMENT 2 WAS RIGHT AND STAGE 1 WAS WRONG TO FALSIFY IT.** Amendment 2
+recorded the multiple as "unmeasurable without paid quote data". Stage 1
+contradicted that on the grounds that the quotes endpoint is reachable.
+**Reachability is not fitness.** The endpoint answers, and it answers with one
+venue's book. Amendment 2's original claim is restored on evidence, and the
+correction belongs in the record because a later session would otherwise repeat
+this run.
+
+**CAUSE 2, INDEPENDENT AND ALSO DISQUALIFYING: 42.1 PERCENT OF THE SAMPLE WERE
+FUNDS.** The measurement script's own universe never applied the fund
+classifier. 64 of 152 sampled symbols are pooled vehicles by this project's own
+rule (COWZ, FXY, AVIG, OUNZ, TCAF and 59 others). Median 7.5 ticks for funds
+against 376.5 for operating companies, because an ETF is quoted continuously on
+IEX and a small-cap operating company is not. **A median over that mixture is a
+number about the mixing ratio, not about spread.** The specification's rule
+rejects funds, 5,387 of them at the 2026-07-01 formation, so the sample was a
+different universe from the one this document defines. Both defects are now
+fixed in the script, and it REFUSES on an IEX-only key rather than producing a
+table that looks measured.
+
+**WHAT THIS DOES NOT TELL US.** The multiple remains unmeasured. Amendment 2's
+warning stands untouched and unquantified: at three ticks the 10.00 floor puts
+the worst member at 30.41 bp against a 30 bp assumed effect. **This session
+moved the question from "unmeasured and one script away" to "unmeasured and
+behind a paid data subscription", which is a worse position honestly stated.**
+
+**WHAT AN AMENDMENT WOULD HAVE TO SAY, NOT APPLIED HERE.** No amendment is
+proposed and none is warranted on this evidence, because nothing was measured.
+Were the multiple later measured at or above 3, an amendment would have to
+choose between raising the price floor above 10.00, which Amendment 2 already
+costed at 30 percent of S4, and lowering the 30 bp working effect, which
+re-powers the whole design. That choice is the operator's and it needs a number
+this session did not produce.
+
 #### The Stage 1 verdict
 
 **STAGE 1 CLEARS ON EVERY STOP CONDITION IT WAS DESIGNED TO TEST. It does not
