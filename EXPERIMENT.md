@@ -965,7 +965,7 @@ second collection.
 
 Listed rather than resolved optimistically.
 
-1. **Small-cap news coverage is unverified.** No source has been checked for
+1. **ANSWERED BY STAGE 1 (2026-07-28): coverage is adequate and the gradient does not trigger the stop.** 98.0/80.0/72.0/64.0 percent by stratum, pooled arrival 0.359 per symbol-day against an assumed 0.10. Residual: 18 of 50 S4 symbols were silent all window, so S4's effective sample is about two thirds of nominal. ORIGINAL TEXT: Small-cap news coverage is unverified. No source has been checked for
    headline coverage of names at ADV 300k to 2M USD. The whole experiment
    assumes coverage exists at 0.10 headlines/symbol/day. **If real coverage is
    an order of magnitude thinner at the thin end, the strata the mechanism
@@ -974,8 +974,7 @@ Listed rather than resolved optimistically.
    measure per-stratum coverage before any scoring, and a strong coverage
    gradient across strata is itself a reason to stop.
 
-2. **The 0.10 headlines/symbol/day arrival rate is an assumption, not a
-   measurement.** The sample-size arithmetic rests on it. Stage 1 measures it.
+2. **ANSWERED BY STAGE 1: measured 0.359, and 71.6 percent arrive off-hours.** The 60 day-clusters, not the 1,000 observations, is now the binding constraint. ORIGINAL: The 0.10 headlines/symbol/day arrival rate is an assumption, not a measurement.** The sample-size arithmetic rests on it. Stage 1 measures it.
 
 3. **The 180 bp residual volatility and the rho = 0.05 intra-day correlation are
    assumptions.** Both feed the required sample size. Both are computable from
@@ -995,7 +994,7 @@ Listed rather than resolved optimistically.
    member always pays `100/floor` bp and only a higher floor reduces it, at a
    measured cost in the thin strata.
 
-5. **DeepSeek V4 Flash is not an approved model string under CLAUDE.md**
+5. **WORSE THAN RECORDED: DeepSeek V4 Flash has NO CREDENTIAL in the keystore, so the named candidate could not be tested at all in Stage 1.** It is also not an approved model string under CLAUDE.md
    (Task 3). Accepting this document means amending that hard rule.
 
 6. **No provider reliability data exists for DeepSeek.** The provider-exhaustion
@@ -1003,7 +1002,7 @@ Listed rather than resolved optimistically.
    billing-error semantics are unknown, and the `model_failed` versus
    `source_failed` split assumes they are distinguishable.
 
-7. **Short-side feasibility is untested.** The mechanism is strongest on
+7. **LARGELY ANSWERED BY STAGE 1: ETB is 62.1 to 93.3 percent by stratum, so the negative-news half IS mostly reachable.** Limited to CURRENT classification, not historical, so a forward study must record ETB at decision time. Borrow COST remains unmodelled. ORIGINAL: Short-side feasibility is untested. The mechanism is strongest on
    NEGATIVE news, and acting on NEGATIVE means shorting. Borrow availability and
    cost in the 2.07M to 65.3M ADV band are modelled nowhere in this repository, and
    the fee model has no borrow term. **The single strongest predicted case may
@@ -1040,6 +1039,195 @@ which are absolute, not in terms of position in a queue.
 **What would reverse the amendment:** evidence that the effect tracks rank
 better than ADV. That is measurable once data exists, by scoring the same
 observations under both memberships, and it is not measurable now.
+
+### STAGE 1 RESULTS — measured 2026-07-28, spend 0.0096 USD of a 15.00 USD ceiling
+
+**Measurement only. No collector built, nothing wired into the engine, nothing traded.** Hard ceiling enforced before the first call and never approached.
+
+#### Task 1 — News coverage per stratum
+
+Universe: ADV 2.07M-65.3M, price floor 10.00, four log-ADV strata. 50 symbols
+sampled per stratum (200 total), Finnhub company-news, 30 calendar days
+(2026-06-28 to 2026-07-28, about 21 trading days).
+
+| stratum | n | any news | silent all window | headlines | per sym/day | median | p90 |
+|---|---|---|---|---|---|---|---|
+| S1 (most liquid) | 50 | **98.0%** | 1 | 660 | 0.616 | 10 | 27 |
+| S2 | 50 | 80.0% | 10 | 315 | 0.294 | 4 | 15 |
+| S3 | 50 | 72.0% | 14 | 211 | 0.197 | 2 | 12 |
+| S4 (thinnest) | 50 | **64.0%** | 18 | 352 | 0.329 | 1 | 16 |
+| POOLED | 200 | | 43 | 1,538 | **0.359** | | |
+
+**THE GRADIENT IS REAL AND DOES NOT FAIL THE STOP CONDITION.** Coverage falls
+98.0 to 64.0 percent from S1 to S4, a 1.5x gradient. The pre-registered stop
+was that the strata where the mechanism is strongest would be the strata with
+NO data. S4 is not that: 64 percent of its symbols carry news and its arrival
+rate of 0.329 is 3.3x the assumption. **Stop condition not met.**
+
+**But coverage is CONCENTRATED, and that is the caveat.** 18 of 50 S4 symbols
+were silent for the entire window, and the 32 that were not averaged 11
+headlines each against S3's 5.9. So S4's healthy pooled rate is produced by a
+minority of noisy names. **The effective S4 sample is about two thirds of
+nominal**, and the stratified draw should over-sample S4 to compensate or
+accept a smaller effective n there.
+
+#### Task 2 — Arrival rate against the requirement
+
+**Measured 0.359 headlines per symbol per trading day, pooled. The
+pre-registration assumed 0.10 and does not clear at 0.05.**
+
+```
+400 symbols x 0.359 x 0.75 surviving filters = 107.7 scorable/day
+1,000 observations reached in about 10 trading days
+60 day-clusters is now the BINDING constraint, not the observation count
+60 days x 107.7 = ~6,460 observations, 6.5x the requirement
+```
+
+**Reachable inside the 120-day hard stop with 2x margin on time and 6.5x on
+count.** The design is over-powered at 400 symbols; the sample could fall to
+about 150 and still clear, which is a decision for the operator, not this
+session.
+
+**OFF-HOURS FRACTION: 71.6 percent** of headlines arrive outside 13:30-20:00
+UTC. The case the mechanism depends on is the majority case, not the exception.
+
+#### Task 3 — ETB fraction per stratum
+
+Alpaca `/v2/assets`, 30 symbols per stratum. `shortable` and `easy_to_borrow`
+agreed on every symbol resolved.
+
+| stratum | n | shortable | ETB | unresolved |
+|---|---|---|---|---|
+| S1 | 30 | 83.3% | **83.3%** | 0 |
+| S2 | 30 | 93.3% | **93.3%** | 0 |
+| S3 | 30 | 80.0% | **80.0%** | 0 |
+| S4 | 29 | 62.1% | **62.1%** | 1 |
+
+**This is the best news in the session.** Open Question 7 named short-side
+feasibility as the most consequential unresolved item, on the worry that the
+NEGATIVE-news half of the mechanism might be untradeable. **It is largely
+reachable: 62 to 93 percent by stratum.** The gradient runs the wrong way (S4
+lowest) so the thin end loses most, but a 62 percent floor is not a blocker.
+
+**LIMITATION, stated: this is CURRENT classification, not historical.** ETB
+status at a past formation is not recoverable from this endpoint. Correct for
+forward collection, wrong for any backfilled study, and a forward study must
+record ETB at decision time rather than reconstructing it.
+
+#### Task 4 — Pipeline latency, measured
+
+| leg | median | p95 | max |
+|---|---|---|---|
+| news API response | 0.17 s | 0.49 s | |
+| scoring call round trip | 1.04 s | 1.91 s | 14.00 s |
+| **total headline-to-scored-decision** | **~1.2 s** | **~2.4 s** | **~14.5 s** |
+
+**The provisional 20-minute delay is confirmed as conservative by three orders
+of magnitude at p95.** The measured path is seconds. **It is NOT reduced here**,
+because this measures API latency alone and excludes polling interval, order
+placement, and venue acknowledgement, none of which this session exercised. The
+honest revision: the 20 minutes is dominated by the POLLING CADENCE, not by
+call latency, so the delay should be re-derived from the collector's poll
+interval once a collector exists. Until then 20 minutes stands.
+
+#### Task 5 — The tick multiple: MEASURABLE, still unmeasured
+
+**Amendment 2 recorded the tick multiple as "unmeasurable without paid quote
+data". THAT IS FALSIFIED.** The Alpaca paper tier serves
+`/v2/stocks/{symbol}/quotes/latest` and `/snapshot`, both returning bid and ask.
+Reachability is established.
+
+**But this session could not measure it, and reports that rather than the
+numbers it collected.** Sampled at 06:31 UTC, outside US regular hours
+(13:30-20:00 UTC):
+
+| stratum | n | ticks wide, median | p25 | p75 | max |
+|---|---|---|---|---|---|
+| S1 | 10 | 870.5 | 99.0 | 1,714.0 | 10,359.0 |
+| S4 | 10 | 303.5 | 6.0 | 1,343.0 | 3,429.0 |
+
+**These are not spreads and must not be read as any.** The most liquid stratum
+shows a WIDER median than the thinnest, which is backwards and is the proof
+that these are stale after-hours quotes rather than markets. **The tick multiple
+remains unmeasured. What it now takes is one script run during RTH**, which is
+a scheduling problem rather than a data-access problem, and it is the highest
+value remaining measurement because the multiple is multiplicative with the
+price floor.
+
+#### Task 6 — The model comparison: INCONCLUSIVE, and one reason is my own error
+
+**Comparison set fixed before any result was seen:** `claude-haiku-4-5`,
+`claude-opus-4-8`, `gemini-3.1-pro-preview`. 21 real headlines drawn from the
+sample, temperature zero, the exact EXPERIMENT.md prompt.
+
+**DeepSeek V4 Flash, the CANDIDATE model the whole specification names, could
+not be tested: no credential exists in the keystore.** OpenAI was recorded
+exhausted and not called.
+
+| model | n | parse fail | directional | cost/call | spend |
+|---|---|---|---|---|---|
+| claude-haiku-4-5 | 21 | **0.0%** | 52.4% | $0.000403 | $0.0085 |
+| claude-opus-4-8 | 21 | **100%** | n/a | $0 | $0 |
+| gemini-3.1-pro-preview | 2 | 0.0% | 50.0% | $0.000559 | $0.0011 |
+
+**THE OPUS RESULT IS MY BUG, NOT A MODEL FAILURE, and reporting it as a model
+failure would have been the dishonest reading.** Every call returned
+`HTTP 400: temperature is deprecated for this model`. My request sent
+`temperature: 0`. **Opus 4.8 was never tested.** CLAUDE.md already records this
+exact quirk for the OpenAI GPT-5 family; it applies to Anthropic Opus 4.8 too
+and is now recorded.
+
+**Gemini latched EXHAUSTED after 2 calls** on HTTP 429 with quota language,
+per the recorded latching rule, and was not retried.
+
+**NO CLAIM OF DIFFERENCE BETWEEN MODELS IS MADE.** One model produced a usable
+sample. The 100 percent agreement between haiku and gemini rests on n=2 and is
+meaningless. With one usable arm there is nothing to correct for
+multiple comparisons, and applying a correction to a comparison that did not
+happen would be theatre.
+
+**WHETHER CAPABILITY MATTERS IS UNANSWERED.** That was the question deciding
+whether the experiment can run on the cheap tier, and it remains open. What IS
+established: haiku parsed 21 of 21 at temperature zero and cost $0.000403 per
+call, so **the cheap tier is mechanically capable of producing well-formed
+verdicts at a workable price.** Whether its judgments are as good is untested.
+#### The Stage 1 verdict
+
+**STAGE 1 CLEARS ON EVERY STOP CONDITION IT WAS DESIGNED TO TEST. It does not
+clear on everything it was asked to answer, and the gap is named rather than
+smoothed.**
+
+**Answered, and passing:**
+- **Open Question 1, coverage.** Real gradient, 98.0 to 64.0 percent, but S4 is
+  not empty and the stop condition is not met. Caveat: coverage is concentrated
+  in a minority of S4 names.
+- **Open Question 2, arrival rate.** 0.359 against an assumed 0.10. The sample
+  is reachable in about 10 trading days for count and 60 for clusters, inside
+  the 120-day stop with 6.5x margin on observations.
+- **Open Question 7, short side, the one flagged most consequential.** ETB is 62
+  to 93 percent by stratum, so the NEGATIVE-news half of the mechanism is
+  largely tradeable. Limited to current classification.
+- **Latency.** The 20-minute delay is conservative by orders of magnitude at the
+  API layer, and its real driver is the polling cadence, which does not exist
+  yet.
+
+**Answered, and it changes a recorded belief:**
+- **The tick multiple is MEASURABLE**, contradicting Amendment 2. Paper-tier
+  quotes are reachable. It is still unmeasured because this session ran outside
+  RTH, and that is now a scheduling task rather than a blocked one.
+
+**NOT answered:**
+- **Does capability matter.** The comparison failed: the named candidate has no
+  credential, one arm died on my own malformed request, and one exhausted after
+  two calls. **This must be redone before the cheap-tier decision is made.**
+- **Open Questions 3, 6, 8** were not in scope for this session.
+
+**Nothing measured here says stop.** The two conditions that would have ended
+the experiment, an empty thin stratum and an unreachable sample size, both came
+back clearly on the passing side, and the short-side worry that looked most
+likely to kill it came back mostly fine. **The experiment is not cleared to
+collect, because the model comparison is unresolved and the tick multiple is
+unmeasured, and both are cheap to finish.**
 
 ## What AMENDMENT 2 (the price floor) does NOT fix
 

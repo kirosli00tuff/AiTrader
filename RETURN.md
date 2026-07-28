@@ -11,6 +11,77 @@ Model:
 Prompt summary: one line.
 Changes: what changed.
 
+## Prompt: Stage 1 feasibility measurement
+
+Date: 2026-07-27
+Model: Opus 5 (claude-opus-5, 1M context).
+Prompt summary: EXPERIMENT.md records open questions that can each end the experiment before a single verdict is scored, and this session answers them. **THIS SESSION SPENDS REAL CREDITS**, under a hard ceiling of **15 USD** across all providers enforced before the first call, refusing to exceed it and reporting spend as it accrues. Provider balances are limited: Anthropic roughly 3.67 USD, Google roughly 6 USD, **OpenAI exhausted**, and a billing error is treated as exhausted per the latching rule while the others continue. Task 1 resolve the universe from the current rule (ADV 2.07M to 65.3M, price floor 10.00, four log-ADV strata), draw the stratified sample, and per stratum report the fraction of symbols with any headline, headlines per symbol per day as a DISTRIBUTION rather than a mean, and how many symbols were silent for the whole window, reporting the coverage GRADIENT explicitly and stating whether it fails the pre-registered stop condition. Task 2 report the measured arrival rate per stratum and pooled, state plainly whether 1,000 observations across 60 day-clusters is reachable inside the 120-day stop, and report the off-hours fraction. Task 3 query Alpaca for ETB status per stratum, noting current-rather-than-historical classification as a limitation. Task 4 measure the real pipeline latency at a high percentile rather than the mean, and state whether the provisional 20-minute delay is confirmed. Task 5 determine whether the tick multiple is measurable at all from what is reachable, saying so plainly if not rather than producing an estimate that looks measured. Task 6 fix the model comparison set BEFORE looking at any result, score identical real headlines at temperature zero through each using the exact EXPERIMENT.md prompt, and report parse failure rate, directional rate, agreement and cost per call, with multiple-comparison correction on any claim of difference and no claim about which is best against outcomes since none exist. Task 7 state plainly whether stage 1 clears, and if any measurement fails its condition say the experiment should stop rather than proposing a workaround.
+
+**This session measures feasibility. It builds no collector, wires nothing into the engine, and trades nothing.**
+
+CONSTRAINTS HONORED: live trading stays off. No RiskGate logic, no live-trading gate, no adaptive limit-weakening invariant, no Level 1 value, no threshold, no strategy parameter touched.
+
+### FINDINGS
+
+**Spend 0.0096 USD of the 15.00 USD ceiling, enforced before the first call and never approached. Measurement only, nothing built.**
+
+**THE VERDICT FIRST: no stop condition fired, but the experiment is NOT cleared to collect.** The two conditions that would have ended it, an empty thin stratum and an unreachable sample size, both came back clearly passing. The short-side worry flagged as most consequential came back mostly fine. What blocks clearance is that the model comparison failed and the tick multiple is still unmeasured, and both are cheap to finish.
+
+#### Task 1 — Coverage gradient
+
+| stratum | n | any news | silent all window | headlines | per sym/day | median | p90 |
+|---|---|---|---|---|---|---|---|
+| S1 | 50 | **98.0%** | 1 | 660 | 0.616 | 10 | 27 |
+| S2 | 50 | 80.0% | 10 | 315 | 0.294 | 4 | 15 |
+| S3 | 50 | 72.0% | 14 | 211 | 0.197 | 2 | 12 |
+| S4 | 50 | **64.0%** | 18 | 352 | 0.329 | 1 | 16 |
+| POOLED | 200 | | 43 | 1,538 | **0.359** | | |
+
+**The 1.5x gradient does NOT fail the stop condition**, which required S4 to have no data. It has 64 percent coverage and 3.3x the assumed rate. **Caveat: coverage is concentrated.** 18 of 50 S4 symbols were silent all window; the 32 that were not averaged 11 headlines each against S3's 5.9, so S4's effective sample is about two thirds of nominal.
+
+#### Task 2 — Arrival rate against the requirement
+
+**0.359 measured against 0.10 assumed.** 400 x 0.359 x 0.75 = 107.7 scorable/day. 1,000 observations in ~10 trading days; **60 day-clusters is now binding**, yielding ~6,460 observations, 6.5x the requirement, inside the 120-day stop. The design is over-powered and would clear at ~150 symbols. **Off-hours 71.6 percent.**
+
+#### Task 3 — ETB per stratum
+
+S1 **83.3%**, S2 **93.3%**, S3 **80.0%**, S4 **62.1%** (1 unresolved). `shortable` and `easy_to_borrow` agreed on every symbol. **Open Question 7 largely answered: the negative-news half is mostly reachable.** LIMITATION: current classification, not historical, so a forward study must record ETB at decision time and no backfilled study can reconstruct it.
+
+#### Task 4 — Latency
+
+News API median 0.17s / p95 0.49s. Scoring median 1.04s / p95 1.91s / max 14.00s. Total ~1.2s median, ~2.4s p95. **20 minutes is confirmed conservative by orders of magnitude at the API layer, and is NOT reduced**: it is dominated by the polling cadence, which does not exist yet, so it should be re-derived from the collector's poll interval once there is one.
+
+#### Task 5 — The tick multiple
+
+**AMENDMENT 2 WAS WRONG AND I CORRECT IT: the multiple is MEASURABLE.** The Alpaca paper tier serves `/quotes/latest` and `/snapshot` with bid and ask. **But this session did not measure it**, and reports that instead of the numbers it collected. Sampled 06:31 UTC, outside RTH (13:30-20:00 UTC): S1 median **870.5 ticks**, S4 median **303.5**. The most liquid stratum wider than the thinnest is backwards and proves these are stale after-hours quotes, not markets. **Unmeasured but no longer blocked: one script run during RTH settles it**, and it is the highest-value remaining measurement because the multiple is multiplicative with the price floor.
+
+#### Task 6 — The model comparison, inconclusive
+
+Set fixed before any result: `claude-haiku-4-5`, `claude-opus-4-8`, `gemini-3.1-pro-preview`. 21 real headlines from the sample, temperature zero, the exact EXPERIMENT.md prompt.
+
+| model | n | parse fail | directional | cost/call | spend |
+|---|---|---|---|---|---|
+| claude-haiku-4-5 | 21 | **0.0%** | 52.4% | $0.000403 | $0.0085 |
+| claude-opus-4-8 | 21 | **100%** | n/a | $0 | $0 |
+| gemini-3.1-pro-preview | 2 | 0.0% | 50.0% | $0.000559 | $0.0011 |
+
+**DeepSeek V4 Flash, the candidate the specification names, has NO CREDENTIAL and could not be tested at all.**
+
+**The Opus 100 percent is MY BUG, not a model failure**, and reporting it as one would have been the dishonest reading. Every call returned `HTTP 400: temperature is deprecated for this model`. **Opus was never tested.** CLAUDE.md records this quirk for the GPT-5 family; it applies to Opus 4.8 too.
+
+**Gemini latched EXHAUSTED** on HTTP 429 with quota language after 2 calls, per the recorded rule, and was not retried.
+
+**No claim of difference is made. No multiple-comparison correction is applied, because a correction on a comparison that did not happen would be theatre.** The 100 percent haiku-gemini agreement rests on n=2 and is meaningless. **Whether capability matters is UNANSWERED**, which was the question deciding the cheap tier. What is established: haiku parsed 21 of 21 at $0.000403 per call, so the cheap tier is mechanically capable at a workable price. Whether its judgment is as good is untested.
+
+#### Task 7 — What was answered and what was not
+
+**Answered and passing:** OQ1 coverage, OQ2 arrival rate, OQ7 short side (the one flagged most consequential), and latency.
+**Answered and it changes a recorded belief:** the tick multiple is measurable, contradicting Amendment 2.
+**NOT answered:** whether capability matters, which must be redone before the cheap-tier decision. OQ3, 6 and 8 were out of scope.
+
+Changes: `EXPERIMENT.md` (Stage 1 results section, open questions 1, 2, 5 and 7 updated), PROGRESS.md, RETURN.md. **No code, config, schema or test. Nothing built or wired. Live trading untouched.**
+Commit message: Stage 1 feasibility, coverage, arrival rate, ETB fraction, latency, tick multiple, and the model comparison, measurement only, nothing built
+
 ## Prompt: Derive the eligibility price floor from the tick's proportional cost
 
 Date: 2026-07-27
