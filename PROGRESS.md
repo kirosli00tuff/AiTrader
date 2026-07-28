@@ -140,7 +140,7 @@ New flags from the feed-work session (2026-07-05, `369b6a6`):
 
 ### 2026-07-28 (Opus 5) — The calendar reached 2026-07-24 against a run date of 2026-07-28, and the default that papered over it was a latent seventh fabrication
 
-**Collection has not started.** Live trading off. No RiskGate logic, no live-trading gate, no adaptive invariant, no Level 1 value, no threshold, no strategy parameter. No LLM provider call. **pytest 1,193 passed, up from 1,183.**
+**Collection has not started.** Live trading off. No RiskGate logic, no live-trading gate, no adaptive invariant, no Level 1 value, no threshold, no strategy parameter. No LLM provider call. **pytest 1,189 passed, up from 1,183.**
 
 **COVERAGE BEFORE 2016-01-04 .. 2026-07-24, 2,654 sessions. AFTER 2016-01-04 .. 2027-07-28, 2,907 sessions (+253).** Half days 21 to 23. Source is Alpaca `/v2/calendar` through `scripts/populate_trading_calendar.py`, upsert only, never delete.
 
@@ -151,7 +151,7 @@ New flags from the feed-work session (2026-07-05, `369b6a6`):
 **DEFECT 2, A MISLABEL THAT BLAMED THE MARKET FOR OUR OWN GAP.** Calendar exhaustion was reported as `symbol_did_not_trade`. **The calendar's ignorance is not the symbol's silence**, and a symbol may have traded perfectly on a session nobody had loaded. It is now `calendar_exhausted`, and the collector writes `excluded_pre_call` and **skips the model call**, since a verdict whose scoring window cannot be located is worth nothing and would still cost money.
 
 - **DEMONSTRATED BY RUNNING, all six cases against the repopulated calendar.** Inside a session 15:00Z anchors `same_session_close` 20:00Z scoring 07-30. Outside 23:00Z anchors `next_session_open` 13:30Z. Inside the 20-minute window 19:50Z rolls to the next open with `rolled=True`. The day before Thanksgiving skips the 11-26 holiday and anchors 11-27 at 14:30Z. **On the 13:00 half day, 12:55 ET rolls forward, which is only correct if the 13:00 close was honoured rather than a defaulted 16:00.** Past the calendar end returns `calendar_exhausted` with no fabricated date. **`ret_10session` now reaches: from 2026-07-29 the tenth session ahead resolves to 2026-08-12**, against zero of 49 in stage 2.
-- **TESTS.** 5 added. A session beyond coverage raises, exhaustion is not reported as the symbol not trading, an unresolvable row is refused and never scored (an exploding scorer proves no call is attempted), a half day resolves to its own close in both the rolled and unrolled directions, and a holiday rolls forward. **Mutation-tested**: restoring the guessing lookup returns a fabricated 20:00Z session while the real path raises, so the refusal test is load bearing rather than vacuous.
+- **TESTS.** 6 added. A session beyond coverage raises, exhaustion is not reported as the symbol not trading, an unresolvable row is refused and never scored (an exploding scorer proves no call is attempted), a half day resolves to its own close in both the rolled and unrolled directions, and a holiday rolls forward. **Mutation-tested**: restoring the guessing lookup returns a fabricated 20:00Z session while the real path raises, so the refusal test is load bearing rather than vacuous.
 
 ### 2026-07-28 (Opus 5) — Amendment 4: a fifth state separates provider health from sample composition, and the delay-rolled reading is settled
 

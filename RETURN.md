@@ -21,7 +21,7 @@ CONSTRAINTS HONORED: live trading off. No RiskGate logic, no live-trading gate, 
 
 ### FINDINGS
 
-**Collection has not started. pytest 1,193 passed, up from 1,183. No LLM provider call. Live trading untouched.**
+**Collection has not started. pytest 1,189 passed, up from 1,183. No LLM provider call. Live trading untouched.**
 
 **TASK 1, COVERAGE.** `trading_calendar(date, open, close)` in `analysis_bars.db`. Written previously only by `scripts/breadth_universe_20260726.py::cmd_load`, a dated one-off that also rebuilds the symbol pool. Six other files read it.
 
@@ -59,7 +59,7 @@ past calendar end         -> calendar_exhausted, no fabricated date
 ret_10session from 2026-07-29 -> 2026-08-12   (was 0 of 49)
 ```
 
-**TASK 5, TESTS.** 5 added. Mutation-tested: restoring the guessing lookup returns a fabricated 20:00Z session while the real path raises.
+**TASK 5, TESTS.** 6 added. Mutation-tested: restoring the guessing lookup returns a fabricated 20:00Z session while the real path raises.
 
 **IS COLLECTION UNBLOCKED BY THIS? Yes by this, no overall.** The calendar was a hard blocker and is cleared. The **tick multiple remains the binding blocker** and is behind a SIP-entitled market-data subscription. Open Questions 3, 6 and 8 are untouched, and the strength distribution needs re-checking at scale.
 
