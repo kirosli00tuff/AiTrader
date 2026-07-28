@@ -138,6 +138,19 @@ New flags from the feed-work session (2026-07-05, `369b6a6`):
 
 ## Session Log
 
+### 2026-07-28 (Opus 5) — A free consolidated quote source was there all along, and one unprobed parameter separated a blocked question from an open one
+
+**NOTHING WAS AMENDED, NOTHING MEASURED, THE FEE MODEL STAYS AT 1.0.** Collection has not started. Live trading off. No RiskGate logic, no live-trading gate, no adaptive invariant, no Level 1 value, no threshold, no strategy parameter. No LLM provider call.
+
+**THE 403 SAYS "RECENT" AND WAS READ AS "UNAVAILABLE".** `feed=sip` on the LATEST-quote endpoint returns 403 "does not permit querying recent SIP data". **On the HISTORICAL quotes endpoint the same feed returns 200.** Real-time SIP is withheld; historical SIP is not. Also reachable: `feed=delayed_sip` on latest quotes, consolidated, tape C. `feed=otc` is 403.
+
+**THE EVIDENCE THAT IEX WAS THE DEFECT, ON ONE SYMBOL AT ONE INSTANT.** UFPT over the same 30 seconds of 2026-07-28: **SIP median 380 ticks, IEX median 7,915 ticks**, a 20x difference. SIP quotes carry two different venues on the two sides (bid Z/BATS, ask U/MEMX), which is what a consolidated best bid and offer looks like.
+
+**THIS CORRECTS THE PRIOR SESSION.** It reported the multiple "unmeasured and behind a paid data subscription". It is unmeasured and reachable for free. The lesson is narrow and worth keeping: **an error message was read as broader than its wording, and one unprobed parameter separated a blocked question from an open one.**
+
+- **TASK 2 NOT PERFORMED and TASK 3 DELIBERATELY NOT PERFORMED.** Task 3 is conditional on no source existing, so pre-registering fixed multiples would **encode a false premise into a binding document** and fix numbers a now-available measurement could replace. Task 2 needs a stratified sample with the fund exclusion, discard accounting and the monotonicity check applied before belief; **this session reached its context limit and recorded the finding rather than beginning a measurement it could not finish or refuse cleanly.**
+- **WHAT RESOLVES IT.** One run of `scripts/measure_tick_multiple_rth.py` repointed from the latest-quote endpoint to the historical quotes endpoint with `feed=sip`. **That also removes the RTH scheduling constraint that cost three sessions**, since historical data can be queried after the close. The script already carries the fund exclusion, the discards by reason and the monotonicity check, and its SIP-entitlement refusal needs re-scoping to the historical endpoint. The IBKR snapshot route stays recorded as a fallback and is no longer the only path.
+
 ### 2026-07-28 (Opus 5) — The calendar reached 2026-07-24 against a run date of 2026-07-28, and the default that papered over it was a latent seventh fabrication
 
 **Collection has not started.** Live trading off. No RiskGate logic, no live-trading gate, no adaptive invariant, no Level 1 value, no threshold, no strategy parameter. No LLM provider call. **pytest 1,189 passed, up from 1,183.**
