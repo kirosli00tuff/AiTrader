@@ -123,6 +123,22 @@ def _build_registry() -> dict[str, CredentialSpec]:
                        "Google (Gemini 3.1 Pro)", "source", True,
                        ("GEMINI_API_KEY",)),
     ]
+    # The news-drift experiment's OWN Anthropic key, deliberately separate from
+    # the council's. It shares a provider but must not share a BALANCE: the
+    # exhaustion latch is keyed by provider label because the quota belongs to
+    # the API key, so on one shared key a credit exhaustion caused by the
+    # council would stop the collector mid-collection and the reverse
+    # (EXPERIMENT.md Open Question 9). There is deliberately NO fallback to
+    # ANTHROPIC_API_KEY among the env candidates: falling back here would
+    # restore that coupling invisibly. news_experiment.credentials offers the
+    # fallback only behind an explicit --allow-shared-key, and records it on
+    # every row it produces.
+    specs += [
+        CredentialSpec("anthropic_experiment_key", "API key",
+                       "anthropic_experiment",
+                       "Anthropic (news-drift experiment, separate balance)",
+                       "source", True, ("EXPERIMENT_ANTHROPIC_API_KEY",)),
+    ]
     return {s.name: s for s in specs}
 
 
@@ -139,6 +155,7 @@ _REQUIRED_FIELDS: dict[str, tuple[str, ...]] = {
     "openai": ("key",),
     "anthropic": ("key",),
     "gemini": ("key",),
+    "anthropic_experiment": ("key",),
 }
 
 

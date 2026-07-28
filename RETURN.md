@@ -11,6 +11,51 @@ Model:
 Prompt summary: one line.
 Changes: what changed.
 
+## Prompt: Stage 2, build the news collector to the accepted specification
+
+Date: 2026-07-28
+Model: Opus 5 (claude-opus-5, 1M context).
+Prompt summary: **The operator ACCEPTED the pre-registration.** Mark EXPERIMENT.md ACCEPTED rather than PROPOSAL, recording the date and that acceptance came before any collection. **From this point the specification is closed and this session implements it rather than revising it. If the specification and reality disagree, stop and report rather than choosing.** Stage 2 builds the collector as a STANDALONE script: no engine integration, no RiskGate, no execution path, no trading, no sleeve. **Collection does not start in this session**, because the tick multiple is still unmeasured and may amend the specification. Task 1 give the experiment its own credential and its own latch identity so a council exhaustion cannot stop the collector and vice versa. Task 2 implement the universe rule, the exact prompt byte for byte, `claude-haiku-4-5` at temperature 0, the horizon convention with its 20-minute delay, de-duplication, and every Task 8 field, reporting anything that cannot be implemented as written. Task 3 implement the absent-input rule and **demonstrate each state by producing it, not by asserting it**. Task 4 record everything including what will not be scored, and state what a non-zero `cached_input_tokens` would mean. Task 5 demonstrate by running against live data under a hard 2 USD ceiling, reporting rows, state distribution, strength distribution, NEUTRAL rate, cost per call against the projected $0.000465, and any field that failed to populate; **the strength distribution is Open Question 10 and a degenerate result is a finding to report now**. Task 6 tests including mutation tests of the absent-input rule and the prompt text, full suite green, no existing test weakened. Task 7 state plainly that collection has not started. Task 8 document and commit.
+
+CONSTRAINTS HONORED: live trading off. No RiskGate logic, no live-trading gate, no adaptive limit-weakening invariant, no Level 1 value, no threshold, no strategy parameter touched.
+
+### FINDINGS
+
+**EXPERIMENT.md marked ACCEPTED 2026-07-28, BINDING AND CLOSED, acceptance recorded as having come before any collection.** Stage 2 implements it. **Standalone: no engine integration, no RiskGate, no execution path, no sleeve.** pytest **1,177 passed against a 1,116 baseline, 61 new, zero existing weakened.** Demonstration spend **0.0256 USD of a 2.00 USD ceiling**. **Collection has not started.**
+
+**TASK 1, THE KEY IS SEPARATED, TWO MECHANISMS.** New keystore credential `anthropic_experiment_key` / `EXPERIMENT_ANTHROPIC_API_KEY`, with **no fallback to `ANTHROPIC_API_KEY` among its env candidates**, because a fallback there restores the coupling invisibly. Separate latch label `anthropic_experiment`. **Only a separate KEY gives a separate BALANCE; the separate LABEL works before one exists.** Confirmed at run time, not asserted: `latch_is_separate()` True, a council exhaustion leaves the experiment callable, two entries in the latch, and the probe restores what it found because the latch is process state. Shared key reachable only behind `--allow-shared-key`, printed loudly and recorded `credential_shared=1` per row. **The operator has not created the second key yet, so the demonstration ran shared and every row says so.**
+
+**TASK 2, THREE SPEC CONTRADICTIONS REPORTED, NOT RESOLVED.** (a) Rule id encodes `p5`, Amendment 2 derived **10.00**; id recorded verbatim with `price_floor_at_formation` beside it. (b) Task 4 scores a delay-rolled headline, Task 8 lists `delay_rolled` as an exclusion reason; roll recorded on its own boolean, `exclusion_reason` left empty, flip point named at `spec.DELAY_ROLL_IS_EXCLUSION`. (c) **Task 7's four states do not cover a pre-call exclusion**; no-publication-time, clock-inconsistent and duplicate rows land on `model_failed` with `error_class` separating them, and a fifth state may be wanted. Two data facts: `universe_asset` has **no sector column** so sector comes from Finnhub with `sector_source` recording absence (44/47 resolved, 3 `unresolved`); the **exchange calendar is stale by two sessions**, last 2026-07-24.
+
+**TASK 5, THE DEMONSTRATION.** 40 symbols across all four strata, 5 sessions 2026-07-06..10, formation 2026-07-01, band 1,558 members from a 9,613-symbol eligible pool.
+
+```
+rows 212 | no_news 159 | judged 47 | model_failed 3 | source_failed 3
+calls 47 | spend $0.025605 | $0.000545/call vs projected $0.000465  (+17%)
+input 338 avg (322-368) vs projected 290 | output 41.3 vs 35
+cached_input_tokens 0 on every row, with cache_control genuinely sent
+NEUTRAL 14/47 = 29.8%  (reportable-failure bar 80%)
+anchors: 37 next_session_open, 12 same_session_close | delay_rolled 0
+outcomes: 49 resolved, 162 pending, 1 excluded | bar_source 'backfill' 49/49
+```
+
+**Cost runs 17 percent above projection, the direction Amendment 3 predicted** when it called its own estimate "about 15 percent light". **Recomputed collection phase $4.71, not $4.01.** Still not a constraint.
+
+**OPEN QUESTION 10, FIRST ANSWER: NOT DEGENERATE, BUT COMPRESSED.** Over 33 directional observations strength took **three of five values: 2 (20), 3 (10), 4 (3). Never 1, never 5.** Against the pre-registered rule (degenerate if one value exceeds 80 percent or fewer than three values occur) this is **60.6 percent and three values, so no reversal condition fires and the five-point scale survives its first look.** The warning is S2: the top pool {4,5} holds **3** observations against the bottom pool {1,2}'s **20**, so the pre-registered top-versus-bottom test would be badly unbalanced if the shape holds. NEGATIVE was 2 on six of seven. **n=33 is far too small to conclude and this is a first look, not a finding.**
+
+**FIELD POPULATION, and every gap is explained rather than excused.** All 47 judged rows carry headline, source, article id, published and fetched timestamps, story group, full raw response, judgment, strength, reason, tokens, cost, latency, anchor, scoring session, ETB, shortable, liquidity rank, ADV and median close at formation, and the collector git sha. **Sector 44/47**, the other three `unresolved` rather than guessed. Resolved rows: `ret_1session` 49/49, `ret_2session` 48/49, `ret_5session` 25/49, **`ret_10session` 0/49 because the calendar ends 2026-07-24**. `ret_intraday` NULL on the 12 close-anchored rows by construction. `net_bp` 33/49, the directional subset. **Every one of those absences is NULL, never zero**, and `outcome_state` keeps pending distinguishable from a resolved 0.0.
+
+**TASK 3, EVERY STATE PRODUCED, NOT ASSERTED**, through the real collector down its real branches. `no_news` and `judged` came from live data; `source_failed` and `model_failed` from deterministic injected failures so the production path is what runs, not a test double of it. `no_news` and `source_failed` never merge. A `no_news` row carries no judgment, no strength, no raw response and no cost. **Mutation-tested**: a mutant client mapping a failed query to an empty one yields four `no_news` and zero `source_failed`, and the assertion that catches it is exercised.
+
+**THE DEMONSTRATION CAUGHT A FABRICATION THE UNIT TESTS DID NOT.** The first run recorded a de-duplicated headline as `state='judged'` with a NULL judgment. Every branch test passed because none asked "does every judged row carry a judgment". `judged` means the model returned a verdict and a duplicate never reached the model. Fixed by routing duplicates through the pre-call-exclusion path, pinned by `test_a_judged_row_always_carries_a_judgment` — the invariant, not the instance — and the demonstration was re-run so the reported numbers come from the shipped code. **This is exactly why Task 3 demanded demonstration by production.**
+
+**TASK 6, TESTS.** 61 new across two files. The prompt is parsed out of EXPERIMENT.md and compared byte for byte, **mutation-tested seven ways including a trailing newline that would be invisible in review**. The universe resolves from the rule and is reproducible from its seed. Absence and failure are distinct. A malformed strength preserves a valid judgment across eight malformations. De-duplication collapses near-identical headlines and shares a story group across tickers. The 20-minute delay rolls a late headline with the boundary pinned inclusive. **An existing guard earned its keep**: `test_keystore_fd_leak` caught the banned unclosed-connection idiom in three of my modules, one of them behind a helper the grep could not see through, before it shipped.
+
+**TASK 7, WHAT REMAINS BEFORE COLLECTION.** The tick multiple is unmeasured and is the binding blocker, because at three ticks the 10.00 floor puts the worst member at 30.4 bp, the entire assumed effect. The operator needs to create the separate Anthropic key. The exchange calendar needs refreshing past 2026-07-24. Open Questions 3, 6 and 8 remain untouched, and the strength distribution needs re-checking at scale.
+
+Changes: `news_experiment/` (new package: spec, credentials, universe, horizon, dedup, scoring, outcomes, store, collect), `tests/test_news_experiment_spec.py`, `tests/test_news_experiment_collector.py`, `account_manager/credentials.py` (one additive credential), `.gitignore`, EXPERIMENT.md (ACCEPTED), PROGRESS.md, CONTEXT.md, RETURN.md. **No RiskGate logic, no live-trading gate, no adaptive invariant, no Level 1 value, no threshold, no strategy parameter. Live trading untouched and off.**
+Commit message: Build the stage 2 news collector to the accepted specification, separate its credential from the council, demonstrate every recorded state, collection not started, live trading untouched
+
 ## Prompt: Amend the model to Haiku 4.5 and add an anchored strength field
 
 Date: 2026-07-28

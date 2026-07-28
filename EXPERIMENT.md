@@ -1,10 +1,31 @@
 # EXPERIMENT.md — News-drift pre-registration
 
-> **STATUS: PROPOSAL, PENDING OPERATOR REVIEW. NOT BINDING.**
+> **STATUS: ACCEPTED BY THE OPERATOR 2026-07-28. BINDING AND CLOSED.**
 >
-> This document is a proposed pre-registration written by Stage 0. It becomes
-> binding only when the operator reviews and accepts it. Until then no number
-> here constrains anything, and a later session may not cite it as settled.
+> **Acceptance came BEFORE any collection.** No headline had been scored
+> against a price, no observation row existed, and no number in this document
+> had been informed by an outcome. That ordering is what makes this a
+> pre-registration rather than a description.
+>
+> **FROM THIS POINT THE SPECIFICATION IS CLOSED.** A later session implements
+> it and does not revise it. Where the specification and reality disagree, or
+> where the document contradicts itself, the session **reports and stops**
+> rather than choosing: a specification that gets quietly adjusted during
+> implementation is not a pre-registration, and the adjustment is always in the
+> direction that makes the work easier.
+>
+> Changing anything here now requires a NEW amendment, dated, with its reason,
+> and with a statement of what data existed at the time. The three amendments
+> below were all made before acceptance and before any data existed.
+>
+> **Known disagreements found during stage 2 implementation and reported
+> rather than resolved:** the rule id string encodes `p5` while Amendment 2
+> derived a 10.00 floor; Task 4 scores a delay-rolled headline while Task 8
+> lists `delay_rolled` as an exclusion reason; and Task 7's four states do not
+> cover a headline excluded before any model call. Each is recorded at its
+> site.
+>
+> This document was a proposed pre-registration written by Stage 0.
 >
 > Written 2026-07-27. Nothing was built, collected, called, or traded to
 > produce it. The only computation performed was read-only queries against
@@ -1911,6 +1932,17 @@ Stated so nobody reads a resolved question into it.
    different study today.
 
 ## What this document does not do
+
+**STATUS UPDATE 2026-07-28, after acceptance and after stage 2.** The paragraph
+below described this document at the moment it was written, and two of its
+clauses are now historical rather than current: **stage 2 HAS built a
+collector** (`news_experiment/`, standalone, demonstrated, no engine
+integration) and it **does create a table**, `news_observation`, in its own
+database. **What has NOT changed is the part that matters: collection has not
+started, nothing is promoted, nothing is sized, and live trading is untouched
+and remains off.** The collector refuses `--run-kind collection` unless the
+operator explicitly clears it, because the tick multiple is still unmeasured
+and its result may amend the cost model or the band. The original text follows.
 
 It does not authorise collection. It creates no table, collector, provider
 client, or config key. It promotes, enables, and sizes nothing. Live trading is

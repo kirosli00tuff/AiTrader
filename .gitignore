@@ -62,3 +62,8 @@ node_modules/
 web/dist/
 web/node_modules/
 .control/
+
+# The stage 2 news-drift collector owns its own database. It is research
+# output, never committed, and never the operational market_ai_lab.db.
+news_experiment.db
+news_experiment.db-*
