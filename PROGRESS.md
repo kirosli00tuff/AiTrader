@@ -138,6 +138,30 @@ New flags from the feed-work session (2026-07-05, `369b6a6`):
 
 ## Session Log
 
+### 2026-07-27 (Opus 5) — EXPERIMENT.md amended from liquidity rank to absolute ADV, and the amendment does not fix the dispersion it was hoped to
+
+Specification amendment. **Nothing built, nothing collected, no provider called, nothing traded.** No code, config, schema or test touched. Live trading off, RiskGate logic, live-trading gate, adaptive invariant, and every Level 1 value untouched. Read-only against `analysis_bars.db`. **No data existed at the time of the change, so nothing was changed after seeing a result.**
+
+**THE BAND IS NOW ABSOLUTE: median daily dollar volume 2,070,000 to 65,300,000 USD.** Derived from three constraints, each shown. **COST** fixes the lower bound at the measured tier-4 floor: tier 5's median hurdle survives a 30 bp effect at 6.63 bp but its **p90 name is 42.64 bp and drowns it**. **MECHANISM** fixes the upper bound at the tier-2 floor: tier 2 is cheaper at 1.79 bp, so cost is not binding there, but the documented effect concentrates in smaller stocks and admitting large caps dilutes the gradient the secondary test looks for. **ORDER SIZE never binds**: at the 2 percent sizer a 2,000 USD position is 0.097 percent of ADV at the lower bound and 0.003 percent at the upper, and 1 percent participation would need 200,000 ADV, a tenth of the lower bound the cost constraint already excludes.
+
+**THE MEASUREMENT CONFIRMS THE PROBLEM IT FIXES.** The ADV band's thin end is **2,071,882 / 2,070,311 / 2,071,925 USD** at the 2020, 2023 and 2026 formations. The rank band's swings **310,358 / 589,725 / 1,327,867**, a 4.3x drift, which is why the same rank sat in a 43.21 bp tier one year and a 4.87 bp tier another.
+
+| | 2020 | 2023 | 2026 |
+|---|---|---|---|
+| rank band members | 3,501 | 3,501 | 3,501 |
+| ADV band members | 2,615 | 2,898 | 3,123 |
+| overlap, % of rank band | 53.4 | 67.2 | **87.3** |
+| overlap, % of ADV band | 71.5 | 81.1 | **97.8** |
+| worst participation, rank | 0.644% | 0.339% | 0.151% |
+| worst participation, ADV | **0.097%** | **0.097%** | **0.097%** |
+
+**AT THE CURRENT FORMATION THIS BUYS INTERPRETABILITY, NOT A DIFFERENT STUDY, and that is said plainly.** 97.8 percent of the ADV band sits inside the rank band at 2026, 68 ADV-only names against 446 rank-only. What changes is the past and the future: at 2020 the overlap falls to 53.4 percent, because the rank band reached to 310k ADV, deep in tiers 5 and 6.
+
+- **THE AMENDMENT DOES NOT FIX COST DISPERSION, AND IS MARGINALLY WORSE.** Max/median hurdle is 5.2x to 5.7x in the ADV band against 4.1x to 5.4x in the rank band. The reason redirects the fix: **the maximum hurdle in BOTH bands is about 20.3 bp, which is exactly `100 / 5.00`, the tick floor at the eligibility price floor.** Dispersion is driven by PRICE through the one-cent tick, not by liquidity, so an ADV band cannot fix it. **The lever is the 5.00 USD price floor, and raising it is a separate amendment needing its own derivation.** Not made here.
+- **RESTRATIFIED to four strata of EQUAL WIDTH IN LOG ADV with FIXED thresholds**: S1 27.55M-65.3M, S2 11.63M-27.55M, S3 4.91M-11.63M, S4 2.07M-4.91M. Equal width in ADV is wrong because ADV is right-skewed and three strata would be nearly empty. **Equal COUNT is wrong for the same reason the rank rule was wrong**: its boundaries move each formation, so S4 in 2020 and S4 in 2026 would be different populations, reintroducing one level down exactly the defect this amendment removes. Log width gives fixed boundaries AND near-equal counts anyway (546-703 in 2020, 745-823 in 2026), so it buys the balance without the drift.
+- **WHAT WOULD HAVE MADE RANK CORRECT, recorded so the decision is auditable.** If the mechanism were about relative position in the liquidity distribution rather than absolute tradeability, rank IS the economic variable. Attention and coverage are plausibly relative, so this is not a strawman. Two things decided against it: the cost hurdle that gates the experiment is a function of absolute ADV and price, and the literature states the mechanism in terms of firm size and coverage, which are absolute. **Reversal condition: evidence that the effect tracks rank better than ADV, measurable once data exists by scoring the same observations under both memberships.** `liquidity_rank` is therefore still RECORDED, so the superseded rule stays scoreable as a pre-registered robustness check.
+- **THE RANK RULE IS PRESERVED UNDER "SUPERSEDED", NOT DELETED**, because the reasoning that produced it is part of the audit trail. Every downstream section was reconciled: the hypothesis statement, the strata, the coverage requirement, the cost paragraph, the recorded schema, and open questions 4 and 7. Per-observation costing is retained regardless of the band definition.
+
 ### 2026-07-27 (Opus 5) — All 23 Level 1 keys traced: 21 enforced, 2 removed, and the consecutive-loss brake was an absorbing state causing 82.5 percent of every block ever recorded
 
 Level 1 enforcement audit. Live trading off, live-trading gate and adaptive invariant untouched. ctest **34 of 34**, pytest **1,116 passed**, up from 1,110.
