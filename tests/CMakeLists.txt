@@ -278,3 +278,13 @@ target_link_libraries(test_zero_weight_participation PRIVATE mal_signal_engine
                       mal_config)
 add_test(NAME zero_weight_participation COMMAND test_zero_weight_participation
          WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+# The SIZER and the CEILING are distinct quantities (2026-07-27). Until then
+# sizing.default_risk_per_trade_pct and risk.max_trade_risk_pct_of_equity were
+# both 0.005, which is how planning conflated them and described a 5,000 USD
+# ceiling that does not exist. Also covers the concurrency and book-exposure
+# limits the offline replay could not reach.
+add_executable(test_sizing_and_ceilings test_sizing_and_ceilings.cpp)
+target_link_libraries(test_sizing_and_ceilings PRIVATE mal_risk mal_config)
+add_test(NAME sizing_and_ceilings COMMAND test_sizing_and_ceilings
+         WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})

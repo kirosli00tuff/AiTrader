@@ -128,9 +128,71 @@ x 0.33 directional (67% NEUTRAL) ASSUMPTION        = 10 candidates/day
 
 **What would need to change:** either run each sleeve as its own engine process with its own database, which gives isolation for free and is the only option available today, or add an account dimension to `PortfolioState` and to `trades_today_`, which is a real change to the RiskGate's state model and is not in scope here. **Recorded as a blocking prerequisite for two simultaneous sleeves.**
 
-### FINDINGS
+### FINDINGS (applied after the pre-registration above was committed at `4e20a20`)
 
-_(applied and replayed below, completed at the end of this session)_
+#### TASK 5 — Applied. Current versus new
+
+| key | old | new | kind |
+|---|---|---|---|
+| `sizing.default_risk_per_trade_pct` | 0.005 | **0.02** | SIZER |
+| `risk.max_trade_risk_pct_of_equity` | 0.005 | **0.025** | CEILING |
+| `risk.max_open_positions_total` | 5 | **10** | CEILING |
+| `risk.max_open_positions_per_venue` | 2 | **10** | CEILING |
+| `risk.max_total_open_risk_pct` | 0.03 | **0.25** | CEILING |
+| `risk.max_exposure_per_category_pct` | 0.05 | **0.25** | CEILING |
+| `risk.max_exposure_per_symbol_pct` | 0.02 | **0.025** | CEILING |
+| `risk.max_exposure_per_market_pct` | 0.02 | **0.025** | CEILING |
+| `risk.max_consecutive_losses` | 3 | **6** | brake |
+| `risk.max_trades_per_day` | 10 | **10 unchanged** | CEILING |
+| `risk.max_daily_loss_total_pct` | 0.03 | **0.03 unchanged** | halt |
+| `risk.max_trade_notional_cap_pct` | 0.05 | **0.05, marked UNENFORCED, flagged for removal** | nothing |
+
+Applied to `config/default_config.yaml` with the derivation beside each value, and to the `config.hpp` struct defaults so an omitted key cannot silently revert.
+
+#### TASK 6 — The replay
+
+Same seed, 4,000 iterations, `synthetic_regimes` + simulated clock, old binary against new:
+
+| | OLD (0.5%) | NEW (2%) |
+|---|---|---|
+| entry decisions | 19,936 | 19,936 |
+| entered / rejected | 3 / 19,933 | 3 / 19,933 |
+| trades (rows) / closed | 6 / 3 | 6 / 3 |
+| notional per position | 100.00 | **400.00** |
+| gross buy exposure | 299.99 | 1,199.87 |
+| limit-related rejects | 0 of 19,933 | **0 of 19,933** |
+| blocked_trades | 0 | **0** |
+| kill_switch events | 0 | **0** |
+
+**ZERO decisions changed in either direction. Zero trades gained or lost. Notional moved exactly 4x, matching the 0.005 to 0.02 sizer change.** Position size is 400 rather than the 2,000 maximum because `notional = base x max(scale, 0.2)` and the synthetic run's signal strength sits at the 0.2 floor throughout, so 2,000 x 0.2 = 400. That is the sizer behaving as specified, not a cap engaging.
+
+**THE ANSWER TO THE TASK 6 QUESTION: the new configuration produces a system that TRADES, not one that halts.** No limit engaged once in 4,000 iterations: no daily-loss breach, no consecutive-loss brake, no position-count rejection, no exposure rejection, no kill switch. The Task 6 stop condition did not fire.
+
+**AN HONEST LIMITATION OF THE REPLAY.** It could not reach the raised ceilings. Three entries in 4,000 iterations never approaches 10 concurrent positions or a 20 percent book, so the replay proves the SIZER change and proves nothing was broken, but it does not exercise the concurrency or exposure caps. Those are pinned instead by `tests/test_sizing_and_ceilings.cpp` against the gate directly, which is stated rather than glossed.
+
+#### TASK 7 — Tests
+
+**ctest 34 of 34. pytest 1,110 passed.** New ctest `sizing_and_ceilings`, 16 assertions.
+
+**MUTATION TESTING, AND IT CAUGHT A GAP IN MY OWN TEST BEFORE IT CAUGHT ANYTHING ELSE.**
+
+| mutation | result |
+|---|---|
+| ceiling collapsed onto the sizer (0.025 to 0.02) | **FAILS 2 assertions** immediately |
+| sizer reverted (0.02 to 0.005), first attempt | **PASSED. Gap in my test.** |
+| sizer reverted, after the fix | **FAILS the capacity assertion** |
+
+Every assertion in the first version was RELATIONAL (ceiling above sizer, book fits caps), and all of them hold at any sizer, so reverting the value the session exists to change passed cleanly. Closed by adding an assertion tying the sizer to the requirement that produced it: a full year at the permitted trade rate must clear the 2,500 USD floor at a 10 bp net edge. At 0.02 that is 5,040 USD and passes; at 0.005 it is 1,260 USD and fails. Both mutations restore green.
+
+**TWO EXISTING TESTS UPDATED, NEITHER SILENCED, AND BOTH ARE BETTER FOR IT.**
+
+1. `tests/test_risk_gate.cpp` case 10 hardcoded `s.consecutive_losses = 3`. It pinned the VALUE while the property is "at the limit, denied". It now reads `limits.max_consecutive_losses` from the gate it was constructed with, so it survives any future re-derivation, **and it additionally asserts one below the limit still trades**, which the old form never checked and which is the half that catches an off-by-one.
+2. `tests/test_config_editor.py` asserted `max_consecutive_losses == 3` in two tests whose subjects are TYPING and round-trip preservation. Both now compare against the file's own value and against a pre-write capture, so they test what they were written to test.
+
+Changes: `config/default_config.yaml`, `config/config.hpp`, `tests/test_sizing_and_ceilings.cpp` (new), `tests/CMakeLists.txt`, `tests/test_risk_gate.cpp`, `tests/test_config_editor.py`, CLAUDE.md, CONTEXT.md, EXPERIMENT.md (the false ceiling claim corrected in place), PROGRESS.md, RETURN.md.
+
+**Live trading off. Live-trading gate untouched. Adaptive limit-weakening invariant untouched and still green. No production row read or written. Level 1 values changed, which this prompt explicitly authorised.**
+Commit message: Raise the sizer from 0.5 to the derived value and set trade and position limits from strategy requirements, derivations pre-registered, consequence proven by replay, live trading untouched
 
 ## Prompt: Propose the stage 0 pre-registration for the news-drift experiment
 

@@ -4,6 +4,7 @@ Covers the round-trip read/edit/write contract, comment/format preservation,
 and that invalid values are rejected without mutating the file on disk.
 """
 import os
+import re
 import shutil
 import sys
 
@@ -31,10 +32,18 @@ def test_read_l1_values_typed(cfg):
     assert isinstance(vals["max_daily_loss_total_pct"], float)
     assert isinstance(vals["max_open_positions_total"], int)
     assert isinstance(vals["kill_switch_enabled"], bool)
-    assert vals["max_consecutive_losses"] == 3
+    # UPDATED 2026-07-27. This read `== 3`, pinning the shipped VALUE when the
+    # test is about TYPING. Re-deriving the brake from the strategy shape
+    # (3 -> 6) broke a test that was never about the number. It now asserts the
+    # type and that the reader agrees with the file, which is what it checks.
+    assert isinstance(vals["max_consecutive_losses"], int)
+    assert vals["max_consecutive_losses"] == int(
+        re.search(r"^\s*max_consecutive_losses:\s*(\d+)",
+                  open(cfg).read(), re.M).group(1))
 
 
 def test_round_trip_read_edit_write(cfg):
+    before_brake = ce.read_l1_values(cfg)["max_consecutive_losses"]
     written = ce.write_l1_values(
         {"max_daily_loss_total_pct": 0.05,
          "max_open_positions_total": 8,
@@ -45,7 +54,11 @@ def test_round_trip_read_edit_write(cfg):
     assert reread["max_open_positions_total"] == 8
     assert reread["kill_switch_enabled"] is False
     # Untouched params are unchanged.
-    assert reread["max_consecutive_losses"] == 3
+    # UPDATED 2026-07-27, same reason: the property is that a write of OTHER
+    # keys leaves this one alone, not that it happens to equal 3. Captured
+    # before the write and compared after, so the assertion is about the round
+    # trip rather than about a shipped value.
+    assert reread["max_consecutive_losses"] == before_brake
 
 
 def test_write_preserves_other_blocks_and_comments(cfg):

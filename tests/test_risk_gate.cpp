@@ -107,11 +107,25 @@ int main() {
     }
 
     // 10. Consecutive losses at limit => denied.
+    // UPDATED 2026-07-27, and the fix is to stop hardcoding the number at all.
+    // This read `s.consecutive_losses = 3`, which pinned the VALUE rather than
+    // the property, so re-deriving the brake from the strategy shape (3 -> 6)
+    // broke a test that was never about the number. It now reads the limit the
+    // gate was constructed with, so it asserts "at the limit, denied" and
+    // survives any future re-derivation. One below the limit must still pass,
+    // which the old form never checked and which is the half that catches an
+    // off-by-one.
     {
         auto s = clean_state();
-        s.consecutive_losses = 3;
+        s.consecutive_losses = limits.max_consecutive_losses;
         auto d = gate.evaluate(good_order(), s);
         check(!d.allowed, "max consecutive losses blocks orders");
+
+        auto below = clean_state();
+        below.consecutive_losses = limits.max_consecutive_losses - 1;
+        check(gate.evaluate(good_order(), below).allowed,
+              "one loss below the limit still trades: the brake stops a broken "
+              "strategy, not normal variation");
     }
 
     // 11. Exposure-per-symbol cap enforced.

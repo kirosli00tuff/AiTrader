@@ -87,14 +87,14 @@ struct MarketDataConfig {
 struct RiskConfig {
     double max_daily_loss_total_pct = 0.03;
     double max_daily_loss_per_venue_pct = 0.02;
-    double max_trade_risk_pct_of_equity = 0.005;
-    double max_total_open_risk_pct = 0.03;
-    int max_open_positions_total = 5;
-    int max_open_positions_per_venue = 2;
-    double max_exposure_per_symbol_pct = 0.02;
-    double max_exposure_per_market_pct = 0.02;
-    double max_exposure_per_category_pct = 0.05;
-    int max_consecutive_losses = 3;
+    double max_trade_risk_pct_of_equity = 0.025;
+    double max_total_open_risk_pct = 0.25;
+    int max_open_positions_total = 10;
+    int max_open_positions_per_venue = 10;
+    double max_exposure_per_symbol_pct = 0.025;
+    double max_exposure_per_market_pct = 0.025;
+    double max_exposure_per_category_pct = 0.25;
+    int max_consecutive_losses = 6;
     int cooldown_minutes_after_loss_breach = 240;
     double min_confidence_default = 0.65;
     double min_edge_default = 0.02;
@@ -102,8 +102,15 @@ struct RiskConfig {
     int stale_signal_reject_minutes = 1;
     // Level-1 ceilings enforced OUTSIDE the deterministic gate (engine/sizing):
     //   max_trades_per_day    — per-day trade counter in the run loop.
-    //   max_trade_notional_cap_pct — documented notional ceiling; the gate's own
-    //     max_trade_risk_pct_of_equity (0.005) stays the binding, tighter cap.
+    //   max_trade_notional_cap_pct — UNENFORCED (verified 2026-07-27). It appears
+    //     in config parsing, range validation, this struct and the yaml, and in
+    //     NO consumer anywhere. It claims a safety property the code does not
+    //     provide, the same defect that removed whale_position_scale_cap and
+    //     dnn_position_scale_cap on 2026-07-18. Planning relied on it as a real
+    //     5,000 USD ceiling and was wrong to. The binding per-trade cap is
+    //     max_trade_risk_pct_of_equity, enforced at risk_gate.cpp:43. FLAGGED
+    //     FOR REMOVAL, kept this session only because removing it is a separate
+    //     change from re-deriving the values.
     int max_trades_per_day = 10;
     double max_trade_notional_cap_pct = 0.05;
     bool kill_switch_enabled = true;
@@ -120,7 +127,7 @@ struct RiskConfig {
 // which IS enforced on every sizing path (core/engine.cpp).
 struct SizingConfig {
     std::string default_position_sizing_method = "fixed_fractional";
-    double default_risk_per_trade_pct = 0.005;
+    double default_risk_per_trade_pct = 0.02;
     double default_position_scale_cap = 1.0;
 };
 

@@ -519,8 +519,8 @@ things**, verified in config:
 
 | key | value | meaning |
 |---|---|---|
-| `risk.max_trade_notional_cap_pct` | 0.05 | the Level-1 **ceiling** the RiskGate enforces: 5,000 USD |
-| `sizing.default_risk_per_trade_pct` | 0.005 | what the **sizer actually sends**: 500 USD base |
+| `risk.max_trade_notional_cap_pct` | 0.05 | **CORRECTED 2026-07-27: UNENFORCED. This row was wrong.** The key is parsed, range-validated, and read by no consumer anywhere. The real per-trade ceiling is `max_trade_risk_pct_of_equity` at `risk_gate.cpp:43`. |
+| `sizing.default_risk_per_trade_pct` | 0.005 | what the **sizer actually sends**: 500 USD base. **RAISED to 0.02 on 2026-07-27, so the capacity arithmetic below is superseded: at 2,000 USD per position the required edge falls from 19.8 bp to 4.96 bp.** |
 | `sizing.default_position_scale_cap` | 1.0 | scale multiplier, so 100 to 500 USD in practice |
 
 The engine sizes at `base * max(scale, 0.2)` where `base = 0.005 * equity`, so a

@@ -88,14 +88,41 @@ venues:
 risk:
   max_daily_loss_total_pct: 0.03
   max_daily_loss_per_venue_pct: 0.02
-  max_trade_risk_pct_of_equity: 0.005
-  max_total_open_risk_pct: 0.03
-  max_open_positions_total: 5
-  max_open_positions_per_venue: 2
-  max_exposure_per_symbol_pct: 0.02
-  max_exposure_per_market_pct: 0.02
-  max_exposure_per_category_pct: 0.05
-  max_consecutive_losses: 3
+  # RAISED 0.005 -> 0.025 (2026-07-27). A CEILING, deliberately ABOVE the
+  # 0.02 sizer rather than equal to it: the two are distinct quantities and
+  # neither is derived from the other. At 0.005 the ceiling and the sizer
+  # were the same number, so the sizer sat exactly on the gate and any sizer
+  # increase rejected every order.
+  max_trade_risk_pct_of_equity: 0.025
+  # RAISED 0.03 -> 0.25 (2026-07-27). 10 concurrent positions x 2% = 20%
+  # deployed, plus headroom. At 0.03 the book capped at 3,000 USD.
+  max_total_open_risk_pct: 0.25
+  # RAISED 5 -> 10 (2026-07-27). THE ONE-SESSION-HOLD IDENTITY: a position
+  # opened today closes at tomorrow's close, so every entry made in a day is
+  # still open when the next day's entries arrive, and peak concurrency
+  # EQUALS entries per day. A 5-position cap throttles a 10-entry strategy
+  # to half. Derived from the strategy shape, not chosen.
+  max_open_positions_total: 10
+  # RAISED 2 -> 10 (2026-07-27). This was the REAL cap: it binds before
+  # max_open_positions_total, and since the crypto removal every tradeable
+  # symbol is venue 'alpaca', so the whole book sat at 2 positions.
+  max_open_positions_per_venue: 10
+  # RAISED 0.02 -> 0.025 (2026-07-27). One 2% position must fit without
+  # sitting exactly on the boundary.
+  max_exposure_per_symbol_pct: 0.025
+  # RAISED 0.02 -> 0.025 (2026-07-27). Instrument.market is set to the SYMBOL
+  # itself, so this is a functional duplicate of the symbol cap and tracks it.
+  max_exposure_per_market_pct: 0.025
+  # RAISED 0.05 -> 0.25 (2026-07-27). Every symbol is category 'equity' now,
+  # so this caps the WHOLE book. At 0.05 one position filled it.
+  max_exposure_per_category_pct: 0.25
+  # RAISED 3 -> 6 (2026-07-27). DERIVED, not loosened by preference. At a
+  # designed ~50% hit rate and 10 trades/day, P(a run of k losses in 10) is
+  # about (11-k) x 0.5^k: at k=3 that is ~100% of days, so the brake fires
+  # daily and the system never trades. k=6 gives 7.8% of days. 6 is the
+  # SMALLEST k keeping daily engagement under 10%. The brake exists to stop a
+  # broken strategy, not normal variation.
+  max_consecutive_losses: 6
   cooldown_minutes_after_loss_breach: 240   # Level-1 (longer/tighter than prior 120)
   min_confidence_default: 0.65              # gate threshold; council has its own (see council:)
   min_edge_default: 0.02
@@ -120,7 +147,17 @@ risk:
 # below, which caps the WHOLE sizing scale on every path.
 sizing:
   default_position_sizing_method: fixed_fractional
-  default_risk_per_trade_pct: 0.005
+  # RAISED 0.005 -> 0.02 (2026-07-27). THE SIZER, distinct from the RiskGate
+  # ceiling above and not derived from it. Capacity floor 2,500 USD/year at an
+  # honest 10 bp net edge needs 992 to 1,984 USD per position, so 1 to 2
+  # percent. 2 percent is the TOP of the derived range and no higher: the
+  # smallest sufficient number is the one least suspected of being chosen to
+  # make a marginal hypothesis pass. At 0.005 the system could not produce a
+  # meaningful dollar result at any plausible edge, which is a defect rather
+  # than conservatism. The operator proposed 5 percent; 5 percent is
+  # inconsistent with four Level-1 limits and buys margin the requirement does
+  # not ask for. Derivation in RETURN.md 2026-07-27.
+  default_risk_per_trade_pct: 0.02
   default_position_scale_cap: 1.0
 
 # -----------------------------------------------------------------------------

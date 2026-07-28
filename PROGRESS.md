@@ -138,6 +138,49 @@ New flags from the feed-work session (2026-07-05, `369b6a6`):
 
 ## Session Log
 
+### 2026-07-27 (Opus 5) — Level 1 sizing and limits re-derived and applied, and the ceiling everyone planned against turned out to be enforced nowhere
+
+**The first session in this project permitted to change Level 1 values.** Live trading off, live-trading gate and adaptive limit-weakening invariant untouched. Derivations pre-registered and committed at `4e20a20` BEFORE any value changed. ctest **34 of 34**, pytest **1,110 passed**.
+
+**THREE CONFLATIONS FOUND, AND THE FIRST IS MINE FROM EARLIER TODAY.**
+
+1. **`max_trade_notional_cap_pct` IS ENFORCED NOWHERE.** It exists in config parsing, range validation, the struct, the yaml, and three documents I wrote today. **EXPERIMENT.md called it "the Level-1 ceiling the RiskGate enforces" and that is false.** Same defect class as `whale_position_scale_cap` and `dnn_position_scale_cap`, removed 2026-07-18 for claiming a safety property the code does not provide. Now marked UNENFORCED in `config.hpp` and flagged for removal. EXPERIMENT.md corrected in place.
+2. **The real ceiling and the sizer were the SAME number, 0.005.** `risk_gate.cpp:43` rejected above 500 USD and the sizer sent at most 500 USD, so the sizer sat exactly on the gate and any sizer increase alone would have rejected every order.
+3. **The effective position cap was 2, not 5.** `max_open_positions_per_venue: 2` binds before the total, and since the crypto removal every symbol is venue `alpaca`. **The real book was 2 x 500 = 1,000 USD, one percent of capital**, not the five positions every document described.
+
+| key | old | new | derivation |
+|---|---|---|---|
+| `default_risk_per_trade_pct` (SIZER) | 0.005 | **0.02** | capacity floor 2,500 USD/yr at an honest 10 bp edge needs 992 to 1,984 USD per position |
+| `max_trade_risk_pct_of_equity` (CEILING) | 0.005 | **0.025** | strictly above the sizer, a real backstop rather than a duplicate |
+| `max_open_positions_total` | 5 | **10** | one-session-hold identity: peak concurrency EQUALS entries per day |
+| `max_open_positions_per_venue` | 2 | **10** | one venue holds the whole book now |
+| `max_total_open_risk_pct` | 0.03 | **0.25** | 10 x 2% = 20% plus headroom |
+| `max_exposure_per_category_pct` | 0.05 | **0.25** | every symbol is category `equity`, so this caps the whole book |
+| `max_exposure_per_symbol_pct` / `_market_pct` | 0.02 | **0.025** | one position must fit off the boundary; market == symbol |
+| `max_consecutive_losses` | 3 | **6** | P(run of k in 10 at p=0.5) ~ (11-k) x 0.5^k: k=3 fires ~every day, k=6 fires 7.8% |
+| `max_trades_per_day` | 10 | **10** | already equals the derived candidate rate |
+| `max_daily_loss_total_pct` | 0.03 | **0.03** | 3,000 on a 20,000 book is a 15% adverse move, outside one-session variation |
+
+**I DERIVED 2 PERCENT, NOT THE 5 PERCENT PROPOSED.** 5 percent is inconsistent with four Level-1 limits that each reject the FIRST order, and puts 25 percent deployed against a 3 percent daily loss limit, where a 12 percent adverse move halts the day. The capacity requirement is met at 1 to 2 percent. **The framing rule was recorded before any number was chosen and applied to every one: take the smallest value meeting the stated requirement, because the smallest sufficient number is the one least suspected of being chosen to make a marginal hypothesis pass.**
+
+**THE REPLAY SAYS IT TRADES, NOT HALTS.** Same seed, 4,000 iterations, old values against new:
+
+| | OLD (0.5%) | NEW (2%) |
+|---|---|---|
+| entry decisions / entered | 19,936 / 3 | 19,936 / 3 |
+| trades, closed | 6, 3 | 6, 3 |
+| notional per position | 100.00 | **400.00** (exactly 4x) |
+| gross exposure | 300 | 1,200 |
+| limit-related rejects | 0 | **0** |
+| blocked_trades, kill_switch events | 0, 0 | **0, 0** |
+
+**Zero decisions changed. No limit engaged once.** Notional moved exactly 4x as derived. Honest limitation: the replay could NOT reach the raised ceilings, since 3 entries in 4,000 iterations never approaches 10 concurrent positions, so concurrency and book exposure are pinned by a new test against the gate directly rather than assumed.
+
+- **TASK 4, AND IT IS A BLOCKING FINDING.** **There is no per-account dimension anywhere.** The consecutive-loss brake and the trade counter are GLOBAL single ints; the daily loss and position counts are global plus per-VENUE. **The map key is venue, never account.** Two sleeves on separate paper accounts would both be venue `alpaca`, so every per-venue map collides and every global counter is shared. **Two sleeves cannot be isolated inside one engine process.** Either run each as its own process with its own database, the only option today, or add an account dimension to `PortfolioState` and `trades_today_`, a real change to the RiskGate state model. Recorded as a prerequisite, not worked around.
+- **NEW TEST `sizing_and_ceilings`, 16 assertions**, pinning that the sizer and ceiling are different numbers, that the ceiling is strictly above the sizer, that neither moves when the other does, that a full-size order passes while an oversize one is refused, that the per-venue cap never binds before the total, that a full book fits every exposure cap, and that the sizer clears the capacity floor.
+- **MUTATION-TESTED, AND THE FIRST ATTEMPT EXPOSED A GAP IN MY OWN TEST.** Collapsing the ceiling onto the sizer failed 2 assertions immediately. **Reverting the sizer 0.02 to 0.005 passed the whole suite**, because every assertion was relational and holds at any sizer. Closed by adding the capacity assertion, which ties the sizer to the requirement that produced it: a full year at the permitted trade rate must clear 2,500 USD at 10 bp. Reverting now fails. Both mutations restore green.
+- **TWO EXISTING TESTS UPDATED, NEITHER SILENCED, BOTH MADE VALUE-INDEPENDENT.** `test_risk_gate.cpp` hardcoded `consecutive_losses = 3`, pinning the VALUE when the property is "at the limit, denied"; it now reads the limit the gate was built with and additionally checks one below still trades, which the old form never did. `test_config_editor.py` asserted `== 3` twice while testing TYPING and round-trip preservation; both now compare against the file and against a pre-write capture.
+
 ### 2026-07-27 (Opus 5) — Stage 0 pre-registration PROPOSED, and the capacity gate does not comfortably clear at configured sizing
 
 Specification session. **Nothing built, nothing collected, no provider called, nothing traded.** Live trading off, no RiskGate logic, no live-trading gate, no adaptive limit-weakening invariant, no Level 1 risk value, no threshold, no strategy parameter, no engine behavior touched. The only computation was read-only queries against `analysis_bars.db` to check the proposed universe rule yields a workable membership. Written to **EXPERIMENT.md**, marked **PROPOSAL PENDING OPERATOR REVIEW**, not binding.
