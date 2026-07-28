@@ -138,6 +138,30 @@ New flags from the feed-work session (2026-07-05, `369b6a6`):
 
 ## Session Log
 
+### 2026-07-27 (Opus 5) — The price floor derived at 10.00 USD, and it removes 16 percent of the population the hypothesis is about
+
+Specification amendment 2. **Nothing built, nothing collected, no provider called.** No code, config, schema or test touched. Live trading off, RiskGate logic, live-trading gate, adaptive invariant and every Level 1 value untouched. Read-only against `analysis_bars.db`. **No data existed at the time of the change.** pytest unchanged at 1,116.
+
+**5.00 USD WAS A CONVENTION, NEVER A CALCULATION.** Amendment 1 found the maximum hurdle in every band tested was about 20.3 bp, exactly `100 / 5.00`, the one-cent tick at the old floor. Dispersion is a function of price, not liquidity, so the floor was the only lever and it had never been derived.
+
+**THE REQUIREMENT, STATED BEFORE THE CHOICE:** the TICK component of the worst-case hurdle must not exceed one third of the assumed 30 bp effect, so even the most expensive name keeps two thirds. Stated on the tick rather than the total because the floor controls only the tick, and making it responsible for the regulatory fee would be incoherent. `100/price <= 10` gives **price >= 10.00**.
+
+| floor | members (2026) | kept | max hurdle | max/median | S4 kept | S1 kept |
+|---|---|---|---|---|---|---|
+| 5.00 | 3,123 | 100.0% | **20.41 bp** | **5.7x** | 100% | 100% |
+| 7.50 | 2,943 | 94.2% | 13.71 | 4.0x | 91.5% | 97.6% |
+| **10.00** | **2,769** | **88.7%** | **10.41** | **3.2x** | **84.2%** | **94.8%** |
+| 15.00 | 2,422 | 77.6% | 7.06 | 2.5x | 70.4% | 89.0% |
+| 20.00 | 2,132 | 68.3% | 5.41 | 2.1x | 59.2% | 82.6% |
+
+**A STRICTER READING WOULD HAVE GIVEN 15.00 AND I REJECTED IT ON THE TRADEOFF.** Requiring the TOTAL worst case under 10 bp fails 10.00 by 0.41 bp, the regulatory fee and impact that no price floor can touch, and selects 15.00 at a cost of **30 percent of S4**, the thinnest stratum and the one where the mechanism is strongest. Accepting 0.41 bp of worse worst case to keep 14 points of study population is the right trade and is recorded rather than buried.
+
+- **MARKET CAP CANNOT BE COMPUTED AND I SAY SO RATHER THAN APPROXIMATE IT.** `analysis_bars.db` holds no shares outstanding: `universe_asset` carries name, exchange, fund classification, bar counts and provenance, and nothing about size. The measurable substitute answers the operative question directly. **Removal is NOT uniform: 15.8 percent of S4 against 5.2 percent of S1, a 3.0x concentration in the thin end.** The floor is a partial size filter that was not intended, exactly as anticipated.
+- **THE GRADIENT SURVIVES AT 10.00 AND WOULD NOT AT 20.00.** All four strata retain 84 percent or more and every one keeps at least 660 members against the 100 the sample draws. At 20.00 S4 falls to 59.2 percent, and a stratum that has lost 41 percent of its members to a price filter is no longer the population the hypothesis names.
+- **THE SAMPLE IS UNTHREATENED.** The 400-symbol stratified draw is unaffected at every candidate, since the smallest stratum after the 10.00 floor still holds 6.6x what it needs. Headline volume is unchanged because the sample size, not the band size, drives it, and the median price rising from 31 to 35 USD plausibly raises coverage rather than lowering it, which is an assumption and marked as one.
+- **WHAT IT DOES NOT FIX, and the third item is the important one.** Dispersion is halved, not removed: the Reg NMS tick is one cent above 1.00 USD so the worst member always pays `100/floor`. Borrow cost on the short side stays unmodelled and falls hardest on the thin names. **THE TICK MULTIPLE IS MULTIPLICATIVE WITH THE FLOOR: at three ticks the 10.00 floor puts the worst member at 30.4 bp, consuming the ENTIRE assumed effect.** The floor improves the multiple's damage proportionally and does not make the design robust to it. **Measuring the multiple is now worth more than any further floor increase.**
+- **The 5.00 floor is preserved under SUPERSEDED with its reversal condition**: evidence that the effect concentrates in 5-to-10 USD names strongly enough to outweigh a doubled tick cost, measurable once data exists by scoring the excluded band separately. `median_close_at_formation` is recorded so that check stays available.
+
 ### 2026-07-27 (Opus 5) — EXPERIMENT.md amended from liquidity rank to absolute ADV, and the amendment does not fix the dispersion it was hoped to
 
 Specification amendment. **Nothing built, nothing collected, no provider called, nothing traded.** No code, config, schema or test touched. Live trading off, RiskGate logic, live-trading gate, adaptive invariant, and every Level 1 value untouched. Read-only against `analysis_bars.db`. **No data existed at the time of the change, so nothing was changed after seeing a result.**

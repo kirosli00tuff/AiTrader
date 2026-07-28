@@ -34,6 +34,25 @@ so nothing was changed after seeing a result.**
 **The original rank rule is preserved below under "SUPERSEDED", not deleted.
 The reasoning that produced it is part of the audit trail.**
 
+## AMENDMENT 2 — 2026-07-27, eligibility price floor derived from the tick
+
+**Changed:** the eligibility price floor is **10.00 USD**, not 5.00.
+
+**Why:** Amendment 1 found the maximum hurdle in every band tested was about
+20.3 bp, which is exactly `100 / 5.00`, the one-cent tick at the old floor.
+Dispersion is a function of PRICE, not liquidity, so no liquidity band can fix
+it and the floor is the only lever. **5.00 was a convention, never a
+calculation.** At 10.00 the worst-case tick cost halves to 10.00 bp and the
+max-over-median dispersion falls from 5.7x to 3.2x.
+
+**What it costs, stated because it is not free:** the floor is a partial size
+filter that was not intended, and its removals are **concentrated in exactly
+the population the hypothesis is about**. See "What the floor removes" below.
+
+**When:** before any collection. **No data existed at the time of this change.**
+
+**The 5.00 floor is preserved under SUPERSEDED, not deleted.**
+
 ## Why this exists
 
 Every prior research attempt in this project built first and measured after.
@@ -119,7 +138,8 @@ At each formation date **D**:
    The window excludes D, because a window containing the formation date
    decides membership using a bar the period it governs can trade on.
 3. **Eligibility inside the window**: at least **40 of 60** bars present, median
-   close at or above **5.00 USD**, and no listing-segment break.
+   close at or above **10.00 USD** (AMENDED 2026-07-27 from 5.00, derived in
+   "The price floor" below), and no listing-segment break.
 4. **THE BAND, ABSOLUTE:** median daily dollar volume **at or above
    2,070,000 USD and at or below 65,300,000 USD**. Not a rank.
 5. **Sample 400 symbols**, stratified (below).
@@ -129,6 +149,96 @@ At each formation date **D**:
    until it stops trading.
 
 **Point-in-time by construction.** Only data dated strictly before D enters.
+
+### The price floor, derived
+
+**THE REQUIREMENT, STATED BEFORE THE CHOICE.** The floor controls exactly one
+term of the hurdle, the tick's proportional cost `tick x multiple / price`. It
+cannot touch the regulatory fee or the impact term, so the requirement is
+stated on the quantity the lever actually controls, not on the total:
+
+> **The TICK component of the worst-case member's round-trip hurdle must not
+> exceed one third of the assumed 30 bp effect, so even the most expensive name
+> in the universe keeps two thirds of it.**
+
+One third, because the pre-registered net assumption is 25 bp from 30 gross,
+implying about 5 bp of typical cost, and the median hurdle at any candidate
+floor sits near 3 bp. A worst case at roughly three times the median is the
+natural bound on a bad name. `100 / price <= 10` gives **price >= 10.00 USD**.
+
+### Candidate floors, measured
+
+ADV band 2.07M to 65.3M, 2,000 USD order, hurdle = 0.30 bp regulatory +
+`100/price` tick + impact.
+
+**2026-01-02 formation** (base n = 3,123 at the old 5.00 floor):
+
+| floor | members | kept | max H | med H | p90 H | max/med | S4 kept | S3 | S2 | S1 | med px |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| 5.00 | 3,123 | 100.0% | **20.41** | 3.60 | 11.12 | **5.7x** | 100% | 100% | 100% | 100% | 31.10 |
+| 7.50 | 2,943 | 94.2% | 13.71 | 3.39 | 9.12 | 4.0x | 91.5% | 92.3% | 95.9% | 97.6% | 33.13 |
+| **10.00** | **2,769** | **88.7%** | **10.41** | **3.21** | **7.64** | **3.2x** | **84.2%** | **85.3%** | **90.9%** | **94.8%** | **35.32** |
+| 15.00 | 2,422 | 77.6% | 7.06 | 2.87 | 5.63 | 2.5x | 70.4% | 72.6% | 79.2% | 89.0% | 39.92 |
+| 20.00 | 2,132 | 68.3% | 5.41 | 2.62 | 4.56 | 2.1x | 59.2% | 63.3% | 69.2% | 82.6% | 44.49 |
+
+**2020-01-02 formation** (base n = 2,615):
+
+| floor | members | kept | max H | med H | max/med | S4 kept | S1 kept |
+|---|---|---|---|---|---|---|---|
+| 5.00 | 2,615 | 100.0% | 20.29 | 3.70 | 5.5x | 100% | 100% |
+| 7.50 | 2,506 | 95.8% | 13.69 | 3.54 | 3.9x | 93.2% | 98.5% |
+| **10.00** | **2,342** | **89.6%** | **10.41** | **3.34** | **3.1x** | **83.4%** | **96.2%** |
+| 15.00 | 2,069 | 79.1% | 7.07 | 3.00 | 2.4x | 69.0% | 89.6% |
+| 20.00 | 1,790 | 68.5% | 5.41 | 2.75 | 2.0x | 55.9% | 82.1% |
+
+**THE CHOICE: 10.00 USD**, the smallest candidate meeting the stated
+requirement. The tick component at the floor is exactly 10.00 bp, one third of
+the assumed effect. Total worst-case hurdle is 10.41 bp, the extra 0.41 coming
+from the regulatory fee and impact, which no price floor can reduce.
+
+**A STRICTER READING WOULD HAVE GIVEN 15.00, AND I REJECTED IT ON THE
+TRADEOFF.** Requiring the TOTAL worst-case hurdle under 10 bp fails 10.00 by
+0.41 bp and selects 15.00. That reading makes the floor responsible for the
+regulatory fee, which it cannot change, and it costs **30 percent of S4**, the
+thinnest ADV stratum and the one where the mechanism is strongest. Accepting a
+0.41 bp worse worst case to keep 14 points of the study population is the right
+trade, and it is recorded rather than buried.
+
+### What the floor removes, and it is not uniform
+
+**MARKET CAP CANNOT BE COMPUTED. Stated plainly rather than approximated.**
+`analysis_bars.db` holds no shares outstanding and no market capitalisation:
+`universe_asset` carries symbol, name, exchange, fund classification, bar
+counts and provenance, and nothing about size. **So the market-cap distribution
+of what the floor removes is unavailable, and any figure claiming otherwise
+would be invented.** What IS measurable is the question that actually matters,
+whether removal concentrates in the thin ADV strata, and it does:
+
+| floor | S4 (thinnest) kept | S1 (most liquid) kept | concentration |
+|---|---|---|---|
+| 7.50 | 91.5% | 97.6% | 3.5x more removal in S4 |
+| **10.00** | **84.2%** | **94.8%** | **3.0x more removal in S4** |
+| 15.00 | 70.4% | 89.0% | 2.7x more removal in S4 |
+| 20.00 | 59.2% | 82.6% | 2.3x more removal in S4 |
+
+**The floor is a partial size filter that was not intended, exactly as
+anticipated.** Cheap and thinly traded correlate, so every candidate removes
+more from the thin end than the liquid end. At 10.00 the removal is 15.8
+percent of S4 against 5.2 percent of S1.
+
+**DOES THE GRADIENT SURVIVE? Yes, at 10.00.** All four strata retain 84 percent
+or more, every stratum keeps at least 660 members against the 100 the sample
+draws, and the ordering of both the hurdle and the liquidity gradient is
+unchanged. **At 20.00 it would not survive intact**: S4 falls to 59.2 percent,
+and a stratum that has lost 41 percent of its members to a price filter is no
+longer the population the hypothesis names.
+
+**THE HONEST RESIDUAL:** even at 10.00 the study population is 15.8 percent
+smaller at the thin end than the mechanism would want, and that removal is not
+random with respect to the hypothesis. It buys a halving of dispersion. **If a
+later reading decides the mechanism matters more than the dispersion, the
+correct response is to lower the floor and accept the worse hurdle, not to keep
+10.00 and stop reporting the tradeoff.**
 
 ### The thresholds, derived
 
@@ -207,7 +317,7 @@ That is the trade taken deliberately: **a constant economic meaning with a
 varying count, rather than a constant count with a varying meaning.** The
 sample of 400 is unaffected, since even the smallest band is six times it.
 
-### Cost dispersion, and the amendment does NOT resolve it
+### Cost dispersion, resolved by Amendment 2 rather than by the band
 
 The recorded fallback condition was that a wide cost dispersion swamping the
 effect would make a pooled result uninterpretable. Measured, at a 2,000 USD
@@ -220,20 +330,24 @@ order:
 | hurdle max | 20.72 - 20.99 bp | 20.29 - 20.41 bp |
 | **max / median** | **4.1x - 5.4x** | **5.2x - 5.7x** |
 
-**The ADV band does not reduce dispersion. It is marginally worse.** The reason
-is worth recording because it redirects the fix: **the maximum hurdle in BOTH
-bands is about 20.3 bp, which is exactly `100 / 5.00`, the tick floor at the
-eligibility price floor.** Dispersion is driven by PRICE through the one-cent
-tick, not by liquidity. An ADV band cannot fix it, because ADV is not what
-causes it. **The lever for dispersion is the 5.00 USD price floor, and raising
-it is a separate amendment needing its own derivation.** It is not made here.
+**The ADV band did not reduce dispersion. It was marginally worse.** The reason
+redirected the fix: **the maximum hurdle in BOTH bands was about 20.3 bp,
+exactly `100 / 5.00`, the tick at the old eligibility price floor.** Dispersion
+is driven by PRICE through the one-cent tick, not by liquidity, so an ADV band
+cannot fix what ADV does not cause.
+
+**AMENDMENT 2 MADE THAT FIX.** At the 10.00 floor the worst-case hurdle falls
+from 20.41 to 10.41 bp and max/median from 5.7x to 3.2x, roughly halving both.
+The figures in the table above are at the OLD 5.00 floor and are retained to
+show what the band alone did and did not achieve.
 
 ### What a news source must cover
 
-- **400 US-listed common equities per quarter**, sampled from a band of 2,615
-  to 3,123 depending on the formation.
-- Thin end at 2.07M USD ADV, median price about 30 USD. Small and mid caps, not
-  an S&P list.
+- **400 US-listed common equities per quarter**, sampled from a band of **2,342
+  to 2,769** at the 10.00 floor, depending on the formation (2,615 to 3,123 at
+  the superseded 5.00 floor).
+- Thin end at 2.07M USD ADV, median price about **35 USD** at the 10.00 floor
+  (was about 31 at the 5.00 floor). Small and mid caps, not an S&P list.
 - Per-headline publication timestamp at minute resolution or better.
 - Roughly 400 symbol-day queries per trading day, under 7 minutes against the
   integrated Finnhub 60/minute free tier.
@@ -262,12 +376,17 @@ met, hard stop 120 trading days.
 
 **Four strata of EQUAL WIDTH IN LOG ADV, with FIXED thresholds.**
 
-| stratum | ADV range (USD) | 2020 n | 2026 n | median price | hurdle median | hurdle p90 |
-|---|---|---|---|---|---|---|
-| S1 | 27,553,544 - 65,300,000 | 546 | 745 | 41.52 | 2.73 bp | 7.32 bp |
-| S2 | 11,626,306 - 27,553,544 | 692 | 778 | 32.23 | 3.43 bp | 9.78 bp |
-| S3 | 4,905,757 - 11,626,306 | 703 | 777 | 27.06 | 4.11 bp | 12.51 bp |
-| S4 | 2,070,000 - 4,905,757 | 674 | 823 | 24.48 | 4.50 bp | 12.46 bp |
+| stratum | ADV range (USD) | 2020 n | 2026 n | retained by the 10.00 floor |
+|---|---|---|---|---|
+| S1 | 27,553,544 - 65,300,000 | 525 | 706 | 96.2% / 94.8% |
+| S2 | 11,626,306 - 27,553,544 | 633 | 707 | 91.5% / 90.9% |
+| S3 | 4,905,757 - 11,626,306 | 622 | 663 | 88.5% / 85.3% |
+| S4 | 2,070,000 - 4,905,757 | 562 | 693 | 83.4% / 84.2% |
+
+Counts are AFTER the 10.00 floor (Amendment 2). At the superseded 5.00 floor
+they were 546/692/703/674 in 2020 and 745/778/777/823 in 2026. **Every stratum
+retains at least 660 members against the 100 the sample draws**, so the floor
+does not threaten stratified sampling at any formation tested.
 
 **100 symbols sampled per stratum**, uniform at random within a stratum, seeded
 deterministically from `sha256(rule_id + formation_date)`. 400 total.
@@ -296,6 +415,24 @@ deterministically from `sha256(rule_id + formation_date)`. 400 total.
 strongest in S4 and weakest in S1. The hurdle runs the other way, 4.50 bp in S4
 against 2.73 bp in S1, so the NET effect after cost is what the pre-registered
 thin-end test (strata S3 and S4) measures.
+
+### SUPERSEDED — the 5.00 USD price floor
+
+The draft and Amendment 1 both used a **5.00 USD** median-close floor, inherited
+from `backtest/universe.py`'s `MIN_MEDIAN_CLOSE`. It was a penny-stock
+convention, never derived. At 5.00 the one-cent tick costs 20.00 bp on the
+cheapest eligible name, which is **two thirds of the entire assumed effect**,
+and it set the maximum hurdle in every band tested.
+
+**Why it was replaced:** it was never chosen against a requirement. Amendment 2
+states the requirement (the tick component of the worst case must not exceed one
+third of the effect) and derives 10.00 from it.
+
+**What would make 5.00 correct again:** evidence that the effect is
+concentrated in 5 to 10 USD names strongly enough to outweigh a doubled tick
+cost. That is measurable once data exists, by scoring the excluded 5-to-10 band
+separately, and `median_close_at_formation` is recorded so the check stays
+available.
 
 ### SUPERSEDED — the original rank rule, kept for the audit trail
 
@@ -852,8 +989,11 @@ Listed rather than resolved optimistically.
    marginally worse than the rank band's 4.1x to 5.4x, because the maximum
    hurdle in both is about 20.3 bp, which is `100 / 5.00`, the tick floor at
    the eligibility price floor. **Dispersion is driven by PRICE, not
-   liquidity**, so the lever is the 5.00 USD price floor and raising it is a
-   separate amendment needing its own derivation.
+   liquidity. ADDRESSED BY AMENDMENT 2**, which derived a 10.00 floor and
+   halved both figures, to a 10.41 bp worst case and 3.2x dispersion. **Not
+   eliminated**: the Reg NMS tick is one cent above 1.00 USD, so the worst
+   member always pays `100/floor` bp and only a higher floor reduces it, at a
+   measured cost in the thin strata.
 
 5. **DeepSeek V4 Flash is not an approved model string under CLAUDE.md**
    (Task 3). Accepting this document means amending that hard rule.
@@ -901,7 +1041,49 @@ which are absolute, not in terms of position in a queue.
 better than ADV. That is measurable once data exists, by scoring the same
 observations under both memberships, and it is not measurable now.
 
-## What this amendment does NOT fix
+## What AMENDMENT 2 (the price floor) does NOT fix
+
+1. **Dispersion is halved, not removed.** Max/median falls from 5.7x to 3.2x
+   and the worst case from 20.41 to 10.41 bp. The residual is structural: the
+   Reg NMS minimum increment is one cent for any equity above 1.00 USD, so the
+   worst member always pays `100 / floor` bp and the only lever is a higher
+   floor, which costs thin-strata membership at a measured rate.
+
+2. **No driver of dispersion exists beyond price and liquidity INSIDE the
+   model, and that is the problem.** The hurdle is regulatory (a constant) plus
+   tick over price plus impact over ADV and size, so within the model the floor
+   and the band together bound it. **Outside the model two drivers are
+   unmodelled**: the actual quoted spread when it exceeds one tick (below), and
+   borrow cost on the short side, which the fee model has no term for and which
+   falls hardest on exactly the thin names the mechanism names.
+
+3. **THE TICK MULTIPLE IS MULTIPLICATIVE WITH THE FLOOR, AND IT IS THE ONE
+   NUMBER THAT COULD INVALIDATE THIS.** Every hurdle figure assumes a ONE-TICK
+   market. The calibration recorded the real multiple as unmeasurable without
+   paid quote data. Because the tick term is `multiple x 100 / price`, the
+   floor and the multiple scale each other exactly:
+
+   | market width | worst case at 5.00 | at 10.00 | at 15.00 |
+   |---|---|---|---|
+   | 1 tick | 20.4 bp | **10.4 bp** | 7.1 bp |
+   | 2 ticks | 40.4 bp | 20.4 bp | 13.7 bp |
+   | 3 ticks | **60.4 bp** | **30.4 bp** | 20.4 bp |
+
+   **At three ticks the 10.00 floor leaves the worst member with zero net
+   effect**, since 30.4 bp consumes the entire 30 bp assumption. The floor
+   improves the multiple's damage proportionally and does not make the design
+   robust to it. **Measuring the multiple is worth more than any further floor
+   increase**, and it remains the single highest-value unresolved input.
+
+4. **The removal is not random with respect to the hypothesis.** 15.8 percent
+   of S4 against 5.2 percent of S1. The study population is smaller at the end
+   where the effect is claimed to live.
+
+5. **Market cap was not measurable**, so the size question is answered by an
+   ADV-stratum proxy rather than directly. If shares outstanding become
+   available, the removal analysis should be redone against actual market cap.
+
+## What AMENDMENT 1 (rank to ADV) does NOT fix
 
 Stated so nobody reads a resolved question into it.
 

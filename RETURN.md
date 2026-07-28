@@ -11,6 +11,88 @@ Model:
 Prompt summary: one line.
 Changes: what changed.
 
+## Prompt: Derive the eligibility price floor from the tick's proportional cost
+
+Date: 2026-07-27
+Model: Opus 5 (claude-opus-5, 1M context).
+Prompt summary: the ADV amendment found the maximum cost hurdle in both the rank band and the ADV band is about 20.3 bp, exactly 100 divided by 5.00, the one-cent tick at the eligibility price floor. Dispersion is a function of PRICE, not liquidity, so no liquidity band can fix it. The lever is the price floor and it has never been derived: 5.00 USD appears to be a convention rather than a calculation. Task 1 report at candidate floors of 5, 7.50, 10, 15 and 20 USD the resulting ADV-band membership at several formations, maximum hurdle, median hurdle, the max-over-median dispersion ratio, and what fraction of each of the four log-ADV strata is lost, then choose the SMALLEST floor bringing the worst-case hurdle into a defensible range against the pre-registered 30 bp effect, stating the requirement explicitly BEFORE choosing, on the same principle applied to the sizer. Task 2 measure what the floor costs, since a price floor is a partial size filter that was not intended: cheap and small correlate, and the documented mechanism concentrates in smaller firms, so raising the floor may remove the population where the effect is strongest. Report the market-cap distribution of what is removed against what is retained, whether removal is uniform across the four ADV strata or concentrated in the thin ones, and whether the gradient the secondary test looks for survives. **If a floor that fixes the cost problem also removes the population the hypothesis is about, say so plainly, because that is a reason to accept a worse hurdle rather than a reason to hide the tradeoff.** Task 3 report the effect of each candidate on expected headline volume and on whether 1,000 observations across 60 day-clusters stays reachable inside the 120-day hard stop. Task 4 state the residual: the tick is one cent above 1.00 USD under Reg NMS, so a floor reduces its proportional cost but cannot eliminate it, and report whether the unmeasurable tick MULTIPLE interacts with the floor, since a three-tick market at 5.00 USD is 60 bp rather than 20. Task 5 reconcile eligibility, membership counts, strata, coverage, sample size and the cost paragraph. Task 6 record the reversal condition and preserve the superseded value. Task 7 amend EXPERIMENT.md in place as a PROPOSAL with an amendment note.
+
+**No data exists, so nothing is being changed after seeing a result.**
+
+CONSTRAINTS HONORED: live trading stays off. No RiskGate logic, no live-trading gate, no adaptive limit-weakening invariant, no Level 1 value, no threshold, no strategy parameter touched. Specification only.
+
+### FINDINGS
+
+**AMENDED IN PLACE, MARKED PROPOSAL, THE 5.00 FLOOR PRESERVED UNDER SUPERSEDED. Nothing built, nothing collected, no provider called. No code, config, schema or test touched. pytest unchanged at 1,116.**
+
+### TASK 1 — THE REQUIREMENT, THEN THE CANDIDATES, THEN THE CHOICE
+
+**The requirement, stated before the choice:** the **TICK component** of the worst-case member's round-trip hurdle must not exceed **one third of the assumed 30 bp effect**, so even the most expensive name keeps two thirds. Stated on the tick rather than the total because the floor controls only the tick term; making it answer for the regulatory fee would be incoherent. `100 / price <= 10` gives **price >= 10.00 USD**.
+
+One third because the pre-registered net assumption is 25 bp from 30 gross, implying about 5 bp typical cost, and the median hurdle at every candidate sits near 3 bp, so a worst case at roughly three times the median is the natural bound on a bad name.
+
+**2026-01-02, ADV band, 2,000 USD order** (base n = 3,123 at the old floor):
+
+| floor | members | kept | max H | med H | p90 H | max/med | S4 | S3 | S2 | S1 | med px |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| 5.00 | 3,123 | 100.0% | **20.41** | 3.60 | 11.12 | **5.7x** | 100% | 100% | 100% | 100% | 31.10 |
+| 7.50 | 2,943 | 94.2% | 13.71 | 3.39 | 9.12 | 4.0x | 91.5% | 92.3% | 95.9% | 97.6% | 33.13 |
+| **10.00** | **2,769** | **88.7%** | **10.41** | **3.21** | **7.64** | **3.2x** | **84.2%** | **85.3%** | **90.9%** | **94.8%** | **35.32** |
+| 15.00 | 2,422 | 77.6% | 7.06 | 2.87 | 5.63 | 2.5x | 70.4% | 72.6% | 79.2% | 89.0% | 39.92 |
+| 20.00 | 2,132 | 68.3% | 5.41 | 2.62 | 4.56 | 2.1x | 59.2% | 63.3% | 69.2% | 82.6% | 44.49 |
+
+**2020-01-02** (base n = 2,615): 5.00 → 2,615 / 20.29 / 5.5x; 7.50 → 2,506 / 13.69 / 3.9x; **10.00 → 2,342 / 10.41 / 3.1x, S4 83.4%, S1 96.2%**; 15.00 → 2,069 / 7.07 / 2.4x, S4 69.0%; 20.00 → 1,790 / 5.41 / 2.0x, S4 55.9%.
+
+**THE CHOICE: 10.00 USD**, the smallest candidate meeting the requirement. Tick at the floor is exactly 10.00 bp; total worst case 10.41 bp, the extra 0.41 being the regulatory fee and impact no floor can reduce. Dispersion falls 5.7x to 3.2x.
+
+**A STRICTER READING GIVES 15.00 AND I REJECTED IT.** Requiring the TOTAL worst case under 10 bp fails 10.00 by 0.41 bp and selects 15.00, at a cost of **30 percent of S4**. Accepting 0.41 bp of worse worst case to keep 14 points of the study population is the right trade.
+
+### TASK 2 — WHAT THE FLOOR REMOVES
+
+**MARKET CAP CANNOT BE COMPUTED, AND I SAY SO RATHER THAN APPROXIMATE IT.** `analysis_bars.db` holds no shares outstanding and no market capitalisation. `universe_asset` carries symbol, name, exchange, fund classification, bar counts and provenance, nothing about size. **Any market-cap distribution I reported would be invented.** The measurable substitute answers the operative question directly:
+
+| floor | S4 (thinnest) kept | S1 (most liquid) kept | concentration |
+|---|---|---|---|
+| 7.50 | 91.5% | 97.6% | 3.5x more removal in S4 |
+| **10.00** | **84.2%** | **94.8%** | **3.0x more removal in S4** |
+| 15.00 | 70.4% | 89.0% | 2.7x more removal in S4 |
+| 20.00 | 59.2% | 82.6% | 2.3x more removal in S4 |
+
+**The removal is NOT uniform. The floor is a partial size filter that was not intended**, because cheap and thinly traded correlate. At 10.00 it removes 15.8 percent of S4 against 5.2 percent of S1.
+
+**THE GRADIENT SURVIVES AT 10.00.** All four strata retain 84 percent or more; every stratum keeps at least 660 members against the 100 the sample draws; the ordering of hurdle and liquidity is unchanged. **At 20.00 it would not**: S4 falls to 59.2 percent, and a stratum that has lost 41 percent of its members to a price filter is no longer the population the hypothesis names.
+
+**The honest residual:** even at 10.00 the population is 15.8 percent thinner at exactly the end where the effect is claimed to live, and that removal is not random with respect to the hypothesis. It buys a halving of dispersion. If a later reading decides the mechanism matters more, **the correct response is to lower the floor and accept the worse hurdle, not to keep 10.00 and stop reporting the tradeoff.**
+
+### TASK 3 — SAMPLE SIZE IS NOT THREATENED
+
+The 400-symbol stratified draw is unaffected at **every** candidate. After the 10.00 floor the smallest stratum holds 663 against the 100 it must supply, 6.6x headroom; even at 20.00 the smallest holds about 460. Headline volume is unchanged because the **sample**, not the band, drives it: 400 x 0.10 x 0.75 x 60 = 1,800 scorable, clearing the pre-registered 1,000 across 60 day-clusters inside the 120-day stop. Directionally the floor helps: median price rises 31.10 to 35.32 and larger firms attract more coverage, so arrival plausibly rises. **That is an assumption and is marked as one.**
+
+### TASK 4 — WHAT IT DOES NOT FIX
+
+1. **Dispersion is halved, not removed.** Reg NMS sets a one-cent increment above 1.00 USD, so the worst member always pays `100 / floor` bp and only a higher floor reduces it, at a measured cost in the thin strata.
+2. **Inside the model, price and liquidity are the only drivers, and that is the problem.** Outside it, two are unmodelled: the quoted spread when it exceeds one tick, and **borrow cost on the short side**, which the fee model has no term for and which falls hardest on the thin names the mechanism names.
+3. **THE TICK MULTIPLE IS MULTIPLICATIVE WITH THE FLOOR, and this is the item that could invalidate the design.** Every figure assumes a one-tick market, and the calibration recorded the real multiple as unmeasurable without paid quote data.
+
+| market width | worst case at 5.00 | at 10.00 | at 15.00 |
+|---|---|---|---|
+| 1 tick | 20.4 bp | **10.4 bp** | 7.1 bp |
+| 2 ticks | 40.4 bp | 20.4 bp | 13.7 bp |
+| 3 ticks | **60.4 bp** | **30.4 bp** | 20.4 bp |
+
+**At three ticks the 10.00 floor leaves the worst member with zero net effect**, 30.4 bp against a 30 bp assumption. The floor improves the multiple's damage proportionally and does not make the design robust to it. **Measuring the multiple is now worth more than any further floor increase.**
+
+4. **Market cap was not measurable**, so the size question is answered by an ADV-stratum proxy. If shares outstanding become available the removal analysis should be redone directly.
+
+### TASKS 5 AND 6 — RECONCILED AND REVERSIBLE
+
+Updated: the eligibility clause, the candidate derivation, the removal analysis, the dispersion section (now attributing the fix to Amendment 2 rather than the band), the coverage requirement (median price 31 to 35, band 2,342 to 2,769), the strata table (counts after the floor, with the pre-floor counts retained), open question 4, and a new residuals section. **No section still describes 5.00 as live.**
+
+**REVERSAL CONDITION, and 5.00 is preserved under SUPERSEDED rather than deleted:** 5.00 becomes correct again on evidence that the effect concentrates in 5-to-10 USD names strongly enough to outweigh a doubled tick cost. Measurable once data exists by scoring the excluded 5-to-10 band separately, and `median_close_at_formation` is recorded so the check stays available.
+
+Changes: `EXPERIMENT.md` (amended in place), PROGRESS.md, RETURN.md. **CLAUDE.md and CONTEXT.md deliberately NOT updated.** No code, config, schema or test. Live trading untouched.
+Commit message: Derive the eligibility price floor from the tick's proportional cost, with the membership and mechanism tradeoff measured, specification only, pending operator review
+
 ## Prompt: Amend the proposed universe rule from liquidity rank to absolute ADV thresholds
 
 Date: 2026-07-27
