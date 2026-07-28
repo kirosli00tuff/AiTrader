@@ -138,6 +138,20 @@ New flags from the feed-work session (2026-07-05, `369b6a6`):
 
 ## Session Log
 
+### 2026-07-28 (Opus 5) — The RTH tick measurement was blocked by the clock, so the script was built to run at the right hour and nothing was changed on no data
+
+Measurement session that took no measurement. **No collector built, nothing wired, nothing traded, no LLM provider called, zero spend.** Live trading off, RiskGate logic, live-trading gate, adaptive invariant and every Level 1 value untouched.
+
+**THE MARKET WAS CLOSED.** At 06:49 UTC Alpaca `/v2/clock` returned `is_open: false` with next open 13:30 UTC, **6h41m away**. Task 1 required RTH sampling and a session cannot wait that long.
+
+**I DID NOT SAMPLE ANYWAY.** Stage 1 already took after-hours quotes and proved them worthless by its own monotonicity check, S1 at 870 ticks against S4's 303 with the liquidity ordering backwards. Repeating that would have produced a table that looks like a measurement and is not one.
+
+**NOTHING WAS CHANGED ON NO DATA.** Task 4 asked to update `alpaca_equity_spread_tick_multiple` to the measured value. There is no measured value, so it stays at 1.0. Moving a cost-model number without a measurement is the fabrication this project has corrected five times, and Tasks 2, 3 and 5 all consume data that does not exist.
+
+- **THE BLOCKER IS NOW ONE COMMAND.** `scripts/measure_tick_multiple_rth.py` resolves the stratified universe, sweeps at 14:00, 16:30 and 19:30 UTC so the open, middle and close are separated, records bid, ask, cents, ticks, bp, stratum, ADV and price, discards crossed, locked, zero-size and over-60s-stale quotes with counts by reason, and applies the Stage 1 monotonicity check before any number is believed. **It REFUSES outside RTH**, verified by running it: exit 2. Two sessions have now failed on the clock, so the work is packaged to run unattended at the right hour.
+- **PROVIDER QUIRK RECORDED IN CLAUDE.md, and it cost a whole measurement arm.** `claude-opus-4-8` rejects `temperature` with `HTTP 400 invalid_request_error, "temperature is deprecated for this model"`, the same shape already recorded for the GPT-5 family. That is why Stage 1's Opus column read 100 percent parse-fail: the model was never reached. `claude-haiku-4-5` accepts `temperature: 0` normally.
+- **Amendment 2's "unmeasurable without paid quote data" is corrected in EXPERIMENT.md**, since the document is an audit trail.
+
 ### 2026-07-28 (Opus 5) — Stage 1 feasibility: no stop condition fired, the short-side worry mostly cleared, and the model comparison failed on my own bug
 
 Measurement only. **No collector built, nothing wired into the engine, nothing traded.** Live trading off, RiskGate logic, live-trading gate, adaptive invariant and every Level 1 value untouched. **Hard ceiling 15.00 USD enforced before the first call. Total spend 0.0096 USD.**

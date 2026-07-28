@@ -1191,6 +1191,31 @@ whether the experiment can run on the cheap tier, and it remains open. What IS
 established: haiku parsed 21 of 21 at temperature zero and cost $0.000403 per
 call, so **the cheap tier is mechanically capable of producing well-formed
 verdicts at a workable price.** Whether its judgments are as good is untested.
+#### Tick multiple, attempt 2 (2026-07-28 06:49 UTC): BLOCKED, NOT MEASURED
+
+**The market was closed and the measurement was not taken.** Alpaca `/v2/clock`
+returned `is_open: false`, next open 13:30 UTC, 6h41m away. A session cannot
+wait that long, so the honest outcome is no measurement rather than a second
+set of after-hours numbers, which Stage 1 already proved worthless (S1 870
+ticks against S4's 303, the liquidity ordering backwards).
+
+**Nothing was changed on no data.** `alpaca_equity_spread_tick_multiple` stays
+at 1.0, the floor, with its yaml note that it therefore understates small caps
+by construction. Moving a cost-model value without a measurement is the
+fabrication this project has corrected five times.
+
+**The blocker is converted into one command.**
+`scripts/measure_tick_multiple_rth.py` resolves the stratified universe, sweeps
+at 14:00, 16:30 and 19:30 UTC so the open, middle and close are separated,
+records bid, ask, cents, ticks, bp, stratum, ADV and price per observation,
+discards crossed, locked, zero-size and over-60-second-stale quotes with counts
+by reason, and applies the Stage 1 monotonicity check before any number is
+believed. **It REFUSES to run outside RTH**, verified: exit 2.
+
+**Still the highest-value remaining measurement**, because the multiple is
+multiplicative with the price floor and at three ticks the 10.00 floor puts the
+worst member at 30.4 bp, the entire assumed effect.
+
 #### The Stage 1 verdict
 
 **STAGE 1 CLEARS ON EVERY STOP CONDITION IT WAS DESIGNED TO TEST. It does not

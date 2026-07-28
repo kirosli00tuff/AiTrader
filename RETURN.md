@@ -11,6 +11,35 @@ Model:
 Prompt summary: one line.
 Changes: what changed.
 
+## Prompt: Measure the tick multiple during regular trading hours
+
+Date: 2026-07-28
+Model: Opus 5 (claude-opus-5, 1M context).
+Prompt summary: Amendment 2 recorded the tick multiple as unmeasurable without paid quote data and Stage 1 falsified that. Stage 1 ran at 06:31 UTC outside RTH and produced numbers it proved stale. Task 1 sample quotes inside 13:30-20:00 UTC at several points in the session, recording bid, ask, cents, ticks, bp, stratum, ADV and price, discarding crossed, locked and stale quotes with counts. Task 2 validate before believing using the monotonicity check. Task 3 report the multiple per stratum with the high percentile and the resulting hurdle. Task 4 feed it into `alpaca_equity_spread_tick_multiple`. Task 5 report what it means for the floor, bands and capacity. Task 6 document, correct Amendment 2, and record the Opus 4.8 temperature quirk.
+
+CONSTRAINTS HONORED: live trading off, no RiskGate logic, no live-trading gate, no adaptive invariant, no Level 1 value, no threshold, no strategy parameter. **Measurement only, no LLM provider call, zero spend.**
+
+### FINDINGS
+
+**THE MEASUREMENT WAS NOT TAKEN, AND NOTHING WAS CHANGED ON NO DATA.**
+
+**Task 1 BLOCKED.** At 06:49 UTC Alpaca `/v2/clock` returned `is_open: false`, next open 13:30 UTC, **6h41m away**. RTH sampling was the whole premise.
+
+**I did not sample anyway.** Stage 1 already took after-hours quotes and proved them worthless by its own check: S1 870 ticks against S4's 303, the most liquid stratum wider than the thinnest. A second after-hours table would look like a measurement and would not be one.
+
+**Tasks 2, 3 and 5 are not reportable**, because each consumes Task 1's data. A sanity check on absent data, or a hurdle at an unmeasured multiple, would invent the thing the session exists to measure.
+
+**Task 4 DELIBERATELY NOT DONE.** `alpaca_equity_spread_tick_multiple` stays **1.0**, the floor, with its yaml note that it understates small caps by construction. There is no measured value to write, and moving a cost-model number without one would silently change every recorded hurdle.
+
+**DELIVERED INSTEAD: the blocker is now one command.** `scripts/measure_tick_multiple_rth.py` resolves the stratified universe (ADV 2.07M-65.3M, price floor 10.00, four log-ADV strata, 40 per stratum, deterministic seed); sweeps at **14:00, 16:30 and 19:30 UTC** so the open, middle and close are measured separately; records bid, ask, cents, ticks, bp, stratum, ADV and price; discards **crossed, locked, zero-size, zero-price, HTTP-failed and over-60-second-stale** quotes counting each reason; applies the **Stage 1 monotonicity check** and reports pass or fail before any number is used; and **REFUSES outside RTH**, verified by running it: exit 2.
+
+**Task 6 DONE, and it cost a whole measurement arm.** CLAUDE.md now records that `claude-opus-4-8` rejects `temperature` with `HTTP 400 invalid_request_error, "temperature is deprecated for this model"`, the same shape already recorded for the GPT-5 family. That is why Stage 1's Opus column read 100 percent parse-fail: the model was never reached. `claude-haiku-4-5` accepts `temperature: 0` normally. Amendment 2's claim is corrected in EXPERIMENT.md.
+
+**The multiple remains the highest-value unresolved input**: multiplicative with the price floor, and at three ticks the 10.00 floor puts the worst member at 30.4 bp, the entire assumed effect.
+
+Changes: `scripts/measure_tick_multiple_rth.py` (new), CLAUDE.md, EXPERIMENT.md, PROGRESS.md, RETURN.md. **No cost-model value changed. Live trading untouched.**
+Commit message: Measure the quoted spread and tick multiple during regular trading hours and feed it into the fee model, measurement only, nothing built
+
 ## Prompt: Stage 1 feasibility measurement
 
 Date: 2026-07-27
