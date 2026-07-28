@@ -313,7 +313,17 @@ def test_haiku_gate_says_no_when_model_declines(monkeypatch):
     assert d.reason == "flat range"
 
 
-def test_haiku_gate_error_is_fail_open(monkeypatch):
+def test_haiku_gate_live_error_fails_CLOSED(monkeypatch):
+    """RENAMED AND INVERTED 2026-07-27, stated rather than quietly relaxed.
+
+    This was test_haiku_gate_error_is_fail_open and asserted proceed is True on
+    a live gate error. That direction was analysed and found wrong: a key is
+    present, so real paid providers sit behind the gate, and a gate that could
+    not run screened nothing. Proceeding sends every candidate to the full
+    three-provider council UNSCREENED, the most expensive possible response to
+    a cost control breaking, and the same ANTHROPIC_API_KEY powers the gate and
+    one provider, so the failure correlates with the waste.
+    """
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
 
     def _raise(*a, **k):
@@ -321,7 +331,30 @@ def test_haiku_gate_error_is_fail_open(monkeypatch):
 
     monkeypatch.setattr(http_json, "post_json", _raise)
     d = HaikuGate().should_review({"symbol": "X"})
-    assert d.proceed is True and d.source == "error"
+    assert d.proceed is False
+    assert d.source == "error_failed_closed"
+    assert "refusing the paid council" in d.reason
+
+
+def test_haiku_gate_unparseable_output_also_fails_closed(monkeypatch):
+    """Same reasoning: a gate whose answer cannot be read screened nothing."""
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    monkeypatch.setattr(http_json, "post_json",
+                        lambda *a, **k: {"content": [{"text": "not json"}]})
+    d = HaikuGate().should_review({"symbol": "X"})
+    assert d.proceed is False and d.source == "error_failed_closed"
+
+
+def test_haiku_gate_with_no_key_still_fails_OPEN(monkeypatch):
+    """THE OFFLINE CASE, DELIBERATELY UNCHANGED. No credential means the demo
+    path, where the council behind the gate is free deterministic mocks.
+    Refusing there screens nothing and protects nothing, so a blanket
+    fail-closed was rejected. The split is between offline and a LIVE failure,
+    never between one error and another."""
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.setattr("llm_consensus.gate._resolve_key", lambda *a, **k: "")
+    d = HaikuGate().should_review({"symbol": "X"})
+    assert d.proceed is True and d.source == "mock"
 
 
 # --- Real-vs-mock council selection + startup line ---------------------------

@@ -199,7 +199,6 @@ Engine::Engine(config::Config cfg, EngineOptions opts)
     } else {
         feed_ = std::make_unique<market_data::MockFeed>(instruments, opts_.seed);
     }
-    news_ = std::make_unique<news::MockCatalystProvider>();
     gate_ = std::make_unique<risk::RiskGate>(cfg_.risk);
     accounts_ = std::make_unique<account::AccountManager>(cfg_);
 
@@ -312,22 +311,23 @@ Engine::Engine(config::Config cfg, EngineOptions opts)
 }
 
 signal_engine::FactorSignal Engine::mock_factor(
-    const std::string& name, const market_data::MarketState& ms,
-    const news::CatalystScore& cat) {
+    const std::string& name, const market_data::MarketState& ms) {
     signal_engine::FactorSignal s;
     s.factor = name;
-    // Momentum + catalyst + per-factor deterministic perturbation.
+    // Momentum + a per-factor deterministic perturbation. The catalyst term
+    // is gone (2026-07-27): it came from a hash of the symbol, which is a
+    // fabricated input, and every real service already ignored it.
     double momentum = std::tanh(ms.ret_5 * 25.0 + ms.order_book_imbalance * 0.3);
     double noise = det_unit(name + ms.symbol, 17) - 0.5;
-    double bias = std::tanh(momentum + 0.4 * cat.score + 0.6 * noise);
+    double bias = std::tanh(momentum + 0.6 * noise);
     s.bias = std::clamp(bias, -1.0, 1.0);
     s.confidence = clamp01(0.55 + 0.4 * std::abs(bias) - 0.15 * ms.volatility * 5);
-    s.edge = std::max(0.0, 0.03 * std::abs(bias) + 0.01 * cat.importance);
+    s.edge = std::max(0.0, 0.03 * std::abs(bias));
     return s;
 }
 
 std::optional<Engine::CouncilScore> Engine::fetch_council_verdict(
-    const market_data::MarketState& ms, const news::CatalystScore& cat) {
+    const market_data::MarketState& ms) {
     // THE ONLY /score/llm call site. One round per evaluation: the bridge
     // runs the base-check gate and every provider, composes under the
     // abstention rule, and persists per-provider detail. The long timeout is
@@ -339,7 +339,7 @@ std::optional<Engine::CouncilScore> Engine::fetch_council_verdict(
          {"ret_5", ms.ret_5},
          {"volatility", ms.volatility},
          {"imbalance", ms.order_book_imbalance},
-         {"catalyst", cat.score}});
+        });
     auto resp = bridge::http_post_json(
         opts_.bridge_host, opts_.bridge_port, "/score/llm", body,
         cfg_.council.engine_council_call_timeout_ms);
@@ -352,7 +352,7 @@ std::optional<Engine::CouncilScore> Engine::fetch_council_verdict(
 }
 
 std::vector<signal_engine::FactorSignal> Engine::gather_factors(
-    const market_data::MarketState& ms, const news::CatalystScore& cat,
+    const market_data::MarketState& ms,
     bool council_allowed, const strategy::StrategySignal* native) {
     std::vector<signal_engine::FactorSignal> out;
     std::vector<std::string> all = {
@@ -398,7 +398,7 @@ std::vector<signal_engine::FactorSignal> Engine::gather_factors(
     std::optional<CouncilScore> council;
     if (any_llm && opts_.use_bridge && council_allowed &&
         factor_source_real("llm_primary", layer_toggles_))
-        council = fetch_council_verdict(ms, cat);
+        council = fetch_council_verdict(ms);
 
     // Rule-based is always computed in C++.
     // LLM/DNN/whale come from the bridge if enabled, else mocks. When
@@ -406,7 +406,7 @@ std::vector<signal_engine::FactorSignal> Engine::gather_factors(
     // llm slots stay on the in-process mock, exactly as a failed per-slot
     // call used to leave them.
     for (const auto& f : factors) {
-        signal_engine::FactorSignal s = mock_factor(f, ms, cat);
+        signal_engine::FactorSignal s = mock_factor(f, ms);
 
         // The native strategy IS the rule-based factor: when a native entry
         // signal is supplied, drive `rule_based` from that genuine technical
@@ -445,7 +445,7 @@ std::vector<signal_engine::FactorSignal> Engine::gather_factors(
                  {"ret_5", ms.ret_5},
                  {"volatility", ms.volatility},
                  {"imbalance", ms.order_book_imbalance},
-                 {"catalyst", cat.score}});
+                });
             auto resp = bridge::http_post_json(
                 opts_.bridge_host, opts_.bridge_port, endpoint, body,
                 cfg_.council.engine_bridge_call_timeout_ms);
@@ -1438,8 +1438,7 @@ void Engine::handle_bar_close(const market_data::MarketState& ms,
         }
     }
 
-    auto cat = news_->score_for(ms.symbol);
-    auto signals = gather_factors(ms, cat, council_allowed, &sig);
+    auto signals = gather_factors(ms, council_allowed, &sig);
     // native_conviction_feeds_gate gates the mild double-count. Default true
     // keeps the native rule_based conviction feeding the gate confidence/edge.
     // When false, the gate confidence/edge come from advisory factors alone and
@@ -2516,8 +2515,7 @@ int Engine::run_iteration() {
         // Skip equities while the US session is closed (crypto stays 24/7).
         if (!equity_open && ms.category == "equity") continue;
 
-        auto cat = news_->score_for(ms.symbol);
-        auto signals = gather_factors(ms, cat);
+            auto signals = gather_factors(ms);
         auto verdict = signal_engine::combine(signals, weights_);
 
         // --- Sizing (fixed-fractional, capped) ---

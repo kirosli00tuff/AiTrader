@@ -29,7 +29,6 @@
 #include "learning/adaptive.hpp"
 #include "market_data/market_data.hpp"
 #include "market_data/synthetic_feed.hpp"
-#include "news_ingestion/news_ingestion.hpp"
 #include "core/sleeves.hpp"
 #include "risk/risk_gate.hpp"
 #include "signal_engine/council_gate.hpp"
@@ -161,7 +160,7 @@ public:
 
 private:
     std::vector<signal_engine::FactorSignal> gather_factors(
-        const market_data::MarketState& ms, const news::CatalystScore& cat,
+        const market_data::MarketState& ms,
         bool council_allowed = true,
         const strategy::StrategySignal* native = nullptr);
     // ONE council round per evaluation (2026-07-20). The bridge composes the
@@ -170,10 +169,10 @@ private:
     // method's body, pinned by tests/test_council_single_run.py.
     struct CouncilScore { double bias; double confidence; double edge; };
     std::optional<CouncilScore> fetch_council_verdict(
-        const market_data::MarketState& ms, const news::CatalystScore& cat);
+        const market_data::MarketState& ms);
     signal_engine::FactorSignal mock_factor(const std::string& name,
-                                            const market_data::MarketState& ms,
-                                            const news::CatalystScore& cat);
+                                            const market_data::MarketState& ms);
+
     void maybe_adapt(int iteration);
     void snapshot_balances();
     double simulate_outcome(const signal_engine::CombinedVerdict& v,
@@ -382,7 +381,6 @@ private:
     EngineOptions opts_;
     std::unique_ptr<storage::Storage> storage_;
     std::unique_ptr<market_data::Feed> feed_;
-    std::unique_ptr<news::MockCatalystProvider> news_;
     std::unique_ptr<risk::RiskGate> gate_;
     std::unique_ptr<account::AccountManager> accounts_;
     signal_engine::WeightState weights_;

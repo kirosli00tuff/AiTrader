@@ -137,6 +137,46 @@ class HaikuGate:
     timeout: float = http_json.DEFAULT_TIMEOUT
 
     def should_review(self, state: dict) -> GateDecision:
+        """THE FAIL DIRECTION, DECIDED DELIBERATELY (2026-07-27).
+
+        This gate exists for one purpose: keep a low-signal setup out of the
+        paid three-provider council. So the question on a failure is not "is
+        this setup good", it is "what does a gate that CANNOT RUN protect". The
+        answer differs by whether money sits behind it, and this method now
+        splits on exactly that rather than treating every failure alike.
+
+        NO KEY MEANS OFFLINE, AND IT KEEPS FAILING OPEN. The demo path has no
+        gate credential BY DESIGN and the council behind it is free
+        deterministic mocks. Refusing there would screen nothing, protect
+        nothing, and change offline behaviour for no gain, which is why a
+        blanket fail-closed was rejected when this was first analysed. Same
+        shape as the tradeable invariant exempting the offline feed modes: a
+        rule about real spending does not apply where there is none.
+
+        A LIVE FAILURE NOW FAILS CLOSED, and that is the change. A key is
+        present, so real providers with real cost sit behind this gate. A gate
+        that errored screened nothing, and proceeding sends every candidate to
+        the full three-provider council UNSCREENED, the most expensive possible
+        response to a cost control breaking. Worse: the same ANTHROPIC_API_KEY
+        powers this gate and one council provider, so the conditions that break
+        the gate (auth, quota, transport) are the conditions that make the
+        spend it releases most wasteful.
+
+        THE COST OF THE NEW DIRECTION IS REAL AND ACCEPTED, not hidden. A
+        transient hiccup now suppresses a council round on a setup that may have
+        been genuine. That is survivable because a refused round is not a
+        refused trade: composition falls back to the fast tier, which is free,
+        already exercised, and the same path a low-signal skip takes.
+        Suppressing one paid opinion is recoverable; spending the budget
+        unscreened through an outage is not.
+
+        The recorded pattern points the same way for anything that can spend: an
+        unreadable control file means NO OVERRIDE and config decides, and config
+        ships every spender off, because a broken input must never start a
+        spender. The counter-pattern (an unprovable serviceability check must
+        not refuse a symbol) is about not silently shrinking a universe on
+        absent evidence, which is a different question from releasing money.
+        """
         key = _resolve_key(GATE_ENV_VAR)
         if not key:
             return GateDecision(
@@ -149,15 +189,19 @@ class HaikuGate:
             resp = http_json.post_json(url, headers, payload, timeout=self.timeout)
             text = anthropic_text(resp)
         except Exception as e:
-            log.warning("base-check gate (%s) call failed: %s", self.model_id, e)
-            return GateDecision(True, f"gate error, proceeding: {e}",
-                                self.model_id, "error")
+            log.error("base-check gate (%s) call FAILED, refusing the paid "
+                      "council for this candidate: %s", self.model_id, e)
+            return GateDecision(
+                False, f"gate unavailable, refusing the paid council: {e}"[:200],
+                self.model_id, "error_failed_closed")
         obj = http_json.extract_json_object(text)
         if obj is None:
-            log.warning("base-check gate (%s) returned unparseable output",
-                        self.model_id)
-            return GateDecision(True, "gate output unparseable, proceeding",
-                                self.model_id, "error")
+            log.error("base-check gate (%s) returned unparseable output, "
+                      "refusing the paid council for this candidate",
+                      self.model_id)
+            return GateDecision(
+                False, "gate output unparseable, refusing the paid council",
+                self.model_id, "error_failed_closed")
         proceed = bool(obj.get("proceed", obj.get("review", True)))
         reason = str(obj.get("reason", ""))[:200] or (
             "worth a full review" if proceed else "skip: low-signal setup")

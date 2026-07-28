@@ -11,6 +11,110 @@ Model:
 Prompt summary: one line.
 Changes: what changed.
 
+## Prompt: Repo cleanup before a new subsystem, with identify-before-moving on OLD/
+
+Date: 2026-07-27
+Model: Opus 5 (claude-opus-5, 1M context).
+Prompt summary: many changes landed today, so the repo is cleaned before a new subsystem is built, so nothing novel sits on dead code and the tree reflects the system that actually runs. Task 1 remove the dead news mock, a hash constant every real service ignores and the audit's clearest removal candidate, reporting every reference removed and anything that still expected it. Task 2 implement the base-check gate's fail direction deliberately, distinguishing the offline demo path (no gate key by design, free mocks) from a live failure, since a blanket fail-closed would change offline behaviour and this system's recorded pattern is failing open in exactly this shape. Task 3 add the C++ zero-weight and participation tests a prior session verified only by replay and inspection. Task 4 resolve the empty `model_registry`: establish whether promotion never ran against this database or the registry is file-based under `ml_factor/models/`, and correct whichever is wrong, the documentation or the code, without promoting anything. Task 5 diagnose `tuner_floor`, make no fix that requires changing a strategy parameter or threshold, and state whether the test or the behaviour is wrong. Task 6 create `OLD/` and move genuinely redundant files preserving relative structure, under a STRICT rule: move a file only after grepping the whole tree for its filename and every symbol it exports and demonstrating no import, include, config key, script invocation, test, or documentation instruction references it. Anything unprovable stays put and goes in an uncertain list with reasoning. No tracking file, database, `.run` content, active config, or test may move. Task 7 rebuild, run both suites, and start the stack far enough to confirm it comes up, moving a file back rather than patching around a failure. Task 8 tests. Task 9 document and commit.
+
+OPERATOR CAUTION CARRIED INTO THE WORK: an automated pass deciding what is redundant is exactly where something load-bearing gets moved, and the audit already found several things that looked like dead weight and were not. Identify and report first, move only what is provably unreferenced, list the uncertain rather than moving it. Git preserves history either way, but a moved file something imports at runtime breaks quietly.
+
+CONSTRAINTS HONORED: live trading stays off. No RiskGate logic, no live-trading gate, no adaptive limit-weakening invariant, no Level 1 risk value, no threshold, no strategy parameter touched.
+
+### FINDINGS
+
+**THE HEADLINE IS AN ACCIDENT OF TASK ORDER. Removing the dead news mock (Task 1) FIXED tuner_floor (Task 5). ctest is 33 of 33, the first fully green C++ suite in the record. pytest 1,108 passed.** The fabricated input was not inert scaffolding, it was suppressing trades, and the fix needed no strategy parameter and no threshold.
+
+### TASK 1, THE DEAD NEWS MOCK
+
+`MockCatalystProvider::score_for` hashed the symbol string into a catalyst score and importance. Every real service already ignored it, in writing: `llm_consensus/providers.py:92` says "The fabricated engine fields (imbalance, catalyst) and the unlabelled tick-window numbers (ret_5, volatility) never render." `discovery/evaluate.py:227` marks its own catalyst emission "legacy, mocks only".
+
+**REMOVED:** `news_ingestion/news_ingestion.hpp`, `news_ingestion/news_ingestion.cpp`, the `mal_news` CMake library and its link edge, `#include "news_ingestion/news_ingestion.hpp"` in `core/engine.hpp`, the `std::unique_ptr<news::MockCatalystProvider> news_` member, its construction, both `news_->score_for(...)` call sites, the `const news::CatalystScore&` parameter on `mock_factor`, `gather_factors` and `fetch_council_verdict`, the `0.4 * cat.score` bias term, the `0.01 * cat.importance` edge term, and the `"catalyst"` field in the `/score/llm` request body. `news_ingestion/` no longer exists.
+
+**WHAT STILL EXPECTED IT, reported rather than hidden:** the offline mock council provider reads `state.get("catalyst", 0.0)` (`llm_consensus/providers.py:159`) and now gets the default. Offline mock verdicts therefore shift. That is the intended consequence and is what fixed `tuner_floor`. No test existed for the mock itself, so none was deleted.
+
+### TASK 2, THE GATE'S FAIL DIRECTION
+
+**Implemented as a split on whether money sits behind the gate, not on the kind of error.**
+
+- **No key means OFFLINE and still fails OPEN.** The demo path has no gate credential by design and the council behind it is free deterministic mocks. Refusing screens nothing and protects nothing. Same shape as the tradeable invariant exempting offline feed modes: a rule about real spending does not apply where there is none. Unchanged, source `mock`.
+- **A LIVE failure now fails CLOSED**, source `error_failed_closed`, logged at ERROR. A key is present, so real paid providers sit behind the gate. A gate that errored screened nothing, and proceeding sends every candidate to the full three-provider council UNSCREENED, the most expensive possible response to a cost control breaking. The same ANTHROPIC_API_KEY powers the gate and one council provider, so the conditions that break the gate are the conditions that make the spend most wasteful.
+
+**THE COST IS ACCEPTED AND STATED.** A transient hiccup now suppresses a council round on a possibly genuine setup. Survivable: a refused round is not a refused trade, composition falls back to the fast tier, which is free and is the same path a low-signal skip takes. Suppressing one paid opinion is recoverable; spending the budget unscreened through an outage is not. The recorded pattern agrees for anything that can spend (an unreadable control file means no override, and config ships every spender off). The counter-pattern (an unprovable serviceability check must not refuse a symbol) is about not shrinking a universe on absent evidence, a different question from releasing money.
+
+### TASK 3, THE C++ ZERO-WEIGHT AND PARTICIPATION TESTS
+
+New ctest `zero_weight_participation`, five cases:
+
+1. A zero-weighted factor leaves the DENOMINATOR: two factors at equal weight compose 0.90 and 0.10 to 0.50, and zeroing the second gives 0.90, not a mean dragged toward 0.10.
+2. Zero weight is exact: a zero-weighted factor at maximum opposite conviction moves bias, confidence and edge by less than 1e-12.
+3. A factor absent from the weight map is excluded by a different code path (the legacy `dnn_rl` shape).
+4. A non-participating council slot leaves the confidence denominator, and does not read as a zero-confidence vote.
+5. **The case that must not be "fixed":** a PARTICIPATING pessimist stays in (0.90 and 0.10 average to 0.50) while a benched slot leaves (0.90 stands). The two look identical in the raw numbers and compose to opposite answers, so the flag separates them, never the confidence value.
+
+### TASK 4, THE MODEL REGISTRY
+
+**The audit's question was a false dichotomy. Both exist, split by role, and production's zero rows are CORRECT.**
+
+- **The registry is DATABASE-backed.** `ml_factor/registry.py:22` INSERTs into the `model_registry` table. There is no file-based registry anywhere in the tree.
+- **Serving is FILE-backed and never consults the registry.** `ml_factor/factor.py::load_champion` reads `ml_factor/models/champion.npz` from disk and self-heals by training a synthetic bootstrap when it is absent.
+- **Promotion never ran against this database.** `train_real.py:154` opens `sqlite3.connect(db_path)` with the path it is GIVEN and then calls `registry.register`. The recorded `challenger_recorded` run went against the demo database, which is exactly why `ml_factor/models/challenger-dnn-real-0.1.0.npz` exists on disk (2026-07-21) with no production row behind it.
+- **The consequence is visible, not silent.** Measured: `bench_state('market_ai_lab.db')` returns `(True, 'benched pending real training: no champion in the registry, serving dnn-0.1.0 (synthetic)')`.
+
+**THE CODE IS RIGHT AND THE DOCUMENTATION WAS WRONG.** Corrected in CLAUDE.md and CONTEXT.md. **Nothing was promoted.**
+
+### TASK 5, THE tuner_floor CAUSE
+
+**The cause is Task 1's fabricated input, and the TEST was right while the BEHAVIOUR was wrong.**
+
+The failing assertion is "synthetic run keeps generating native entries past 100 closed trades (no plateau)", the residual the 2026-07-13 `rule_based_weight_floor` fix was written to clear and which the record had since attributed to "the momentum-biased mock advisory factors disagreeing with mean-reversion entries, a mock-data artifact a real council would not have". That attribution was correct and the source was nameable: the catalyst hash gave each symbol a fixed pseudo-random directional pull that `mock_factor` folded into every advisory slot's bias, so the `required_model_agreement_count` gate blocked entries.
+
+**PROVEN BOTH DIRECTIONS:** removing the mock takes ctest from 31 of 32 to 33 of 33, and re-inserting the single term `0.4 * ((hash(symbol) ^ 7) % 2000 / 1000 - 1)` into the bias fails `tuner_floor` again. Restoring the removal passes.
+
+**No strategy parameter and no threshold was changed, and none was required.**
+
+### TASK 6, THE MOVES, WITH EVIDENCE
+
+Method: whole-tree grep for the exact basename (fixed-string, so a dot cannot act as a wildcard) plus, for Python, `import X`, `from X import` and `-m ...X`, excluding the file itself, `build/`, `.git/`, `node_modules/` and `__pycache__/`.
+
+**MOVED, 4 files, zero references each:**
+
+| file | refs | evidence |
+|---|---|---|
+| `web_desktop.py` | **0** | An earlier pywebview launcher with a hardcoded absolute path. `ops/run_desktop.sh:42` execs `ui/desktop.py` and `ui/MarketAILab.spec:5` packages it, so the live desktop entry is elsewhere. Was untracked, so the move puts it under version control for the first time. |
+| `check.sh` | **0** | Ad-hoc operator diagnostic (`ps`, `sudo ss`, fd counts) with hardcoded `$HOME`. Superseded by `ops/watchdog.py`, `/health/integrations`, and the GUI diagnostics view. Was untracked. |
+| `news_ingestion/fetchers.py` | **0** | The Python half of the mock removed in Task 1. Its docstring pairs it with `news_ingestion.cpp`, and it carried an unfulfilled `TODO: wire real providers`. Its C++ half no longer exists. |
+| `REDESIGN_BRIEF.md` | **0** | A completed one-off brief (`e09c12c`) for the Dash redesign, since superseded by the React GUI rebuild. A finished work order, not a tracking document. |
+
+**UNCERTAIN, LEFT IN PLACE. The operator's caution held: the files that looked most disposable are the ones source comments depend on.**
+
+| file | why it stays |
+|---|---|
+| `scripts/quarantine_synthetic_bars_20260717.py` | **`storage/storage.cpp:135` names it in a comment as the writer of the `synthetic` bar marks.** A SOURCE reference, not prose. Moving it breaks the trail from a production row to the code that wrote it. |
+| `scripts/quarantine_fabricated_volume_20260723.py` | **`core/provenance.hpp:157`: "Written by scripts/quarantine_fabricated_volume_20260723.py, never by a live write path. Listed so the set is closed and the label is not reinvented."** Same reason, and the header depends on it to justify a value in a closed set. |
+| `scripts/reconcile_stranded_positions_20260724.py` | One-off and already run, but it is the recorded explanation for production trade rows 249 to 251 (`origin='reconciliation'`). Moving it orphans the provenance of live data. |
+| `scripts/prune_unserviceable_20260720.py` | One-off and already run, but it imports `market_data.tradeable.REAL_SOURCES` and is the recorded mechanism for the MANA/USD and RUNE/USD prune. Documents its own invocation. |
+| `scripts/backfill_entry_decisions_20260723.py` | Described as idempotent and re-runnable against production. Idempotent means it is designed to be run again. |
+| `scripts/validate_universe_20260726.py` | RETURN.md documents an invocation: `python scripts/validate_universe_20260726.py --expect-hash <production sha256>`. That is a documentation instruction to run it, which the rule excludes. |
+| `scripts/measure_council_latency.py` | CONTEXT.md:303 cites it as the source of the recorded council latency measurement, and its docstring documents the command. |
+| `electron-app/` | Untracked and holding only `node_modules` and `package.json` with no source, so it looks abandoned. But `tests/test_keystore_fd_leak.py:231` names it in a directory-exclusion list, which is a TEST reference. Left in place. |
+| `ml_factor/models/challenger-dnn-real-0.1.0.npz` | Zero references and orphaned (its registry row lived in a demo database), but it is a MODEL ARTIFACT that a future promotion could want and that cannot be regenerated without re-running the trainer. The cost of keeping it is 7 kB. |
+
+### TASK 7, VERIFICATION
+
+Rebuilt clean, no warnings. **ctest 33 of 33. pytest 1,108 passed.** The engine starts and completes a paper loop, writing 480 bars across all 8 symbols (crypto still collected), 300 entry decisions, and events, and prints "universe: 5 tradeable ... SPY, QQQ, AAPL, MSFT, NVDA". Every service module imports clean: `api_server` (app, operator, store, controls, stack), `ops` (watchdog, weeklog, maintenance, backup), `ui` (desktop, db), `discovery.run`, `adaptive.run`, `llm_consensus`, `ml_factor.factor`, `rl_advisory`. **Nothing had to be moved back.**
+
+### TASK 8, TESTS
+
+**ctest 33 of 33 (`tuner_floor` now passes, and the reason is Task 5). pytest 1,108 passed.** One new ctest target, three new Python tests.
+
+**ONE EXISTING TEST INVERTED, NAMED WITH ITS REASON.** `test_haiku_gate_error_is_fail_open` asserted `proceed is True and source == "error"` on a live gate error, which is the direction Task 2 reversed. It is renamed `test_haiku_gate_live_error_fails_CLOSED` and now asserts the refusal, with two cases added beside it: unparseable output also fails closed, and the no-key offline case still fails OPEN, which pins the split rather than the blanket. **No test was deleted**: the news mock had no test of its own, so nothing existed only to cover removed code.
+
+Changes: `news_ingestion/news_ingestion.{hpp,cpp}` (deleted), `news_ingestion/fetchers.py` (moved to OLD), `CMakeLists.txt`, `core/engine.hpp`, `core/engine.cpp`, `llm_consensus/gate.py`, `tests/test_zero_weight_participation.cpp` (new), `tests/CMakeLists.txt`, `tests/test_llm_consensus.py`, `OLD/README.md` (new), `OLD/web_desktop.py`, `OLD/check.sh`, `OLD/REDESIGN_BRIEF.md`, CLAUDE.md, PROGRESS.md, CONTEXT.md, RETURN.md.
+
+**No RiskGate logic, no live-trading gate, no adaptive limit-weakening invariant, no Level 1 risk value, no threshold, no strategy parameter. Nothing promoted. Live trading untouched. No database row read or written except read-only.**
+Commit message: Remove the dead news mock, set the base-check gate fail direction, add the C++ zero-weight tests, resolve the model registry, diagnose tuner_floor, and archive unreferenced files to OLD, live trading untouched
+
 ## Prompt: Remove crypto from all trading paths at the universe layer, retain the data path
 
 Date: 2026-07-27

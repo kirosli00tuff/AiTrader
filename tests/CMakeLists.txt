@@ -268,3 +268,13 @@ add_test(NAME bridge_transport COMMAND test_bridge_transport
 add_executable(test_trading_scope test_trading_scope.cpp)
 add_test(NAME trading_scope COMMAND test_trading_scope
          WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+# Zero weight vs non-participation (2026-07-27): the two exclusion rules that
+# look alike and are opposite. A zero-weighted factor leaves the DENOMINATOR,
+# and a benched council slot leaves it too, while a PARTICIPATING pessimist
+# stays in. Both were previously verified only by replay and inspection.
+add_executable(test_zero_weight_participation test_zero_weight_participation.cpp)
+target_link_libraries(test_zero_weight_participation PRIVATE mal_signal_engine
+                      mal_config)
+add_test(NAME zero_weight_participation COMMAND test_zero_weight_participation
+         WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
