@@ -138,6 +138,28 @@ New flags from the feed-work session (2026-07-05, `369b6a6`):
 
 ## Session Log
 
+### 2026-07-27 (Opus 5) — All 23 Level 1 keys traced: 21 enforced, 2 removed, and the consecutive-loss brake was an absorbing state causing 82.5 percent of every block ever recorded
+
+Level 1 enforcement audit. Live trading off, live-trading gate and adaptive invariant untouched. ctest **34 of 34**, pytest **1,116 passed**, up from 1,110.
+
+**TASK 1, THE FULL TRACE. 23 keys, 21 enforced, 2 unenforced.** Judged by tracing to an enforcement line, not by name or struct membership. `learning/adaptive.cpp` was excluded as an enforcement site because it compares proposals against hard limits, which is the weakening invariant rather than a gate on an order.
+
+| unenforced key | parsed | validated | banner | enforced at | blocks in record |
+|---|---|---|---|---|---|
+| `risk.max_trade_notional_cap_pct` | yes | yes | no | **NONE** | **0** |
+| `sizing.default_position_sizing_method` | yes | no | no | **NONE** | **0** |
+
+**TASK 2 AND 3, BOTH REMOVED, following the 2026-07-18 precedent.** Neither has ever fired, so neither protects anything today, and building either would be a new control needing its own justification rather than a repair. Removed from the yaml, the struct, the parser, the validator, and `example_live_disabled.yaml`. Neither reached the startup banner, checked and now guarded.
+
+**THE COOLDOWN WAS NOT REMOVED, AND THIS IS THE ONE PLACE I CHOSE WIRING OVER THE DEFAULT.** What makes it worth building now is that it is not a new restriction at all. **`backtest_main.cpp:518` already applies `cooldown_minutes_after_loss_breach` as a reset for the consecutive-loss counter, and its comment asserts the live engine does the same. It did not.** So every backtest ever run used a laxer brake than live, a harness-versus-engine divergence that inverts the rule that the harness calls the strategy and never reimplements it. Wiring it in the engine closes that divergence, and it is **permissive by construction**: a release can only admit trades the engine already wanted, never refuse one.
+
+**TASK 4, AND THE REQUESTED FIX WOULD HAVE BEEN THE WRONG ONE.** The brake cleared only on a win, and it refuses the entries that could produce a win, so once tripped **no market outcome could clear it**. The record: **1,578 of 1,912 blocked_trades rows, 82.5 percent of every RiskGate refusal ever recorded**, read `max_consecutive_losses`, by far the largest blocker in the system's history. **Making it per-symbol without a release would have created 400 absorbing states instead of one.** Both keyings guard real and different risks: a GLOBAL brake guards systematic failure, which is what a broken feed or a mispriced model looks like, and a PER-SYMBOL brake guards repeated re-entry into one losing name. The global one is the larger loss and is not given up. **The brake stays global and gains the release it never had.** Duration 240 minutes, not chosen: it is the harness's own value, and any other number reopens the divergence.
+
+- **THE REPLAY COULD NOT EXERCISE IT, SAID PLAINLY.** Same seed, 6,000 iterations, old against new: 29,894 entry decisions and 10 trades in both, **zero brake blocks and zero releases in either**, because the run produces 5 closed losses against a cap of 6, one short of tripping. The replay proves nothing here, and rather than assert safety on that basis, which is the mistake the sizing session was criticised for, a behavioural test tightens the cap to 2 in a temp config so the brake genuinely trips, then asserts it releases.
+- **TASK 5, UNCHANGED AS INSTRUCTED.** `min_confidence_default` stays 0.65. Making it per-strategy needs an identity field on `OrderProposal` (`risk/risk_gate.hpp:30` area), threaded from the engine's order construction (`core/engine.cpp:1344`, where `o.venue`, `o.symbol`, `o.market` are set), and read at `risk_gate.cpp:75`. Recorded so the text sleeve build carries the work rather than rediscovering it.
+- **TASK 6, THE GUARD IS NOW STRUCTURAL.** `tests/test_level1_enforcement.py`, 6 tests, scans `RiskConfig` and `SizingConfig` and fails on any field no enforcement site references, so a **seventh** unenforced key cannot ship quietly. Also pins that removed keys stay removed and never reach the banner.
+- **MUTATION-TESTED THREE WAYS, EACH VERIFIED TO ACTUALLY FAIL.** Re-adding an unenforced key to `RiskConfig` fails 2 tests. Removing the release call fails the ordering test. Gutting the release body so the brake trips and never clears fails the **behavioural** test. All three restore green.
+
 ### 2026-07-27 (Opus 5) — Stopped before applying: the loss cooldown is enforced nowhere, and the confidence floor is global
 
 Session that changed **no Level 1 value**. No source, config, schema or test file touched. Production opened READ-ONLY. Suites unchanged and green from the prior commit: ctest **34 of 34**, pytest **1,110**. Live trading off, live-trading gate and adaptive invariant untouched.

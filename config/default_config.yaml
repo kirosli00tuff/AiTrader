@@ -129,8 +129,6 @@ risk:
   required_model_agreement_count: 2
   stale_signal_reject_minutes: 1            # Level-1 (~60s; tighter than prior 10)
   max_trades_per_day: 10                    # Level-1 ceiling, enforced in the run loop
-  max_trade_notional_cap_pct: 0.05          # Level-1 notional ceiling; the 0.005 per-trade
-                                            # risk cap above stays the binding, tighter limit
   kill_switch_enabled: true
   hard_stop_live_if_loss_breach: true
   manual_resume_required_after_kill_switch: true
@@ -146,7 +144,9 @@ risk:
 # (+/- 0.10, discovery/evaluate.py), and the enforced default_position_scale_cap
 # below, which caps the WHOLE sizing scale on every path.
 sizing:
-  default_position_sizing_method: fixed_fractional
+  # REMOVED 2026-07-27: default_position_sizing_method. A string naming a
+  # method that was parsed and never compared against anything, so it claimed
+  # the method was selectable when only one exists.
   # RAISED 0.005 -> 0.02 (2026-07-27). THE SIZER, distinct from the RiskGate
   # ceiling above and not derived from it. Capacity floor 2,500 USD/year at an
   # honest 10 bp net edge needs 992 to 1,984 USD per position, so 1 to 2

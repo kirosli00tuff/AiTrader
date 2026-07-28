@@ -203,7 +203,6 @@ Config load_config(const std::string& path,
     r.required_model_agreement_count = get_int(root, "risk.required_model_agreement_count", r.required_model_agreement_count);
     r.stale_signal_reject_minutes = get_int(root, "risk.stale_signal_reject_minutes", r.stale_signal_reject_minutes);
     r.max_trades_per_day = get_int(root, "risk.max_trades_per_day", r.max_trades_per_day);
-    r.max_trade_notional_cap_pct = get_double(root, "risk.max_trade_notional_cap_pct", r.max_trade_notional_cap_pct);
     r.kill_switch_enabled = get_bool(root, "risk.kill_switch_enabled", r.kill_switch_enabled);
     r.hard_stop_live_if_loss_breach = get_bool(root, "risk.hard_stop_live_if_loss_breach", r.hard_stop_live_if_loss_breach);
     r.manual_resume_required_after_kill_switch = get_bool(root, "risk.manual_resume_required_after_kill_switch", r.manual_resume_required_after_kill_switch);
@@ -235,7 +234,6 @@ Config load_config(const std::string& path,
 
     // sizing
     auto& s = c.sizing;
-    s.default_position_sizing_method = get_str(root, "sizing.default_position_sizing_method", s.default_position_sizing_method);
     s.default_risk_per_trade_pct = get_double(root, "sizing.default_risk_per_trade_pct", s.default_risk_per_trade_pct);
     s.default_position_scale_cap = get_double(root, "sizing.default_position_scale_cap", s.default_position_scale_cap);
     // dnn_position_scale_cap / whale_position_scale_cap deliberately not
@@ -547,7 +545,6 @@ std::vector<std::string> validate_config(const Config& cfg) {
     pct("risk.max_exposure_per_category_pct", r.max_exposure_per_category_pct);
     pct("risk.min_confidence_default", r.min_confidence_default);
     pct("risk.min_edge_default", r.min_edge_default);
-    pct("risk.max_trade_notional_cap_pct", r.max_trade_notional_cap_pct);
 
     if (r.max_trades_per_day < 0)
         problems.push_back("risk.max_trades_per_day must be >= 0");

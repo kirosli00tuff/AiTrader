@@ -72,7 +72,6 @@ risk:
 # dnn_position_scale_cap / whale_position_scale_cap removed 2026-07-18:
 # parsed but never enforced. The signal weights are the real control.
 sizing:
-  default_position_sizing_method: fixed_fractional
   default_risk_per_trade_pct: 0.005
   default_position_scale_cap: 1.0
 

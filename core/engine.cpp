@@ -481,6 +481,48 @@ std::vector<signal_engine::FactorSignal> Engine::gather_factors(
     return out;
 }
 
+// THE CONSECUTIVE-LOSS BRAKE'S RESET (2026-07-27).
+//
+// The brake had no reset in the live engine. `consecutive_losses` cleared only
+// on a win, and the brake refuses the entries that could produce a win, so
+// once tripped it was an ABSORBING STATE that no market outcome could clear.
+// The record is unambiguous: 1,578 of 1,912 blocked_trades rows, 82.5 percent
+// of every RiskGate refusal ever recorded, read max_consecutive_losses.
+//
+// This is a RELEASE, not a restriction. It can only ever admit trades the
+// engine already wanted to take, never refuse one, so it cannot weaken any
+// limit and the adaptive limit-weakening invariant is untouched.
+//
+// The duration is NOT chosen. core/backtest_main.cpp:518 already applies
+// cooldown_minutes_after_loss_breach as this exact reset, and its comment
+// asserts the live engine does the same. It did not, so every backtest ran
+// under a laxer brake than live. Matching the harness value closes that
+// divergence, and any other number would re-open it.
+void Engine::note_loss_brake(long now_epoch) {
+    if (pstate_.consecutive_losses >= cfg_.risk.max_consecutive_losses) {
+        if (loss_brake_until_epoch_ == 0)
+            loss_brake_until_epoch_ =
+                now_epoch +
+                static_cast<long>(cfg_.risk.cooldown_minutes_after_loss_breach) * 60L;
+    } else {
+        loss_brake_until_epoch_ = 0;   // a win cleared it the old way
+    }
+}
+
+void Engine::release_loss_brake_if_due(long now_epoch) {
+    if (loss_brake_until_epoch_ > 0 && now_epoch >= loss_brake_until_epoch_) {
+        pstate_.consecutive_losses = 0;
+        loss_brake_until_epoch_ = 0;
+        storage_->append_event(
+            {util::now_iso8601(), "loss_brake_released", "", "", "info",
+             "Consecutive-loss brake released after " +
+                 std::to_string(cfg_.risk.cooldown_minutes_after_loss_breach) +
+                 " minutes. Before 2026-07-27 the brake had no reset and was an "
+                 "absorbing state.",
+             "{}"});
+    }
+}
+
 double Engine::symbol_adv_usd(const std::string& key) const {
     const auto it = bar_history_.find(key);
     if (it == bar_history_.end()) return 0.0;
@@ -1118,6 +1160,7 @@ void Engine::handle_bar_close(const market_data::MarketState& ms,
         pstate_.realized_pnl_today_total += pnl;
         pstate_.realized_pnl_today_per_venue[ms.venue] += pnl;
         pstate_.consecutive_losses = win ? 0 : pstate_.consecutive_losses + 1;
+        note_loss_brake(now_epoch);
         accounts_->record_trade_outcome(ms.venue, win);
 
         storage::TradeRow tr;
@@ -1168,6 +1211,11 @@ void Engine::handle_bar_close(const market_data::MarketState& ms,
         open_positions_.erase(it);
         return;
     }
+
+    // Release the loss brake if its cooldown has elapsed, BEFORE any entry is
+    // judged, so a released brake takes effect on this bar rather than one
+    // late. A release can only admit, never refuse.
+    release_loss_brake_if_due(now_epoch);
 
     // ---------- ENTRY path: consider a new native strategy entry ----------
     // TRADING SCOPE (2026-07-27). US equities only. This sits FIRST in the
@@ -2606,6 +2654,7 @@ int Engine::run_iteration() {
             std::min(pstate_.open_positions_total + 1,
                      cfg_.risk.max_open_positions_total);
         pstate_.consecutive_losses = win ? 0 : pstate_.consecutive_losses + 1;
+        note_loss_brake(now_epoch);
         accounts_->record_trade_outcome(o.venue, win);
 
         storage::TradeRow tr;

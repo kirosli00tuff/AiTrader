@@ -100,19 +100,15 @@ struct RiskConfig {
     double min_edge_default = 0.02;
     int required_model_agreement_count = 2;
     int stale_signal_reject_minutes = 1;
-    // Level-1 ceilings enforced OUTSIDE the deterministic gate (engine/sizing):
-    //   max_trades_per_day    — per-day trade counter in the run loop.
-    //   max_trade_notional_cap_pct — UNENFORCED (verified 2026-07-27). It appears
-    //     in config parsing, range validation, this struct and the yaml, and in
-    //     NO consumer anywhere. It claims a safety property the code does not
-    //     provide, the same defect that removed whale_position_scale_cap and
-    //     dnn_position_scale_cap on 2026-07-18. Planning relied on it as a real
-    //     5,000 USD ceiling and was wrong to. The binding per-trade cap is
-    //     max_trade_risk_pct_of_equity, enforced at risk_gate.cpp:43. FLAGGED
-    //     FOR REMOVAL, kept this session only because removing it is a separate
-    //     change from re-deriving the values.
+    // Level-1 ceiling enforced OUTSIDE the deterministic gate:
+    //   max_trades_per_day - per-day trade counter in the run loop.
+    // REMOVED 2026-07-27: max_trade_notional_cap_pct. Parsed,
+    // range-validated, and enforced NOWHERE, so it claimed a 5,000 USD
+    // ceiling the code did not provide and planning relied on it.
+    // Same removal as whale_position_scale_cap and
+    // dnn_position_scale_cap on 2026-07-18. The binding per-trade cap
+    // is max_trade_risk_pct_of_equity, at risk_gate.cpp:43.
     int max_trades_per_day = 10;
-    double max_trade_notional_cap_pct = 0.05;
     bool kill_switch_enabled = true;
     bool hard_stop_live_if_loss_breach = true;
     bool manual_resume_required_after_kill_switch = true;
@@ -126,7 +122,6 @@ struct RiskConfig {
 // (+/- 0.10, discovery/evaluate.py), and default_position_scale_cap here,
 // which IS enforced on every sizing path (core/engine.cpp).
 struct SizingConfig {
-    std::string default_position_sizing_method = "fixed_fractional";
     double default_risk_per_trade_pct = 0.02;
     double default_position_scale_cap = 1.0;
 };

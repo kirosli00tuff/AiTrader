@@ -390,6 +390,22 @@ private:
 
     // Aggregate portfolio/risk state, updated as trades happen.
     risk::PortfolioState pstate_;
+    // THE CONSECUTIVE-LOSS BRAKE'S RESET (2026-07-27). Epoch at which the
+    // brake releases, 0 when not tripped. The brake had NO reset in the live
+    // engine: consecutive_losses cleared only on a win, and the brake blocks
+    // the entries that could produce one, so it was an ABSORBING STATE. The
+    // record shows the consequence: 1,578 of 1,912 blocked_trades rows, 82.5
+    // percent, read max_consecutive_losses. backtest_main.cpp:111 already
+    // implements this reset and its comment asserts the live engine does too.
+    // It did not. This closes that divergence.
+    long loss_brake_until_epoch_ = 0;
+    // Trip the release timer when a loss takes the counter to the cap. Called
+    // wherever consecutive_losses is updated, so the two cannot drift apart.
+    void note_loss_brake(long now_epoch);
+    // Release the brake once the cooldown has elapsed. Called once per bar
+    // BEFORE any entry is judged, so a released brake takes effect on the same
+    // bar rather than one late.
+    void release_loss_brake_if_due(long now_epoch);
     double equity_;
     double peak_equity_;
     uint64_t rng_;

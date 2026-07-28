@@ -11,6 +11,118 @@ Model:
 Prompt summary: one line.
 Changes: what changed.
 
+## Prompt: Audit every Level 1 key for enforcement, remove or wire the unenforced ones
+
+Date: 2026-07-27
+Model: Opus 5 (claude-opus-5, 1M context).
+Prompt summary: four Level 1 keys have been found today that are parsed, range-validated, printed at the startup banner, and enforced nowhere (`max_trade_notional_cap_pct`, `cooldown_minutes_after_loss_breach` and its `in_cooldown` field, and `AccountManager::VenueState.cooldown_until_ts`). Two more, `whale_position_scale_cap` and `dnn_position_scale_cap`, were removed 2026-07-18 for the same defect. The startup banner has been claiming safety properties the code does not provide. Task 1 establish by TRACING, for every Level 1 risk key and every sizing key, where it is parsed, where it is validated, whether it reaches the banner, the exact enforcement line or the fact that none exists, and how many times it has blocked something in the record, judging by the code rather than by the name and counting enforced against unenforced. Task 2 give every unenforced key a DECISION rather than a default: remove it following the 2026-07-18 precedent, or wire it, which builds a new restriction in the blocking direction whose effect no replay can measure. **Default to removal**, since a key that has never fired protects nothing today and building it is a new control needing its own justification rather than a repair. Whatever is removed must also leave the startup banner, the GUI and the documentation. Task 3 resolve the cooldown under that rule, and if removed say what replaces it and whether the operator's intent is served by the 24-hour de-duplication window pre-registered in EXPERIMENT.md or is currently unserved. Task 4 decide whether the consecutive-loss brake should become per-symbol, weighing a global brake's protection against systematic failure against a per-symbol brake's protection against re-entering one losing name, stating which risk each guards, whether both are needed, and what replaces the systematic protection if per-symbol is proposed, deriving the value rather than choosing it and proving by replay. Task 5 leave `min_confidence_default` alone and record exactly what making it per-strategy would require. Task 6 tests including a guard that fails if a Level 1 key is referenced by no enforcement site, plus mutation tests verified to actually fail. Task 7 document and commit.
+
+CONSTRAINTS HONORED: live trading stays off. The live-trading gate and the adaptive limit-weakening invariant are untouched.
+
+### FINDINGS
+
+**23 Level 1 and sizing keys traced. 21 enforced, 2 unenforced and removed. The largest finding is not a key at all: the consecutive-loss brake had no release, making it an absorbing state responsible for 82.5 percent of every RiskGate block ever recorded.** ctest 34 of 34, pytest 1,116 (up from 1,110).
+
+### TASK 1 — THE FULL TRACE
+
+Judged by tracing to an enforcement line, never by name or struct membership. `learning/adaptive.cpp` is excluded as an enforcement site: it compares proposals against hard limits, which is the weakening invariant, not a gate on an order.
+
+| key | parsed | validated | banner | enforced at | blocks in record |
+|---|---|---|---|---|---|
+| `max_daily_loss_total_pct` | y | y | **y** | `risk_gate.cpp:34` (+4) | 0 |
+| `max_daily_loss_per_venue_pct` | y | y | - | `risk_gate.cpp:39` (+1) | 0 |
+| `max_trade_risk_pct_of_equity` | y | y | **y** | `risk_gate.cpp:43` (+1) | 0 |
+| `max_total_open_risk_pct` | y | y | - | `risk_gate.cpp:47` (+1) | 0 |
+| `max_open_positions_total` | y | - | **y** | `risk_gate.cpp:51` (+2) | 0 |
+| `max_open_positions_per_venue` | y | - | - | `risk_gate.cpp:54` (+1) | 0 |
+| `max_exposure_per_symbol_pct` | y | y | - | `risk_gate.cpp:59` (+1) | 0 |
+| `max_exposure_per_market_pct` | y | y | - | `risk_gate.cpp:63` (+1) | 0 |
+| `max_exposure_per_category_pct` | y | y | - | `risk_gate.cpp:67` (+1) | 0 |
+| `max_consecutive_losses` | y | - | - | `risk_gate.cpp:71` (+2) | **1,578** |
+| `cooldown_minutes_after_loss_breach` | y | - | **y** | `backtest_main.cpp:518` **harness only** | 0 |
+| `min_confidence_default` | y | y | - | `risk_gate.cpp:75` (+4) | **334** |
+| `min_edge_default` | y | y | - | `risk_gate.cpp:77` (+4) | 0 |
+| `required_model_agreement_count` | y | - | - | `risk_gate.cpp:79` (+5) | 0 |
+| `stale_signal_reject_minutes` | y | - | - | `risk_gate.cpp:81` | 0 |
+| `max_trades_per_day` | y | - | **y** | `engine.cpp:1230` | 0 |
+| `kill_switch_enabled` | y | - | - | `engine.cpp:99` | 0 |
+| `hard_stop_live_if_loss_breach` | y | - | - | `risk_gate.cpp:85` | 0 |
+| `manual_resume_required_after_kill_switch` | y | - | - | `risk_gate.cpp:26` (+1) | 0 |
+| `default_risk_per_trade_pct` | y | - | - | `engine.cpp:1336` (+2) | n/a sizer |
+| `default_position_scale_cap` | y | - | - | `engine.cpp:1338` (+2) | n/a sizer |
+| **`max_trade_notional_cap_pct`** | y | y | - | **NONE** | **0** |
+| **`default_position_sizing_method`** | y | - | - | **NONE** | **0** |
+
+**ENFORCED 21. UNENFORCED 2.** Only two RiskGate reasons appear in the entire 1,912-row `blocked_trades` record: `max_consecutive_losses` 1,578 and `confidence below min_confidence_default` 334. **Every other enforced limit has blocked nothing, ever**, which is a separate observation worth keeping: enforced is not the same as exercised.
+
+**A NUANCE THE AUTOMATED SCAN GETS WRONG AND I CORRECT BY HAND.** `cooldown_minutes_after_loss_breach` shows an enforcement site, but it is `backtest_main.cpp:518`, **the harness only**. The live engine had no cooldown: `in_cooldown` is declared at `risk_gate.hpp:51`, read at `risk_gate.cpp:28`, and assigned by nothing. So the harness enforced a control the live engine did not.
+
+### TASK 2 AND 3 — DECISIONS
+
+**`max_trade_notional_cap_pct` → REMOVED.** Never fired, enforced nowhere, and it claimed a 5,000 USD ceiling that planning relied on and that did not exist. Removed from the yaml, the struct, the parser, and the validator. Follows the 2026-07-18 precedent exactly.
+
+**`default_position_sizing_method` → REMOVED.** A string parsed and never compared, claiming the sizing method is selectable when only one exists. A capability claim rather than a safety claim, removed under the same rule. Also removed from `example_live_disabled.yaml`.
+
+Neither reached the startup banner. That is now guarded rather than assumed.
+
+**`cooldown_minutes_after_loss_breach` → WIRED, and this is the one place I chose against the default-to-removal rule.** What makes it worth building now is that **it is not a new restriction**. The harness already applies it as a reset for the consecutive-loss counter, and `backtest_main.cpp:111-116` states in its own comment that the live engine does the same. It did not. **So every backtest ever run used a laxer brake than live**, a harness-versus-engine divergence that inverts the recorded rule that the harness calls the strategy and never reimplements it. Wiring it in the engine closes the divergence rather than adding a control, and it is **permissive by construction**: a release can only admit trades the engine already wanted, never refuse one, so it cannot weaken a limit and the adaptive invariant is untouched.
+
+**The operator's original intent, and whether it is served.** The intent was preventing repeated entry into the same name as a developing story generates successive headlines about one event. **It is served, but only in a document, not in code.** EXPERIMENT.md pre-registers a 24-hour `story_group_id` de-duplication window that collapses near-identical headlines for one ticker into a single observation. That is the analysis layer. **There is no execution-layer equivalent today, and there should not be one until the sleeve it protects exists**, because a per-symbol re-entry cooldown with no consumer is the unenforced-key defect this session removed twice.
+
+### TASK 4 — THE BRAKE, AND THE REQUESTED FIX WOULD HAVE BEEN THE WRONG ONE
+
+**The brake cleared only on a win, and it refuses the entries that could produce a win. Once tripped, no market outcome could clear it.** The record: **1,578 of 1,912 blocked_trades rows, 82.5 percent of every RiskGate refusal in the system's history.**
+
+**Making it per-symbol without a release would have created 400 absorbing states instead of one.**
+
+Which risk each guards, and both are real:
+
+| keying | guards | fails to guard |
+|---|---|---|
+| **global** | systematic failure: a broken feed, a mispriced model, a regime the strategy cannot read. Everything fails at once and everything must stop. | one name losing repeatedly while the rest are fine |
+| per-symbol | repeated re-entry into one losing name | a systematic failure, which it would let run across 400 symbols |
+
+**The global one guards the larger loss, so it is not given up. The brake stays GLOBAL and gains the release it never had.** Per-symbol keying remains a reasonable future addition ALONGSIDE the global brake, never instead of it, and it is not built here because nothing consumes it yet.
+
+**Duration derived, not chosen: 240 minutes**, the harness's own `cooldown_minutes_after_loss_breach`. The requirement is that the engine and harness agree, so any other value reopens the divergence this closes.
+
+**THE REPLAY COULD NOT EXERCISE IT, AND I SAY SO RATHER THAN ASSERT SAFETY.** Same seed, 6,000 iterations, old against new:
+
+| | OLD (no release) | NEW (release) |
+|---|---|---|
+| entry decisions | 29,894 | 29,894 |
+| entered | 5 | 5 |
+| trades / closed | 10 / 5 | 10 / 5 |
+| brake blocks | **0** | **0** |
+| `loss_brake_released` events | 0 | **0** |
+
+Zero either way, because the run produces 5 closed losses against a cap of 6, **one short of tripping**. The replay proves nothing here. This is exactly the case the prompt anticipated and the mistake the sizing session was criticised for, so instead a behavioural test tightens the cap to 2 in a temp config so the brake genuinely trips, and asserts it releases. That test fails when the release is gutted.
+
+### TASK 5 — THE CONFIDENCE FLOOR, UNCHANGED
+
+`min_confidence_default` stays 0.65. **What making it per-strategy requires**, recorded so the text sleeve build carries the work:
+
+1. **An identity field on `OrderProposal`** (`risk/risk_gate.hpp`, beside `confidence` at line 30). A strategy or sleeve tag, not a boolean bypass, so the gate resolves a policy rather than being told to skip.
+2. **Threaded at order construction**, `core/engine.cpp:1344`, where `o.venue`, `o.symbol`, `o.market` and `o.category` are already set. Every other order-producing path needs the same field or it defaults to the strict policy.
+3. **Read at `risk_gate.cpp:75`**, selecting the floor by tag with the current global value as the default, so every existing strategy is byte-identical.
+
+### TASK 6 — TESTS
+
+**ctest 34 of 34. pytest 1,116 passed, up from 1,110.** New `tests/test_level1_enforcement.py`, 6 tests: the enforcement guard over both structs, removed keys stay removed, no removed key reaches the banner, the release path exists and runs before the entry marker, engine and harness use the same key, and the behavioural release test.
+
+**MUTATION-TESTED THREE WAYS, EACH VERIFIED TO ACTUALLY FAIL:**
+
+| mutation | result |
+|---|---|
+| re-add an unenforced key to `RiskConfig` | **FAILS 2 tests** |
+| remove the release call from the entry path | **FAILS** the ordering test |
+| gut the release body so the brake trips and never clears | **FAILS the behavioural test** |
+
+All three restore green.
+
+Changes: `config/default_config.yaml`, `config/config.hpp`, `config/config.cpp`, `config/example_live_disabled.yaml`, `core/engine.hpp`, `core/engine.cpp`, `tests/test_level1_enforcement.py` (new), CLAUDE.md, CONTEXT.md, PROGRESS.md, RETURN.md. **Live trading off. Live-trading gate and adaptive limit-weakening invariant untouched. Production opened read-only.**
+Commit message: Audit every Level 1 key for enforcement, remove or wire the unenforced ones, resolve the consecutive-loss brake keying, and guard against silently unenforced keys, live trading untouched
+
 ## Prompt: Make the loss cooldown per-symbol and record model confidence without gating on it
 
 Date: 2026-07-27
