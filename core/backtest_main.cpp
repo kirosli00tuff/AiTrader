@@ -93,6 +93,10 @@ struct OpenPos {
     strategy::OpenPosition pos;
     std::string entry_ts;
     double entry_fee = 0.0;
+    // Per-side cost FRACTION this symbol was priced at (2026-07-27). Stored on
+    // the position because the equity figure is now per-symbol, so the exit
+    // must reuse the entry's number rather than recompute a different one.
+    double entry_side_fee = 0.0;
     double atr_z_at_entry = 0.0;
     double signal_close = 0.0;  // the signal bar close (fill-gap reporting)
     std::string regime;         // regime at the signal bar (research emission)
@@ -172,12 +176,12 @@ int main(int argc, char** argv) {
         if (!v2.empty()) cfg.strategy.atr_band_std = std::stod(v2);
     }
 
-    // Per-side fee fractions, resolved once. The harness prices what live
-    // trading would pay: market orders, taker rate.
+    // Crypto's per-side fraction resolves ONCE: its schedule is a published
+    // percentage of notional with no liquidity axis. Equity no longer can
+    // (2026-07-27), because its cost depends on the symbol's own price and
+    // median dollar volume, so it is resolved per fill below.
     const double fee_side_crypto =
         fees::per_side_fraction(cfg.fees, true, fees::OrderType::Taker);
-    const double fee_side_equity =
-        fees::per_side_fraction(cfg.fees, false, fees::OrderType::Taker);
 
     std::vector<std::string> symbols =
         split_csv(arg_value(argc, argv, "--symbols", ""));
@@ -352,6 +356,23 @@ int main(int argc, char** argv) {
 
     // ---- Backtest mode ----------------------------------------------------
     std::map<std::string, std::vector<strategy::Bar>> hist;
+    // Liquidity for the fee model (2026-07-27), from the rolling window the
+    // harness already keeps. NO LOOKAHEAD: `hist` holds only bars already
+    // seen, so a symbol's cost at bar t uses volume up to t and never after.
+    // The window is 5-minute bars, scaled by 78 bars per US session to reach
+    // the DAILY figure the tier floors are stated in.
+    auto adv_usd = [&hist](const std::string& sym) {
+        const auto it = hist.find(sym);
+        if (it == hist.end()) return 0.0;
+        std::vector<double> closes, vols;
+        closes.reserve(it->second.size());
+        vols.reserve(it->second.size());
+        for (const auto& b : it->second) {
+            closes.push_back(b.close);
+            vols.push_back(b.volume);
+        }
+        return fees::median_dollar_volume(closes, vols) * 78.0;
+    };
     std::map<std::string, std::optional<strategy::StrategySignal>> pending;
     std::map<std::string, double> pending_atr_z;
     std::map<std::string, double> pending_close;
@@ -432,8 +453,18 @@ int main(int argc, char** argv) {
                 op.pos.time_stop_bars = sig.time_stop_bars;
                 op.pos.bars_held = 0;
                 op.entry_ts = r.timestamp;
-                op.entry_fee = notional * (crypto ? fee_side_crypto
-                                          : fee_side_equity);
+                // LIQUIDITY-AWARE EQUITY COST (2026-07-27). A flat per-side
+                // figure calibrated on the top 500 by liquidity understates a
+                // small cap by 5x or more, so the equity side is priced from
+                // THIS symbol's fill price and its own median dollar volume.
+                // Crypto keeps its published percentage schedule, which has no
+                // liquidity axis. The per-side fraction is stored on the
+                // position so the exit prices the round trip the same way.
+                op.entry_side_fee =
+                    crypto ? fee_side_crypto
+                           : fees::equity_per_side_fraction(
+                                 cfg.fees, fill_px, adv_usd(sym), notional);
+                op.entry_fee = notional * op.entry_side_fee;
                 op.atr_z_at_entry = pending_atr_z[sym];
                 op.signal_close = pending_close[sym];
                 op.regime = pending_regime[sym];
@@ -462,9 +493,10 @@ int main(int argc, char** argv) {
             if (reason != strategy::ExitReason::None) {
                 double exit_px =
                     strategy::exit_fill_price(op.pos, reason, bar);
-                const double side_fee = op.pos.category == "crypto"
-                                            ? fee_side_crypto
-                                            : fee_side_equity;
+                // The exit prices at the SAME per-side fraction the entry paid,
+                // so the round trip is one symbol's cost twice rather than two
+                // different symbols' costs added together.
+                const double side_fee = op.entry_side_fee;
                 double fee = exit_px * op.pos.qty * side_fee + op.entry_fee;
                 double pnl = strategy::realized_pnl(op.pos, exit_px) - fee;
                 double ret = op.pos.entry_price > 0

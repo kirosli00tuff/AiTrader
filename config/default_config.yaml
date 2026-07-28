@@ -813,7 +813,50 @@ fees:
   # Source: Alpaca published equity fee disclosure, read 2026-07-26.
   alpaca_equity_commission_bp: 0.0
   alpaca_equity_regulatory_bp_per_side: 0.15
+  # THE FLAT SPREAD ESTIMATE, UNCHANGED AT 0.5, now the fallback used only when
+  # a symbol's liquidity is unknown. It was never measured: the 2026-07-26
+  # session recorded it as an estimate. Measured 2026-07-27 it is about right
+  # for the top 500 by liquidity (floor 0.42 bp per side) and too low by 5x or
+  # more below that. See the liquidity model below.
   alpaca_equity_spread_bp_per_side: 0.5
+  # ---------------------------------------------------------------------
+  # LIQUIDITY-AWARE EQUITY COST (2026-07-27). A single figure calibrated on
+  # large caps does not apply to small ones, so cost now varies with the
+  # symbol's own price and its median daily dollar volume.
+  #
+  # SPREAD IS A FLOOR, NOT AN ESTIMATE, AND THE DISTINCTION IS THE POINT.
+  # One cent is the minimum quoted increment for a US equity above 1.00 USD
+  # (SEC Reg NMS Rule 612), so a one-tick market is the tightest any name can
+  # be and the floor is exactly tick/price. Per side that is half of it.
+  # Real small caps quote SEVERAL ticks wide, and no quote data exists in this
+  # project to measure how many, so the multiple ships at 1.0 and the model
+  # therefore UNDERSTATES small-cap spread by construction. Raise the multiple
+  # when quote data is available. Recorded this way rather than guessed, the
+  # same posture as alpaca_crypto_spread_bp_per_side above.
+  # Source: SEC Reg NMS Rule 612 minimum pricing increment, read 2026-07-27.
+  alpaca_equity_spread_tick_usd: 0.01
+  alpaca_equity_spread_tick_multiple: 1.0
+  # IMPACT IS MEASURED. Amihud (2002) illiquidity, mean(|return| / dollar
+  # volume), computed per symbol over 2025-07-01 to 2026-07-24 on 11,710 US
+  # equities priced at or above 1.00 USD in analysis_bars.db (consolidated SIP,
+  # adjustment=all), then the median within each liquidity band. Expressed as
+  # bp per side per 1,000 USD of notional so the value is a plain decimal and
+  # scales linearly with order size.
+  # Amihud is a DAILY aggregate applied to a single order, which overstates.
+  # That is the conservative direction for a cost. Measured 2026-07-27, method
+  # and distribution in RETURN.md.
+  # Tier floors are the measured median daily dollar volume at each band edge.
+  alpaca_equity_tier1_adv_floor_usd: 277000000
+  alpaca_equity_tier2_adv_floor_usd: 65300000
+  alpaca_equity_tier3_adv_floor_usd: 13300000
+  alpaca_equity_tier4_adv_floor_usd: 2070000
+  alpaca_equity_tier5_adv_floor_usd: 235000
+  alpaca_equity_tier1_impact_bp_per_1k: 0.00024
+  alpaca_equity_tier2_impact_bp_per_1k: 0.00114
+  alpaca_equity_tier3_impact_bp_per_1k: 0.00543
+  alpaca_equity_tier4_impact_bp_per_1k: 0.02847
+  alpaca_equity_tier5_impact_bp_per_1k: 0.17320
+  alpaca_equity_tier6_impact_bp_per_1k: 3.86400
   # IBKR (live-only path): US equities Pro pricing is tiered 0.0035 USD/share
   # (min 0.35 USD) or fixed 0.005 USD/share (min 1 USD). WHICH PLAN THIS
   # ACCOUNT USES COULD NOT BE ESTABLISHED this session. Recorded as not

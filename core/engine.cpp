@@ -480,6 +480,24 @@ std::vector<signal_engine::FactorSignal> Engine::gather_factors(
     return out;
 }
 
+double Engine::symbol_adv_usd(const std::string& key) const {
+    const auto it = bar_history_.find(key);
+    if (it == bar_history_.end()) return 0.0;
+    std::vector<double> closes, vols;
+    closes.reserve(it->second.size());
+    vols.reserve(it->second.size());
+    for (const auto& b : it->second) {
+        closes.push_back(b.close);
+        vols.push_back(b.volume);
+    }
+    // The history is 5-minute bars, so this is a median 5-MINUTE dollar
+    // volume. Scale to a session: 78 five-minute bars in a US regular session.
+    // Stated rather than hidden, because the tier floors are DAILY figures and
+    // comparing a 5-minute median against a daily floor would put every symbol
+    // in the bottom tier.
+    return fees::median_dollar_volume(closes, vols) * 78.0;
+}
+
 double Engine::simulate_outcome(const signal_engine::CombinedVerdict& v,
                                 double notional) {
     // Paper outcome simulation: expected return ~ edge, scaled by confidence,
@@ -1095,7 +1113,8 @@ void Engine::handle_bar_close(const market_data::MarketState& ms,
         auto exit_verdict = signal_engine::combine(ap.entry_signals, weights_);
         tr.combined_conf = exit_verdict.confidence;
         tr.combined_edge = exit_verdict.edge;
-        fees::apply_fee_model(cfg_.fees, tr);
+        fees::apply_fee_model(cfg_.fees, tr,
+                      symbol_adv_usd(tr.venue + "|" + tr.symbol));
         storage_->insert_trade(tr);
         // Mark the position flat (qty 0) in the positions table.
         storage_->upsert_position(ms.venue, ms.symbol, ap.pos.market,
@@ -1467,7 +1486,8 @@ void Engine::handle_bar_close(const market_data::MarketState& ms,
     // real path. Recorded anyway: on offline modes it is synthetic/replay, and
     // the real-fill gates read it.
     tr.bar_source = current_bar_source_;
-    fees::apply_fee_model(cfg_.fees, tr);
+    fees::apply_fee_model(cfg_.fees, tr,
+                      symbol_adv_usd(tr.venue + "|" + tr.symbol));
     const long long entry_trade_id = storage_->insert_trade(tr);
     record_entry_decision(
         "entered", "",
@@ -2140,7 +2160,8 @@ bool Engine::apply_defensive_action(const core::DefensiveAction& a,
     // which was a silent lie about a live fill. Same value the native exit
     // records: what the engine last ingested for this loop.
     tr.bar_source = current_bar_source_;
-    fees::apply_fee_model(cfg_.fees, tr);
+    fees::apply_fee_model(cfg_.fees, tr,
+                      symbol_adv_usd(tr.venue + "|" + tr.symbol));
     storage_->insert_trade(tr);
 
     const double remaining_qty = ap.pos.qty - qty;
@@ -2566,7 +2587,8 @@ int Engine::run_iteration() {
         // that is genuinely unestablished and lands as `unclassified` with a
         // CRITICAL event, which is the honest answer rather than a quiet one.
         tr.bar_source = current_bar_source_;
-        fees::apply_fee_model(cfg_.fees, tr);
+        fees::apply_fee_model(cfg_.fees, tr,
+                      symbol_adv_usd(tr.venue + "|" + tr.symbol));
         storage_->insert_trade(tr);
         storage_->upsert_position(o.venue, o.symbol, o.market, o.category, o.side,
                                   o.qty, o.price, o.notional, ts);
@@ -3002,7 +3024,8 @@ void Engine::maybe_rebalance(const std::string& ts, long now_epoch) {
         // predates the adaptive layer; the discriminator fixes both at once.
         tr.origin = "rebalance";
         tr.bar_source = current_bar_source_;
-        fees::apply_fee_model(cfg_.fees, tr);
+        fees::apply_fee_model(cfg_.fees, tr,
+                      symbol_adv_usd(tr.venue + "|" + tr.symbol));
         storage_->insert_trade(tr);
         storage_->upsert_position(ap.pos.venue, ap.pos.symbol, ap.pos.market,
                                   ap.pos.category, side, 0.0, px, 0.0, ts, ap.sleeve);
@@ -3197,7 +3220,8 @@ void Engine::maybe_run_research_pass(const market_data::MarketState& ms,
     tr.outcome = "open"; tr.combined_conf = conviction; tr.combined_edge = 0.02;
     tr.sleeve = "research_satellite";
     tr.bar_source = current_bar_source_;
-    fees::apply_fee_model(cfg_.fees, tr);
+    fees::apply_fee_model(cfg_.fees, tr,
+                      symbol_adv_usd(tr.venue + "|" + tr.symbol));
     storage_->insert_trade(tr);
     storage_->upsert_position(o.venue, o.symbol, o.market, o.category, "buy", o.qty,
                               o.price, o.notional, ts, "research_satellite");

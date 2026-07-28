@@ -138,6 +138,31 @@ New flags from the feed-work session (2026-07-05, `369b6a6`):
 
 ## Session Log
 
+### 2026-07-27 (Opus 5) — The equity cost hurdle is liquidity-dependent: 1.14 bp in the top 500, 43 bp below rank 8000, and the spread component was never measured
+
+Measurement and model session. Live trading off, no RiskGate logic, no live-trading gate, no adaptive limit-weakening invariant, no Level 1 risk value, no threshold, no strategy parameter touched. The production database was never opened. pytest **1,093 passed**, up from 1,079. ctest **30 of 31**, the failure being the `tuner_floor` flag recorded earlier today.
+
+**THE SPREAD COMPONENT WAS ASSUMED, AND THE CONFIG SAID SO IN WRITING.** `alpaca_equity_spread_bp_per_side: 0.5` carried the note "an estimate, stated as one, not a schedule value". Commission (0.0) and regulatory (0.15/side) are real schedule values. Nothing had ever validated the spread against an instrument, and the only equity fills this project has recorded are SPY, QQQ, AAPL, NVDA and MSFT, so the figure was assumed and the names that could have contradicted it are the names it fits.
+
+**SPREAD CANNOT BE MEASURED FROM ANY DATA HERE, AND THAT IS THE FINDING.** `analysis_bars.db` holds OHLCV and no quotes at either timeframe. **Corwin-Schultz (2012) and Abdi-Ranaldo (2017) were computed and both are REJECTED with the evidence**: CS is non-monotonic in liquidity, returns **0.0 bp in the thinnest band** where spreads are widest, and produced a NEGATIVE estimate on a median 44.2 percent of day-pairs per symbol; AR is flat at 32 to 37 bp across four orders of magnitude of volume, which is a noise floor. Non-trading days collapse the high-low range both depend on, so they fail hardest exactly where the question matters.
+
+**WHAT IS DEFENSIBLE IS A FLOOR.** One cent is the minimum quoted increment above 1.00 USD (Reg NMS Rule 612), so `100/price` bp is the tightest any market can be. Combined with measured Amihud (2002) impact, over 11,710 US equities on consolidated SIP, 2025-07-01 to 2026-07-24:
+
+| band | median ADV USD | 5k order as % ADV | spread floor bp | impact RT bp | **HURDLE FLOOR** | p90 name | vs 1.3 bp |
+|---|---|---|---|---|---|---|---|
+| 1-500 | 539.9M | 0.001% | 0.84 | 0.00 | **1.14** | 3.83 | 0.9x |
+| 501-1500 | 123.4M | 0.004% | 1.48 | 0.01 | **1.79** | 6.20 | 1.4x |
+| 1501-3000 | 28.8M | 0.017% | 2.80 | 0.05 | **3.15** | 10.14 | 2.4x |
+| 3001-5000 | 4.95M | 0.101% | 4.29 | 0.28 | **4.87** | 22.63 | 3.7x |
+| 5001-8000 | 652k | 0.767% | 4.59 | 1.73 | **6.63** | 42.64 | 5.1x |
+| 8001+ | 61k | **8.171%** | 4.28 | 38.64 | **43.21** | 652.72 | 33.2x |
+
+- **THE UNIVERSE CONSTRAINT: test no thinner than rank 5000.** Against a tens-of-basis-points drift effect, ranks 1 to 5000 keep 84 to 96 percent of it. Rank 5001-8000 survives at the median and drowns at p90 (42.64 bp), so membership there would have to be per-symbol. **Below rank 8000 the question is settled: 43.21 bp exceeds the effect outright, and at p90 participation the 5,000 USD order needs 125 percent of a full day's volume, so the position cannot be exited at all.** The honest shape is not "the effect's home is eaten by cost": ranks 1500 to 5000 are genuine small-cap territory (median price 35.71 and 23.34 USD) with real room. **But every figure is a FLOOR. At a three-tick market band 4 goes from 4.87 to 13.45 bp and takes 45 percent of a 30 bp effect, and the tick multiple is the one number no data here can pin.**
+- **THE MODEL NOW VARIES WITH LIQUIDITY, AND NO EXISTING VALUE MOVED.** The flat 0.5 bp per side is unchanged and is now the FALLBACK for a symbol whose liquidity is unknown, so a caller with no bar history costs exactly as before. Added: `alpaca_equity_spread_tick_usd` 0.01 and `alpaca_equity_spread_tick_multiple` **1.0, the floor, with the yaml stating in writing that the model therefore understates small caps by construction**, plus five tier ADV floors and six measured Amihud coefficients. `fees::equity_per_side_fraction` and `backtest.fees.equity_per_side_bp` price per symbol; the harness stores the fraction on the position so the exit charges the entry's number; the engine derives ADV from `bar_history_`. Engine behaviour cannot change: `fee_model_cost` is a recorded diagnostic and paper pnl keeps the venue figure.
+- **THE REPLAY, AND WHAT IT COULD NOT TEST.** Only 8 symbols carry intraday bars and all 5 equities are tier 1, so the recorded results **cannot exercise the small-cap correction at all** — which is the original defect in miniature. Old against new on the same window: 1366 vs 1365 trades, mean per-trade return -2.505 vs -1.773 bp, ending equity 99,957.2 vs 99,969.7. Costs FELL, because 0.5 bp per side sat above the tick floor of a 683 USD share (0.07 bp). **NO CONCLUSION CHANGED.** NVDA's mean crosses zero (-0.13 to +0.51 bp) and is addressed rather than skipped: zero was never the bar (buy-and-hold is, at 17.7 percent per year and Sharpe 1.13) and a mean without an interval is not a finding. The trade count moved by one because equity feeds sizing and the loss cooldown.
+- **TWO EXISTING ASSERTIONS CHANGED, NEITHER QUIETLY.** Both pinned equity cost to the constant 0.65 bp per side, which is the thing removed, so leaving them would have re-asserted the defect. Each now pins crypto exactly and requires the unconditional regulatory component on equity, with the exact arithmetic moved onto the pure function where it can be checked at many prices. Named in RETURN.md with the reason.
+- **NOT MEASURED, AND NOT GUESSED:** the tick multiple (needs quote data behind a paid tier), and the SEC's own small-cap market-quality study, which returned HTTP 403 to the fetch and is therefore cited as unretrieved rather than quoted.
+
 ### 2026-07-27 (Opus 5) — `unclassified` splits the live fill from the historical row, both silent fallbacks removed, and the marker never travels without a CRITICAL event
 
 Application session that applied the change. Live trading off, no RiskGate logic, no live-trading gate, no adaptive limit-weakening invariant, no Level 1 risk value, no threshold, no strategy parameter touched. Production database opened READ-ONLY throughout. pytest **1,079 passed**, up from 1,068. ctest **30 of 31**, with the one failure proven pre-existing.

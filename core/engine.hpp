@@ -397,6 +397,11 @@ private:
     // ("venue|symbol" -> bars, oldest-first) seeded from storage on startup.
     strategy::BarAggregator bar_agg_;
     std::map<std::string, std::vector<strategy::Bar>> bar_history_;
+    // Median daily dollar volume for "venue|symbol" from bar_history_, the
+    // liquidity input the fee model needs to cost a small cap differently from
+    // a mega cap (2026-07-27). Returns 0 when there is no history, which the
+    // fee model reads as unknown and falls back to the flat estimate for.
+    double symbol_adv_usd(const std::string& key) const;
 
     // --- Bar provenance (2026-07-18, after the silent walk-substitution
     // outage; see core/provenance.hpp for the rules) -----------------------

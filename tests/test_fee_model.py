@@ -97,10 +97,26 @@ def test_paper_fill_records_model_and_venue_cost(tmp_path) -> None:
     assert rows, "synthetic run produced no fills"
     for cat, notional, venue_fee, model_cost, order_type in rows:
         assert order_type == "market_taker"
-        side_bp = fees.per_side_bp(
-            "crypto" if cat == "crypto" else "equity", "taker")
-        assert model_cost == pytest.approx(notional * side_bp / 1e4,
-                                           rel=1e-6)
+        if cat == "crypto":
+            # Crypto is a published percentage with no liquidity axis, so the
+            # equality still holds exactly.
+            side_bp = fees.per_side_bp("crypto", "taker")
+            assert model_cost == pytest.approx(notional * side_bp / 1e4,
+                                               rel=1e-6)
+            continue
+        # EQUITY CHANGED 2026-07-27 and this assertion changed with it, stated
+        # rather than quietly relaxed. It used to pin model_cost to the flat
+        # 0.65 bp per side. That figure is no longer a constant: equity cost
+        # now depends on the symbol's own price and median dollar volume, and
+        # this test cannot know the ADV the engine measured from its own bar
+        # history. What the original assertion existed to prove, that the
+        # engine records the MODEL cost and not the venue cost, is kept: the
+        # regulatory component is unconditional, so every equity fill must
+        # carry at least it, and no fill may be free. The exact arithmetic is
+        # pinned on the pure function in tests/test_fee_liquidity.py.
+        reg_bp = fees.load()["alpaca_equity_regulatory_bp_per_side"]
+        assert model_cost >= notional * reg_bp / 1e4 * 0.999
+        assert model_cost > 0.0
     crypto = [r for r in rows if r[0] == "crypto"]
     if crypto:
         # The divergence is the point: paper reports ~1 bp, live pays 25.
@@ -132,10 +148,22 @@ def test_harness_meta_and_trades_carry_class_fees(tmp_path) -> None:
     assert meta["fee_equity_rt_bp"] == "1.3"
     assert meta["fee_order_type"] == "market_taker"
     for line in out.splitlines():
-        if '"t":"trade"' in line:
-            d = json.loads(line)
-            want = 50.0 if d["category"] == "crypto" else 1.3
-            assert d["fee_rt_bp"] == pytest.approx(want)
+        if '"t":"trade"' not in line:
+            continue
+        d = json.loads(line)
+        if d["category"] == "crypto":
+            assert d["fee_rt_bp"] == pytest.approx(50.0)
+            continue
+        # EQUITY CHANGED 2026-07-27, stated rather than quietly relaxed. This
+        # pinned every equity trade at exactly 1.3 bp, which is what the defect
+        # WAS: one figure for a mega cap and a micro cap alike. The harness now
+        # prices each symbol from its own fill price and median dollar volume,
+        # so the per-trade figure is no longer a constant and pinning it to one
+        # would re-assert the bug. The meta line above still carries 1.3 as the
+        # reference flat figure, and the arithmetic is pinned exactly on the
+        # pure function in tests/test_fee_liquidity.py.
+        reg_rt = 2 * fees.load()["alpaca_equity_regulatory_bp_per_side"]
+        assert reg_rt <= d["fee_rt_bp"] < 1000.0
 
 
 # ---- runstate surfaces the hurdle ----------------------------------------

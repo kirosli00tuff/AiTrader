@@ -134,6 +134,22 @@ struct FeesConfig {
     double alpaca_equity_commission_bp = 0.0;
     double alpaca_equity_regulatory_bp_per_side = 0.15;
     double alpaca_equity_spread_bp_per_side = 0.5;
+    // Liquidity-aware equity cost (2026-07-27). Spread is a FLOOR derived from
+    // the Reg NMS one-cent increment and the fill price; impact is measured
+    // Amihud illiquidity by liquidity tier. Sources and method in the yaml.
+    double alpaca_equity_spread_tick_usd = 0.01;
+    double alpaca_equity_spread_tick_multiple = 1.0;
+    double alpaca_equity_tier1_adv_floor_usd = 277000000.0;
+    double alpaca_equity_tier2_adv_floor_usd = 65300000.0;
+    double alpaca_equity_tier3_adv_floor_usd = 13300000.0;
+    double alpaca_equity_tier4_adv_floor_usd = 2070000.0;
+    double alpaca_equity_tier5_adv_floor_usd = 235000.0;
+    double alpaca_equity_tier1_impact_bp_per_1k = 0.00024;
+    double alpaca_equity_tier2_impact_bp_per_1k = 0.00114;
+    double alpaca_equity_tier3_impact_bp_per_1k = 0.00543;
+    double alpaca_equity_tier4_impact_bp_per_1k = 0.02847;
+    double alpaca_equity_tier5_impact_bp_per_1k = 0.17320;
+    double alpaca_equity_tier6_impact_bp_per_1k = 3.86400;
     bool ibkr_established = false;
 };
 

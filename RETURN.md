@@ -11,6 +11,159 @@ Model:
 Prompt summary: one line.
 Changes: what changed.
 
+## Prompt: Calibrate spread and slippage across the liquidity spectrum
+
+Date: 2026-07-27
+Model: Opus 5 (claude-opus-5, 1M context).
+Prompt summary: the fee model was built against a top-500-by-liquidity universe and carries an equity round trip near 1.3 bp. A planned experiment trades small caps deliberately, because the documented news-drift effect concentrates there, and spread plus slippage on a thin name can exceed the commission by a large multiple. Same shape as the crypto error, where a hurdle understated by 25x made every measurement meaningless until corrected. Task 1 report the model's current equity components, their sources, the universe they were calibrated against, and state explicitly whether the spread component was measured or assumed. Task 2 measure realised spread as a function of liquidity rank across at least top 500, 500 to 1500, and whatever smaller band the data supports, reporting the DISTRIBUTION rather than the mean, naming the source, its limitations, and whether quotes are consolidated or single-venue. If spread cannot be measured directly, say so plainly and give the best proxy with its weaknesses rather than a number that looks measured. Task 3 report what a 5,000 USD order (Level 1 caps notional at 5 percent of a 100k account) represents against typical daily volume per band, and where it stops being trivial. Task 4 combine commission, regulatory fees, spread and slippage into a round-trip hurdle per band as a table, and state which bands are viable for a next-day-drift strategy whose effect is measured in tens of basis points. Task 5 report the band where hurdle and effect size still leave room, as a constraint on the universe rule, and if the bands with the strongest effect are also the bands where cost eats it, state that as the finding. Task 6 extend the fee model with a liquidity-aware spread and slippage component, recording the source and date of every input, changing no existing calibrated value without stating what it was and why, and verify by replaying an existing recorded result. Task 7 report.
+
+CONSTRAINTS HONORED: live trading stays off. No RiskGate logic, no live-trading gate, no adaptive limit-weakening invariant, no Level 1 risk value, no threshold, no strategy parameter touched.
+
+### FINDINGS
+
+**THE HEADLINE. The 1.3 bp equity round trip is correct for the universe it was built on and wrong everywhere else. Measured floor by liquidity rank: 1.14 bp in the top 500, 4.87 bp at rank 3001-5000, 43.21 bp below rank 8000, a 33x spread across the spectrum. The bands a small-cap experiment would target are not yet dead, but the margin is thinner than the effect size and the answer below rank 5000 depends on a number this project cannot measure.**
+
+### TASK 1, WHAT THE MODEL ASSUMED
+
+| component | value | source | measured? |
+|---|---|---|---|
+| commission | 0.0 bp/side | Alpaca published equity fee disclosure, read 2026-07-26 | yes, a schedule value |
+| regulatory | 0.15 bp/side | SEC fee + FINRA TAF, sells only, averaged over both sides | yes, a schedule value |
+| spread | 0.5 bp/side | none | **NO. ASSUMED.** |
+| **round trip** | **1.3 bp** | | |
+
+**THE SPREAD COMPONENT WAS NEVER MEASURED, AND THE CONFIG ALREADY SAID SO.** The 2026-07-26 fee session wrote, beside the value, "The spread figure is an estimate, stated as one, not a schedule value." It was not calibrated against any instrument. What it was implicitly validated against is narrower still: every fill this project has ever recorded on the equity side is SPY, QQQ, AAPL, NVDA or MSFT, and the universe rule `U-LIQ-500-stk-w60-m40-p5` admits only the top 500 by median dollar volume. So the figure was assumed, and the only names that could have contradicted it are the names it happens to fit.
+
+### TASK 2, SPREAD ACROSS THE LIQUIDITY SPECTRUM
+
+**SPREAD CANNOT BE MEASURED FROM ANY DATA THIS PROJECT HAS.** `analysis_bars.db` holds OHLCV bars and nothing else. There are no quotes, no NBBO, no bid or ask column, at either timeframe. Alpaca serves historical quotes only on a paid tier this account does not hold. Saying this plainly is the finding, because the alternative is a number that looks measured.
+
+**TWO PUBLISHED PROXIES WERE COMPUTED AND BOTH ARE REJECTED, with the evidence rather than a shrug.** Corwin and Schultz (2012), *A Simple Way to Estimate Bid-Ask Spreads from Daily High and Low Prices*, JF 67(2); and Abdi and Ranaldo (2017), *A Simple Estimation of Bid-Ask Spreads from Daily Close, High, and Low Prices*, RFS 30(12). Per-symbol estimates over 12,282 symbols:
+
+| band | CS median bp | AR median bp |
+|---|---|---|
+| 1-500 | 16.9 | 32.5 |
+| 501-1500 | 23.9 | 36.0 |
+| 1501-3000 | 31.3 | 36.4 |
+| 3001-5000 | 20.8 | 34.1 |
+| 5001-8000 | 12.4 | 32.1 |
+| 8001+ | **0.0** | 36.8 |
+
+**Three things are wrong with that and any one of them is disqualifying.** It is NON-MONOTONIC in liquidity, peaking in the middle. It reports **0.0 bp in the thinnest band**, where spreads are widest. And Abdi-Ranaldo is essentially FLAT at 32 to 37 bp across a spectrum spanning four orders of magnitude of volume, which is a noise floor, not a measurement. The cause is the same for both: a non-trading day has a collapsed or zero high-low range, and both estimators are built on that range. Corwin-Schultz returned a NEGATIVE estimate on a median of **44.2 percent** of day-pairs per symbol (p90 68.5 percent), and zero-flooring a noisy estimator biases the survivor upward. The estimators fail hardest exactly where the question matters. They are recorded here and used for nothing.
+
+**WHAT IS DEFENSIBLE IS A FLOOR, AND IT IS A HARD ONE.** One cent is the minimum quoted increment for a US equity above 1.00 USD (SEC Reg NMS Rule 612), so a one-tick market is the tightest any name can be and the proportional floor is exactly `100/price` bp. A round trip crosses one full spread. This is arithmetic on an observed price, not an estimate.
+
+| band | n | median price | spread floor bp (median) | p75 | p90 | p95 |
+|---|---|---|---|---|---|---|
+| 1-500 | 500 | 118.91 | 0.84 | — | 3.52 | — |
+| 501-1500 | 1000 | 67.61 | 1.48 | — | 5.87 | — |
+| 1501-3000 | 1500 | 35.71 | 2.80 | — | 9.68 | — |
+| 3001-5000 | 2000 | 23.34 | 4.29 | — | 21.14 | — |
+| 5001-8000 | 3000 | 21.77 | 4.59 | — | 29.51 | — |
+| 8001+ | 3710 | 23.38 | 4.28 | — | 37.88 | — |
+
+Across all 11,710 names the floor's decile spread is p10 1.08, p25 2.14, p50 3.98, p75 8.66, p90 23.37 bp. **A median and a bad name are different hurdles**: the p90 name in band 4 faces five times the band's median floor.
+
+**LIMITATIONS, STATED.** The floor is a FLOOR: real small caps quote several ticks wide and this understates them by that unmeasured multiple. Source is `analysis_bars.db`, **consolidated SIP** (`universe_feed: sip`, `adjustment: all`), 2025-07-01 to 2026-07-24, 11,710 US equities priced at or above 1.00 USD with at least 100 sessions. The record's warning applies and is repeated: **historical SIP here is consolidated across every US venue, while the live engine path reads single-venue IEX, and the two are not comparable.** Dividend and split adjustment is applied by the venue relative to the request date, so a price on an ex-date sits on a slightly different scale than its neighbour; this affects the tick floor only through the price level and is immaterial at these magnitudes. The SEC's own study, *A characterization of market quality for small capitalization US equities*, would be the right external anchor; `sec.gov` returned HTTP 403 to the fetch, so no figure from it is quoted here rather than quoting one I did not read.
+
+### TASK 3, ORDER SIZE AGAINST DAILY VOLUME
+
+A 5,000 USD order, Level 1's 5 percent cap on a 100,000 account, as a share of median daily dollar volume:
+
+| band | median ADV USD | participation (median) | participation (p90) | zero-return days |
+|---|---|---|---|---|
+| 1-500 | 539,937,811 | 0.001% | 0.00% | 0.0% |
+| 501-1500 | 123,369,208 | 0.004% | 0.01% | 0.4% |
+| 1501-3000 | 28,795,711 | 0.017% | 0.03% | 0.7% |
+| 3001-5000 | 4,949,483 | 0.101% | 0.20% | 1.5% |
+| 5001-8000 | 652,109 | 0.767% | 1.73% | 2.2% |
+| 8001+ | 61,195 | **8.171%** | **125.05%** | 3.7% |
+
+**WHERE IT STOPS BEING TRIVIAL.** Through rank 5000 the order is at most 0.2 percent of a day's volume even for the p90 name, which is negligible by any impact convention. Band 5 reaches 1.7 percent at p90, material but workable. **Band 6 is where it breaks: the median name absorbs 8 percent of a full day's volume and the p90 name would need 125 percent of one, so a single Level-1 position cannot be filled in a day at all.** The zero-return column says the same thing from the other side: 3.7 percent of sessions in that band have no price change because nothing traded.
+
+### TASK 4, THE HURDLE PER BAND
+
+Impact is Amihud (2002) illiquidity, `mean(|return| / dollar volume)`, measured per symbol over the same window and taken as the band median, then applied to a 5,000 USD order. It is a daily aggregate applied to a single order, which overstates, and that is the conservative direction for a hurdle.
+
+| band | commission | regulatory | spread floor | impact RT | **HURDLE FLOOR** | p90 name | vs the 1.3 bp model |
+|---|---|---|---|---|---|---|---|
+| 1-500 | 0.00 | 0.30 | 0.84 | 0.00 | **1.14** | 3.83 | 0.9x |
+| 501-1500 | 0.00 | 0.30 | 1.48 | 0.01 | **1.79** | 6.20 | 1.4x |
+| 1501-3000 | 0.00 | 0.30 | 2.80 | 0.05 | **3.15** | 10.14 | 2.4x |
+| 3001-5000 | 0.00 | 0.30 | 4.29 | 0.28 | **4.87** | 22.63 | 3.7x |
+| 5001-8000 | 0.00 | 0.30 | 4.59 | 1.73 | **6.63** | 42.64 | 5.1x |
+| 8001+ | 0.00 | 0.30 | 4.28 | 38.64 | **43.21** | 652.72 | 33.2x |
+
+All figures are basis points of notional, round trip. **Every one is a floor.**
+
+**WHICH BANDS ARE VIABLE for a next-day-drift effect measured in tens of basis points**, taking 30 bp as the working figure the prompt implies:
+
+- **Bands 1 to 4 (rank 1 to 5000): viable at the floor.** 1.14 to 4.87 bp against 30 bp leaves 84 to 96 percent of the effect.
+- **Band 5 (rank 5001 to 8000): marginal.** 6.63 bp median is survivable, but the p90 name at 42.64 bp is already underwater before the strategy does anything.
+- **Band 6 (below rank 8000): dead.** 43.21 bp exceeds the effect outright, and it is not close. The p90 figure of 652.72 bp is not a trading cost, it is a statement that the position cannot be exited.
+
+**AND THE FLOOR IS NOT THE EXPECTED COST.** If a band-4 name quotes three ticks wide rather than one, its hurdle goes from 4.87 to 13.45 bp and takes 45 percent of a 30 bp effect. At five ticks it takes 74 percent. The tick multiple is the single unmeasured number that decides bands 3 through 5, and no data available here can pin it.
+
+### TASK 5, WHAT THIS MEANS FOR THE UNIVERSE RULE
+
+**The tradeable window is roughly rank 1500 to 5000 by median dollar volume, and it is narrower than it looks.**
+
+The honest shape of the answer is not the clean one the prompt anticipated. It is not true that the bands with the strongest effect are simply eaten by cost. What is true:
+
+1. **Below rank 8000 the question is settled and the answer is no.** The cost floor alone exceeds a tens-of-basis-points effect, and a Level-1 order cannot be filled in a day for a tenth of that band. No experiment design fixes this.
+2. **Between rank 5000 and 8000 the median name survives at the floor and the p90 name does not.** A universe rule admitting this band admits names whose individual hurdle is six times the band median. Membership would have to be per-symbol, not per-band.
+3. **Between rank 1500 and 5000 there is real room at the floor**, 3.15 to 4.87 bp against 30, and this is genuinely small-cap territory (median price 35.71 and 23.34 USD, median ADV 28.8M and 4.95M). **This is the constraint the universe rule should carry.**
+4. **The conclusion for band 3 to 5 is conditional on a number nobody has measured.** At a three-tick market the room in band 4 halves. Establishing the tick multiple needs quote data, which needs a paid subscription, and until then any result in those bands carries that caveat.
+
+Stated as a constraint rather than a recommendation: **a next-day-drift hypothesis should be tested no thinner than rank 5000, it must report its result against the per-band hurdle rather than a single figure, and any claim below rank 5000 must state the assumed tick multiple explicitly.** The existing top-500 rule is not wrong, it is simply narrower than the effect's natural habitat, and widening it to rank 5000 costs 3.7x the hurdle rather than the 1x the old model implied.
+
+### TASK 6, THE MODEL EXTENSION AND THE REPLAY
+
+**NO EXISTING CALIBRATED VALUE MOVED.** `alpaca_equity_spread_bp_per_side` is still 0.5, commission still 0.0, regulatory still 0.15, and every crypto value is untouched. The flat figure is now the FALLBACK used when a symbol's liquidity is unknown, so a caller with no bar history is costed exactly as it was before today.
+
+Added, each with its source and date in the yaml beside it:
+
+- `alpaca_equity_spread_tick_usd: 0.01` and `alpaca_equity_spread_tick_multiple: 1.0`. Source SEC Reg NMS Rule 612, read 2026-07-27. **The multiple ships at 1.0, which is the floor, and the config says in writing that the model therefore understates small-cap spread by construction.** Raising it is the one knob that makes the model realistic, and it is left at the honest value rather than guessed.
+- Five tier ADV floors and six Amihud impact coefficients, measured 2026-07-27 over the window and population above.
+
+`mal::fees::equity_per_side_fraction(price, adv, notional)` and its Python mirror `backtest.fees.equity_per_side_bp` now price equity per symbol. The harness resolves it per fill and stores the fraction on the position so the exit charges the entry's number. The engine computes ADV from its own `bar_history_` (5-minute bars scaled by 78 per session, stated because the tier floors are daily) and passes it to `apply_fee_model`. **This cannot alter trading behaviour in the engine: `fee_model_cost` is a recorded diagnostic and paper pnl keeps the venue figure, by the 2026-07-26 decision.**
+
+**THE REPLAY, and its most important result is what it could NOT test.**
+
+Only 8 symbols in the deep-history database carry intraday bars, and the 5 equities are SPY, QQQ, AAPL, NVDA and MSFT. **Every one is tier 1.** The recorded results this project has cannot exercise the small-cap correction at all, because no small-cap intraday data exists here. That is a limit on the verification, and it is also the cleanest illustration of the original defect: the model was validated only against names it fit.
+
+Same window (2025-07-01 to 2026-07-24), same symbols, old binary against new:
+
+| symbol | median entry px | OLD fee_rt_bp | NEW fee_rt_bp | OLD mean ret | NEW mean ret |
+|---|---|---|---|---|---|
+| SPY | 682.89 | 1.300 | 0.446 | -2.43 bp | -1.65 bp |
+| QQQ | 614.21 | 1.300 | 0.463 | -1.96 bp | -1.12 bp |
+| MSFT | 465.74 | 1.300 | 0.515 | -2.22 bp | -1.40 bp |
+| AAPL | 260.62 | 1.300 | 0.684 | -6.12 bp | -5.51 bp |
+| NVDA | 183.40 | 1.300 | 0.845 | -0.13 bp | **+0.51 bp** |
+
+| | OLD | NEW |
+|---|---|---|
+| trades | 1366 | 1365 |
+| mean return per trade | -2.505 bp | -1.773 bp |
+| total | -3421.8 bp | -2420.8 bp |
+| ending equity | 99,957.2 | 99,969.7 |
+
+**The new model costs these five names LESS, and the reason is worth recording: the assumed 0.5 bp per side sat ABOVE the measured tick floor for a high-priced share.** A penny on SPY at 683 USD is 0.15 bp, so half of it is 0.07 bp per side, an order of magnitude under the assumption. The old figure was conservative for mega caps and wildly optimistic for everything else, which is the failure mode of any single number.
+
+**DID ANY CONCLUSION CHANGE? No, and one number moved enough that it has to be addressed rather than skipped.** NVDA's mean per-trade return crosses zero, -0.13 to +0.51 bp. That is not a conclusion changing, for two reasons already established in the record. **Zero was never the bar**: the standard is buy-and-hold after costs, and SPY returned 17.7 percent per year at Sharpe 1.13 over the holdout, which +0.51 bp per trade does not approach. And a mean with no interval is not a finding, by this project's own rule. Every price-based family remains dead against its benchmark. The trade count moved by one because equity feeds position sizing and the consecutive-loss cooldown, so a cost change does propagate into the trade set, which is expected and is noted so nobody reads 1366 against 1365 as nondeterminism.
+
+### TESTS
+
+**pytest 1,093 passed, up from 1,079.** 14 new in `tests/test_fee_liquidity.py`. **ctest 30 of 31**, the failure being `tuner_floor`, which fails identically at `3e4a684` and is recorded as a pre-existing flag from the previous session.
+
+**TWO EXISTING ASSERTIONS CHANGED AND NEITHER WAS QUIETLY RELAXED.** Both pinned the equity per-side cost to the constant 0.65 bp, which is precisely the thing this session removed, so leaving them would have re-asserted the defect. `test_engine_records_model_cost_beside_venue_cost` now pins crypto exactly and requires every equity fill to carry at least the unconditional regulatory component, preserving what it existed to prove (the engine records the MODEL cost, not the venue cost). `test_harness_meta_and_trades_carry_class_fees` does the same for the harness. The exact arithmetic both used to hold is now pinned on the pure function, where it belongs and where it can be checked at many prices and volumes rather than one.
+
+Mutation guard: restoring a resolved-once `fee_side_equity` in the harness fails `test_the_harness_prices_equity_per_symbol_not_once`.
+
+Changes: `config/default_config.yaml`, `config/config.hpp`, `config/config.cpp`, `core/fees.hpp`, `core/engine.hpp`, `core/engine.cpp`, `core/backtest_main.cpp`, `backtest/fees.py`, `tests/test_fee_model.py`, `tests/test_fee_liquidity.py` (new), PROGRESS.md, CONTEXT.md, RETURN.md. **No RiskGate logic, no live-trading gate, no adaptive invariant, no Level 1 value, no threshold, no strategy parameter. Live trading untouched. The production database was never opened.**
+Commit message: Calibrate spread and slippage across the liquidity spectrum and extend the fee model, live trading untouched
+
 ## Prompt: Apply the unclassified fill provenance change, Task 1 checked rather than assumed
 
 Date: 2026-07-27

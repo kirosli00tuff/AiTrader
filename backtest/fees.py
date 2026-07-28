@@ -51,6 +51,19 @@ def load(config_path: str = DEFAULT_CONFIG) -> dict:
         "alpaca_equity_commission_bp": 0.0,
         "alpaca_equity_regulatory_bp_per_side": 0.15,
         "alpaca_equity_spread_bp_per_side": 0.5,
+        "alpaca_equity_spread_tick_usd": 0.01,
+        "alpaca_equity_spread_tick_multiple": 1.0,
+        "alpaca_equity_tier1_adv_floor_usd": 277000000.0,
+        "alpaca_equity_tier2_adv_floor_usd": 65300000.0,
+        "alpaca_equity_tier3_adv_floor_usd": 13300000.0,
+        "alpaca_equity_tier4_adv_floor_usd": 2070000.0,
+        "alpaca_equity_tier5_adv_floor_usd": 235000.0,
+        "alpaca_equity_tier1_impact_bp_per_1k": 0.00024,
+        "alpaca_equity_tier2_impact_bp_per_1k": 0.00114,
+        "alpaca_equity_tier3_impact_bp_per_1k": 0.00543,
+        "alpaca_equity_tier4_impact_bp_per_1k": 0.02847,
+        "alpaca_equity_tier5_impact_bp_per_1k": 0.17320,
+        "alpaca_equity_tier6_impact_bp_per_1k": 3.86400,
     }
     text = open(config_path).read()
     out = {}
@@ -76,6 +89,57 @@ def per_side_bp(asset_class: str, order_type: str = "taker",
 def round_trip_bp(asset_class: str, order_type: str = "taker",
                   fees: dict | None = None) -> float:
     return 2.0 * per_side_bp(asset_class, order_type, fees)
+
+
+# --- Liquidity-aware equity cost (2026-07-27) ------------------------------- #
+#
+# Mirrors mal::fees in core/fees.hpp. THE FLAT 0.5 bp PER SIDE WAS NEVER
+# MEASURED: it was recorded as an estimate on 2026-07-26, and measured on
+# 2026-07-27 it is about right for the top 500 by liquidity and too low by 5x
+# or more below that. Kept unchanged as the fallback for a symbol whose
+# liquidity is unknown.
+#
+# SPREAD IS A FLOOR, IMPACT IS MEASURED, and the difference matters:
+#   * One cent is the minimum quoted increment for a US equity above 1.00 USD
+#     (SEC Reg NMS Rule 612), so tick/price is the tightest any market can be.
+#     Real small caps quote several ticks wide and no quote data exists here to
+#     say how many, so the multiple ships at 1.0 and this UNDERSTATES.
+#   * Amihud (2002) illiquidity measured per tier over 11,710 US equities,
+#     2025-07-01 to 2026-07-24, consolidated SIP. Scales with order size.
+
+def equity_liquidity_tier(adv_usd: float, fees: dict | None = None) -> int:
+    """1..6 by median daily dollar volume. 6 is the thinnest."""
+    f = fees or load()
+    for tier in range(1, 6):
+        if adv_usd >= f[f"alpaca_equity_tier{tier}_adv_floor_usd"]:
+            return tier
+    return 6
+
+
+def equity_per_side_bp(price: float, adv_usd: float, notional: float,
+                       fees: dict | None = None) -> float:
+    """Per-side equity cost in bp for one symbol at one order size.
+
+    adv_usd <= 0 or price <= 0 means liquidity is UNKNOWN, and the flat legacy
+    estimate is returned unchanged rather than a guessed tier.
+    """
+    f = fees or load()
+    fixed = (f["alpaca_equity_commission_bp"]
+             + f["alpaca_equity_regulatory_bp_per_side"])
+    if price <= 0 or adv_usd <= 0:
+        return fixed + f["alpaca_equity_spread_bp_per_side"]
+    half_spread_bp = 0.5 * (f["alpaca_equity_spread_tick_usd"]
+                            * f["alpaca_equity_spread_tick_multiple"]
+                            / price) * 1e4
+    tier = equity_liquidity_tier(adv_usd, f)
+    impact_bp = (f[f"alpaca_equity_tier{tier}_impact_bp_per_1k"]
+                 * notional / 1000.0)
+    return fixed + half_spread_bp + impact_bp
+
+
+def equity_round_trip_bp(price: float, adv_usd: float, notional: float,
+                         fees: dict | None = None) -> float:
+    return 2.0 * equity_per_side_bp(price, adv_usd, notional, fees)
 
 
 def summary() -> dict:
