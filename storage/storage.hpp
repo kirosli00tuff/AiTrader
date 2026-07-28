@@ -45,10 +45,16 @@ struct TradeRow {
     // so both are recorded and the divergence is measurable.
     double fee_model_cost = 0.0;
     std::string fee_order_type;
-    // Provenance of the bar this trade executed against (same five values as
-    // BarRow.source). Default unknown, never real. The real-fill gates exclude
-    // proven-synthetic fills: a trade against walk prices exercised nothing.
-    std::string bar_source = "unknown";
+    // Provenance of the bar this trade executed against (BarRow.source's five
+    // values, plus `unclassified`). NO DEFAULT, deliberately (2026-07-27): the
+    // old `= "unknown"` silently pre-substituted the HISTORICAL marker before
+    // insert_trade's ternary was ever reached, so a caller that forgot to state
+    // provenance wrote a row byte-identical to an unmigrated 2026-06 one. Left
+    // empty, insert_trade records `unclassified` and emits a CRITICAL
+    // fill_provenance_unclassified event naming the omission as the reason. See
+    // mal::provenance::fill. The real-fill gates count real_feed and backfill
+    // only, so an unclassified fill exercises no gate.
+    std::string bar_source;
 };
 
 // A persisted LLM deep-research thesis attached to a research_satellite position,

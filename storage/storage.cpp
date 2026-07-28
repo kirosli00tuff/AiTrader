@@ -8,6 +8,8 @@
 #include <sstream>
 #include <stdexcept>
 
+#include "core/provenance.hpp"
+
 namespace mal::storage {
 
 namespace {
@@ -41,6 +43,34 @@ private:
     sqlite3* db_;
     sqlite3_stmt* st_ = nullptr;
 };
+
+// JSON string escaping for the event payloads this file writes directly.
+// mal_storage does not link the util library, and these payloads carry a
+// symbol and free text, so escaping is not optional: an unescaped quote would
+// produce a payload no reader can parse, in the one event that must be read.
+std::string json_escape(const std::string& s) {
+    std::string out;
+    out.reserve(s.size() + 8);
+    for (char c : s) {
+        switch (c) {
+            case '"':  out += "\\\""; break;
+            case '\\': out += "\\\\"; break;
+            case '\n': out += "\\n";  break;
+            case '\r': out += "\\r";  break;
+            case '\t': out += "\\t";  break;
+            default:
+                if (static_cast<unsigned char>(c) < 0x20) {
+                    char buf[8];
+                    std::snprintf(buf, sizeof(buf), "\\u%04x",
+                                  static_cast<unsigned char>(c));
+                    out += buf;
+                } else {
+                    out += c;
+                }
+        }
+    }
+    return out;
+}
 
 }  // namespace
 
@@ -142,6 +172,15 @@ long long Storage::append_event(const EventRow& e) {
 }
 
 long long Storage::insert_trade(const TradeRow& t) {
+    // FILL PROVENANCE IS CLASSIFIED, NEVER SUBSTITUTED (2026-07-27). This bind
+    // used to read `t.bar_source.empty() ? "unknown" : t.bar_source`, and
+    // TradeRow additionally defaulted the field to "unknown". Two silent
+    // fallbacks to the HISTORICAL marker, so a live write with no established
+    // provenance produced a row byte-identical to an unmigrated 2026-06 one,
+    // with no event and no log. Both are gone. classify() sends empty,
+    // "unknown" and junk to `unclassified`, which no historical row carries,
+    // and the CRITICAL event below makes the write impossible to miss.
+    const std::string bar_source = provenance::fill::classify(t.bar_source);
     Stmt s(db_,
            "INSERT INTO trades(ts,venue,symbol,market,category,side,qty,price,"
            "notional,fee,mode,pnl,outcome,combined_conf,combined_edge,sleeve,"
@@ -153,11 +192,38 @@ long long Storage::insert_trade(const TradeRow& t) {
     if (t.pnl) s.bind(12, *t.pnl); else s.bind_null(12);
     s.bind(13, t.outcome).bind(14, t.combined_conf).bind(15, t.combined_edge)
         .bind(16, t.sleeve).bind(17, t.origin)
-        .bind(18, t.bar_source.empty() ? "unknown" : t.bar_source)
+        .bind(18, bar_source)
         .bind(19, t.fee_model_cost)
         .bind(20, t.fee_order_type);
     s.step_done();
-    return sqlite3_last_insert_rowid(db_);
+    const long long id = sqlite3_last_insert_rowid(db_);
+    // THE MARKER NEVER TRAVELS ALONE. A silent marker is how the last three
+    // fabrication defects survived, so the row is never the only record. The
+    // fill is KEPT: it happened at the venue, and refusing it here would
+    // destroy the only evidence it occurred and hide the position from
+    // reconciliation and rehydration.
+    if (bar_source == provenance::fill::kUnclassified) {
+        const std::string reason = provenance::fill::reason_for(t.bar_source);
+        append_event(
+            {t.ts, "fill_provenance_unclassified", t.venue, t.symbol,
+             "critical",
+             "Fill " + std::to_string(id) + " " + t.symbol + " (" + t.side +
+                 ", origin " + t.origin +
+                 ") recorded with UNCLASSIFIED bar provenance: " + reason +
+                 ". The fill is kept because it already happened at the venue. "
+                 "Its prices are not proven real, so it counts toward no "
+                 "real-fill gate.",
+             "{\"trade_id\":" + std::to_string(id) +
+                 ",\"symbol\":\"" + json_escape(t.symbol) +
+                 "\",\"origin\":\"" + json_escape(t.origin) +
+                 "\",\"side\":\"" + json_escape(t.side) +
+                 "\",\"mode\":\"" + json_escape(t.mode) +
+                 "\",\"reason\":\"" + json_escape(reason) +
+                 "\",\"declared_bar_source\":\"" + json_escape(t.bar_source) +
+                 "\",\"recorded_bar_source\":\"" + json_escape(bar_source) +
+                 "\"}"});
+    }
+    return id;
 }
 
 long long Storage::insert_signal(const SignalRow& sig) {

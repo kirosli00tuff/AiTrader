@@ -2135,6 +2135,11 @@ bool Engine::apply_defensive_action(const core::DefensiveAction& a,
     // strategy fills only, so tagging it keeps an event-driven exit from
     // counting toward "the policy has traded enough to learn from".
     tr.origin = "adaptive_react";
+    // STATE THE PROVENANCE (2026-07-27). This site used to leave bar_source
+    // unset and inherit the struct default "unknown", the HISTORICAL marker,
+    // which was a silent lie about a live fill. Same value the native exit
+    // records: what the engine last ingested for this loop.
+    tr.bar_source = current_bar_source_;
     fees::apply_fee_model(cfg_.fees, tr);
     storage_->insert_trade(tr);
 
@@ -2554,6 +2559,13 @@ int Engine::run_iteration() {
         tr.fee = fill.fee; tr.mode = "paper"; tr.pnl = pnl;
         tr.outcome = win ? "win" : "loss";
         tr.combined_conf = verdict.confidence; tr.combined_edge = verdict.edge;
+        // STATE THE PROVENANCE (2026-07-27). Bootstrap-sim used to leave
+        // bar_source unset and inherit the struct default "unknown", the
+        // HISTORICAL marker. It records what the engine last ingested, the
+        // same value every other write path records; before any bar closes
+        // that is genuinely unestablished and lands as `unclassified` with a
+        // CRITICAL event, which is the honest answer rather than a quiet one.
+        tr.bar_source = current_bar_source_;
         fees::apply_fee_model(cfg_.fees, tr);
         storage_->insert_trade(tr);
         storage_->upsert_position(o.venue, o.symbol, o.market, o.category, o.side,

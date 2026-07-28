@@ -117,6 +117,10 @@ Found 2026-07-19 by the remediation-loop session, deliberately NOT fixed here (r
 
 - ~~**Discovery can surface symbols the execution venue cannot serve, and MANA/USD and RUNE/USD are live examples.**~~ **CLEARED 2026-07-20 by the invariant session.** Discovery now backfills BEFORE the watchlist add and refuses a candidate the tradeable predicate cannot confirm (journalled applied=0). The four live dead entries (MANA/USD, RUNE/USD, and ZEC/USD, APT/USD found by this session's probe) were pruned through the event-sourced path by `scripts/prune_unserviceable_20260720.py`, and the tradeable invariant contains any that ever slip in: symbol_unavailable, per-symbol, never a stack stop. Original flag text follows for the record. Discovery ranks the curated universe through Finnhub (Binance pairs), onboarding backfills through Alpaca, and Alpaca serves no data for those two pairs (probed live: 565 AAVE/USD bars, 0 MANA/USD, 0 RUNE/USD from one request). Both sit `active` on the watchlist with zero bars. The engine merges them, gets no Alpaca quotes, and walks them synthetically on the real path (engine `feed_substitution` events at 2026-07-20 06:03:44Z and 06:05:15Z name exactly these two). Consequence after this session's fix: once the stack stays up past the grace, their in-window synthetic bars read as a GENUINE substitution, one restart fires, the condition recurs, and the watchdog holds with the symbols named. No capital risk (the provenance gate refuses entries on non-real bars and they never warm on real data), but the hold notification will persist until an operator acts. The clean fixes are an operator watchlist removal through the event-sourced path (never a raw DELETE, the SOL/USD lesson) or a venue-capability check in discovery onboarding. Not done here: this session's scope was the watchdog, and deleting production watchlist rows overnight repeats the exact mistake the SOL/USD postmortem documented.
 
+Found 2026-07-27 by the fill-provenance application session, deliberately NOT fixed (out of that prompt's scope, reported rather than lost):
+
+- **ctest `tuner_floor` FAILS at `3e4a684` and is not caused by the provenance change.** The failing assertion is "synthetic run keeps generating native entries past 100 closed trades (no plateau)", the exact residual the 2026-07-13 `rule_based_weight_floor` fix was written to clear. Confirmed pre-existing by stashing all five changed C++ files back to HEAD, rebuilding, and re-running: identical failure. The remaining 30 tests pass. Fixing it means moving a tuner or strategy value, which the provenance prompt forbade, so it needs its own session. Until then the suite is 30 of 31 and the plateau claim in Known Issues above is not currently demonstrable by the test that pins it.
+
 Still open (not defects — known limits):
 
 - Advisory factor scores run through real Python services only with `--bridge`; the default path uses deterministic C++ mocks.
@@ -133,6 +137,33 @@ New flags from the feed-work session (2026-07-05, `369b6a6`):
 - **Replay council-cooldown timing FIXED 2026-07-13.** Cooldown spacing now keys off the true historical bar `ts` (`util::iso8601_to_epoch`), matching the per-day trade cap, instead of a synthetic sequential epoch.
 
 ## Session Log
+
+### 2026-07-27 (Opus 5) — `unclassified` splits the live fill from the historical row, both silent fallbacks removed, and the marker never travels without a CRITICAL event
+
+Application session that applied the change. Live trading off, no RiskGate logic, no live-trading gate, no adaptive limit-weakening invariant, no Level 1 risk value, no threshold, no strategy parameter touched. Production database opened READ-ONLY throughout. pytest **1,079 passed**, up from 1,068. ctest **30 of 31**, with the one failure proven pre-existing.
+
+**TASK 1 CHECKED, NOT ASSUMED, AND IT IS MOOT RATHER THAN DONE.** The operator asked for a check instead of an assumption. `CREATE TABLE IF NOT EXISTS trades` in `schema.sql` (lines 23 to 53) declares no `bar_source` column, and the file's one occurrence of the name, line 481, belongs to `entry_decision`. The column reaches `trades` by exactly one route, the ALTER at `storage.cpp:115`, identically on a fresh database and a migrated one, and both get `DEFAULT 'unknown'`. Measured rather than argued: `PRAGMA table_info(trades)` reports `dflt_value = 'unknown'` on both paths, and an insert omitting the column yields `unknown`, never NULL. **Nothing was changed for Task 1**, because giving `trades.bar_source` a `schema.sql` declaration would be a new decision needing its own justification. Two tests now pin the premise so the disagreement cannot be introduced later.
+
+**THE SPLIT.** `unknown` keeps ONE meaning, an unmigrated historical row. `unclassified` (`mal::provenance::fill`) is a live write whose bar provenance could not be established. It SUCCEEDS rather than refusing: `insert_trade` records a fill that already happened at the venue, so refusing would destroy the only record it occurred and hide the position from reconciliation and rehydration, the opposite of the bar path where a refused bar can be refetched.
+
+**BOTH SILENT FALLBACKS ARE GONE**, the struct default at `storage.hpp:51` and the ternary at `storage.cpp:156`. `classify` sends empty, `unknown` and junk to `unclassified`, so no live write can produce the historical marker.
+
+**AND THE MARKER NEVER TRAVELS ALONE**, because a silent marker is how the last three fabrication defects survived. Every unclassified write emits a CRITICAL `fill_provenance_unclassified` event carrying trade id, symbol, side, mode, origin and reason, surfaced in the GUI diagnostics view with `ev-critical` styling.
+
+**OBSERVED, NOT ASSERTED.** A harness ran all four paths through the real `Storage::insert_trade`:
+
+| path | declared | recorded | event |
+|---|---|---|---|
+| normal fill | `real_feed` | `real_feed` | none |
+| provenance unavailable | `unknown` | **`unclassified`** | CRITICAL, reason `provenance_unavailable` |
+| field never set | (unset) | **`unclassified`** | CRITICAL, reason `field_never_set` |
+| offline fill | `synthetic` | `synthetic` | none |
+
+- **PRODUCTION UNTOUCHED, PROVEN BY HASH.** The distribution before and after is identical at `unknown` 247, `real_feed` 16, `synthetic` 2, zero NULL, 265 total. The sha256 over all 247 unknown row tuples matches before and after (`8fa978b0...`), and the file's size and mtime are unchanged. Zero `unclassified` rows and zero events exist in production, because nothing has run against it. **The corrected real-fill count reads 9**, unchanged, since `unclassified` is excluded by the same rule that already excludes `unknown`.
+- **THE ONE PLACE THE SPEC PULLS AGAINST ITSELF, stated rather than hidden.** The prompt asks that a caller which never sets provenance and one whose provenance is genuinely unavailable no longer produce byte-identical rows, while specifying a single new marker. Both therefore record `unclassified` in the trade row by construction. What separates them is the CRITICAL event's `reason`, `field_never_set` against `provenance_unavailable`, and that field is load-bearing rather than decorative: it is what catches a restored struct default. Separately, the two engine call sites that never stated provenance now do (the `adaptive_react` exit and bootstrap-sim), so the never-set condition no longer exists in production, and a guard test keeps it that way.
+- **MUTATION-TESTED THREE WAYS, each applied, run, and restored.** Restoring the struct default fails ctest `provenance` (the never-set reason flips) and the pytest lexical guard. Restoring the ternary fails 6 ctest assertions and the pytest guard. Removing one engine site's provenance assignment fails the call-site guard. All three restore green.
+- **CTEST 30 OF 31, AND THE FAILURE IS NOT MINE.** `tuner_floor` fails on "synthetic run keeps generating native entries past 100 closed trades (no plateau)". Verified pre-existing by stashing all five changed C++ files back to `3e4a684`, rebuilding, and re-running: it fails identically. Not fixed here, because it is a tuner and native-entry question and this prompt forbids touching strategy parameters and thresholds. Recorded as a flag below.
+- **FILES TOUCHED:** `core/provenance.hpp`, `storage/storage.hpp`, `storage/storage.cpp`, `core/engine.cpp`, `api_server/operator.py`, `web/src/components/DiagnosticsPanels.tsx`, `tests/test_provenance.cpp`, `tests/test_fill_provenance.py` (new), plus the four tracking documents. Frontend typecheck clean, 136 vitest tests green.
 
 ### 2026-07-27 (Opus 5) — Stopped: my own diagnosis misattributed a schema line, so Task 1 had nothing to reconcile
 

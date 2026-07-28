@@ -57,6 +57,81 @@ inline bool allows_entry(const std::string& feed_mode,
     return is_real(source);
 }
 
+// FILL PROVENANCE (2026-07-27). The provenance recorded on a TRADE row, which
+// is the bar set above plus one value a bar can never carry.
+//
+// WHY A SIXTH VALUE EXISTS HERE AND NOWHERE ELSE. `unknown` on a trade row
+// means AN UNMIGRATED HISTORICAL ROW. The column arrived by
+// `ALTER TABLE trades ADD COLUMN bar_source TEXT DEFAULT 'unknown'`
+// (storage.cpp), so all 247 pre-existing rows carry it and nothing recorded
+// where their prices came from. Meanwhile two silent fallbacks (a struct field
+// default and an empty-string ternary) made a LIVE write with no established
+// provenance produce that same literal, byte for byte. Four conditions
+// collapsed onto one string and the data could separate none of them.
+//
+// `unclassified` splits the live case out. A live write whose bar provenance
+// cannot be established records `unclassified`, so an unclassified live row is
+// distinguishable from an unmigrated historical one and `unknown` keeps one
+// meaning. No live write can produce `unknown` any more: classify maps it, and
+// empty, and junk, to `unclassified`.
+//
+// IT SUCCEEDS, IT DOES NOT REFUSE, and the direction is deliberate.
+// insert_trade records a fill that ALREADY HAPPENED at the venue. Refusing
+// would destroy the only record that it occurred and hide the position from
+// reconciliation and rehydration, which is worse than a badly labelled row.
+// That is the opposite of the bar path, where a refused bar can be refetched.
+//
+// AND THE MARKER NEVER TRAVELS ALONE. A silent marker is how three fabrication
+// defects survived, so Storage::insert_trade emits a CRITICAL
+// `fill_provenance_unclassified` event on every one, carrying the trade id,
+// symbol, origin and reason, and the GUI surfaces it.
+//
+// The real-fill gates are unaffected: they count `real_feed` and `backfill`
+// only, so `unclassified` is excluded by the same rule that already excludes
+// `unknown`. A gate whose job is to say "not yet" counts nothing it cannot
+// prove.
+//
+// THIS IS A LABEL, NOT A GATE. Nothing here refuses an order, sizes one, or
+// touches RiskGate, the live-trading gate, or any Level-1 value.
+namespace fill {
+
+inline constexpr const char* kUnclassified = "unclassified";
+
+// WHY a fill was recorded unclassified. These are the two conditions the old
+// code made byte-identical: a caller that never stated provenance, and a
+// caller whose provenance genuinely could not be established. Both record the
+// same marker, because the value set gains exactly one member by design, and
+// this field is what separates them in the audit record. It is load-bearing
+// rather than decorative: restoring the struct default at storage.hpp turns a
+// field_never_set write into a provenance_unavailable one, which is how the
+// guard test catches a restored fallback that the row value alone would hide.
+inline constexpr const char* kReasonFieldUnset = "field_never_set";
+inline constexpr const char* kReasonUnavailable = "provenance_unavailable";
+
+// THE classifier for a trade write. Anything that cannot stand as an
+// established live provenance becomes `unclassified`: empty (nobody stated
+// it), `unknown` (the historical marker, never a live claim), and junk.
+// Everything else keeps the bar meaning it was given.
+inline std::string classify(const std::string& s) {
+    if (s.empty()) return kUnclassified;
+    if (s == kUnclassified) return kUnclassified;
+    const std::string n = provenance::normalize(s);
+    if (n == kUnknown) return kUnclassified;
+    return n;
+}
+
+// Which of the two conditions produced an unclassified write.
+inline std::string reason_for(const std::string& s) {
+    return s.empty() ? kReasonFieldUnset : kReasonUnavailable;
+}
+
+// True when a fill's provenance could not be established. Never real.
+inline bool is_unclassified(const std::string& s) {
+    return classify(s) == kUnclassified;
+}
+
+}  // namespace fill
+
 // VOLUME PROVENANCE (2026-07-25). Where a bar's VOLUME came from, which is a
 // separate question from where its prices came from.
 //

@@ -19,6 +19,11 @@ const CONDITION_COPY: Record<string, string> = {
   kill_switch: "The latching kill switch tripped. Manual resume required.",
   watchdog_restart: "The watchdog restarted the stack.",
   engine_supervisor: "The supervisor acted on the engine (start or stop).",
+  fill_provenance_unclassified:
+    "A fill was recorded whose bar prices are not proven real. The trade is " +
+    "KEPT, because it already happened at the venue and removing it would " +
+    "hide the position. It counts toward no real-fill gate, and the payload " +
+    "says whether the writer stated an unestablishable source or none at all.",
 };
 
 function ago(s: number | null): string {
@@ -116,6 +121,7 @@ export function WatchdogTimeline({ diag }: { diag: WatchdogDiagnostics }) {
           <span className="mono dim">{e.ts.slice(0, 19)}</span>
           <span className={`ev-kind mono ${
             e.kind === "feed_substitution" ? "ev-critical"
+            : e.kind === "fill_provenance_unclassified" ? "ev-critical"
             : e.kind === "symbol_unavailable" ? "ev-warn" : ""}`}>
             {e.kind}
           </span>

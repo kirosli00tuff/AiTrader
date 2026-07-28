@@ -10,10 +10,23 @@
 //      a bar written empty reads back unknown, and a pre-migration row (no
 //      source value) reads back unknown. No path defaults to real.
 //
+//   4. FILL provenance (2026-07-27): a TRADE row carries the bar set plus
+//      `unclassified`. `unknown` on a trade means an unmigrated historical
+//      row, so no live write may produce it. Empty, `unknown` and junk all
+//      land `unclassified`, and each one emits a CRITICAL
+//      fill_provenance_unclassified event naming WHY, which is what keeps a
+//      never-set write distinguishable from an unestablishable one.
+//
 // Mutation checks (verified by hand during development, recorded in RETURN.md):
 // flipping allows_entry to return true makes the real-path cases fail, and
 // removing the empty->unknown guard in upsert_bar makes the empty-source
-// round trip fail.
+// round trip fail. Restoring either fill-provenance fallback fails this suite:
+// the ternary makes the two unclassified round trips read `unknown` and emit
+// no event, and the struct default turns the never-set write's reason from
+// field_never_set into provenance_unavailable. tests/test_fill_provenance.py
+// pins the same two removals lexically.
+#include <sqlite3.h>
+
 #include <cstdio>
 #include <string>
 
@@ -23,7 +36,62 @@
 
 using namespace mal;
 
+namespace {
+
+// Read one text cell straight out of the file. The fill-provenance assertions
+// have to describe what is ON DISK, not what the writer meant to put there.
+std::string cell(const std::string& db, const std::string& sql) {
+    sqlite3* h = nullptr;
+    if (sqlite3_open(db.c_str(), &h) != SQLITE_OK) { sqlite3_close(h); return ""; }
+    sqlite3_stmt* st = nullptr;
+    std::string out;
+    if (sqlite3_prepare_v2(h, sql.c_str(), -1, &st, nullptr) == SQLITE_OK &&
+        sqlite3_step(st) == SQLITE_ROW) {
+        const unsigned char* v = sqlite3_column_text(st, 0);
+        if (v) out = reinterpret_cast<const char*>(v);
+    }
+    sqlite3_finalize(st);
+    sqlite3_close(h);
+    return out;
+}
+
+std::string trade_bar_source(const std::string& db, long long id) {
+    return cell(db, "SELECT bar_source FROM trades WHERE id=" +
+                        std::to_string(id));
+}
+
+int count_fill_events(const std::string& db) {
+    const std::string n = cell(db,
+        "SELECT COUNT(*) FROM events WHERE kind='fill_provenance_unclassified'");
+    return n.empty() ? -1 : std::stoi(n);
+}
+
+int count_critical_fill_events(const std::string& db) {
+    const std::string n = cell(db,
+        "SELECT COUNT(*) FROM events WHERE kind='fill_provenance_unclassified'"
+        " AND severity='critical'");
+    return n.empty() ? -1 : std::stoi(n);
+}
+
+// The reason field out of the event payload for one trade id, or "" when the
+// write emitted no event at all.
+std::string fill_event_reason(const std::string& db, long long id) {
+    const std::string payload = cell(db,
+        "SELECT payload_json FROM events WHERE "
+        "kind='fill_provenance_unclassified' AND payload_json LIKE "
+        "'%\"trade_id\":" + std::to_string(id) + ",%'");
+    const std::string key = "\"reason\":\"";
+    const auto at = payload.find(key);
+    if (at == std::string::npos) return "";
+    const auto from = at + key.size();
+    const auto to = payload.find('"', from);
+    return to == std::string::npos ? "" : payload.substr(from, to - from);
+}
+
+}  // namespace
+
 int main() {
+    long long id_syn = 0, id_gap = 0, id_unset = 0;
     // --- 1. The entry gate, exhaustively -------------------------------
     maltest::check(provenance::allows_entry("alpaca_paper", "real_feed"),
                    "real path: real_feed bar may open");
@@ -137,7 +205,49 @@ int main() {
         maltest::check(eth[1].volume_source == "unknown",
                        "an empty volume provenance lands unknown, never venue");
 
-        // A trade row carries the bar it executed against; empty lands unknown.
+        // --- 5. FILL provenance (2026-07-27) ----------------------------
+        // A trade row carries the bar it executed against. `unknown` on a
+        // trade means an UNMIGRATED HISTORICAL ROW, so no live write may
+        // produce it: two silent fallbacks used to, and both are gone.
+        namespace fp = provenance::fill;
+        maltest::check(fp::classify("real_feed") == "real_feed",
+                       "an established fill provenance passes through");
+        maltest::check(fp::classify("backfill") == "backfill",
+                       "backfill passes through");
+        maltest::check(fp::classify("synthetic") == "synthetic",
+                       "an offline fill keeps its synthetic label");
+        maltest::check(fp::classify("replay") == "replay",
+                       "a replayed fill keeps its replay label");
+        maltest::check(fp::classify("") == "unclassified",
+                       "a fill nobody stated provenance for is unclassified");
+        maltest::check(fp::classify("unknown") == "unclassified",
+                       "a LIVE write can never claim the historical marker");
+        maltest::check(fp::classify("walk") == "unclassified",
+                       "junk fill provenance is unclassified, never unknown");
+        maltest::check(fp::classify("unclassified") == "unclassified",
+                       "an explicit unclassified stays itself");
+        // The two conditions the old code made byte-identical. The marker is
+        // one value by design, so the REASON is what separates them, and it is
+        // also what catches a restored struct default.
+        maltest::check(fp::reason_for("") == "field_never_set",
+                       "an unset field is recorded as the omission it is");
+        maltest::check(fp::reason_for("unknown") == "provenance_unavailable",
+                       "a stated but unestablishable provenance carries its "
+                       "own reason, distinct from an omission");
+        maltest::check(fp::is_unclassified("") && fp::is_unclassified("unknown"),
+                       "neither empty nor unknown is an established fill");
+        maltest::check(!fp::is_unclassified("real_feed") &&
+                       !fp::is_unclassified("synthetic"),
+                       "an established fill provenance is not unclassified");
+        // The BAR rule is UNCHANGED: unclassified is a fill value only, a bar
+        // carrying it still normalizes to unknown and still cannot enter.
+        maltest::check(provenance::normalize("unclassified") == "unknown",
+                       "unclassified is not a BAR provenance");
+        maltest::check(!provenance::allows_entry("alpaca_paper", "unclassified"),
+                       "unclassified never opens a position on the real path");
+        maltest::check(!provenance::is_real("unclassified"),
+                       "unclassified is never real, so no gate counts it");
+
         storage::TradeRow tr;
         tr.ts = "2026-07-18T10:10:00Z";
         tr.venue = "alpaca";
@@ -146,9 +256,48 @@ int main() {
         tr.mode = "paper";
         tr.outcome = "open";
         tr.bar_source = "synthetic";
-        st.insert_trade(tr);
-        tr.bar_source = "";
-        st.insert_trade(tr);
+        id_syn = st.insert_trade(tr);
+        tr.symbol = "ETH/USD";
+        tr.bar_source = "unknown";      // provenance genuinely unavailable
+        id_gap = st.insert_trade(tr);
+        // A caller that NEVER TOUCHES the field. A fresh row on purpose:
+        // assigning "" here would bypass the struct default and this case
+        // exists to prove the default is gone.
+        storage::TradeRow untouched;
+        untouched.ts = "2026-07-18T10:15:00Z";
+        untouched.venue = "alpaca";
+        untouched.symbol = "SOL/USD";
+        untouched.side = "buy";
+        untouched.mode = "paper";
+        untouched.outcome = "open";
+        id_unset = st.insert_trade(untouched);
+    }
+    {
+        // Read the rows back through a plain connection, so the assertions
+        // describe what is ON DISK rather than what the writer intended.
+        maltest::check(trade_bar_source(db_path, id_syn) == "synthetic",
+                       "a stated fill provenance round-trips unchanged");
+        maltest::check(trade_bar_source(db_path, id_gap) == "unclassified",
+                       "an unavailable provenance lands unclassified, NOT the "
+                       "historical unknown marker");
+        maltest::check(trade_bar_source(db_path, id_unset) == "unclassified",
+                       "a never-set provenance lands unclassified, NOT the "
+                       "historical unknown marker");
+        // THE MARKER NEVER TRAVELS ALONE.
+        maltest::check(count_fill_events(db_path) == 2,
+                       "exactly the two unclassified writes emitted a "
+                       "fill_provenance_unclassified event");
+        maltest::check(count_critical_fill_events(db_path) == 2,
+                       "and both carry severity critical");
+        maltest::check(fill_event_reason(db_path, id_gap) ==
+                           "provenance_unavailable",
+                       "the unavailable write names its reason");
+        maltest::check(fill_event_reason(db_path, id_unset) == "field_never_set",
+                       "the never-set write names ITS reason, so the two stay "
+                       "distinguishable in the audit record even though the "
+                       "marker is a single value");
+        maltest::check(fill_event_reason(db_path, id_syn).empty(),
+                       "a provenance-confirmed fill emits no such event");
     }
     {
         // Reopen: init_schema is idempotent and the migration tolerant.

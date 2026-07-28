@@ -28,6 +28,11 @@ WATCHDOG_KINDS = (
     "symbol_available", "watchdog_restart", "engine_supervisor",
     "continuous_start", "continuous_stop", "kill_switch", "provenance_block",
     "position_unmanageable", "position_rehydrated",
+    # A fill recorded with unestablishable bar provenance (2026-07-27). It sits
+    # here rather than buried in the activity stream because a silent marker is
+    # how the last three fabrication defects survived: the row is KEPT, and the
+    # operator has to be able to see that it is not proven real.
+    "fill_provenance_unclassified",
 )
 
 # Council-tier decision events: the engine evaluated a setup all the way to a

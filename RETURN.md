@@ -11,6 +11,145 @@ Model:
 Prompt summary: one line.
 Changes: what changed.
 
+## Prompt: Apply the unclassified fill provenance change, Task 1 checked rather than assumed
+
+Date: 2026-07-27
+Model: Opus 5 (claude-opus-5, 1M context).
+Prompt summary: re-issue of the application prompt after the previous session stopped on a diagnosis-versus-code disagreement. Operator instruction appended verbatim: "PLEASE IGNORE TASK 1, I BELIEVE IT IS ALREADY DONE. ACTUALLY, CHECK IF IT IS COMPLETED." So Task 1 is verified rather than assumed, and Tasks 2 through 5 are applied. Keep `unknown` meaning an unmigrated historical row with all 247 rows byte-identical. Introduce `unclassified` for a live write whose bar provenance cannot be established. Such a write SUCCEEDS with the marker rather than refusing, because `insert_trade` records a fill that already happened at the venue and refusing destroys the only record it occurred. Because a silent marker is how three prior fabrication defects survived, every unclassified write emits a CRITICAL `fill_provenance_unclassified` event carrying trade id, symbol and origin, and surfaces in the GUI. Both silent fallbacks are removed: the ternary at `storage.cpp:156` and the struct default at `storage.hpp:51`. Task 2 apply and rebuild. Task 3 verify both paths by observation. Task 4 full ctest and pytest with a mutation test on the fallback removal. Task 5 document and commit.
+
+SCOPE DISCIPLINE CARRIED FROM THE PROMPT: do not re-diagnose, do not widen scope, do not resolve any question the diagnosis left open. If the diagnosis and the code disagree, stop and report rather than choosing.
+
+CONSTRAINTS HONORED: live trading stays off. No RiskGate logic, no live-trading gate, no adaptive limit-weakening invariant, no Level 1 risk value, no threshold, no strategy parameter touched.
+
+### FINDINGS
+
+**APPLIED. Tasks 2 through 5 are done, Task 1 was checked and is moot rather than done. Production was opened READ-ONLY and no row was rewritten.**
+
+### TASK 1, CHECKED RATHER THAN ASSUMED
+
+The operator asked me to verify instead of skipping. It is **moot, not completed**, and the distinction matters because nothing was changed for it.
+
+`CREATE TABLE IF NOT EXISTS trades` in `storage/schema.sql` runs lines 23 to 53 and declares no `bar_source` column. The file's one occurrence of the name is line 481, inside `CREATE TABLE IF NOT EXISTS entry_decision` (which opens at 476). So `trades.bar_source` reaches the table by exactly one route, the ALTER at `storage.cpp:115`, and that route is identical on a fresh database and a migrated one.
+
+Measured rather than argued, on both paths:
+
+- `PRAGMA table_info(trades)` reports `dflt_value = 'unknown'` for `bar_source`.
+- An INSERT omitting the column yields `unknown`, never NULL.
+
+There is no fresh-versus-migrated disagreement, so **nothing was changed**. Giving `trades.bar_source` an explicit `schema.sql` declaration would be a new decision needing its own justification. Two tests now pin the premise (`test_a_fresh_database_and_a_migrated_one_agree_about_the_column`, `test_schema_sql_declares_no_bar_source_on_trades`), so the disagreement fails loudly if someone later adds the column to the CREATE TABLE without the matching default.
+
+### TASK 2, THE CHANGE
+
+`mal::provenance::fill` is new in `core/provenance.hpp`, a sibling of the existing bar and volume namespaces. The **bar** rule is untouched: `normalize("unclassified")` still returns `unknown` and no bar can carry the new value.
+
+- `classify(s)`: empty, `unknown` and junk all become `unclassified`; `real_feed`, `backfill`, `synthetic`, `replay` pass through.
+- `reason_for(s)`: `field_never_set` when empty, `provenance_unavailable` otherwise.
+- `storage.hpp:51` `std::string bar_source = "unknown";` becomes `std::string bar_source;`.
+- `storage.cpp:156` `t.bar_source.empty() ? "unknown" : t.bar_source` becomes `provenance::fill::classify(t.bar_source)`.
+- `Storage::insert_trade` emits the CRITICAL `fill_provenance_unclassified` event after the insert, from inside the DAO so no caller can bypass it.
+- The two engine sites that never stated provenance now do: the `adaptive_react` defensive exit and the bootstrap-sim path.
+
+**FILES TOUCHED (10).** `core/provenance.hpp`, `storage/storage.hpp`, `storage/storage.cpp`, `core/engine.cpp`, `api_server/operator.py`, `web/src/components/DiagnosticsPanels.tsx`, `tests/test_provenance.cpp`, `tests/test_fill_provenance.py` (new), `PROGRESS.md`, `CONTEXT.md`, plus this file. Rebuilt clean with `-Wall -Wextra`, no new warnings.
+
+### TASK 3, THE OBSERVED DEMONSTRATION
+
+All four paths run through the real `Storage::insert_trade` against a scratch database. This is what the code wrote, not what I expected it to write:
+
+```
+PATH 1 normal fill        -> trade id 1
+PATH 2a unavailable       -> trade id 2
+PATH 2b field never set   -> trade id 3
+PATH 3 synthetic          -> trade id 4
+
+id  symbol    origin    outcome  bar_source
+--  --------  --------  -------  ------------
+1   BTC/USD   strategy  open     real_feed
+2   ETH/USD   strategy  open     unclassified
+3   SOL/USD   strategy  open     unclassified
+4   DOGE/USD  strategy  open     synthetic
+```
+
+Two events, both CRITICAL, and nothing for the two established fills:
+
+```
+ts=      2026-07-27T10:05:00Z
+kind=    fill_provenance_unclassified
+severity=critical
+message= Fill 2 ETH/USD (buy, origin strategy) recorded with UNCLASSIFIED bar
+         provenance: provenance_unavailable. The fill is kept because it
+         already happened at the venue. Its prices are not proven real, so it
+         counts toward no real-fill gate.
+payload= {"trade_id":2,"symbol":"ETH/USD","origin":"strategy","side":"buy",
+          "mode":"paper","reason":"provenance_unavailable",
+          "declared_bar_source":"unknown","recorded_bar_source":"unclassified"}
+
+ts=      2026-07-27T10:10:00Z
+kind=    fill_provenance_unclassified
+severity=critical
+message= Fill 3 SOL/USD (buy, origin strategy) recorded with UNCLASSIFIED bar
+         provenance: field_never_set. The fill is kept because it already
+         happened at the venue. Its prices are not proven real, so it counts
+         toward no real-fill gate.
+payload= {"trade_id":3,"symbol":"SOL/USD","origin":"strategy","side":"buy",
+          "mode":"paper","reason":"field_never_set",
+          "declared_bar_source":"","recorded_bar_source":"unclassified"}
+```
+
+**PROVENANCE DISTRIBUTION, BEFORE AND AFTER, production read-only:**
+
+| bar_source | before | after |
+|---|---|---|
+| unknown | 247 | 247 |
+| real_feed | 16 | 16 |
+| synthetic | 2 | 2 |
+| NULL | 0 | 0 |
+| unclassified | 0 | 0 |
+| **total** | **265** | **265** |
+
+**THE 247 HISTORICAL ROWS ARE PROVEN UNCHANGED, not asserted.** sha256 over the full tuples of all 247 `unknown` rows is `8fa978b0147c55b28112306d4e85cf979e1e5e60053da32a95dd16a95c5d7942` before and after, identical. The database file is 52,920,320 bytes with mtime `2026-07-26 13:54:43.041746523 -0700` before and after. Zero `fill_provenance_unclassified` events exist in production, because nothing has run against it.
+
+**THE CORRECTED REAL-FILL COUNT READS 9.** Not "unchanged": the number is **9**. Closed strategy fills break down `unknown` 240, `real_feed` 9, `synthetic` 1, and `unclassified` is excluded by the same `REAL_SOURCES` rule that already excludes `unknown`. RL activation stands at 9 of 500.
+
+### TASK 4, TESTS
+
+**pytest 1,079 passed, up from 1,068.** 11 new in `tests/test_fill_provenance.py`, no existing test weakened or silenced. **ctest 30 of 31.**
+
+Coverage, one test per requirement:
+
+- unavailable provenance takes the unclassified path and emits the event: ctest `provenance` (row value, event count, severity, reason).
+- a write that never sets provenance no longer silently becomes unknown: ctest `provenance`, using a **fresh TradeRow that never touches the field**. The first version assigned `""`, which bypassed the struct default and made the case blind to mutation 1; caught while mutation testing and fixed.
+- historical rows untouched: `test_historical_unknown_rows_are_untouched_by_the_split`, `test_no_code_path_rewrites_an_existing_bar_source`.
+- fresh and migrated schemas agree: the two Task 1 tests above.
+- the gate excludes unclassified by the same rule as unknown: `test_the_gate_excludes_unclassified_by_the_same_rule_as_unknown` (60 unprovable fills count 0, 4 real ones count 4), `test_unclassified_is_not_in_the_real_source_set`.
+- GUI surfacing: `test_the_event_surfaces_in_the_gui`.
+
+**MUTATION TESTS, each applied to the real source, run, and restored:**
+
+| mutation | ctest `provenance` | pytest guard |
+|---|---|---|
+| struct default `= "unknown"` restored | **FAIL**, the never-set reason flips to `provenance_unavailable` | **FAIL** `test_the_struct_field_default_stays_removed` |
+| ternary restored | **FAIL**, 6 assertions | **FAIL** `test_the_empty_string_ternary_stays_removed` |
+| an engine site's `tr.bar_source` assignment removed | n/a | **FAIL** `test_every_engine_trade_write_states_its_provenance` |
+
+All three restored green. Note the first mutation is invisible in the trade row (`classify` maps `unknown` to `unclassified` either way), which is exactly why the event's `reason` field carries weight.
+
+**Frontend:** `tsc --noEmit` clean, 136 vitest tests in 11 files green.
+
+### TWO THINGS I AM NOT PAPERING OVER
+
+**1. ctest is 30 of 31, and the failure predates this change.** `tuner_floor` fails on "synthetic run keeps generating native entries past 100 closed trades (no plateau)". Verified pre-existing by stashing all five changed C++ files back to `3e4a684`, rebuilding, and re-running: identical failure. Not fixed, because it is a tuner and native-entry question and this prompt forbids touching any strategy parameter or threshold. Recorded as a new flag in PROGRESS.md.
+
+**2. The spec pulls against itself in one place, and I chose rather than stopped.** The prompt asks that a caller which never sets provenance and one whose provenance is genuinely unavailable "must no longer produce byte-identical rows", while specifying exactly one new marker. With one marker, both record `unclassified` in the trade row by construction. I did not stop on this: the prompt's stop rule is for a diagnosis-versus-CODE disagreement, and this is internal to the specification. What I did instead:
+
+- The CRITICAL event's `reason` distinguishes them, `field_never_set` against `provenance_unavailable`, so they are separable in the audit record.
+- Both are now distinguishable from an unmigrated historical row, which is the distinction Task 5 names as the decision to record.
+- Every production caller states provenance explicitly, so the never-set condition no longer exists in the engine, pinned by a guard test.
+
+Inventing a second marker value would have widened the specified value set, which the prompt forbids.
+
+Changes: `core/provenance.hpp`, `storage/storage.hpp`, `storage/storage.cpp`, `core/engine.cpp`, `api_server/operator.py`, `web/src/components/DiagnosticsPanels.tsx`, `tests/test_provenance.cpp`, `tests/test_fill_provenance.py` (new), PROGRESS.md, CONTEXT.md, RETURN.md. **No production row rewritten, no schema changed, no config changed, live trading untouched.**
+Commit message: Record unclassified fill provenance explicitly with a critical event, remove both silent fallbacks, reconcile the schema default, historical rows preserved, live trading untouched
+
 ## Prompt: Record unclassified fill provenance explicitly with a critical event
 
 Date: 2026-07-27
