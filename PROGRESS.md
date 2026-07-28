@@ -138,6 +138,24 @@ New flags from the feed-work session (2026-07-05, `369b6a6`):
 
 ## Session Log
 
+### 2026-07-27 (Opus 5) — Stopped before applying: the loss cooldown is enforced nowhere, and the confidence floor is global
+
+Session that changed **no Level 1 value**. No source, config, schema or test file touched. Production opened READ-ONLY. Suites unchanged and green from the prior commit: ctest **34 of 34**, pytest **1,110**. Live trading off, live-trading gate and adaptive invariant untouched.
+
+Task 4 says pre-register and commit before changing anything. Writing the pre-registration is what exposed that neither change is the change it appears to be.
+
+**THE COOLDOWN IS NOT GLOBAL. IT DOES NOT EXIST.** `grep -rn "in_cooldown"` returns exactly two lines: a declaration at `risk_gate.hpp:51` and a read at `risk_gate.cpp:28`. **Nothing assigns it** — not the engine, not AccountManager, not the harness, not a test. `AccountManager::VenueState.cooldown_until_ts` is likewise written by no one. Confirmed against the record rather than by reading alone: across 3,627 entry decisions and 1,912 `blocked_trades` rows, **the cooldown has blocked 0 things, ever**. This is the THIRD instance today of a Level 1 key parsed, range-validated, printed at startup and enforced nowhere, after `max_trade_notional_cap_pct`.
+
+**THE PROMPT'S EVIDENCE DESCRIBES A DIFFERENT CONTROL.** "Three losses engaged the brake and suppressed the rest of the trading day" is the **consecutive-loss brake**: global, enforced, engine-written, and **the single largest RiskGate blocker in the record at 1,578 blocks**. The number three is the giveaway, since `max_consecutive_losses` was 3 until earlier today.
+
+**WHY I DID NOT BUILD IT.** Re-keying an enforced control is something a replay can validate. Building a control that has never fired is not a re-keying: it adds a NEW restriction to the money path, in the blocking direction, whose effect no replay of recorded data can measure precisely because no recorded instance exists. The sizing session was already criticised in its own report for asserting safety on a limit its replay could not reach.
+
+**THE CONFIDENCE FLOOR IS GLOBAL, AND TASK 3 SAYS NOT TO APPLY IT.** `min_confidence_default` lives in one `RiskConfig`, held by one `RiskGate` that judges every order from every strategy, checked by one unconditional line at `risk_gate.cpp:75`. `OrderProposal` carries no strategy or sleeve identity, so the gate cannot distinguish the caller even in principle. **Same finding as the sizing session's Task 4, in a second place.** The floor is not decorative: it blocked **334 orders**. Removing it globally weakens the gate for H-F, which did not ask. Task 3's own rule then applies, so it was not applied.
+
+- **THE RECORDING HALF IS ALREADY CORRECT, checked rather than assumed.** Confidence is NULL on 3,614 of 3,615 rejected `entry_decision` rows, and that is right: those rejections occur at the strategy layer (`trend_filter` 1,339, `rsi2_trigger` 1,117, `no_ema_cross` 1,113) **before any factor is composed, so no confidence exists**. Writing 0.0 would fabricate a number nobody computed, the exact defect corrected five times here. Where composition runs, confidence is recorded on all 12 entered rows and the 1 gate-rejected row.
+- **DERIVED AND PRE-REGISTERED FOR THE NEXT SESSION.** A per-symbol re-entry cooldown, if built, is **1440 minutes**, not chosen: EXPERIMENT.md already pre-registers 24 hours as the window collapsing near-identical headlines for one ticker, and the execution-layer cooldown prevents the same failure as that de-duplication, so they must span the same window or one admits what the other excludes. 1440 is also the existing validated clamp in `operator_controls.hpp`. State cost: `bool in_cooldown` becomes a per-symbol map, under 16 kB at a 400-symbol universe, and the real cost is the RiskGate input-struct API change rather than the memory.
+- **NEXT SESSION, MECHANICALLY.** Treat the cooldown as unbuilt rather than misconfigured: either wire it per-symbol at 1440, or **remove `cooldown_minutes_after_loss_breach`** as the 2026-07-18 precedent removed the two scale caps, and stop printing it at startup as though it were live. Take the per-symbol question to `max_consecutive_losses`, the control the evidence actually describes. Build the per-order confidence declaration alongside the text sleeve, never before it, because a gate bypass with no consumer is the unenforced-key defect this session found for the third time.
+
 ### 2026-07-27 (Opus 5) — Level 1 sizing and limits re-derived and applied, and the ceiling everyone planned against turned out to be enforced nowhere
 
 **The first session in this project permitted to change Level 1 values.** Live trading off, live-trading gate and adaptive limit-weakening invariant untouched. Derivations pre-registered and committed at `4e20a20` BEFORE any value changed. ctest **34 of 34**, pytest **1,110 passed**.

@@ -11,6 +11,92 @@ Model:
 Prompt summary: one line.
 Changes: what changed.
 
+## Prompt: Make the loss cooldown per-symbol and record model confidence without gating on it
+
+Date: 2026-07-27
+Model: Opus 5 (claude-opus-5, 1M context).
+Prompt summary: two Level 1 values were set for a five-position swing strategy holding for days, and a one-session-hold news strategy has a different shape, so both now misfire. Task 1 make the 240-minute loss cooldown PER-SYMBOL rather than global, since news-driven entries are largely independent and a bad outcome on one stock says nothing about the next headline on a different stock. On 2026-07-25 three losses engaged the brake and suppressed the rest of the trading day. State the derived duration and its reasoning, and keep the purpose it must still serve: preventing repeated re-entry into the SAME name as a developing story generates successive headlines about one event, which would take one bet three times while appearing as three observations. Report whether the cooldown is a global single value or already keyed, and what the change costs in state. Task 2 `min_confidence_default` is 0.65, the text sleeve's only participating factor is the model's own confidence, and three measurement sessions established that council confidence carried no information at all, with every individual provider's correlation negative and the pooled positive shown to be a pooling artifact. Setting a threshold on a quantity not yet known to carry information is a guess. Change the arrangement so confidence is RECORDED on every observation and does not gate, expressed as an explicit not-gated state rather than a 0.50 threshold that happens to admit everything, since a later reader would treat 0.50 as meaningful. Stage 4 measures calibration, and only then does confidence become a threshold derived from measured calibration. Task 3 determine whether `min_confidence_default` can be set per strategy or per sleeve or whether it is global, since the sizing session found no per-account dimension anywhere. If a global change would weaken the gate for a strategy that did not ask for it, say so and propose the alternative rather than applying it. Task 4 pre-register and commit before changing anything. Task 5 prove by replay, and if the replay cannot exercise the change say so plainly rather than asserting the change is safe, as the sizing session did for concurrency. Task 6 tests plus mutation tests, checking each mutation actually fails, since the sizing session found its first mutation passed because every assertion was relational. Task 7 document and commit.
+
+CONSTRAINTS HONORED: live trading stays off. The live-trading gate and the adaptive limit-weakening invariant are untouched. Two Level 1 values ARE changed, which this prompt explicitly authorises.
+
+### FINDINGS
+
+**NO LEVEL 1 VALUE WAS CHANGED. Both changes are blocked, for different reasons, and one of them by this prompt's own Task 3 rule. No source, config or schema file was modified. The production database was opened read-only.**
+
+Task 4 says pre-register and commit before changing anything. The pre-registration below is what that step produced, and it is where the work stopped, because writing it down is what exposed that neither change is the change it appears to be.
+
+### TASK 1 — THE COOLDOWN IS NOT GLOBAL. IT DOES NOT EXIST.
+
+The prompt asks me to make a global 240-minute cooldown per-symbol. **There is no cooldown to re-key.**
+
+```
+$ grep -rn "in_cooldown" --exclude-dir=build .
+  risk/risk_gate.cpp:28:    if (s.in_cooldown)
+  risk/risk_gate.hpp:51:    bool in_cooldown = false;
+```
+
+Two lines. A declaration and a read. **`in_cooldown` is assigned by nothing** — not by the engine, not by AccountManager, not by the harness, not even by a test. `AccountManager::VenueState.cooldown_until_ts` is likewise a declared field written by no one. `cooldown_minutes_after_loss_breach = 240` is read from config at `config.cpp:200`, printed in the startup banner at `main.cpp:569`, and consumed by no control.
+
+**Confirmed against the record rather than by reading alone.** Across all 3,627 recorded entry decisions and all 1,912 `blocked_trades` rows in production:
+
+| blocker | entry_decision | blocked_trades |
+|---|---|---|
+| cooldown | **0** | **0** |
+| consecutive-loss brake | 17 | **1,578** |
+| confidence floor | 1 | 334 |
+
+**The cooldown has never blocked anything, ever.** This is the third instance today of the same defect class, after `max_trade_notional_cap_pct` and alongside it: a Level 1 key that is parsed, range-validated, printed at startup, and enforced nowhere. The 2026-07-18 precedent removed two such keys for exactly this.
+
+**SO THE PROMPT'S PREMISE MAPS TO A DIFFERENT CONTROL.** "On 2026-07-25 three losses engaged the brake and suppressed the rest of the trading day" describes the **consecutive-loss brake**, not the cooldown. That brake is global, is enforced at `risk_gate.cpp`, is written by the engine (`pstate_.consecutive_losses = win ? 0 : pstate_.consecutive_losses + 1`), and is **the single largest RiskGate blocker in the entire record at 1,578 blocks**. The number three is the giveaway: `max_consecutive_losses` was 3 until earlier today.
+
+**WHY I DID NOT BUILD IT.** Converting an enforced global control to a per-symbol one is a re-keying that a replay can validate. Building a control that has never once fired is not a re-keying. It would add a NEW restriction to the money path, in the direction of blocking trades, whose effect no replay of recorded data can measure precisely because there is no recorded instance of it firing. That is the opposite of this session's method, and the sizing session was already criticised in its own report for asserting safety on a limit the replay could not reach.
+
+**THE CORRECTED DESIGN, pre-registered for a session that has the premise right:**
+
+- **The control that actually needs per-symbol keying is `max_consecutive_losses`, not the cooldown.** It is global, enforced, and demonstrably the thing that suppresses days. The crypto session already proved the cross-contamination shape: crypto losses consumed the shared brake and blocked equity entries, and removing crypto freed it, moving 42 equity decisions.
+- **Derived duration for a per-symbol re-entry cooldown, if one is built: 1440 minutes.** Not chosen. EXPERIMENT.md already pre-registers 24 hours as the window in which near-identical headlines for one ticker collapse to a single observation (`story_group_id`). The cooldown's stated purpose is preventing one developing story from being taken as three bets. **The execution-layer cooldown and the analysis-layer de-duplication prevent the same failure, so they must span the same window, or one admits what the other excludes.** 1440 is also the existing validated upper clamp in `operator_controls.hpp`.
+- **State cost:** replacing `bool in_cooldown` with `std::map<std::string,long> cooldown_until_epoch_by_symbol` on `PortfolioState`. Bounded by the traded universe, 400 symbols at roughly 40 bytes, so under 16 kB. Trivial in memory and a real API change to the RiskGate's input struct, which is the part that needs the care.
+- **Throughput cost: none.** One entry per symbol per 24h against a 10-trades-per-day ceiling and a 400-symbol universe never binds.
+
+### TASK 2 AND 3 — CONFIDENCE IS GLOBAL, AND TASK 3 SAYS DO NOT APPLY IT
+
+**THE SCOPE ANSWER: `min_confidence_default` is GLOBAL, with no per-strategy or per-sleeve dimension.** It lives in `config::RiskConfig`, one instance is constructed at engine startup, and one `RiskGate` holds it and judges every order from every strategy. The check is a single unconditional line:
+
+```
+risk_gate.cpp:75:    if (o.confidence < limits_.min_confidence_default)
+risk_gate.cpp:76:        fail("confidence below min_confidence_default");
+```
+
+`OrderProposal` carries `confidence` but nothing identifying the strategy or sleeve, so the gate cannot distinguish the caller even in principle. **This is the same finding as the sizing session's Task 4, in a second place: the RiskGate has no per-account, per-sleeve, or per-strategy dimension anywhere.**
+
+**WHAT A GLOBAL CHANGE WOULD COST.** Setting the floor to not-gated removes it for every strategy passing the gate, including H-F, which did not ask and whose confidence has not been shown to be uninformative. In the record the floor is not decorative: it blocked **334 orders**. Removing it globally admits those 334 and every future equivalent.
+
+**Task 3 instructs: "If a global change would weaken the gate for a strategy that did not ask for it, say so and propose the alternative rather than applying it." It would. So I am not applying it.**
+
+**THE ALTERNATIVE, pre-registered.** The not-gated state must be scoped to the caller, which requires the dimension that does not exist. Two options, and the second is the one I would build:
+
+1. **A global mode key** (`risk.confidence_gate_mode: gated | recorded_only`). Rejected: it is the global change wearing a different name, and shipping it as `gated` to be flipped later just relocates the problem.
+2. **Declare it on the order.** `OrderProposal` gains an explicit tri-state, defaulting to the current behaviour, so a strategy states whether its confidence has a measured basis and the gate records the value either way. Existing strategies are byte-identical because the default is unchanged. **This is the only option that does not weaken a gate for a strategy that did not ask.** It should be built by the session that builds the text sleeve, because a gate bypass with no consumer is precisely the unenforced-key defect this same session found three times.
+
+**AND THE RECORDING HALF IS ALREADY CORRECT, which I checked rather than assumed.** Confidence is NULL on 3,614 of 3,615 rejected `entry_decision` rows. That is not a gap: those rejections occur at the strategy layer (`trend_filter` 1,339, `rsi2_trigger` 1,117, `no_ema_cross` 1,113) **before any factor is composed, so no confidence exists yet.** Writing 0.0 there would fabricate a number nobody computed, which is the exact defect this project has corrected five times. Where composition does run, confidence is recorded: all 12 entered rows and the 1 gate-rejected row carry it. **The requirement "recorded on every observation" is satisfied by the project's own absent-versus-zero rule, and the honest reading of the NULLs is that no observation existed to record.**
+
+**When confidence becomes a threshold:** after Stage 4 measures calibration, derived from that measurement. Recorded as the condition for revisiting.
+
+### TASKS 5, 6, 7 — not reached, and why
+
+**Task 5, replay.** Nothing was applied, so there is nothing to replay. Stated plainly rather than reported as a null result, and this is the case the prompt anticipated: "If the replay cannot exercise the change, say so plainly rather than asserting the change is safe."
+
+**Task 6, tests.** No test was added, because a test for a control that was not built would assert behaviour that does not exist. The suites are unchanged and green from the prior commit: **ctest 34 of 34, pytest 1,110 passed.**
+
+**What the next session should do, mechanically:**
+
+1. Treat the cooldown as unbuilt, not misconfigured. Either wire it per-symbol at 1440 minutes as derived above, or **remove `cooldown_minutes_after_loss_breach` as the 2026-07-18 precedent removed the two scale caps**, and stop printing it in the startup banner as though it were live.
+2. Take the per-symbol question to `max_consecutive_losses`, which is the control the prompt's evidence actually describes.
+3. Build the per-order confidence declaration alongside the text sleeve, never before it.
+
+Changes: RETURN.md, PROGRESS.md, CONTEXT.md. **No Level 1 value changed. No source, config or schema file touched. No test added or altered. Live trading off, live-trading gate and adaptive invariant untouched. Production opened read-only.**
+Commit message: Stop before applying: the loss cooldown is enforced nowhere and the confidence floor is global, so neither Level 1 change is the change it appears to be
+
 ## Prompt: Raise the sizer from 0.5 percent and derive the trade and position limits
 
 Date: 2026-07-27
