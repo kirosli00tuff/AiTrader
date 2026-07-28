@@ -11,6 +11,134 @@ Model:
 Prompt summary: one line.
 Changes: what changed.
 
+## Prompt: Propose the stage 0 pre-registration for the news-drift experiment
+
+Date: 2026-07-27
+Model: Opus 5 (claude-opus-5, 1M context).
+Prompt summary: Stage 0 of a staged experiment testing whether LLM judgment of news headlines predicts next-session equity drift. Every prior attempt in this project built first and measured after, and all returned negative, so this one measures first and this session produces the pre-registration that constrains every later stage. **STATUS: a PROPOSED pre-registration, not a locked one**, committed as a proposal for operator review, and the document says so at the top. **This session writes a specification. It builds nothing, collects nothing, calls no provider, and trades nothing.** Task 1 the hypothesis in one sentence, precise enough that a later session could not reinterpret it, including the economic mechanism and why it persists for a fee-paying participant, on the recorded literature basis of delayed information diffusion and limits to arbitrage. Task 2 propose the complete universe rule over the defensible rank 1500 to 5000 band, with the liquidity measure, trailing window, formation schedule, whole-band-or-sample decision, stratification, point-in-time membership, resulting membership at several historical formation dates, what a news source would need to cover, and the size arithmetic against both news coverage and the pre-registered sample size. Task 3 the exact prompt byte for byte, deliberately simple, plus the model (DeepSeek V4 Flash), its cost, caching layout, and exactly what the model does and does not receive. Task 4 the horizon and the actionable moment for both the in-session and out-of-session cases, the provisional 20-minute delay, the publication timestamp definition, and holiday, half-day and non-trading-symbol handling. Task 5 scoring, the unconditional-move benchmark, the clustering unit chosen deliberately against day, sector and news-event confounds, the significance bar with multiple-comparison correction, the required sample size from a stated assumed effect, and the cost hurdle from the liquidity-aware fee model. Task 6 what counts as a negative, and the capacity arithmetic applied BEFORE any collection, stating plainly whether it clears. Task 7 the absent-input rule, since five fabrications are recorded in this project and news absence for a small cap is the common case. Task 8 every recorded field with type and meaning. Task 9 write it to a new EXPERIMENT.md marked PROPOSAL, with an explicit list of open questions left unresolved rather than resolved optimistically.
+
+OPERATOR INSTRUCTION: run autonomously without stopping for confirmation, the operator is away, so where a choice is needed make it, record it, and state the reasoning and what would change it.
+
+CONSTRAINTS HONORED: live trading stays off. No RiskGate logic, no live-trading gate, no adaptive limit-weakening invariant, no Level 1 risk value, no threshold, no strategy parameter, and no engine behavior touched. Nothing was built, collected, called, or traded.
+
+### FINDINGS
+
+**WRITTEN TO `EXPERIMENT.md`, MARKED PROPOSAL PENDING OPERATOR REVIEW, NOT BINDING. Nothing built, nothing collected, no provider called, nothing traded.** The only computation was read-only queries against `analysis_bars.db` to check the proposed universe rule yields a workable membership.
+
+**THE HEADLINE IS THE CAPACITY GATE, applied before collection as instructed, and it does not comfortably clear.**
+
+### THE UNIVERSE RULE
+
+`U-NEWS-1500-5000-stk-w60-m40-p5-s400`. Median daily dollar volume over the 60 trading sessions **ending the session BEFORE** the formation date (excluded on purpose: a window containing D decides membership on a bar the period it governs can trade on), at least 40 of 60 bars, median close at or above 5.00 USD, no listing-segment break, ranks **1500 to 5000**, ties on symbol ascending. Formation on the first session of each calendar quarter from the exchange calendar. **400 symbols, 100 per stratum** across four equal rank strata (1500-2374, 2375-3249, 3250-4124, 4125-5000), uniform at random within a stratum, seeded from `sha256(rule_id + formation_date)` so the draw is reproducible and chosen by nobody. Membership holds for the quarter; **a delisted name stays until it stops trading.**
+
+Checked against data:
+
+| formation | window | eligible pool | band members | ADV @1500 | ADV @5000 |
+|---|---|---|---|---|---|
+| 2020-01-02 | 2019-10-07 .. 2019-12-31 | 7,844 | 3,501 | $21,108,236 (RVLV) | $310,358 (CTAC) |
+| 2023-01-03 | 2022-10-06 .. 2022-12-30 | 8,964 | 3,501 | $30,599,824 (VMI) | $589,725 (TERN) |
+| 2026-01-02 | 2025-10-07 .. 2025-12-31 | 9,999 | 3,501 | $59,716,980 (LIF) | $1,327,867 (HYDR) |
+
+**THE TABLE EXPOSED A PROBLEM THE COST CALIBRATION HID.** Rank is not a stable proxy for ADV across time. Rank 5000 held $1.33M ADV in 2026 and $310k in 2020, which the calibration places in **tier 5 or 6 at a 6.63 to 43.21 bp hurdle**, not the 4.87 bp the band was justified on. Proposed resolution: charge cost **per observation** from the symbol's own ADV and price, never a band average. The SELECTION side stays unresolved and is Open Question 4.
+
+**News source requirement:** 400 US-listed common equities per quarter, thin end at ~300k USD ADV, per-headline publication timestamp at minute resolution, ~400 symbol-day queries per trading day, which is under 7 minutes against the integrated Finnhub 60/min free tier. **Small-cap coverage is unverified and is Open Question 1.**
+
+### THE EXACT PROMPT
+
+DeepSeek V4 Flash, temperature 0, `max_tokens` 60. System block is the byte-identical cached prefix; the ticker and headline are the only variable content and sit last.
+
+**System:**
+
+```
+You judge whether a news headline is likely to move a US-listed stock's price by the next market close.
+
+Reply with exactly one JSON object and nothing else, in this form:
+{"judgment": "POSITIVE", "reason": "<at most 20 words>"}
+
+judgment must be exactly one of POSITIVE, NEGATIVE, NEUTRAL.
+
+POSITIVE means you expect this stock to outperform the broad market by the next close.
+NEGATIVE means you expect this stock to underperform the broad market by the next close.
+NEUTRAL means you expect no material difference either way.
+
+You are given the ticker and the headline text. You have no price, no chart, no volume, no indicator, and no other information, and you must not assume any.
+
+Do not answer NEUTRAL to be safe. Answer NEUTRAL only when the headline genuinely carries no directional information about this company.
+```
+
+**User:**
+
+```
+TICKER: {ticker}
+HEADLINE: {headline}
+```
+
+Receives the ticker and the headline. **Does not receive** price, return, volume, volatility, indicator, regime, sector, market cap, liquidity rank, stratum, date, time of day, prior verdicts, or any other headline. Pricing read 2026-07-27: $0.14 / $0.0028 / $0.28 per 1M (input miss / input hit / output), **~$0.02 cached or ~$0.07 uncached for the whole collection.**
+
+**HARD-RULE CONFLICT REPORTED, NOT RESOLVED.** DeepSeek is not among CLAUDE.md's four approved model strings. Read narrowly the rule governs the LLM COUNCIL and this is a separate subsystem; read broadly it governs the repository. **CLAUDE.md wins and the conflict is reported.** Accepting this proposal means amending that hard rule.
+
+### SAMPLE SIZE ARITHMETIC
+
+Assumed effect **30 bp gross** less **5 bp** representative cost = **25 bp net**. Residual SD taken conservatively at **180 bp** (measured band volatility 2.41 percent S1-S2, 1.76 percent S3-S4, less the market factor the benchmark removes).
+
+```
+n = (z_alpha/2 + z_beta)^2 * sigma^2 / delta^2
+  = (2.50 + 0.84)^2 * (180/30)^2        80% power, Bonferroni z for 4 tests
+  = 11.156 * 36  =  402 independent observations
+
+day-clustering design effect, k = 40 obs/day, rho = 0.05:
+  DE = 1 + 39*0.05 = 2.95   ->   402 * 2.95 = 1,186
+
+collection feasibility:
+  400 symbols x 0.10 headlines/symbol/day        =    40 headlines/day
+  40 x 60 trading days                           = 2,400 raw
+  x 0.75 surviving delay and hygiene filters     = 1,800 scorable
+```
+
+**Pre-registered: 1,000 scorable observations across at least 60 day clusters, running until BOTH are met**, hard stop 120 trading days, and **the realised rho is recomputed and the requirement raised if it exceeds 0.05.** The 1,000 sits below the 1,186 deliberately, and that gap is stated rather than hidden: rho is an assumption. At a pessimistic 0.05 headlines/day the yield is 900 and does not clear, which the running-until rule catches instead of a mid-experiment sample increase.
+
+**Clustering by DAY**, chosen deliberately: the market-wide move is the largest correlated component of a one-session return, and benchmarking against the same-window unconditional move already removes most of it. Sector is recorded and reported as a secondary robustness variance. News-event clustering is handled by de-duplication plus a `story_group_id`, with a re-run clustered on it if more than 10 percent of observations share one.
+
+### THE CAPACITY GATE RESULT
+
+**A 10x discrepancy had to be resolved first, and both figures turned out right about different things.** Verified in config:
+
+| key | value | meaning |
+|---|---|---|
+| `risk.max_trade_notional_cap_pct` | 0.05 | the Level-1 **ceiling** the RiskGate enforces: 5,000 USD |
+| `sizing.default_risk_per_trade_pct` | 0.005 | what the sizer actually **sends**: 500 USD base |
+| `sizing.default_position_scale_cap` | 1.0 | scale multiplier, so 100 to 500 USD in practice |
+
+```
+AT THE CONFIGURED SIZER (500 USD max, 10 trades/day cap, ~2,520 trades/year):
+  turnover           = 2,520 x 500 = 1,260,000 USD/year
+  required net edge  = 2,500 / 1,260,000 = 19.8 bp per trade
+  assumed available  = 25 bp net
+  CLEARS BY 5.2 bp, a 26 percent margin
+
+AT THE LEVEL-1 CEILING (5,000 USD):
+  required net edge  = 2,500 / 12,600,000 = 2.0 bp per trade
+  CLEARS COMFORTABLY
+```
+
+**STATED PLAINLY: at the configured sizing it does not comfortably clear.** A three-tick market in the thin strata raises the hurdle from 4.87 to 13.45 bp and takes the net to **16.5 bp, below the 19.8 required**. Halving trade frequency doubles the requirement to 39.6 bp. "Returns decline as adoption rises" is part of the mechanism. **It clears only if effect size, tick width and trade frequency all land favourably, and fails if any one does not.** It clears comfortably only at the Level-1 ceiling, which would need `default_risk_per_trade_pct` raised tenfold, a sizing change with its own justification and risk review that is **not part of this experiment**.
+
+**Recorded so it cannot be blurred later: a statistically significant positive that does not clear the capacity floor is a finding, not a strategy.** The measurement is still worth making at ~$0.07.
+
+### OPEN QUESTIONS, UNRESOLVED
+
+1. **Small-cap news coverage is unverified.** If real coverage is an order of magnitude thinner at the thin end, the strata the mechanism predicts most strongly are the strata with no data, and the experiment measures the liquid end while claiming the thin one.
+2. **The 0.10 headlines/symbol/day arrival rate is an assumption.** The whole sample-size arithmetic rests on it.
+3. **The 180 bp residual and rho 0.05 are assumptions**, both feeding required n, both recomputable from collected data before the stop rule fires.
+4. **Rank drifts against ADV across the period.** Per-observation costing handles the cost side; the selection side is unresolved, since rank 5000 in 2020 and in 2026 are different kinds of company.
+5. **DeepSeek V4 Flash is not an approved model string under CLAUDE.md.**
+6. **No provider reliability data exists for DeepSeek**; the `model_failed` versus `source_failed` split assumes its error shapes are distinguishable.
+7. **Short-side feasibility is untested, and this is the most consequential item.** The mechanism is strongest on NEGATIVE news, acting on it means shorting, borrow availability and cost in this band are modelled nowhere, and the fee model has no borrow term. **The single strongest predicted case may be the one that cannot be traded**, leaving the POSITIVE-only subset whose effect the literature places lower.
+8. **The benchmark's own cost is not modelled.** Comparing a costed strategy against an uncosted benchmark is the error the buy-and-hold work already corrected once.
+
+Changes: `EXPERIMENT.md` (new), PROGRESS.md, RETURN.md. **CLAUDE.md and CONTEXT.md deliberately NOT updated, since nothing is decided yet.** No code, no config, no schema, no test. No provider call and no network call except one read of published DeepSeek pricing. Production database never opened. Live trading untouched.
+Commit message: Propose the stage 0 pre-registration for the news-drift experiment, specification only, nothing built, pending operator review
+
 ## Prompt: Repo cleanup before a new subsystem, with identify-before-moving on OLD/
 
 Date: 2026-07-27
