@@ -11,6 +11,127 @@ Model:
 Prompt summary: one line.
 Changes: what changed.
 
+## Prompt: Raise the sizer from 0.5 percent and derive the trade and position limits
+
+Date: 2026-07-27
+Model: Opus 5 (claude-opus-5, 1M context).
+Prompt summary: **this session changes Level 1 sizing and limit values, frozen throughout this project, and that is deliberate and is the whole purpose of the session.** Every change is derived, pre-registered, and proven by replay before it is applied. WHY: EXPERIMENT.md Task 6 established that the configured sizer sends 100 to 500 USD per position while the RiskGate ceiling permits 5,000, so two different keys were being conflated in planning. At the configured sizer a strategy needs 19.8 bp net per trade to clear the 2,500 USD annual capacity floor, which is marginal against every optimistic assumption. At 0.5 percent risk per trade the system cannot produce a meaningful dollar result at any plausible edge, which is a defect rather than conservatism. The trade and position limits were set for a five-position swing strategy holding for days, and a one-session-hold news strategy has a different shape. Task 1 report every key participating in sizing and in the trade and position limits, its value, what it controls, which layer enforces it, distinguishing a RiskGate CEILING that grants permission from a SIZER value that determines what is sent, and stating where the two are conflated in code, config, documentation or the tracking files. Task 2 derive rather than accept the operator's proposed 5 percent. Task 3 derive the limits from the strategy shape, showing the arithmetic and marking every assumption. Task 4 determine whether the consecutive-loss brake, the daily loss limit, the trade count and the position count are per-account or global. Task 5 pre-register in RETURN.md and COMMIT before changing anything, then apply. Task 6 replay, stopping if the limits engage often enough to make the system unmeasurable. Task 7 tests, including one pinning the sizer and ceiling as distinct, plus a mutation test. Task 8 document and commit.
+
+**THE FRAMING, RECORDED BEFORE ANY NUMBER IS CHOSEN and carried verbatim from the prompt: these values are being changed because the configured sizing cannot produce a meaningful result at any edge, and because the limits were designed for a different strategy shape. They are NOT being changed to make a marginal hypothesis pass. Any number chosen must be one I would defend without knowing the outcome.**
+
+CONSTRAINTS HONORED: live trading stays off. The live-trading gate and the adaptive limit-weakening invariant are untouched. Level 1 values ARE changed, which this prompt explicitly authorises and which no prior session was permitted to do.
+
+### PRE-REGISTRATION (committed BEFORE any value was changed)
+
+**THE FRAMING TEST APPLIED TO EVERY NUMBER BELOW: would I defend this without knowing the outcome? The rule I used is to take the SMALLEST value that meets the stated requirement, because the smallest sufficient number is the one least suspected of being chosen to make something pass.**
+
+#### TASK 1 — What is actually configured, and the correction I owe
+
+| key | value | what it controls | enforced where |
+|---|---|---|---|
+| `sizing.default_risk_per_trade_pct` | 0.005 | **SIZER.** base notional = pct x equity | `engine.cpp:1336`, `backtest_main.cpp:411` |
+| `sizing.default_position_scale_cap` | 1.0 | **SIZER.** caps the scale multiplier | `engine.cpp:1338` |
+| `risk.max_trade_risk_pct_of_equity` | 0.005 | **CEILING.** rejects if notional exceeds it | `risk_gate.cpp:43` |
+| `risk.max_trade_notional_cap_pct` | 0.05 | **NOTHING. UNENFORCED.** | **nowhere** |
+| `risk.max_total_open_risk_pct` | 0.03 | CEILING. book notional | `risk_gate.cpp:47` |
+| `risk.max_open_positions_total` | 5 | CEILING. concurrent positions | `risk_gate.cpp:52` |
+| `risk.max_open_positions_per_venue` | 2 | CEILING. per venue | `risk_gate.cpp:54` |
+| `risk.max_exposure_per_symbol_pct` | 0.02 | CEILING | `risk_gate.cpp:59` |
+| `risk.max_exposure_per_market_pct` | 0.02 | CEILING | `risk_gate.cpp:63` |
+| `risk.max_exposure_per_category_pct` | 0.05 | CEILING | risk_gate.cpp |
+| `risk.max_consecutive_losses` | 3 | brake | `backtest_main.cpp:514`, engine |
+| `risk.max_daily_loss_total_pct` | 0.03 | halt | `risk_gate.cpp`, engine |
+| `risk.max_trades_per_day` | 10 | CEILING. entries/day | `engine.cpp:1230` |
+
+**THREE CORRECTIONS, AND THE FIRST ONE IS MINE FROM EARLIER TODAY.**
+
+1. **`max_trade_notional_cap_pct` IS NOT ENFORCED ANYWHERE.** Its only occurrences are config parsing (`config.cpp:206`), range validation (`config.cpp:550`), the struct default, the yaml, and three documents I wrote today. **EXPERIMENT.md:522 and PROGRESS.md:147 call it "the Level-1 ceiling the RiskGate enforces". That is false and I wrote it.** `config.hpp:105` says so in its own comment: "documented notional ceiling; the gate's own max_trade_risk_pct_of_equity (0.005) stays the binding, tighter cap." This is the same defect class as `whale_position_scale_cap` and `dnn_position_scale_cap`, removed 2026-07-18 for claiming a safety property the code did not provide. **The whole "5,000 USD ceiling" framing in EXPERIMENT.md rests on a key that does nothing.**
+2. **THE REAL CEILING AND THE SIZER ARE THE SAME NUMBER, 0.005.** `risk_gate.cpp:43` rejects when notional exceeds `max_trade_risk_pct_of_equity x equity` = 500 USD, and the sizer sends at most 500 USD. The sizer sits exactly ON the gate. **Raising the sizer without raising that gate rejects every order.**
+3. **THE EFFECTIVE POSITION CAP IS 2, NOT 5.** `max_open_positions_per_venue: 2` binds before `max_open_positions_total: 5`, and since the crypto removal every tradeable symbol is venue `alpaca`. **The real book today is 2 positions x 500 USD = 1,000 USD, one percent of capital.** Also: `Instrument.market` is set to the symbol itself, so `max_exposure_per_market_pct` is a functional duplicate of `max_exposure_per_symbol_pct`, and `category` is `equity` for every symbol, so `max_exposure_per_category_pct` caps the entire book.
+
+#### TASK 2 — What 5 percent means, derived
+
+At 100,000 equity, 5 percent is 5,000 USD base, 1,000 to 5,000 USD sent.
+
+**Capacity:** 2,520 trades/year x 5,000 = 12.6M turnover, required edge = 2,500/12.6M = **1.98 bp**. Clears easily.
+
+**But 5 percent is inconsistent with FOUR existing Level-1 limits, and every one rejects the FIRST order:**
+
+| limit | value at 100k | a 5,000 USD order |
+|---|---|---|
+| `max_trade_risk_pct_of_equity` 0.005 | 500 | **rejected** |
+| `max_total_open_risk_pct` 0.03 | 3,000 | **rejected** |
+| `max_exposure_per_symbol_pct` 0.02 | 2,000 | **rejected** |
+| `max_exposure_per_category_pct` 0.05 | 5,000 | fills the whole book with one position |
+
+**They are NOT mutually consistent.** Applying 5 percent alone produces a system that trades zero. Five positions at 5 percent is 25 percent deployed, against a 3 percent daily loss limit: a 12 percent adverse book move halts the day, which on a concentrated five-name one-session book is reachable variation rather than a tail.
+
+#### TASK 2 CONCLUSION — I derive 2 percent, not 5
+
+Capacity floor 2,500 USD/year. EXPERIMENT.md's optimistic net edge is 25 bp; the honest planning figure is half that, **10 bp**, because that document's own capacity gate showed 25 bp assumes the middle of the literature AND the cost floor AND full trade frequency.
+
+```
+turnover required = 2,500 / 0.0010 = 2,500,000 USD/year
+at 2,520 trades/year   -> 992 USD per position
+at 1,260 trades/year   -> 1,984 USD per position
+```
+
+**The requirement is met at roughly 1,000 to 2,000 USD, which is 1 to 2 percent of equity. I take 2 percent, the top of the derived range, and no higher.**
+
+At 2 percent: 2,000 USD per position, 10 positions = 20 percent deployed, required edge at 10 trades/day = 2,500/5.04M = **4.96 bp**, a 2x margin on the honest 10 bp figure and a 5x margin on the optimistic 25 bp. 5 percent buys margin the requirement does not ask for, at the cost of relaxing four Level-1 limits further and bringing the daily-loss brake into contact with normal variation. **Under the framing test, 2 percent is the number I would defend not knowing the outcome. 5 percent is not.**
+
+#### TASK 3 — The limits, derived from the strategy shape
+
+Every input marked. **ASSUMPTION** means unmeasured.
+
+```
+400 symbols                                        universe rule, EXPERIMENT.md
+x 0.10 headlines/symbol/day   ASSUMPTION           = 40 headlines/day
+x 0.75 surviving delay+hygiene ASSUMPTION          = 30 actionable/day
+x 0.33 directional (67% NEUTRAL) ASSUMPTION        = 10 candidates/day
+```
+
+**THE ONE-SESSION-HOLD IDENTITY, which is the whole reason the old limits do not fit.** A position opened today closes at tomorrow's close, so every entry made in a day is still open when the next day's entries arrive. **Peak concurrent positions equals entries per day.** A five-position cap on a ten-entry-per-day strategy throttles it to half, and the per-venue cap of 2 throttles it to a fifth.
+
+| derived | value | derivation |
+|---|---|---|
+| `max_trades_per_day` | **10, unchanged** | equals the derived candidate rate; already correct |
+| `max_open_positions_total` | 5 -> **10** | the one-session identity: concurrency = daily entries |
+| `max_open_positions_per_venue` | 2 -> **10** | one venue holds the whole book now |
+| `max_consecutive_losses` | 3 -> **6** | see below |
+
+**The brake, derived.** At a designed ~50 percent hit rate and 10 trades/day, P(a run of k losses in 10) is about (11-k) x 0.5^k. At k=3 that is 8 x 0.125 = **100 percent of days**, so the brake fires daily and the system never trades. At k=6 it is 5 x 0.0156 = **7.8 percent of days**. **6 is the smallest k keeping daily engagement under 10 percent.** The brake exists to stop a broken strategy, not normal variation.
+
+**Ceilings that must move to admit a 2,000 USD position and a 20,000 USD book:**
+
+| key | old | new | why |
+|---|---|---|---|
+| `max_trade_risk_pct_of_equity` | 0.005 | **0.025** | must exceed the 0.02 sizer, and stay a genuine ceiling ABOVE it rather than equal to it |
+| `max_total_open_risk_pct` | 0.03 | **0.25** | 10 x 2% = 20%, plus headroom |
+| `max_exposure_per_symbol_pct` | 0.02 | **0.025** | one position must fit without sitting exactly on the boundary |
+| `max_exposure_per_market_pct` | 0.02 | **0.025** | market == symbol, so it tracks the symbol cap |
+| `max_exposure_per_category_pct` | 0.05 | **0.25** | every symbol is category `equity`, so this caps the whole book |
+| `max_daily_loss_total_pct` | 0.03 | **0.03 unchanged** | 3,000 on a 20,000 book is a 15% adverse move, far outside one-session variation |
+
+**What the operator would need to believe for a different number.** For a HIGHER sizer: that the net edge is below 10 bp and volume must compensate, or that the capacity floor is above 2,500 USD. For a LOWER sizer: that 20 percent deployed is too much for a one-session book, which is a risk-appetite judgment the capacity arithmetic cannot settle. For a HIGHER position count: a lower NEUTRAL rate than the assumed 67 percent, which Stage 1 measures. **All three assumptions in the candidate-rate arithmetic are unmeasured, and if Stage 1 measures them differently these limits must be re-derived, not stretched.**
+
+#### TASK 4 — Per-account or global
+
+| control | scope | evidence |
+|---|---|---|
+| consecutive-loss brake | **GLOBAL**, one int | `risk_gate.hpp:49` `PortfolioState.consecutive_losses`. A second per-VENUE copy exists at `account_manager.hpp:23` |
+| daily loss limit | **BOTH**, global and per-venue | `risk_gate.hpp:41-42` |
+| trade count | **GLOBAL**, one int in the Engine | `engine.hpp:488` `trades_today_` |
+| position count | **BOTH**, global and per-venue | `risk_gate.hpp:44-45` |
+
+**THERE IS NO PER-ACCOUNT DIMENSION ANYWHERE. The map key is VENUE, not account.** Two sleeves on separate paper accounts would both be venue `alpaca`, so every per-venue map collides and every global counter is shared. **Within one engine process, two sleeves cannot be isolated.** The crypto session already demonstrated the consequence in a smaller form: crypto losses consumed the shared consecutive-loss brake and blocked equity entries, and removing crypto freed it, changing 42 equity decisions.
+
+**What would need to change:** either run each sleeve as its own engine process with its own database, which gives isolation for free and is the only option available today, or add an account dimension to `PortfolioState` and to `trades_today_`, which is a real change to the RiskGate's state model and is not in scope here. **Recorded as a blocking prerequisite for two simultaneous sleeves.**
+
+### FINDINGS
+
+_(applied and replayed below, completed at the end of this session)_
+
 ## Prompt: Propose the stage 0 pre-registration for the news-drift experiment
 
 Date: 2026-07-27
