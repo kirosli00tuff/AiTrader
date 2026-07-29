@@ -11,6 +11,31 @@ Model:
 Prompt summary: one line.
 Changes: what changed.
 
+## Prompt: The three fixes and the stale figures
+
+Date: 2026-07-29
+Model: Fable 5 (claude-fable-5, 1M context).
+Prompt summary: Queued work, prompt 2 of 2. AUDIT-2026-07-29.md records three latent fabrication candidates and several stale documented figures, none fired, every one of the seven recorded fabrications was found by someone looking before it fired. Task A close the three latent fallbacks so absence refuses rather than returning a plausible number: the experiment scoring path inheriting the engine's flat-cost fallback when ADV is absent (optimistic 14x to 40x there), missing provider usage reading as zero spend against the ceiling, and a fees.load regex miss resurrecting a stale default plus unpinned fallback-default drift when a non-shipped yaml omits keys. For each, report whether it could fire, what it would have produced, and what it now does instead, demonstrated by producing it. Task B correct CLAUDE.md's stale 1.14 to 4.87 bp hurdle figures (noting the crypto-exclusion conclusion still stands on tier-1 names at 0.5 to 0.9 bp and that tier 4 now sits within 20 percent of crypto's 50 bp), PROGRESS Current State's ctest 7/7 against 34, and the 14 hard checks claim against 18 fail sites, then sweep for any other overtaken figure. Task C tests covering each closed fallback including a non-shipped yaml omitting keys refusing rather than defaulting, mutation-tested with each mutation verified to fail, full ctest and pytest green with no existing test weakened. Task D update PROGRESS.md, record in CONTEXT.md Key Decisions that an uncomputable cost refuses rather than defaulting small and that unknown provider usage is not zero spend, complete this entry, commit and push.
+
+CONSTRAINTS HONORED: live trading off. No RiskGate logic, no live-trading gate, no adaptive limit-weakening invariant, no Level 1 value, no threshold, no strategy parameter. No provider call, production databases untouched, all demonstrations against gitignored scratch DBs.
+
+### FINDINGS
+
+**ALL THREE LATENT FALLBACKS CLOSED, EACH DEMONSTRATED BY PRODUCING IT. ctest 34 of 34. pytest 1,200 passed, 1 skipped, 2 pre-existing container-artifact failures reproduced identically at HEAD. Live trading untouched.**
+
+**FALLBACK 1, could fire: yes.** `collect.resolve_pending` coerced a NULL `adv_usd_at_formation` to 0.0 and `resolve_one` fell to the engine's flat 1.3 bp fallback, costing a band symbol 14x to 40x optimistically. Now: the NULL passes through and `resolve_one` excludes the row as `adv_unavailable`, cost and net NULL. Produced through the real resolve pass: NULL-ADV row lands `excluded/adv_unavailable/cost NULL`, its ADV-bearing control resolves at 23.14 bp. The engine's own pinned fallback is untouched.
+
+**FALLBACK 2, could fire: yes**, on any response without a usage block. It would have recorded the call at cost 0.0 and the ceiling would under-count. Now: the row refuses as `model_failed/usage_missing` and the ceiling is charged the projected per-call cost. Partial usage (missing `output_tokens`) also refuses. Absent cache fields still read as no caching, a documented semantic. Produced through the real Scorer: state `model_failed`, ceiling charged 0.000465.
+
+**FALLBACK 3, could fire: yes**, for any yaml omitting a key or writing one the regex missed. It would have resurrected the stale hard-coded default, and the prefix-matching pattern additionally read `1e-3` as 1.0, a 1000x misread found while closing it. Now: `fees.load()` raises `FeeKeyUnreadable` naming every unreadable key, the hard-coded defaults are gone, and scientific notation parses correctly. Produced: a yaml missing `tier3_spread_tick_multiple` refuses naming the key, and `1e-3` reads 0.001.
+
+**TASK B.** CLAUDE.md scope note corrected: 0.5 to 0.9 bp for the tier-1 names the engine trades, the superseded 1.14 to 4.87 recorded as the one-tick floor, tier 4's measured 41.2 bp noted within 20 percent of crypto's 50, conclusion stands on tier 1 with the reasoning recorded as narrowed. CONTEXT.md's scope decision bracket-corrected (the 10x-to-44x ratio no longer holds band-wide, tier-1 gap 56x to 100x). PROGRESS "ctest 7/7" corrected to 34/34, verified by running. "RiskGate: 14 hard checks, tested" corrected to 18 refusal sites with "tested" scoped to the predicates (8 sites recorded untested at wiring). Sweep: the "14" never lived in CLAUDE.md despite the audit's attribution. EXPERIMENT.md's capacity text still says "open positions at 5" against the re-derived Level 1 value 10, reported not amended because the document is binding and the 10/day cap binds that arithmetic either way. Nothing else found overtaken.
+
+**TASK C.** 12 new tests in `tests/test_latent_fallbacks.py`, each closed path produced. Mutations verified: removing the ADV precondition fails 1 test, restoring the or-zero usage reader fails 2, restoring the default-on-miss reader fails 3. The 2 pytest failures (`test_research_sweep`: `/usr/bin/time` absent in the remote container, host-memory-dependent width arithmetic at 16 GB) reproduce identically with this session's changes stashed at HEAD, verified, so nothing was weakened.
+
+Changes: `backtest/fees.py`, `news_experiment/outcomes.py`, `news_experiment/collect.py`, `news_experiment/scoring.py`, `news_experiment/spec.py`, `tests/test_latent_fallbacks.py` (new), CLAUDE.md, CONTEXT.md, PROGRESS.md, RETURN.md.
+Commit message: Close three latent cost and usage fallbacks, correct the stale hurdle and test-count figures, live trading untouched
+
 ## Prompt: Amendment 6, the permutation null
 
 Date: 2026-07-29

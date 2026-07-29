@@ -153,8 +153,11 @@ STATES = (STATE_NO_NEWS, STATE_JUDGED, STATE_MODEL_FAILED,
 # cannot use, which means the effective sample is smaller than the raw headline
 # count and Task 5's power arithmetic is optimistic. A combined rate answers
 # neither. `error_class` remains the cause axis inside each.
+# `usage_missing` added 2026-07-29: a response whose usage block is absent has
+# an UNKNOWN cost, and unknown is not free. The row refuses and the ceiling is
+# charged the projected per-call cost.
 ERROR_CLASSES_MODEL_FAILED = ("transport", "timeout", "http_status",
-                              "unparseable", "exhausted")
+                              "unparseable", "exhausted", "usage_missing")
 ERROR_CLASSES_PRE_CALL = ("no_publication_time", "clock_inconsistent",
                           "duplicate_headline", "calendar_exhausted")
 
@@ -171,6 +174,14 @@ EXCLUSION_DAY_EXCLUDED = "day_excluded_source_failures"
 # about our own data. A symbol may have traded perfectly on a session we had
 # simply not loaded.
 EXCLUSION_CALENDAR_EXHAUSTED = "calendar_exhausted"
+# A row whose formation ADV is absent cannot be costed (2026-07-29). The fee
+# model's flat legacy fallback for unknown liquidity is deliberate in the
+# ENGINE and pinned there, but in THIS path it would price a band symbol at
+# 1.3 bp against a measured 17.8 to 41.2, optimistic 14x to 40x, which is the
+# fabrication shape the audit named. Band membership guarantees ADV exists,
+# so this reason firing means broken data, and the row refuses rather than
+# scoring with a fabricated small cost. Task 7: absence refuses.
+EXCLUSION_ADV_UNAVAILABLE = "adv_unavailable"
 # `delay_rolled` REMOVED by AMENDMENT 4. Task 4 scores a rolled headline and
 # Task 8 could not simultaneously exclude it. The operator confirmed Task 4:
 # the 20-minute delay moves a headline to a moment it could actually have been
@@ -185,6 +196,7 @@ EXCLUSION_REASONS = (
     EXCLUSION_DUPLICATE_HEADLINE,
     EXCLUSION_DAY_EXCLUDED,
     EXCLUSION_CALENDAR_EXHAUSTED,
+    EXCLUSION_ADV_UNAVAILABLE,
 )
 
 # SETTLED BY AMENDMENT 4, with the operator's explicit approval. Stage 2 found

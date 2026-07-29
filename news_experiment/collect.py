@@ -516,7 +516,8 @@ def resolve_pending(conn, cfg: RunConfig, cal: Calendar,
         out = outcomes.resolve_one(
             symbol=sym, judgment=judgment, anchor_kind=kind or "",
             anchor_session=(anchor_ts or "")[:10],
-            scoring_session=scoring or "", adv_usd=float(adv or 0.0),
+            scoring_session=scoring or "",
+            adv_usd=(float(adv) if adv is not None else None),
             notional=NOTIONAL_FOR_COST, book=book, cal=cal,
             band_members=band_symbols)
         if out.outcome_state == "pending":

@@ -121,9 +121,9 @@ class Outcome:
 
 
 def resolve_one(*, symbol: str, judgment: str | None, anchor_kind: str,
-                anchor_session: str, scoring_session: str, adv_usd: float,
-                notional: float, book: PriceBook, cal: Calendar,
-                band_members: list[str]) -> Outcome:
+                anchor_session: str, scoring_session: str,
+                adv_usd: float | None, notional: float, book: PriceBook,
+                cal: Calendar, band_members: list[str]) -> Outcome:
     """Fill one row's outcome, or say why it cannot be filled."""
     if not scoring_session or scoring_session not in cal.sessions:
         return Outcome("pending")
@@ -136,6 +136,14 @@ def resolve_one(*, symbol: str, judgment: str | None, anchor_kind: str,
         # Absence, not a zero. Recorded and excluded, never rolled forward.
         return Outcome("excluded",
                        exclusion_reason=spec.EXCLUSION_SYMBOL_DID_NOT_TRADE)
+
+    if adv_usd is None or adv_usd <= 0:
+        # An absent ADV must not fall to the engine's flat 1.3 bp legacy
+        # figure here: in this band that would understate the measured cost
+        # 14x to 40x, silently inflating net_bp. The engine keeps its
+        # deliberate fallback. THIS path refuses (Task 7: absence refuses).
+        return Outcome("excluded",
+                       exclusion_reason=spec.EXCLUSION_ADV_UNAVAILABLE)
 
     ret_1 = end_price / anchor_price - 1.0
     # ret_intraday is "anchor to that session's close". For a CLOSE anchor the

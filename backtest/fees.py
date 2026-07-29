@@ -41,40 +41,79 @@ def crypto_tier(volume_30d_usd: float) -> tuple[float, float, float]:
     return row
 
 
+# Every key the fee model reads. Values live in the yaml ONLY: this module
+# carried hard-coded fallback defaults until 2026-07-29, when the audit named
+# them a latent fabrication (a regex miss or an omitted key would silently
+# resurrect a stale figure). load() now refuses instead of defaulting.
+FEE_KEYS = (
+    "alpaca_crypto_maker_pct",
+    "alpaca_crypto_taker_pct",
+    "alpaca_crypto_tier_volume_threshold_usd",
+    "alpaca_crypto_spread_bp_per_side",
+    "alpaca_equity_commission_bp",
+    "alpaca_equity_regulatory_bp_per_side",
+    "alpaca_equity_spread_bp_per_side",
+    "alpaca_equity_spread_tick_usd",
+    "alpaca_equity_tier1_spread_tick_multiple",
+    "alpaca_equity_tier2_spread_tick_multiple",
+    "alpaca_equity_tier3_spread_tick_multiple",
+    "alpaca_equity_tier4_spread_tick_multiple",
+    "alpaca_equity_tier5_spread_tick_multiple",
+    "alpaca_equity_tier6_spread_tick_multiple",
+    "alpaca_equity_tier1_adv_floor_usd",
+    "alpaca_equity_tier2_adv_floor_usd",
+    "alpaca_equity_tier3_adv_floor_usd",
+    "alpaca_equity_tier4_adv_floor_usd",
+    "alpaca_equity_tier5_adv_floor_usd",
+    "alpaca_equity_tier1_impact_bp_per_1k",
+    "alpaca_equity_tier2_impact_bp_per_1k",
+    "alpaca_equity_tier3_impact_bp_per_1k",
+    "alpaca_equity_tier4_impact_bp_per_1k",
+    "alpaca_equity_tier5_impact_bp_per_1k",
+    "alpaca_equity_tier6_impact_bp_per_1k",
+)
+
+
+class FeeKeyUnreadable(RuntimeError):
+    """A fee key is absent or written in a form the reader cannot parse.
+
+    Raised instead of falling back to a hard-coded default (2026-07-29). A
+    default here is a latent fabrication: a yaml omitting a key, or writing
+    one in a form the regex does not match, would silently cost trades at a
+    stale figure. Absence refuses.
+    """
+
+
 def load(config_path: str = DEFAULT_CONFIG) -> dict:
-    """The fees block as a flat dict, read from the shipped yaml."""
-    keys = {
-        "alpaca_crypto_maker_pct": 0.15,
-        "alpaca_crypto_taker_pct": 0.25,
-        "alpaca_crypto_tier_volume_threshold_usd": 100000.0,
-        "alpaca_crypto_spread_bp_per_side": 0.0,
-        "alpaca_equity_commission_bp": 0.0,
-        "alpaca_equity_regulatory_bp_per_side": 0.15,
-        "alpaca_equity_spread_bp_per_side": 0.5,
-        "alpaca_equity_spread_tick_usd": 0.01,
-        "alpaca_equity_tier1_spread_tick_multiple": 1.0,
-        "alpaca_equity_tier2_spread_tick_multiple": 1.0,
-        "alpaca_equity_tier3_spread_tick_multiple": 8.0,
-        "alpaca_equity_tier4_spread_tick_multiple": 9.0,
-        "alpaca_equity_tier5_spread_tick_multiple": 1.0,
-        "alpaca_equity_tier6_spread_tick_multiple": 1.0,
-        "alpaca_equity_tier1_adv_floor_usd": 277000000.0,
-        "alpaca_equity_tier2_adv_floor_usd": 65300000.0,
-        "alpaca_equity_tier3_adv_floor_usd": 13300000.0,
-        "alpaca_equity_tier4_adv_floor_usd": 2070000.0,
-        "alpaca_equity_tier5_adv_floor_usd": 235000.0,
-        "alpaca_equity_tier1_impact_bp_per_1k": 0.00024,
-        "alpaca_equity_tier2_impact_bp_per_1k": 0.00114,
-        "alpaca_equity_tier3_impact_bp_per_1k": 0.00543,
-        "alpaca_equity_tier4_impact_bp_per_1k": 0.02847,
-        "alpaca_equity_tier5_impact_bp_per_1k": 0.17320,
-        "alpaca_equity_tier6_impact_bp_per_1k": 3.86400,
-    }
+    """The fees block as a flat dict, read from the yaml.
+
+    Refuses on any missing or unparseable key rather than defaulting: the
+    shipped yaml carries every key (pinned by the mirror test), so a miss
+    means either a broken yaml or a value form the reader cannot parse, and
+    both must surface, never silently become a stale number.
+    """
     text = open(config_path).read()
     out = {}
-    for key, default in keys.items():
-        m = re.search(rf"^\s*{key}:\s*([0-9.]+)", text, re.M)
-        out[key] = float(m.group(1)) if m else default
+    unreadable = []
+    for key in FEE_KEYS:
+        # The whole value token is captured and float() decides whether it is
+        # a number. The old pattern ([0-9.]+) took the longest numeric PREFIX,
+        # so `1e-3` read as 1.0, a silent 1000x misread, and anything it could
+        # not prefix-match fell to the stale default. Both paths now refuse,
+        # and scientific notation parses correctly instead of wrongly.
+        m = re.search(rf"^\s*{key}:\s*(\S+)", text, re.M)
+        if m is None:
+            unreadable.append(key)
+            continue
+        try:
+            out[key] = float(m.group(1))
+        except ValueError:
+            unreadable.append(key)
+    if unreadable:
+        raise FeeKeyUnreadable(
+            f"{config_path} is missing or has unparseable values for: "
+            f"{', '.join(unreadable)}. Refusing to cost trades from "
+            f"hard-coded defaults.")
     return out
 
 

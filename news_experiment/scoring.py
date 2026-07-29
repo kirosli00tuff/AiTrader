@@ -43,6 +43,7 @@ ERROR_TIMEOUT = "timeout"
 ERROR_HTTP_STATUS = "http_status"
 ERROR_UNPARSEABLE = "unparseable"
 ERROR_EXHAUSTED = "exhausted"
+ERROR_USAGE_MISSING = "usage_missing"
 
 
 class SpendCeilingReached(RuntimeError):
@@ -177,12 +178,27 @@ def build_request(ticker: str, headline: str, key: str) -> tuple[str, dict, dict
     return ANTHROPIC_URL, headers, payload
 
 
-def _usage(resp: dict) -> tuple[int, int, int, int]:
-    usage = resp.get("usage") or {}
-    return (int(usage.get("input_tokens") or 0),
+def _usage(resp: dict) -> tuple[int, int, int, int] | None:
+    """Token counts from the response, or None when spend is UNKNOWN.
+
+    Until 2026-07-29 a response without a usage block read as zero tokens, so
+    a call whose cost was unknown recorded as FREE and the spend ceiling had
+    a hole exactly where it mattered. Now: `input_tokens` and `output_tokens`
+    must both be present, or the whole usage is unknown and the caller
+    refuses the row and charges the projected cost instead. The two cache
+    fields may be absent, because an absent cache field means no caching
+    happened, which is a documented semantic rather than unknown spend.
+    """
+    usage = resp.get("usage")
+    if not isinstance(usage, dict):
+        return None
+    inp, out = usage.get("input_tokens"), usage.get("output_tokens")
+    if not isinstance(inp, (int, float)) or not isinstance(out, (int, float)):
+        return None
+    return (int(inp),
             int(usage.get("cache_read_input_tokens") or 0),
             int(usage.get("cache_creation_input_tokens") or 0),
-            int(usage.get("output_tokens") or 0))
+            int(out))
 
 
 def _text_of(resp: dict) -> str:
@@ -245,7 +261,21 @@ class Scorer:
         latency = int((time.monotonic() - started) * 1000)
         self.calls += 1
         payload_resp = resp if isinstance(resp, dict) else {}
-        inp, cache_read, cache_write, out = _usage(payload_resp)
+        usage = _usage(payload_resp)
+        if usage is None:
+            # The call happened, so it cost something, and the provider did
+            # not say what. Unknown is not free: the ceiling is charged the
+            # projected per-call cost (the same conservative figure the
+            # pre-call check uses), and the row refuses rather than carrying
+            # a verdict whose accounting is broken.
+            self.failures += 1
+            charged = self.ceiling.projected_per_call
+            self.ceiling.record(charged)
+            return ScoreResult(state=spec.STATE_MODEL_FAILED,
+                               raw_response=_text_of(payload_resp),
+                               error_class=ERROR_USAGE_MISSING,
+                               latency_ms=latency, cost_usd=charged)
+        inp, cache_read, cache_write, out = usage
         cost = cost_usd(inp, out, cache_read, cache_write)
         self.ceiling.record(cost)
 
