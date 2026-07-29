@@ -11,6 +11,21 @@ Model:
 Prompt summary: one line.
 Changes: what changed.
 
+## Prompt: Independent audit after the Level 1 re-derivation and five amendments
+
+Date: 2026-07-29
+Model: Fable 5 (claude-fable-5, 1M context).
+Prompt summary: Queued work, prompt 2 of 2. Assessment only: change no file, run no test suite, start no process, make no network or provider call, read databases with SELECT only, write AUDIT-2026-07-29.md at the repo root beside the existing audit. Task A verify every checkable factual claim in CLAUDE.md, CONTEXT.md and EXPERIMENT.md against code and data. Task B verify the fee model's two halves genuinely agree, that the mirror test would catch a divergence, and that the unmeasured tiers are marked everywhere. Task C hunt the eighth fabrication. Task D name where the discipline is thinner than it claims and whether the under-claiming direction still holds. Task E judge the amended specification on its merits. Task F lead with the three most important findings, separate verified from inferred, update PROGRESS.md, commit and push.
+
+CONSTRAINTS HONORED: assessment only, nothing changed outside the report and tracking entries. CONFLICT REPORTED per CLAUDE.md precedence: the prompt said commit the report alone, CLAUDE.md requires RETURN.md and PROGRESS.md entries, CLAUDE.md wins and the commit carries all three.
+
+### FINDINGS
+
+Three lead findings. (1) CLAUDE.md's scope rationale cites equity band costs of 1.14 to 4.87 bp that the fee model no longer produces (measured tiers 3/4 now yield about 17.8 and 41.2 bp), PROGRESS.md still says ctest 7/7 against 34, and the 14-versus-18 RiskGate check-count gap flagged by the prior audit survived it. (2) The direction of error moved: the near-monotone judgment and Amendment 5 are two post-measurement calls that both landed permissive, both disclosed, named as a pattern before it becomes a habit. (3) The amended primary carries an uncontrolled confound: signed gross excess against a band-wide benchmark does not cancel unconditional news-day drift when judgments are imbalanced, and no shuffled-judgment null is registered. Recommendation, not applied: pre-register a within-day judgment-permutation null before collection. Task B: halves agree at runtime through the shared yaml, presence pinned 18 keys both languages, residual unpinned surface is default-value drift when a non-shipped yaml omits keys. Task C: no realized eighth fabrication, three latent candidates recorded (experiment scoring inherits the flat-cost fallback on absent ADV, missing provider usage reads as zero spend, fees.load regex miss resurrects a stale default). Task D: under-claiming otherwise holds, no holdout reuse, model-capability question still open while stage 3 is unblocked. Task E: the separation is sound, the verdict table is the strongest guard, wording must stay "the pipeline predicts" never "the model understands".
+
+Changes: AUDIT-2026-07-29.md (new), PROGRESS.md, RETURN.md. Nothing else touched.
+Commit message: Independent audit after the Level 1 re-derivation and five amendments, assessment only, nothing changed
+
 ## Prompt: Amendment 5, separate the gross signal question from the net economic question
 
 Date: 2026-07-29

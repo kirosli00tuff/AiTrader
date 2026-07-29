@@ -138,6 +138,21 @@ New flags from the feed-work session (2026-07-05, `369b6a6`):
 
 ## Session Log
 
+### 2026-07-29 (Fable 5) — Independent audit: the constitution cites costs the model no longer produces, the direction of error moved, and the amended primary has one unregistered control
+
+**ASSESSMENT ONLY.** Nothing changed outside AUDIT-2026-07-29.md and the tracking entries. No test suite run, no process touched, no network or provider call, databases read with SELECT only. Full report in AUDIT-2026-07-29.md. **Conflict reported per CLAUDE.md precedence: the prompt said commit the report alone, CLAUDE.md requires the tracking entries, CLAUDE.md wins.**
+
+**LEAD 1, DOCUMENTATION DEBT AGAIN THE HIGHEST YIELD.** CLAUDE.md's scope note cites "1.14 to 4.87 bp" for the tradeable bands while the measured fee model now yields about 17.8 and 41.2 bp for tiers 3 and 4. The crypto-exclusion conclusion stands (the engine trades tier-1 names, unchanged at 0.5 to 0.9 bp) but the cited figure is stale, and tier 4 now sits within 20 percent of crypto's 50 bp. Also stale: PROGRESS Current State "ctest 7/7" against 34, and the "14 hard checks" claim against 18 fail sites, which survived the prior audit that flagged it.
+
+**LEAD 2, THE DIRECTION OF ERROR MOVED.** Two post-measurement judgment calls this week both landed permissive: the near-monotone verdict on a strictly-failed tick ladder, and Amendment 5's re-framing after cost data existed. Both disclosed with counter-arguments recorded, which is the discipline working, and both named as a pattern so the pre-registered verdict table ("a gross-positive net-negative result licenses no trade") is read as binding.
+
+**LEAD 3, ONE UNREGISTERED CONTROL IN THE AMENDED PRIMARY.** Signed gross excess against a band-wide benchmark cancels unconditional news-day drift only under balanced judgments. A POSITIVE-skewed model plus any attention premium on news names reads as skill. Recommendation recorded, not applied: pre-register a within-day judgment-permutation null before collection.
+
+- **Task B**: the fee model's halves agree at runtime through the shared yaml, 18 keys presence-pinned in both languages, unmeasured tiers marked in all eight reader locations. Unpinned residual: fallback-default drift when a non-shipped yaml omits keys.
+- **Task C**: no realized eighth fabrication. Three latent candidates recorded: the experiment scoring path inherits the engine's flat-cost fallback on absent ADV (optimistic 14x to 40x there), missing provider usage reads as zero spend, and a fees.load regex miss resurrects a stale default.
+- **Task D**: under-claiming otherwise holds, no holdout reuse, no over-claimed result found. The model-capability question is still open while stage 3 is unblocked, and nothing forces it closed.
+- **Task E**: the separation is sound and the verdict table is its strongest guard. A gross positive supports "the pipeline predicts", never "the model understands", because no baseline comparator exists.
+
 ### 2026-07-29 (Fable 5) — Amendment 5: the gross signal question is separated from the net economic question, with the verdicts written before the numbers
 
 **AMENDED WITH THE OPERATOR'S EXPLICIT APPROVAL. NO COLLECTION DATA EXISTED**: not one row carries `run_kind='collection'` and no headline has ever been scored against a price, so nothing was changed after seeing a result. The tick measurement that motivated it measured COSTS, not outcomes. Live trading off. No RiskGate logic, no live-trading gate, no adaptive invariant, no Level 1 value, no threshold, no strategy parameter. No LLM provider call. **pytest spec and collector files 73 passed.**
