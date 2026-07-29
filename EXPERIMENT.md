@@ -41,6 +41,15 @@
 > stays at 2.50, the confirmation is conjunctive so the union-bound 0.15 does
 > not rise, and the named cost is power, not size.
 >
+> **AMENDMENT 7 (2026-07-29, operator approved, no collection data existed)
+> corrects the stale Level 1 figures in the capacity gate against what the
+> code now enforces**, verifies in the engine that the per-day trade cap
+> counts entries only, records the trading gate's confidence floor as
+> unresolved rather than settled, and documents the collection start
+> preconditions. **It corrects figures and changes no test, no bar, no
+> universe rule and no verdict.** The 4.96 bp economic comparison figure is
+> confirmed exact, not moved.
+>
 > This document was a proposed pre-registration written by Stage 0.
 >
 > Written 2026-07-27. Nothing was built, collected, called, or traded to
@@ -567,6 +576,117 @@ which is an outcome, so nothing was changed after seeing a result.
 records: judgment, the excess components, the day cluster, the story group.
 It adds no collector machinery and no new data requirement, so it does not
 re-block stage 3.
+
+## AMENDMENT 7 — 2026-07-29, the stale Level 1 figures corrected, the trade-cap mechanism verified, and the start preconditions documented
+
+**Changed: figures only. No test, no bar, no universe rule and no verdict
+moves.** The capacity gate's Level 1 citations predate the 2026-07-27
+re-derivation, and the fallback session correctly declined to touch a binding
+document. This amendment closes them with the operator's approval so the
+specification does not carry a stale Level 1 value into collection.
+
+**THE POSITION FIGURE, AND THE MECHANISM UNDER IT.** The capacity text said
+"open positions at 5". The enforced values are `max_open_positions_total` 10
+and `max_open_positions_per_venue` 10 (`risk_gate.cpp:51` and `:54`). The
+text also said "a one-session hold means ~5 exits and 5 entries per day, so
+10/day is the structural maximum", which asserts that the trade cap counts
+exits. **Verified in the engine rather than accepted: it does not.**
+`trades_today_` is checked before entry evaluation (`engine.cpp:1278`) and
+incremented only where a position opens (`engine.cpp:1603`, the one increment
+site). Exits never touch the counter, and `risk_gate.cpp` carries no
+trade-per-day check at all. So `max_trades_per_day` 10 caps ENTRIES per UTC
+day, and with 10 position slots and a one-session hold the structural maximum
+is **10 round trips per day, about 2,520 round trips per year**, not 5.
+
+**WHAT THAT DOES TO THE ARITHMETIC: the recorded figures survive, and the
+reason is worth stating.** The superseded text divided the floor by "2,520
+trades" while describing them as 5 round trips per day. Its count was right
+and its mechanism was wrong, because it counted exits into a cap that never
+counts them. Under the verified mechanism the 2,520 is round trips, so:
+
+```
+required net edge per ROUND TRIP, floor 2,500 USD/year on 100,000 equity:
+  at the enforced sizer,   2,000 USD:  2,500 / (2,520 x 2,000) = 4.96 bp
+  at the enforced ceiling, 2,500 USD:  2,500 / (2,520 x 2,500) = 3.97 bp
+  (superseded sizer 500 USD for the audit trail:  19.8 bp)
+```
+
+The **4.96 bp figure Amendment 5 re-scoped as the E-test comparison bar is
+confirmed exact and does not move.** The annual projection at the enforced
+sizer is 2,520 round trips of 2,000 USD, about 5.04 million USD entered per
+year, 10.08 million counting both sides. Had the document's stated mechanism
+been the real one, the requirement would have been 9.92 bp per round trip and
+the recorded 4.96 would have been wrong by 2x, which is why the figure needed
+correcting even though no recorded number moves: the arithmetic was resting
+on two errors that cancelled.
+
+**THE SIBLING FIGURES, document against enforced.** Every Level 1 value the
+document cites, checked against the code this session:
+
+| document said | where | enforced today | disposition |
+|---|---|---|---|
+| open positions 5 | capacity text | `max_open_positions_total` 10, `max_open_positions_per_venue` 10 (`risk_gate.cpp:51,:54`) | **CORRECTED** |
+| trade cap counts entries and exits | capacity text | entries only (`engine.cpp:1278,:1603`), exits uncapped | **CORRECTED** |
+| sizer 0.005, 500 USD base | capacity table | `default_risk_per_trade_pct` 0.02, 2,000 USD base (`engine.cpp:1384`) | already noted RAISED, row now marked SUPERSEDED |
+| positions "100 to 500 USD in practice" | capacity table and text | `base * max(scale, 0.2)`, scale capped 1.0, so **400 to 2,000 USD** | **CORRECTED** |
+| Level 1 ceiling "5 percent, ~5,000 USD" | capacity text | key `max_trade_notional_cap_pct` **REMOVED 2026-07-27**, real ceiling `max_trade_risk_pct_of_equity` 0.025 caps notional at 2,500 USD (`risk_gate.cpp:43`) | **CORRECTED, cited key no longer exists** |
+| "raising `default_risk_per_trade_pct` tenfold" to reach the ceiling | capacity conclusion | sizer already 0.02, ceiling 2,500, the gap is 1.25x | **CORRECTED** |
+| trades 10/day | capacity text | `max_trades_per_day` 10 | accurate |
+| floor 2,500 USD/year on 100,000 | capacity text | derivation input, not a config key | accurate |
+
+Values the code enforces that the document does not cite, checked for
+completeness and needing no correction: `max_total_open_risk_pct` 0.25,
+`max_exposure_per_category_pct` 0.25, `max_daily_loss_total_pct` 0.03,
+`max_daily_loss_per_venue_pct` 0.02, `max_consecutive_losses` 6 with the
+`cooldown_minutes_after_loss_breach` 240 release (`engine.cpp:497-519`), and
+`min_confidence_default` 0.65. The document cites none of them, so none is
+stale, and they are listed here so the sweep is auditable.
+
+**THE CONFIDENCE FLOOR, RECORDED AS UNRESOLVED.** The document previously
+said nothing about the trading gate's confidence floor, and silence reads as
+settled. It is not. `min_confidence_default` is **0.65, global**
+(`risk_gate.cpp:75`), `OrderProposal` carries no strategy identity, and the
+per-strategy floor work was deliberately deferred to the sleeve build.
+Nothing in this experiment reaches that gate, because the collector is
+standalone and produces no orders. A stage 5 reader deciding what a deployed
+version of this signal must clear should know the floor question is
+**unresolved rather than settled**, and that the discovery layer's separate
+floor mismatch (0.60 passed as a conviction floor against measured council
+confidences of 0.53 to 0.59) is a recorded open flag, not a precedent.
+
+**THE START PRECONDITIONS, DOCUMENTED AS THEY ARE.** Amendment 5 records
+that collection waits on the operator's start command. The mechanism, read
+from the collector rather than from memory:
+
+- **The flag is an attestation, not a verifier.** `--run-kind collection`
+  without `--i-have-read-the-preconditions` refuses at argument parse, exit
+  3, before any resolution, call or write. The flag itself checks nothing.
+  Its refusal message still cites the tick multiple as unmeasured, which has
+  been false since the 2026-07-29 measurement. Reported, not changed here.
+- **What run() verifies at startup, flag or no flag:** the credential
+  resolves (`resolve_experiment_key`, missing key exits 2), the shared
+  council key is reachable only behind `--allow-shared-key` and is recorded
+  `credential_shared=1` on every row, latch separation is confirmed at run
+  time and a non-separate latch refuses to run, and the spend ceiling is
+  structurally always set because `--ceiling` is a required argument enforced
+  before the first call.
+- **Of the five checks the operator's list names, two are fully present**
+  (credential separate, ceiling set), **and three are NOT start-time
+  checks**: calendar coverage 130 sessions forward is not verified at start
+  (exhaustion surfaces per row as `calendar_exhausted`, honest but late),
+  the fee model's measured-versus-floor state in the traded band is checked
+  nowhere at runtime (the yaml marks it in comments only), and universe
+  reproducibility is deterministic by construction and pinned by test but
+  not verified by the run itself. **Reported rather than added**, because
+  the collector is built to an accepted specification and adding start
+  gates is implementation work under its own approval.
+
+**When:** 2026-07-29, before any collection. **The operator approved this
+amendment explicitly. No collection data existed**: not one row carries
+`run_kind='collection'` and no headline has ever been scored against a
+price. Every input to this amendment is a code read, not an outcome, so
+nothing was changed after seeing a result. Superseded figures are preserved
+in place under SUPERSEDED notes.
 
 ## Why this exists
 
@@ -1724,34 +1844,51 @@ things**, verified in config:
 
 | key | value | meaning |
 |---|---|---|
-| `risk.max_trade_notional_cap_pct` | 0.05 | **CORRECTED 2026-07-27: UNENFORCED. This row was wrong.** The key is parsed, range-validated, and read by no consumer anywhere. The real per-trade ceiling is `max_trade_risk_pct_of_equity` at `risk_gate.cpp:43`. |
-| `sizing.default_risk_per_trade_pct` | 0.005 | what the **sizer actually sends**: 500 USD base. **RAISED to 0.02 on 2026-07-27, so the capacity arithmetic below is superseded: at 2,000 USD per position the required edge falls from 19.8 bp to 4.96 bp.** |
-| `sizing.default_position_scale_cap` | 1.0 | scale multiplier, so 100 to 500 USD in practice |
+| `risk.max_trade_notional_cap_pct` | 0.05 | **CORRECTED 2026-07-27: UNENFORCED. This row was wrong.** The key is parsed, range-validated, and read by no consumer anywhere. The real per-trade ceiling is `max_trade_risk_pct_of_equity` at `risk_gate.cpp:43`. **AMENDMENT 7 note: the key was REMOVED entirely on 2026-07-27 and no longer exists. The enforced ceiling is 0.025, capping notional at 2,500 USD on 100,000 equity.** |
+| `sizing.default_risk_per_trade_pct` | 0.005 **SUPERSEDED, enforced value 0.02** | what the **sizer actually sends**: 2,000 USD base. **RAISED to 0.02 on 2026-07-27, so the arithmetic below at the 500 USD sizer is superseded: at 2,000 USD per position the required edge is 4.96 bp per round trip.** |
+| `sizing.default_position_scale_cap` | 1.0 | scale multiplier. **AMENDMENT 7: 400 to 2,000 USD in practice at the enforced sizer. SUPERSEDED figure at the old sizer: 100 to 500.** |
 
-The engine sizes at `base * max(scale, 0.2)` where `base = 0.005 * equity`, so a
-real position is **100 to 500 USD**, not 5,000. The ceiling is what is
-permitted; it is not what is sent.
+The engine sizes at `base * max(scale, 0.2)` where `base` is
+`default_risk_per_trade_pct * equity`, **2,000 USD at the enforced 0.02**, so
+a real position is **400 to 2,000 USD** (SUPERSEDED at the 0.005 sizer: 100
+to 500). The ceiling is what is permitted; it is not what is sent.
 
 **The arithmetic, at both.** Floor: 2,500 USD/year on 100,000 equity. Level 1
-caps trades at 10/day (`risk.max_trades_per_day`) and open positions at 5, and a
-one-session hold means ~5 exits and 5 entries per day, so **10/day is the
-structural maximum**, about 2,520 trades/year.
+caps trades at 10/day (`risk.max_trades_per_day`) and open positions at
+**10** (`max_open_positions_total`, AMENDMENT 7, superseded figure 5). **The
+trade cap counts ENTRIES only, verified in the engine** (`engine.cpp:1278`
+checks before entry, `:1603` increments where the position opens, exits
+uncapped), so with 10 position slots and a one-session hold the structural
+maximum is **10 round trips per day, about 2,520 round trips per year**.
+SUPERSEDED mechanism, wrong about the cap: "a one-session hold means ~5 exits
+and 5 entries per day, so 10/day is the structural maximum, about 2,520
+trades/year". Its 2,520 survives as the round-trip count by cancellation, see
+Amendment 7.
 
 ```
-AT THE CONFIGURED SIZER, 500 USD max:
+AMENDMENT 7, at the enforced values, per ROUND TRIP:
+  at the sizer,   2,000 USD: 2,500 / (2,520 x 2,000) = 4.96 bp
+  at the ceiling, 2,500 USD: 2,500 / (2,520 x 2,500) = 3.97 bp
+  entered per year at the sizer: 2,520 x 2,000 = 5,040,000 USD
+
+SUPERSEDED (500 USD sizer, removed 5,000 USD ceiling), for the audit trail:
   turnover = 2,520 x 500 = 1,260,000 USD/year
   required net edge = 2,500 / 1,260,000 = 19.8 bp per trade
   available (assumed)  = 25 bp net
   CLEARS BY 5.2 bp, a 26 percent margin
 
-AT THE LEVEL-1 CEILING, 5,000 USD:
+  AT THE LEVEL-1 CEILING, 5,000 USD:
   turnover = 2,520 x 5,000 = 12,600,000 USD/year
   required net edge = 2,500 / 12,600,000 = 2.0 bp per trade
   CLEARS COMFORTABLY
+  (the 5,000 USD ceiling was max_trade_notional_cap_pct, removed 2026-07-27)
 ```
 
 **IS THAT PLAUSIBLE? Stated plainly: at the configured sizing, no, not
-comfortably.**
+comfortably.** (AMENDMENT 7: this block reasons at the superseded 500 USD
+sizer in the pre-Amendment-5 net framing and is kept for the audit trail.
+The current comparison figure is 4.96 bp per round trip at the enforced
+sizer.)
 
 The margin is 5.2 bp on an assumed 25 bp net. Every input on the favourable
 side is optimistic:
@@ -1772,7 +1909,12 @@ effect size, tick width, and trade frequency, and fails if any one lands
 unfavourably.** It clears comfortably only at the Level-1 ceiling, which would
 require raising `default_risk_per_trade_pct` tenfold. **That is a sizing change
 with its own justification and its own risk review, and it is NOT part of this
-experiment.**
+experiment.** (AMENDMENT 7: the tenfold and the 5,000 USD ceiling are both
+superseded. The sizer was raised to 0.02 on 2026-07-27, the removed notional
+key's 5,000 gave way to the enforced `max_trade_risk_pct_of_equity` ceiling
+of 2,500, and the remaining sizer-to-ceiling gap is 1.25x. The sizing-change
+caveat stands unchanged: moving the sizer further is its own decision and not
+part of this experiment.)
 
 **What this means for whether to proceed.** The measurement is still worth
 making, because it is cheap (**about $4.01 in model calls at the measured

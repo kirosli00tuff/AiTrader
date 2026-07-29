@@ -11,6 +11,31 @@ Model:
 Prompt summary: one line.
 Changes: what changed.
 
+## Prompt: Amendment 7, correct the stale Level 1 figures and document the start preconditions
+
+Date: 2026-07-29
+Model: Fable 5 (claude-fable-5, 1M context).
+Prompt summary: The fallback session reported EXPERIMENT.md's capacity-gate "open positions at 5" against Level 1's re-derived 10 and correctly declined to change a binding document. This session closes it and any sibling with the operator's explicit approval, before collection, so the specification does not carry a stale Level 1 value into stage 3. Task 1 correct the position figure, verify rather than accept that the 10-per-day trade cap is the binding constraint, and report whether the capacity arithmetic, the required per-trade edge, or the annual dollar projection moves. Task 2 sweep every Level 1 value the document cites against what the code now enforces (sizer, notional ceiling, trade cap, both position caps, exposure caps, consecutive-loss brake and its release, confidence floor, loss limits), report each document-versus-enforced pair, correct every stale one, and report any cited figure whose key no longer exists. Task 3 confirm the document states accurately that min_confidence_default remains 0.65 and global, per-strategy floors deferred to the sleeve build, unresolved rather than settled. Task 4 amend in place as Amendment 7 with superseded figures preserved, stating that no test, bar, universe rule or verdict changes, and stopping if any correction would move one. Task 5 report the collection start preconditions flag, what each precondition checks, what happens on failure, and whether the five named checks (credential separate, calendar 130 sessions forward, no unmeasured tier in the traded band, universe reproducible from seed, spend ceiling set) are all present, reporting any gap rather than adding it. Task 6 update PROGRESS.md, commit and push to main.
+
+CONSTRAINTS HONORED: live trading off. No RiskGate logic, no live-trading gate, no adaptive limit-weakening invariant, no Level 1 value, no threshold, no strategy parameter. Collection has NOT started, not one row carries run_kind='collection', and the operator approves this amendment explicitly.
+
+### FINDINGS
+
+**AMENDED WITH THE OPERATOR'S EXPLICIT APPROVAL. FIGURES ONLY: no test, no bar, no universe rule, no verdict moved. The 4.96 bp comparison figure is confirmed exact. Spec and collector tests 73 passed. Live trading untouched.**
+
+**TASK 1.** "Open positions at 5" corrected to the enforced 10. The binding-constraint claim was verified rather than accepted and its mechanism is wrong: the trade cap counts ENTRIES only (`engine.cpp:1278` check, `:1603` sole increment, exits uncapped, no per-day check in risk_gate.cpp), so the structural maximum is 10 round trips per day, 2,520 per year. The recorded arithmetic survives by cancellation (the superseded text counted exits into a cap that never counts them, landing on the right 2,520). Required edge per round trip: 4.96 bp at the 2,000 USD sizer, unchanged and now exactly derived, 3.97 bp at the enforced 2,500 USD ceiling. Annual projection at the sizer: 5.04M USD entered, 10.08M both sides. Under the document's stated mechanism the requirement would have been 9.92 bp, wrong by 2x, which is why the correction mattered with no number moving.
+
+**TASK 2, document versus enforced.** Corrected: positions 5 to 10 (both caps 10), cap mechanism, sizer 0.005 to enforced 0.02 (row marked SUPERSEDED), position range 100-500 to 400-2,000 USD, ceiling "5 percent ~5,000" to `max_trade_risk_pct_of_equity` 0.025 = 2,500 USD with the cited `max_trade_notional_cap_pct` recorded as REMOVED (no longer a key), "tenfold" to the real 1.25x gap. Accurate: trades 10/day, floor 2,500/year. Cited-but-removed keys: one, `max_trade_notional_cap_pct`. Enforced values the document never cites are listed in the amendment for auditability (open risk 0.25, category 0.25, daily loss 0.03/0.02, consecutive losses 6 with 240-minute release, confidence 0.65).
+
+**TASK 3.** EXPERIMENT.md did not state the confidence floor at all, silence reading as settled. Now recorded: 0.65 global at `risk_gate.cpp:75`, no strategy identity on OrderProposal, per-strategy floors deferred to the sleeve build, unresolved rather than settled, collector never reaches the gate.
+
+**TASK 4.** Amendment 7 written, header note added, capacity table and text corrected in place, superseded figures preserved (sizer row, position range, the 500-sizer and 5,000-ceiling arithmetic blocks, the plausibility block marked as reasoning at superseded values). No correction moved a bar or verdict, so no stop condition fired.
+
+**TASK 5.** The flag is an attestation, not a verifier: collection without it refuses at parse (exit 3) checking nothing, and its refusal message still cites the tick multiple as unmeasured, stale, reported not changed. run() verifies at startup: credential resolves (exit 2 on missing), shared key only behind `--allow-shared-key` recorded per row, latch separation or refuse, ceiling structurally set. Of the five named checks: credential-separate PRESENT, ceiling PRESENT, calendar-130-forward NOT a start check (per-row `calendar_exhausted`), fee-model measured-tier NOT checked at runtime, universe reproducibility deterministic and test-pinned but NOT run-verified. All three gaps reported rather than added.
+
+Changes: EXPERIMENT.md (Amendment 7 + capacity corrections), PROGRESS.md, RETURN.md.
+Commit message: Amendment 7, correct the stale Level 1 figures in the specification and document the collection start preconditions, no test or bar changed, collection not started
+
 ## Prompt: The three fixes and the stale figures
 
 Date: 2026-07-29
