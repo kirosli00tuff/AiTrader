@@ -11,6 +11,33 @@ Model:
 Prompt summary: one line.
 Changes: what changed.
 
+## Prompt: Amendment 6, the permutation null
+
+Date: 2026-07-29
+Model: Fable 5 (claude-fable-5, 1M context).
+Prompt summary: Queued work, prompt 1 of 2. AUDIT-2026-07-29.md lead finding 3: signed gross excess against a band-wide benchmark cancels unconditional news-day drift only under balanced judgments, and a POSITIVE-skewed model plus any attention premium on news names reads as skill. Collection has NOT started, not one row carries run_kind='collection', and the operator approves this amendment explicitly. Task 1 pre-register a within-day judgment-permutation null in the primary family, specifying the permutation unit, the number of permutations, what is held fixed and what is shuffled, why within-day is the correct stratification, the bar, how it interacts with the existing correction whose union-bound cost already stands at 0.15, and whether it replaces, supplements or reframes any existing primary test. Task 2 pre-register the skew diagnostic the null depends on: report the realised judgment distribution and the NEUTRAL rate before the null is interpreted, and state what degree of skew makes the null uninformative rather than reassuring. Task 3 record in the verdict table that a gross positive supports "the pipeline predicts" and never "the model understands", and state what a comparator would have to be, without adding one. Task 4 reconcile every affected section, amend EXPERIMENT.md in place with superseded text preserved, update PROGRESS.md, commit and push, and state whether stage 3 remains unblocked.
+
+CONSTRAINTS HONORED: live trading off. No RiskGate logic, no live-trading gate, no adaptive limit-weakening invariant, no Level 1 value, no threshold, no strategy parameter. No provider call, no computation of any kind against outcome data, because none exists.
+
+### FINDINGS
+
+**AMENDED WITH THE OPERATOR'S EXPLICIT APPROVAL. NO COLLECTION DATA EXISTED.** No provider call, no outcome computed, live trading untouched.
+
+**TASK 1, THE NULL.** Pre-registered as a required confirmation on each of the four primary tests, not a fifth test. Unit: the scored observation within its trading-day cluster. Held fixed per day: the set of scored names, each `excess_i`, the POSITIVE and NEGATIVE counts, every NEUTRAL row. Shuffled per day: which scored name carries which directional judgment, uniform without replacement. 10,000 seeded permutations matching the bootstrap count. Fixed-property subsets permute within their own membership, NEGATIVE-only re-forms its subset from the permuted labels. Doubled one-sided add-one p, bar 0.0125, the family's existing per-test alpha. Within-day is correct because the confound is a day-level property: the shuffle preserves which names had news, the day's market move and the day's judgment mix, so the attention premium survives and only the judgment-to-name pairing does not. **Replaces nothing, supplements all four primaries, reframes "clears" as both bars.** The confirmation is conjunctive, so the union-bound 0.15 does not rise. The named cost is POWER: a true signal must clear two bars, and in a skewed sample a genuine effect may be unable to demonstrate itself at all, accepted deliberately because skill under skew and premium under skew are indistinguishable in the data.
+
+**TASK 2, THE SKEW DIAGNOSTIC.** Reported before the null is interpreted: the realised judgment distribution pooled, per stratum and per half, the NEUTRAL rate (80 percent bar unchanged), the pooled minority directional share, the mixed-day-cluster count. UNINFORMATIVE below 10 percent minority share or 30 mixed day clusters, thresholds justified against the registered floors and below the demonstration's 21 percent first look. An uninformative null makes the affected primary an abstention, never a negative. Skew makes the null strictly conservative, so the failure mode is a null that cannot reassure, not one that falsely does.
+
+**TASK 3, THE CLAIM BOUNDARY.** Two rows added to the verdict table: a gross positive supports "the pipeline predicts" and never "the model understands" (no baseline comparator exists), and an uninformative null is an abstention. The comparator the stronger claim would need is recorded without being added: a pre-registered baseline arm, same headlines, universe, windows, benchmark, estimator and bars, a reader with no claimed understanding, plus a margin test with its own bar.
+
+**TASK 4, RECONCILED.** Header note, primary-family list, the bar, the exploratory paragraph, both union-bound statements, the NEUTRAL diagnostic, the powered-negative definition (untouched, said explicitly), Open Question 12. No superseded marker needed: the amendment adds and reframes, deletes nothing, moves no carried-forward figure.
+
+**STAGE 3 REMAINS UNBLOCKED.** The null consumes only Task 8 fields already recorded, adds no collector machinery and no data requirement. Collection waits only on the operator's start command.
+
+BRANCH NOTE, conflict reported rather than resolved silently: the prompt says push to main, this session's execution environment designates `claude/amendment-6-judgment-null-fixes-ruj7jc` and forbids pushing elsewhere. The environment rule wins, the commit is pushed to that branch for merge to main.
+
+Changes: EXPERIMENT.md (Amendment 6 + reconciliations), PROGRESS.md, RETURN.md.
+Commit message: Amendment 6, pre-register a within-day judgment-permutation null and record what a gross positive supports, collection not started
+
 ## Prompt: Independent audit after the Level 1 re-derivation and five amendments
 
 Date: 2026-07-29

@@ -33,6 +33,14 @@
 > is a pre-registered secondary per stratum, the band is kept in full, and the
 > verdict for every outcome is written before any number exists.
 >
+> **AMENDMENT 6 (2026-07-29, operator approved, no collection data existed)
+> adds a within-day judgment-permutation null as a required confirmation on
+> each primary test**, pre-registers the judgment-balance diagnostic the null
+> depends on, and records in the verdict table that a gross positive supports
+> "the pipeline predicts" and never "the model understands". The primary bar
+> stays at 2.50, the confirmation is conjunctive so the union-bound 0.15 does
+> not rise, and the named cost is power, not size.
+>
 > This document was a proposed pre-registration written by Stage 0.
 >
 > Written 2026-07-27. Nothing was built, collected, called, or traded to
@@ -281,6 +289,9 @@ the scored unit:
 - The NEUTRAL-rate diagnostic, the de-duplication rule, the story-group
   re-run trigger, and the sector-clustered robustness figure all carry
   forward unchanged.
+- **AMENDED by AMENDMENT 6:** each of the four tests carries the within-day
+  judgment-permutation confirmation defined there. Clearing requires both
+  bars.
 
 The required-sample arithmetic already used a 30 bp delta, so it transfers to
 the gross framing without recomputation and its stated effect size is now
@@ -311,7 +322,9 @@ bar is weaker evidence than a primary that clears 2.50, it is labelled so
 wherever it is reported, and no secondary can confirm the hypothesis. The
 primary bar is untouched, for the same reason Amendment 3 recorded: raising a
 pre-registered primary bar because a later question was added is the defect
-pre-registration exists to prevent.
+pre-registration exists to prevent. **AMENDMENT 6 note: the permutation
+confirmation added there is conjunctive on the primaries, so it consumes no
+alpha and this 0.15 does not rise. Its stated cost is power.**
 
 ### The band stays, and what would reverse that
 
@@ -344,6 +357,8 @@ here, before collection, so it cannot be negotiated afterwards.
 | Clears gross, net clears in some strata and fails in S3/S4 | The signal exists band-wide and is tradeable where the E-tests cleared. Trading only the cleared strata is permitted ONLY as a new pre-registered deployment decision with its own capacity arithmetic. It is never a post-hoc restriction of this result. |
 | Fails gross | **The hypothesis is dead** per the powered-negative definition (Task 6, gross). It is not re-tested with a different horizon, prompt or band. |
 | Clears gross and net | Proceed per the capacity gate, which still separates a finding from a strategy at the configured sizing. |
+| Any gross positive, whatever net says (AMENDMENT 6) | **Supports "this pipeline's judgment predicts next-session drift on the names its news source covers", and never "the model understands the news."** No baseline comparator exists, so attribution to model capability is unavailable by design. The comparator the stronger claim would need is recorded in Amendment 6 and is not added. The conclusion is worded as "the pipeline predicts" everywhere it is reported. |
+| The permutation null is UNINFORMATIVE under the Amendment 6 thresholds | **The affected primary is an abstention**, not a negative and not a positive, reported in those words with the realised judgment distribution beside it. |
 
 A gross-positive net-negative result must be reported in exactly those words:
 a finding about markets. It licenses no trade. An effect that cannot pay its
@@ -380,6 +395,178 @@ amendment explicitly. No collection data existed**: not one row carries
 The tick measurement that motivated it measured COSTS, not outcomes: no
 signal, judgment or return was seen. The superseded net-framed text is
 preserved under SUPERSEDED notes at each amended site.
+
+## AMENDMENT 6 — 2026-07-29, the within-day judgment-permutation null, its skew diagnostic, and the claim boundary on a gross positive
+
+**Changed, three things.**
+
+1. **Each of the four primary tests gains a required confirmation: a
+   within-day judgment-permutation null.** A primary test now clears only if
+   its bootstrap z clears 2.50 AND its statistic clears the permutation null
+   at `p <= 0.0125`. The 2.50 bar itself is untouched.
+2. **A judgment-balance diagnostic is pre-registered beside the NEUTRAL
+   rate**, with the thresholds below which the null is declared UNINFORMATIVE
+   and the affected primary reads as an abstention.
+3. **The verdict table gains the claim boundary**: any gross positive supports
+   "the pipeline predicts" and never "the model understands", and the
+   comparator the stronger claim would need is recorded without being added.
+
+**WHY.** AUDIT-2026-07-29.md lead finding 3. The primary scores signed gross
+excess against the equal-weighted band benchmark, and that construction
+cancels unconditional news-day drift only under balanced judgments. If the
+model skews POSITIVE and names in the news carry any unconditional
+same-session attention premium over the quiet band, the pooled signed excess
+inherits a fraction of that premium and reads as skill. The concern is
+plausible rather than hypothetical, on the stage 2 demonstration's own
+numbers: NEUTRAL ran 29.8 percent, strength landed on three of five values
+with 20 of 33 at 2, and the 33 directional judgments split 26 POSITIVE
+against 7 NEGATIVE, a 79 to 21 skew. n=33 is far too small to conclude and
+those rows are demonstration scratch, but the shape is exactly the one the
+confound needs, and nothing registered before this amendment controlled for
+it.
+
+### The permutation null, specified
+
+- **Unit:** the scored observation within its trading-day cluster. Day is the
+  registered clustering unit, so the null respects the same dependence
+  structure the bootstrap already assumes.
+- **Held fixed, per day:** the day's set of scored names, each observation's
+  `excess_i` (raw minus the same-window band benchmark), the day's count of
+  POSITIVE and count of NEGATIVE judgments, and every NEUTRAL row (unscored
+  before, unscored still, untouched by the shuffle). Day membership itself
+  never changes.
+- **Shuffled, per day:** which scored name carries which of the day's
+  directional judgments. The labels are reassigned uniformly at random
+  without replacement across the day's scored observations, and `signed_i`
+  is recomputed from the permuted label and the fixed `excess_i`.
+- **Permutations:** 10,000, one seeded stream, seed recorded, matching the
+  bootstrap resample count and resolving p to about 1e-4 against a 0.0125
+  bar.
+- **Statistic:** for each primary test, the statistic that test reports,
+  recomputed under each permutation. Tests whose subset is a fixed row
+  property (pooled, thin-end S3 and S4, chronological second half) permute
+  within day among that subset's own observations, so stratum and half
+  composition are preserved. The NEGATIVE-only test is the exception, because
+  its membership IS the label: its null permutes among all of the day's
+  scored observations and re-forms the subset from the permuted labels on
+  each draw.
+- **p-value:** doubled one-sided with the add-one estimator,
+  `p = min(1, 2 * min((1 + count(T_perm >= T_obs)), (1 + count(T_perm <= T_obs))) / (10,000 + 1))`.
+  The doubled one-sided form is chosen over `|T|` because the null
+  distribution is not centered at zero by construction: under the confound
+  it centers at the premium-inherited value, and sitting inside it must read
+  as failure to clear.
+- **Bar:** `p <= 0.0125`, which is 0.05/4, the same per-test alpha the
+  primary family already carries.
+- **Story groups:** if the registered 10 percent story-group trigger fires,
+  the null is re-run permuting story groups as blocks within day, one
+  judgment moving with its whole group, and both versions are reported,
+  mirroring the registered story-group re-run of the primary estimate.
+- **Strength is not permuted.** The strength secondaries gain no permutation
+  machinery. They cannot confirm the hypothesis, so they do not need this
+  control.
+
+**Why within-day is the correct stratification.** The confound lives at the
+day level. The attention premium, if it exists, attaches to being a
+news-carrying band name on that session. Shuffling within the day preserves
+every day-level quantity: which names had news, what the market did that
+session, and the day's judgment mix. The premium therefore survives the
+shuffle in full, and so does any skew-times-premium interaction, because each
+day keeps its own judgment counts. What the shuffle destroys is exactly and
+only the pairing between a specific judgment and a specific name, which is
+what skill is. A cross-day shuffle would fail in both directions: it would
+move judgment mixes across market regimes, and it would manufacture
+day-composition differences the real data never had, so its null would test a
+hypothesis nobody registered.
+
+**What this replaces, supplements or reframes.** It replaces nothing. It
+SUPPLEMENTS each of the four primary tests with a conjunctive confirmation,
+and it REFRAMES what "clears" means: clearing now requires both the bootstrap
+z at 2.50 and the permutation p at 0.0125. No test is removed, no bar moves,
+and no subset changes.
+
+**The correction, and the stated cost.** Three families exist and the
+union-bound family-wise error across them stands at 0.15. This amendment does
+not raise it: a conjunctive requirement can only remove false positives,
+never add one, so the confirmation consumes no alpha and 0.15 stands. The
+cost is named rather than absorbed, and it is POWER. A true signal must now
+clear two bars, so the type II rate rises, and in a skewed sample a genuine
+effect may be unable to demonstrate itself against the null at all. That is
+accepted deliberately: in the data, skill under skew and an attention premium
+under skew look the same, and a design that cannot tell them apart should
+abstain rather than promote. A second cost is named too: this is a
+post-acceptance change to what a primary "clears" means. It moves in the
+strict direction only, it precedes all collection, and the operator approved
+it, which is the whole list of what makes such a change admissible.
+
+### The skew diagnostic the null depends on
+
+The null is informative only if there is something to permute. A day whose
+scored judgments are unanimous contributes the same value to every draw, so
+as unanimity spreads across days the null distribution collapses onto the
+observed statistic and p rises toward 1 by construction, whatever the model
+knows. Skew makes the null strictly more conservative, never less, so the
+failure mode is a null that cannot reassure, not one that falsely does.
+
+**Pre-registered, reported BEFORE the null is interpreted:**
+
+- The realised judgment distribution: POSITIVE, NEGATIVE and NEUTRAL counts
+  and shares, pooled, per stratum, and per chronological half.
+- The NEUTRAL rate against its registered 80 percent reportable-failure bar,
+  unchanged from Task 5.
+- The directional balance: the pooled minority share of directional
+  judgments, and the number of MIXED day clusters, days holding at least one
+  POSITIVE and at least one NEGATIVE scored observation.
+
+**Uninformative, declared in advance:** the null is UNINFORMATIVE if the
+pooled minority directional share falls below 10 percent, or if fewer than 30
+day clusters are mixed. The 30 reuses the E-tests' registered per-stratum
+cluster floor. The 10 percent keeps at least 100 minority observations at the
+registered 1,000, the same order as the thinnest population any registered
+test consumes, and it sits well below the demonstration's 21 percent minority
+share, so the one measured first look would have been informative. When the
+null is UNINFORMATIVE the affected primary cannot clear and reads as an
+abstention, not a negative and not a positive, reported in those words. That
+outcome is the design working: a sample that skewed is one where this design
+cannot separate the confound from the signal, and saying so is the finding.
+
+An uninformative null does not touch the powered-negative definition. The
+confirmation intercepts positives only. A primary whose interval and z fail
+on their own terms fails regardless of the null, and Task 6 reads exactly as
+before.
+
+### What a gross positive supports, and what it never supports
+
+Recorded in the verdict table (Amendment 5), and stated here in full. A gross
+positive, confirmed against the permutation null, supports **"this pipeline's
+judgment predicts next-session drift on the names its news source covers"**.
+It never supports **"the model understands the news"**, because no baseline
+comparator exists: post-news drift is in the literature, and a trivial reader
+riding it would clear the same tests. The conclusion is worded as "the
+pipeline predicts" everywhere it is reported.
+
+**What a comparator would have to be, recorded without being added.** A
+pre-registered baseline arm scoring the SAME headlines over the SAME universe,
+windows, benchmark, estimator and bars, using a reader with no claimed
+understanding, a keyword-sentiment rule being the canonical example, plus a
+pre-registered margin test of model minus baseline with its own bar and its
+own correction. Only a cleared margin would support "the model reads news
+better than a trivial reader", and even that is weaker than "understands".
+No comparator is added now: it is a new hypothesis and needs its own
+pre-registration, and bolting it on here would grow this amendment past what
+the audit finding asks for.
+
+**When:** 2026-07-29, before any collection. **The operator approved this
+amendment explicitly. No collection data existed**: not one row carries
+`run_kind='collection'` and no headline has ever been scored against a
+price. The inputs that motivated it are AUDIT-2026-07-29.md lead finding 3
+and the stage 2 demonstration's judgment and strength distributions, none of
+which is an outcome, so nothing was changed after seeing a result.
+
+**Implementation note.** The null consumes only fields Task 8 already
+records: judgment, the excess components, the day cluster, the story group.
+It adds no collector machinery and no new data requirement, so it does not
+re-block stage 3.
 
 ## Why this exists
 
@@ -1308,7 +1495,11 @@ market's direction, the error the council measurement already had to correct.
 **NEUTRAL verdicts are not scored** and are counted separately. A model that
 answers NEUTRAL to everything must not be able to produce a null by abstaining.
 The **NEUTRAL rate is a recorded primary diagnostic**, and a rate above 80
-percent is itself a reportable failure of the design.
+percent is itself a reportable failure of the design. **AMENDMENT 6 registers
+the directional-balance diagnostic beside it**: the pooled minority share of
+directional judgments and the mixed-day-cluster count, reported before the
+permutation null is interpreted, with the uninformative thresholds declared
+in the amendment.
 
 `cost_i` is the **per-observation round trip** from
 `fees.equity_per_side_bp(price, adv, notional)` at the symbol's own price and
@@ -1366,6 +1557,14 @@ re-run clustered on `story_group_id`** and both are reported.
 - **Cluster floor:** at least **60 distinct day clusters**. Below that the
   result is an abstention regardless of the point estimate, following the
   precedent that a thin sample is not a finding.
+- **Permutation confirmation (AMENDMENT 6):** each of the four tests clears
+  only if its statistic also clears the within-day judgment-permutation null
+  at `p <= 0.0125` over 10,000 permutations. The null holds each day's scored
+  names, excess values and judgment counts fixed and shuffles which name
+  carries which judgment, so the attention premium survives the shuffle and
+  only the specific pairing does not. A null that is UNINFORMATIVE under the
+  amendment's thresholds makes the test an abstention. Full specification in
+  Amendment 6.
 
 Anything outside those four is **exploratory** and is labelled so. Exploratory
 results may motivate a new pre-registration and may never be reported as a
@@ -1374,7 +1573,9 @@ strength tests below, and the four economic E-tests defined in AMENDMENT 5
 (per-stratum `net_i`, own alpha 0.05 split four ways, `|z| >= 2.50`, at least
 30 day clusters containing the stratum's observations else abstention).
 Combined family-wise error across the three families is up to 0.15 by the
-union bound, stated in the amendment.**
+union bound, stated in the amendment. The permutation confirmation
+(AMENDMENT 6) is not a further family: it is part of what clearing a primary
+means, it is conjunctive, and it adds no alpha.**
 
 ### Secondary tests on strength, pre-registered (AMENDMENT 3)
 
@@ -1503,6 +1704,11 @@ each of those is a new hypothesis needing its own pre-registration.
 
 **An interval that includes both zero and 30 bp gross at the cluster floor is
 an abstention, not a negative and not a finding.**
+
+**AMENDMENT 6 note: this definition is untouched.** The permutation
+confirmation intercepts positives only. A primary whose interval and z fail
+on their own terms fails regardless of the null, and an UNINFORMATIVE null
+produces an abstention, never a negative.
 
 SUPERSEDED (pre-Amendment-5): the definition read on net excess against a
 25 bp net effect, which made the negative partly a statement about taker
@@ -1920,6 +2126,17 @@ Listed rather than resolved optimistically.
     the adverse selection of which orders fill are all unknown, and the
     amendment forbids relying on the path before they are measured under
     their own pre-registration.
+
+12. **NEW, INTRODUCED BY AMENDMENT 6: the realised directional balance is
+    unknown, and the permutation null needs it.** The null is UNINFORMATIVE
+    below the registered thresholds: pooled minority directional share under
+    10 percent, or fewer than 30 mixed day clusters. The stage 2
+    demonstration's first look, 26 POSITIVE against 7 NEGATIVE over 33
+    directional rows at n far too small to conclude, sits at a 21 percent
+    minority share, informative but close enough to warrant the registration.
+    If collection lands skewed past the thresholds, the affected primary
+    reads as an abstention however strong its point estimate, which is the
+    registered and accepted behaviour.
 
 ---
 
