@@ -91,19 +91,49 @@ def test_spread_scales_as_one_over_price_because_the_tick_is_fixed():
     assert (lo - fixed) == pytest.approx(100.0 * (hi - fixed), rel=0.02)
 
 
-def test_the_tick_multiple_ships_at_one_which_is_the_floor():
-    """The model UNDERSTATES small-cap spread by construction and must say so.
-    No quote data exists in this project to measure how many ticks wide a
-    market really is, so the multiple is 1.0 until it can be measured."""
+def test_the_tick_multiple_is_measured_for_tiers_3_and_4_and_floors_elsewhere():
+    """MEASURED 2026-07-29 from Alpaca historical quotes, feed=sip, sessions
+    2026-07-24/27/28 at 14:00Z/16:30Z/19:30Z, 1,402 rows over 157 band
+    symbols: median quoted spread 8.0 ticks in tier 3 and 9.0 in tier 4.
+    Tiers 1, 2, 5 and 6 were NOT measured and stay at the 1.0 floor, because
+    a guessed multiple for an unmeasured tier is the fabrication this project
+    keeps correcting. Tier 1 at 1.0 still understates mildly."""
     f = fees.load()
-    assert f["alpaca_equity_spread_tick_multiple"] == 1.0
+    assert f["alpaca_equity_tier1_spread_tick_multiple"] == 1.0
+    assert f["alpaca_equity_tier2_spread_tick_multiple"] == 1.0
+    assert f["alpaca_equity_tier3_spread_tick_multiple"] == 8.0
+    assert f["alpaca_equity_tier4_spread_tick_multiple"] == 9.0
+    assert f["alpaca_equity_tier5_spread_tick_multiple"] == 1.0
+    assert f["alpaca_equity_tier6_spread_tick_multiple"] == 1.0
     assert f["alpaca_equity_spread_tick_usd"] == 0.01
+
+
+def test_the_multiple_is_selected_by_the_symbols_own_tier():
+    """A band small cap is costed at its measured tier multiple; a mega cap
+    keeps the unmeasured 1.0 floor. The selection key is ADV, the same ladder
+    the impact term already uses."""
+    f = fees.load()
+    assert fees.equity_spread_tick_multiple(20e6, f) == 8.0    # tier 3
+    assert fees.equity_spread_tick_multiple(5e6, f) == 9.0     # tier 4
+    assert fees.equity_spread_tick_multiple(1e9, f) == 1.0     # tier 1
+    assert fees.equity_spread_tick_multiple(500e3, f) == 1.0   # tier 5
+
+
+def test_the_measured_multiple_moved_the_band_and_left_tier_1_alone():
+    """The recorded tier-1 re-cost (five mega caps at 0.45-0.85 bp round trip,
+    2026-07-27) must NOT move: tier 1 was not measured and its multiple did
+    not change. A tier-4 band name at the band's median price moves ~9x."""
+    mega = fees.equity_round_trip_bp(600.0, 500e6, ORDER)
+    assert mega == pytest.approx(0.6, abs=0.3)
+    t4 = fees.equity_round_trip_bp(23.0, 5e6, 2000.0)
+    assert t4 == pytest.approx(0.3 + 100.0 * 9.0 / 23.0 + 2 * 0.02847 * 2,
+                               rel=0.02)
 
 
 def test_raising_the_tick_multiple_raises_only_the_spread_component():
     f = fees.load()
     base = fees.equity_per_side_bp(10.0, 1e9, ORDER, f)
-    f2 = dict(f, alpaca_equity_spread_tick_multiple=3.0)
+    f2 = dict(f, alpaca_equity_tier1_spread_tick_multiple=3.0)
     wide = fees.equity_per_side_bp(10.0, 1e9, ORDER, f2)
     fixed = f["alpaca_equity_regulatory_bp_per_side"]
     assert (wide - fixed) == pytest.approx(3.0 * (base - fixed), rel=0.01)
@@ -157,7 +187,7 @@ def test_every_new_key_exists_in_yaml_hpp_and_python():
     yaml, hpp = open(YAML).read(), open(CFG_HPP).read()
     keys = [k for k in fees.load() if "tier" in k or "spread_tick" in k]
     keys = [k for k in keys if "crypto" not in k]
-    assert len(keys) == 13, f"expected the 13 new keys, found {len(keys)}"
+    assert len(keys) == 18, f"expected the 18 liquidity keys, found {len(keys)}"
     for k in keys:
         assert re.search(rf"^\s*{k}:", yaml, re.M), f"{k} missing from yaml"
         assert re.search(rf"\b{k}\b", hpp), f"{k} missing from FeesConfig"
@@ -169,7 +199,9 @@ def test_the_python_and_cpp_tier_ladders_have_the_same_shape():
         assert f"alpaca_equity_tier{tier}_adv_floor_usd" in cpp
     for tier in range(1, 7):
         assert f"alpaca_equity_tier{tier}_impact_bp_per_1k" in cpp
+        assert f"alpaca_equity_tier{tier}_spread_tick_multiple" in cpp
     assert "equity_per_side_fraction" in cpp
+    assert "equity_spread_tick_multiple" in cpp
     assert "median_dollar_volume" in cpp
 
 

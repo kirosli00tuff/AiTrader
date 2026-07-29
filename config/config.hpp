@@ -140,7 +140,14 @@ struct FeesConfig {
     // the Reg NMS one-cent increment and the fill price; impact is measured
     // Amihud illiquidity by liquidity tier. Sources and method in the yaml.
     double alpaca_equity_spread_tick_usd = 0.01;
-    double alpaca_equity_spread_tick_multiple = 1.0;
+    // Per-tier tick multiples (2026-07-29): tiers 3-4 MEASURED from historical
+    // consolidated SIP quotes, tiers 1-2 and 5-6 UNMEASURED floors at 1.0.
+    double alpaca_equity_tier1_spread_tick_multiple = 1.0;
+    double alpaca_equity_tier2_spread_tick_multiple = 1.0;
+    double alpaca_equity_tier3_spread_tick_multiple = 8.0;
+    double alpaca_equity_tier4_spread_tick_multiple = 9.0;
+    double alpaca_equity_tier5_spread_tick_multiple = 1.0;
+    double alpaca_equity_tier6_spread_tick_multiple = 1.0;
     double alpaca_equity_tier1_adv_floor_usd = 277000000.0;
     double alpaca_equity_tier2_adv_floor_usd = 65300000.0;
     double alpaca_equity_tier3_adv_floor_usd = 13300000.0;

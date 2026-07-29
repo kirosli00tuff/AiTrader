@@ -11,6 +11,44 @@ Model:
 Prompt summary: one line.
 Changes: what changed.
 
+## Prompt: Measure the tick multiple from historical consolidated quotes
+
+Date: 2026-07-29
+Model: Fable 5 (claude-fable-5, 1M context).
+Prompt summary: The prior session established that `feed=sip` is refused only on the latest-quote endpoint (403, "does not permit querying recent SIP data") while the historical quotes endpoint returns 200 for the same feed. It reached its context limit and recorded the finding rather than starting a measurement it could not finish. `alpaca_equity_spread_tick_multiple` still reads 1.0, the floor. Task 1 repoint `scripts/measure_tick_multiple_rth.py` from the latest-quote endpoint to the historical quotes endpoint with `feed=sip`, re-scope the SIP-entitlement refusal to the historical endpoint's failure modes, remove or re-scope the RTH refusal since historical data can be queried after the close, keep the open/middle/close window separation, and confirm the fund exclusion, discard accounting, and monotonicity check survive. Task 2 measure across the stratified universe over recent complete sessions, reporting sessions, windows, sample size per stratum, discards by reason, and fund exclusions. Task 3 apply the monotonicity check and the two-venue consolidation signal before believing anything; on failure report unusable, change nothing, stop. Task 4 report per-stratum median, distribution, high percentile, the resulting round-trip hurdle against the one-tick floor and the 30 bp assumed effect, and the SIP-versus-IEX comparison on shared symbols. Task 5 if and only if every check passed, update `alpaca_equity_spread_tick_multiple` with full provenance and re-run any recorded result the change affects. Task 6 report what the measurement implies for the price floor, the ADV band, the capacity arithmetic, and the 30 bp assumption; do not amend EXPERIMENT.md; state whether stage 3 is unblocked. Task 7 record the measurement in EXPERIMENT.md stage 1 results as a result rather than an amendment, update PROGRESS.md, commit and push.
+
+CONSTRAINTS: live trading off. No RiskGate logic, no live-trading gate, no adaptive limit-weakening invariant, no Level 1 value, no threshold, no strategy parameter. No LLM provider calls. Collection has NOT started. EXPERIMENT.md is ACCEPTED and BINDING: an implied change is reported, never applied.
+
+### FINDINGS
+
+**MEASURED, CHECKED, APPLIED TO THE FEE MODEL. SPECIFICATION UNTOUCHED. pytest 1,191 passed (was 1,189), ctest 34 of 34. No LLM provider call. Live trading untouched.**
+
+**TASK 1, REPOINTED.** The script queries `/v2/stocks/{symbol}/quotes` with `feed=sip`, up to 50 quotes from the first 5 minutes of each window. The RTH refusal is replaced by three guards: complete sessions only (strictly before today, from `trading_calendar`), windows validated inside each session's own open/close via zoneinfo, and a 16-minute recency floor (the historical endpoint 403s on recent SIP data). The entitlement refusal now probes the historical endpoint and refuses on 403 or an empty AAPL quote list. Fund exclusion (tri-state, 5,501 excluded), discard accounting by reason, and the monotonicity check all retained. `stale` retired as a discard reason: the query's time bounds are the label, so a late run cannot mislabel a window.
+
+**TASK 2, MEASURED.** Sessions 2026-07-24/27/28, windows 14:00Z/16:30Z/19:30Z. 1,402 rows kept of 1,440 cells, 157 of 160 symbols. Per stratum n: S1 351, S2 351, S3 355, S4 345. Discards: 241 locked quotes, 38 no-quote cells, 0 crossed, 0 zero, 0 no-size, 0 HTTP.
+
+**TASK 3, THE CHECKS.**
+
+```
+monotonicity (ticks, strict)   FAILS: 7.0 / 8.0 / 6.5 / 12.0 (S3 dip)
+monotonicity (registered wording) NEAR-MONOTONE, USABLE:
+  thinnest widest holds in both units (the clause both recorded
+  failures violated); bp ladder STRICTLY monotone at med, p75, p90
+  (15.8/21.1/30.6/50.0); the tick dip is the price gradient
+  (stratum median prices 46.80/38.51/23.93/20.87)
+venue diversity                PASS: 1,372/1,402 rows two-venue (69.8% of quotes)
+SIP vs IEX (same session/windows) IEX wider 139/151 pairs, median 41.5x
+```
+
+**TASK 4, THE MULTIPLE AND THE HURDLE.** Ticks median per stratum 7.0/8.0/6.5/12.0; bp median 15.8/21.1/30.6/50.0; bp p90 63.9/95.1/121.1/211.6. Round-trip hurdle (spread + 0.3 bp fixed): S1 16.1 med / 64.2 p90, S2 21.4 / 95.4, S3 30.9 / 121.4, S4 50.3 / 211.9. The one-tick floor said 2.4-5.1 bp: understated 6.7x-9.9x. **Against 30 bp: S1 and S2 survive at the median, S3 and S4 are dead at the median, all four dead at p90.** IEX/SIP 41.5x median across 151 pairs confirms the prior session's UFPT diagnosis sample-wide.
+
+**TASK 5, FEE MODEL UPDATED, PER TIER, DELIBERATELY.** One global number rejected: it would misprice the tier-1 mega caps the engine actually trades 5-20x. `alpaca_equity_tier3_spread_tick_multiple = 8.0`, `tier4 = 9.0` (measured; cross-check route bp_med x price_med/100 gives 7.17/9.50, two routes agree), tiers 1/2/5/6 stay 1.0 floors marked UNMEASURED. Both language halves moved together; mirror test pins all six keys. Re-run of affected recorded results: the five tier-1 mega caps re-cost byte-identical (pinned by a new test); no recorded conclusion moves.
+
+**TASK 6, SPECIFICATION IMPLICATIONS, REPORTED NOT APPLIED.** Amendment 2's three-tick worst case (30.41 bp) is exceeded 3x: tier-4 median is 9 ticks, worst-member tick component 90 bp. The price-floor lever is exhausted (bp spread roughly flat across band prices). An amendment must choose: restrict the band to the tier-3 floor (ADV >= 13.3M, the S1/S2 half, median hurdle 16-21 bp, net effect clears the 4.96 bp capacity bar) and lose the thin half where the mechanism is documented strongest, or keep the band and accept that half the sample is pre-condemned to negative net, invalidating the registered power arithmetic. **Stage 3 is NOT unblocked: the measurement blocker is cleared and the block is now an operator decision.**
+
+Changes: `scripts/measure_tick_multiple_rth.py` (repointed), `config/default_config.yaml`, `config/config.hpp`, `config/config.cpp`, `core/fees.hpp`, `backtest/fees.py`, `tests/test_fee_liquidity.py`, EXPERIMENT.md (stage 1 result record only), PROGRESS.md, CONTEXT.md, RETURN.md. Raw record `.run/tick_multiple_sip_20260729.json`.
+Commit message: Measure the tick multiple from historical consolidated quotes and update the fee model, specification unchanged, live trading untouched
+
 ## Prompt: Populate the exchange calendar forward and refuse an unresolvable session
 
 Date: 2026-07-28

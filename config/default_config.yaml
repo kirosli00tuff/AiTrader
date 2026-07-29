@@ -861,18 +861,34 @@ fees:
   # large caps does not apply to small ones, so cost now varies with the
   # symbol's own price and its median daily dollar volume.
   #
-  # SPREAD IS A FLOOR, NOT AN ESTIMATE, AND THE DISTINCTION IS THE POINT.
+  # SPREAD IS A FLOOR TIMES A MEASURED MULTIPLE, PER LIQUIDITY TIER.
   # One cent is the minimum quoted increment for a US equity above 1.00 USD
   # (SEC Reg NMS Rule 612), so a one-tick market is the tightest any name can
   # be and the floor is exactly tick/price. Per side that is half of it.
-  # Real small caps quote SEVERAL ticks wide, and no quote data exists in this
-  # project to measure how many, so the multiple ships at 1.0 and the model
-  # therefore UNDERSTATES small-cap spread by construction. Raise the multiple
-  # when quote data is available. Recorded this way rather than guessed, the
-  # same posture as alpaca_crypto_spread_bp_per_side above.
-  # Source: SEC Reg NMS Rule 612 minimum pricing increment, read 2026-07-27.
+  # THE MULTIPLE IS PER TIER because it was MEASURED per tier and the strata
+  # differ: one global number would misprice the mega caps this engine
+  # actually trades to serve a band it does not. Tiers 3 and 4 are MEASURED;
+  # tiers 1, 2, 5 and 6 stay at the 1.0 FLOOR, marked unmeasured, because
+  # writing a guessed multiple for an unmeasured tier is the fabrication this
+  # project keeps correcting. Tier 1 at 1.0 still understates mildly (AAPL
+  # probed ~3-8 ticks intraday); tiers 5-6 are outside the tradeable universe.
+  # Source: Alpaca historical quotes endpoint /v2/stocks/{symbol}/quotes,
+  # feed=sip (consolidated tape, venue diversity verified 1,372 of 1,402
+  # rows), measured 2026-07-29 over sessions 2026-07-24, 2026-07-27 and
+  # 2026-07-28 at windows 14:00Z, 16:30Z, 19:30Z; 1,402 symbol-session-window
+  # rows over 157 band symbols, funds excluded by the tri-state classifier.
+  # Median quoted spread in ticks per fee tier; the independent cross-check
+  # bp_median x price_median / 100 gives 7.17 (tier 3) and 9.50 (tier 4)
+  # against 8.0 and 9.0, so the two routes agree. Raw record in
+  # .run/tick_multiple_sip_20260729.json and EXPERIMENT.md stage 1 results.
+  # Tick source: SEC Reg NMS Rule 612 minimum pricing increment, read 2026-07-27.
   alpaca_equity_spread_tick_usd: 0.01
-  alpaca_equity_spread_tick_multiple: 1.0
+  alpaca_equity_tier1_spread_tick_multiple: 1.0   # UNMEASURED floor
+  alpaca_equity_tier2_spread_tick_multiple: 1.0   # UNMEASURED floor
+  alpaca_equity_tier3_spread_tick_multiple: 8.0   # measured 2026-07-29
+  alpaca_equity_tier4_spread_tick_multiple: 9.0   # measured 2026-07-29
+  alpaca_equity_tier5_spread_tick_multiple: 1.0   # UNMEASURED floor
+  alpaca_equity_tier6_spread_tick_multiple: 1.0   # UNMEASURED floor
   # IMPACT IS MEASURED. Amihud (2002) illiquidity, mean(|return| / dollar
   # volume), computed per symbol over 2025-07-01 to 2026-07-24 on 11,710 US
   # equities priced at or above 1.00 USD in analysis_bars.db (consolidated SIP,

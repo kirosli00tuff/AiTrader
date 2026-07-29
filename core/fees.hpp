@@ -81,6 +81,21 @@ inline int equity_liquidity_tier(const config::FeesConfig& f, double adv_usd) {
     return 6;
 }
 
+// The tick multiple for a liquidity tier (2026-07-29). Tiers 3 and 4 are
+// MEASURED from historical consolidated SIP quotes; tiers 1, 2, 5 and 6 are
+// 1.0 floors, unmeasured, stated in the yaml rather than guessed.
+inline double equity_spread_tick_multiple(const config::FeesConfig& f,
+                                          double adv_usd) {
+    switch (equity_liquidity_tier(f, adv_usd)) {
+        case 1: return f.alpaca_equity_tier1_spread_tick_multiple;
+        case 2: return f.alpaca_equity_tier2_spread_tick_multiple;
+        case 3: return f.alpaca_equity_tier3_spread_tick_multiple;
+        case 4: return f.alpaca_equity_tier4_spread_tick_multiple;
+        case 5: return f.alpaca_equity_tier5_spread_tick_multiple;
+        default: return f.alpaca_equity_tier6_spread_tick_multiple;
+    }
+}
+
 // Per-side EQUITY cost as a fraction of notional, aware of the symbol's price
 // and its liquidity. adv_usd <= 0 or price <= 0 means liquidity is UNKNOWN and
 // the flat legacy estimate is used unchanged, so a caller with no bar history
@@ -94,7 +109,7 @@ inline double equity_per_side_fraction(const config::FeesConfig& f,
     if (price <= 0.0 || adv_usd <= 0.0)
         return fixed + f.alpaca_equity_spread_bp_per_side / 1e4;
     const double half_spread = 0.5 * f.alpaca_equity_spread_tick_usd *
-                               f.alpaca_equity_spread_tick_multiple / price;
+                               equity_spread_tick_multiple(f, adv_usd) / price;
     const double impact =
         equity_impact_bp_per_1k(f, adv_usd) * (notional / 1000.0) / 1e4;
     return fixed + half_spread + impact;

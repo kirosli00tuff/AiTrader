@@ -1965,6 +1965,137 @@ costed at 30 percent of S4, and lowering the 30 bp working effect, which
 re-powers the whole design. That choice is the operator's and it needs a number
 this session did not produce.
 
+#### Tick multiple, attempt 4 (2026-07-29, HISTORICAL SIP): MEASURED AND USABLE
+
+**THIS RECORDS A RESULT. IT AMENDS NOTHING.** No specification value moves
+here. The fee model (config, not this document) is updated with the measured
+values, and what the measurement implies for this specification is REPORTED at
+the end of this section for the operator to decide.
+
+**THE ROUTE.** The latest-quote endpoint refuses `feed=sip` only for RECENT
+data. The HISTORICAL quotes endpoint (`/v2/stocks/{symbol}/quotes`) serves
+`feed=sip` with HTTP 200 for any window older than about 15 minutes, so the
+measurement ran after hours against complete past sessions and the RTH
+scheduling constraint that cost three sessions is gone. Sessions 2026-07-24,
+2026-07-27, 2026-07-28; windows 14:00Z, 16:30Z, 19:30Z (open, middle, close
+kept separated); up to 50 quotes from the first 5 minutes of each window; one
+row per symbol-session-window, the median over that window's quotes.
+
+**THE SAMPLE.** 160 symbols drawn 40 per stratum by the specification's rule
+(fund exclusion tri-state, 5,501 excluded during the build; price floor 10.00;
+band ADV 2.07M-65.3M). 157 symbols produced rows. **1,402 rows kept of 1,440
+cells.** Discards by reason: 241 locked quotes, 38 cells with no quotes in the
+window, 0 crossed, 0 zero-price, 0 missing-size, 0 HTTP failures. `stale` is
+retired as a reason: a historical query bounds time by construction.
+
+| stratum | n | ticks med | p25 | p75 | p90 | bp med | bp p75 | bp p90 |
+|---|---|---|---|---|---|---|---|---|
+| S1 | 351 | 7.0 | 2.0 | 26.0 | 54.0 | 15.8 | 32.7 | 63.9 |
+| S2 | 351 | 8.0 | 3.0 | 25.0 | 51.0 | 21.1 | 49.9 | 95.1 |
+| S3 | 355 | 6.5 | 3.0 | 22.0 | 65.0 | 30.6 | 65.8 | 121.1 |
+| S4 | 345 | 12.0 | 5.0 | 26.5 | 65.0 | 50.0 | 97.4 | 211.6 |
+
+**SANITY CHECK 1, MONOTONICITY, AND THE STRICT READING IS REPORTED FIRST: the
+tick-median ladder 7.0 / 8.0 / 6.5 / 12.0 is NOT strictly monotone.** S3 dips
+1.5 ticks below S2. The registered wording is "monotone or near-monotone with
+the thinnest widest", and the verdict here is NEAR-MONOTONE, judged usable, on
+four grounds stated so the call is auditable:
+1. **The operative clause holds in both units**: S4, the thinnest, is the
+   widest, in ticks and in bp. Both recorded failures of this check (S1 870
+   against S4 303 after hours; S4 62.5 below S3 104.5 on IEX) failed exactly
+   this clause. This data does not.
+2. **The bp ladder is STRICTLY monotone at the median, p75 and p90**
+   (15.8/21.1/30.6/50.0; 32.7/49.9/65.8/97.4; 63.9/95.1/121.1/211.6). The
+   proportional spread carries the liquidity ordering cleanly.
+3. **The tick dip is the price gradient, demonstrated**: stratum median prices
+   fall 46.80 / 38.51 / 23.93 / 20.87 down the ladder, and ticks scale with
+   price at equal proportional spread (price-quartile tick medians run 3.0 to
+   31.0 while bp stays in a 21-35 band). A 24 USD S3 name shows ~40 percent
+   fewer ticks than a 39 USD S2 name at the same bp. Ticks confound spread
+   with price; bp deconfounds it.
+4. **No artifact signature**: medians are 6.5-12 ticks, not hundreds; the p90s
+   differ 3.3x across strata rather than sitting uniform as the IEX run's did;
+   zero crossed quotes, zero HTTP failures.
+The measurement script records the strict flag honestly
+(`monotone: false, usable: false` in the raw JSON); this session's verdict
+applies the registered near-monotone wording and says so here rather than
+editing the flag.
+
+**SANITY CHECK 2, VENUE DIVERSITY: PASS DECISIVELY.** 1,372 of 1,402 rows
+(97.9 percent) contain at least one quote with different venues on the two
+sides of the book; 41,642 of 59,663 kept quotes (69.8 percent) are two-venue.
+This is what a consolidated best bid and offer looks like, and it is the
+signal the one-venue IEX feed could not produce.
+
+**SANITY CHECK 3, SIP AGAINST IEX ON THE SAME SYMBOLS, SAME SESSION, SAME
+WINDOWS.** A parallel IEX arm sampled 2026-07-28 identically. Over **151
+paired symbols the IEX/SIP spread ratio is median 41.5x** (p25 8.0x, p75
+81.2x, p90 127x), IEX wider on 139 of 151. Extremes: ENVA SIP 90 ticks
+against IEX 6,841; KB 26 against 3,381; FELE 31 against 3,337. Against the
+recorded LIVE IEX run of 2026-07-28 the ratio is 129.5x median on the 8
+shared kept symbols. **The prior session's one-symbol diagnosis (UFPT 380
+against 7,915) is confirmed across the sample: IEX was the defect, and the
+consolidated tape is a different, sane population.**
+
+**THE FEE MODEL UPDATE (config, not this document).** The multiple varies
+across the band less in ticks (6.5-12) than in bp (15.8-50.0) because price
+composition cancels part of the liquidity gradient in tick units. **One global
+number was REJECTED deliberately**: the engine trades tier-1 mega caps today,
+and a band-measured multiple applied globally would misprice them 5-20x
+against their own probed quotes (AAPL ~3-8 ticks). The multiple is now PER
+LIQUIDITY TIER, the same ladder the impact term already uses:
+`alpaca_equity_tier3_spread_tick_multiple = 8.0` and
+`alpaca_equity_tier4_spread_tick_multiple = 9.0` (measured, median quoted
+spread in ticks per tier; the independent cross-check bp_med x price_med / 100
+gives 7.17 and 9.50, so two routes agree), tiers 1, 2, 5, 6 stay at the 1.0
+floor marked UNMEASURED. Within-band model fidelity at the tier medians is
+about +-20 percent per stratum, against 10-50x understatement at the old
+floor. **Recorded tier-1 results do not move** (five mega caps re-costed
+byte-identical, pinned by test). Raw record:
+`.run/tick_multiple_sip_20260729.json`.
+
+**THE HURDLE, MEASURED, AGAINST THE ONE-TICK FLOOR AND THE 30 BP EFFECT.**
+Round trip = measured spread bp + 0.3 regulatory; impact at 2,000 USD adds
+under 0.12 bp anywhere in the band.
+
+| stratum | hurdle med | hurdle p90 | one-tick floor said | vs 30 bp effect |
+|---|---|---|---|---|
+| S1 | 16.1 bp | 64.2 bp | 2.4 bp | survives med (keeps 13.9), dead p90 |
+| S2 | 21.4 bp | 95.4 bp | 2.9 bp | survives med (keeps 8.6), dead p90 |
+| S3 | 30.9 bp | 121.4 bp | 4.5 bp | **dead at the median** |
+| S4 | 50.3 bp | 211.9 bp | 5.1 bp | **dead at the median** |
+
+**The one-tick floor understated the band by 6.7x to 9.9x.** Amendment 2's
+three-tick scenario (worst member 30.41 bp) is EXCEEDED: the measured tier-4
+median is 9 ticks, three times that scenario, and at the 10.00 floor price the
+worst member's tick component alone is 90 bp. **The design survives at the
+median only in S1 and S2, fails S3 and S4 at the median, and fails everywhere
+at the p90.** Capacity at the 2,000 USD sizer (required net edge 4.96 bp):
+S1 clears with 13.9 bp net at the median, S2 with 8.6, S3 and S4 are negative
+before any effect-size uncertainty.
+
+**WHAT AN AMENDMENT WOULD NEED TO SAY, REPORTED AND NOT APPLIED.** (1) The
+price-floor lever is exhausted: measured spread in bp is roughly flat across
+the band's price range (21-35 bp by price quartile), so raising the floor
+above 10.00, the remedy Amendment 2 anticipated, would no longer buy what it
+bought when dispersion was tick-at-the-floor arithmetic. (2) The live choice
+is the band's thin edge: restricting the band to the tier-3 floor
+(ADV >= 13,300,000, roughly the S1/S2 half) keeps a median hurdle of 16-21 bp
+and a positive net effect at the capacity gate, at the cost of the S3/S4 half,
+which is where the documented mechanism is strongest, killing or reframing
+the gradient secondary test. (3) Keeping the full band forces either scoring
+gross-of-cost (a different hypothesis) or accepting that half the sample is
+pre-condemned to negative net by measured cost, which invalidates the pooled
+power arithmetic as registered. **The decision is the operator's.**
+
+**IS STAGE 3 UNBLOCKED? NO, and the blocker changed character.** The named
+blocker, the tick multiple unmeasured, is CLEARED. But collection under the
+accepted specification would spend roughly half its sample in strata whose
+measured median hurdle consumes the entire 30 bp working effect. Starting
+collection before the operator decides the amendment question above would
+collect data whose pre-registered power arithmetic is known wrong. The block
+is now a decision, not a measurement.
+
 #### The Stage 1 verdict
 
 **STAGE 1 CLEARS ON EVERY STOP CONDITION IT WAS DESIGNED TO TEST. It does not

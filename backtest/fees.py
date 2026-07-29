@@ -52,7 +52,12 @@ def load(config_path: str = DEFAULT_CONFIG) -> dict:
         "alpaca_equity_regulatory_bp_per_side": 0.15,
         "alpaca_equity_spread_bp_per_side": 0.5,
         "alpaca_equity_spread_tick_usd": 0.01,
-        "alpaca_equity_spread_tick_multiple": 1.0,
+        "alpaca_equity_tier1_spread_tick_multiple": 1.0,
+        "alpaca_equity_tier2_spread_tick_multiple": 1.0,
+        "alpaca_equity_tier3_spread_tick_multiple": 8.0,
+        "alpaca_equity_tier4_spread_tick_multiple": 9.0,
+        "alpaca_equity_tier5_spread_tick_multiple": 1.0,
+        "alpaca_equity_tier6_spread_tick_multiple": 1.0,
         "alpaca_equity_tier1_adv_floor_usd": 277000000.0,
         "alpaca_equity_tier2_adv_floor_usd": 65300000.0,
         "alpaca_equity_tier3_adv_floor_usd": 13300000.0,
@@ -99,11 +104,12 @@ def round_trip_bp(asset_class: str, order_type: str = "taker",
 # or more below that. Kept unchanged as the fallback for a symbol whose
 # liquidity is unknown.
 #
-# SPREAD IS A FLOOR, IMPACT IS MEASURED, and the difference matters:
+# SPREAD IS A FLOOR TIMES A MEASURED PER-TIER MULTIPLE, IMPACT IS MEASURED:
 #   * One cent is the minimum quoted increment for a US equity above 1.00 USD
 #     (SEC Reg NMS Rule 612), so tick/price is the tightest any market can be.
-#     Real small caps quote several ticks wide and no quote data exists here to
-#     say how many, so the multiple ships at 1.0 and this UNDERSTATES.
+#     The multiple was MEASURED 2026-07-29 for tiers 3-4 from historical
+#     consolidated SIP quotes (8.0 and 9.0 ticks median); tiers 1-2 and 5-6
+#     stay at the 1.0 floor, unmeasured, stated in the yaml.
 #   * Amihud (2002) illiquidity measured per tier over 11,710 US equities,
 #     2025-07-01 to 2026-07-24, consolidated SIP. Scales with order size.
 
@@ -114,6 +120,18 @@ def equity_liquidity_tier(adv_usd: float, fees: dict | None = None) -> int:
         if adv_usd >= f[f"alpaca_equity_tier{tier}_adv_floor_usd"]:
             return tier
     return 6
+
+
+def equity_spread_tick_multiple(adv_usd: float, fees: dict | None = None) -> float:
+    """The tick multiple for a symbol's liquidity tier (2026-07-29).
+
+    Tiers 3 and 4 are MEASURED from historical consolidated SIP quotes; tiers
+    1, 2, 5 and 6 are 1.0 floors, unmeasured, stated in the yaml rather than
+    guessed.
+    """
+    f = fees or load()
+    tier = equity_liquidity_tier(adv_usd, f)
+    return f[f"alpaca_equity_tier{tier}_spread_tick_multiple"]
 
 
 def equity_per_side_bp(price: float, adv_usd: float, notional: float,
@@ -129,7 +147,7 @@ def equity_per_side_bp(price: float, adv_usd: float, notional: float,
     if price <= 0 or adv_usd <= 0:
         return fixed + f["alpaca_equity_spread_bp_per_side"]
     half_spread_bp = 0.5 * (f["alpaca_equity_spread_tick_usd"]
-                            * f["alpaca_equity_spread_tick_multiple"]
+                            * equity_spread_tick_multiple(adv_usd, f)
                             / price) * 1e4
     tier = equity_liquidity_tier(adv_usd, f)
     impact_bp = (f[f"alpaca_equity_tier{tier}_impact_bp_per_1k"]

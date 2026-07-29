@@ -218,7 +218,12 @@ Config load_config(const std::string& path,
     fe.alpaca_equity_spread_bp_per_side = get_double(root, "fees.alpaca_equity_spread_bp_per_side", fe.alpaca_equity_spread_bp_per_side);
     // Liquidity-aware equity cost (2026-07-27).
     fe.alpaca_equity_spread_tick_usd = get_double(root, "fees.alpaca_equity_spread_tick_usd", fe.alpaca_equity_spread_tick_usd);
-    fe.alpaca_equity_spread_tick_multiple = get_double(root, "fees.alpaca_equity_spread_tick_multiple", fe.alpaca_equity_spread_tick_multiple);
+    fe.alpaca_equity_tier1_spread_tick_multiple = get_double(root, "fees.alpaca_equity_tier1_spread_tick_multiple", fe.alpaca_equity_tier1_spread_tick_multiple);
+    fe.alpaca_equity_tier2_spread_tick_multiple = get_double(root, "fees.alpaca_equity_tier2_spread_tick_multiple", fe.alpaca_equity_tier2_spread_tick_multiple);
+    fe.alpaca_equity_tier3_spread_tick_multiple = get_double(root, "fees.alpaca_equity_tier3_spread_tick_multiple", fe.alpaca_equity_tier3_spread_tick_multiple);
+    fe.alpaca_equity_tier4_spread_tick_multiple = get_double(root, "fees.alpaca_equity_tier4_spread_tick_multiple", fe.alpaca_equity_tier4_spread_tick_multiple);
+    fe.alpaca_equity_tier5_spread_tick_multiple = get_double(root, "fees.alpaca_equity_tier5_spread_tick_multiple", fe.alpaca_equity_tier5_spread_tick_multiple);
+    fe.alpaca_equity_tier6_spread_tick_multiple = get_double(root, "fees.alpaca_equity_tier6_spread_tick_multiple", fe.alpaca_equity_tier6_spread_tick_multiple);
     fe.alpaca_equity_tier1_adv_floor_usd = get_double(root, "fees.alpaca_equity_tier1_adv_floor_usd", fe.alpaca_equity_tier1_adv_floor_usd);
     fe.alpaca_equity_tier2_adv_floor_usd = get_double(root, "fees.alpaca_equity_tier2_adv_floor_usd", fe.alpaca_equity_tier2_adv_floor_usd);
     fe.alpaca_equity_tier3_adv_floor_usd = get_double(root, "fees.alpaca_equity_tier3_adv_floor_usd", fe.alpaca_equity_tier3_adv_floor_usd);
