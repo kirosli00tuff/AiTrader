@@ -1,0 +1,17 @@
+# Daily news collection (EXPERIMENT.md stage 3). Installed by copying to
+# ~/.config/systemd/user/ and running: systemctl --user daemon-reload &&
+# systemctl --user enable --now news-collect.timer
+#
+# The wrapper derives everything from the trading calendar and refuses
+# rather than guessing. See news_experiment/daily.py.
+[Unit]
+Description=MAL daily news collection wrapper
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/kiros-li/Documents/GitHub/AiTrader
+ExecStart=/home/kiros-li/Documents/GitHub/AiTrader/.venv/bin/python -m news_experiment.daily
+# The host has 14 GB and a recorded OOM incident from an oversized research
+# sweep. The run is a single process, capped so it can never contribute.
+MemoryMax=2G
+Nice=10

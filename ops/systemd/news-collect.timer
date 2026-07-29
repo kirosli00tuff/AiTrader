@@ -1,0 +1,16 @@
+# Once per weekday at 22:30 UTC: 2.5 hours after the 20:00 UTC summer close,
+# 1.5 hours after the 21:00 UTC winter close, both past the SIP settle and
+# the daily bar cut. Local: 15:30 PDT, 14:30 PST. The wrapper itself decides
+# what is collectable, so a firing on a holiday resolves to a clean no-op.
+[Unit]
+Description=MAL daily news collection schedule
+
+[Timer]
+OnCalendar=Mon..Fri *-*-* 22:30:00 UTC
+# A machine asleep or off at 22:30 runs the job at next wake instead of
+# skipping it. The wrapper's idempotence makes late firings safe.
+Persistent=true
+RandomizedDelaySec=120
+
+[Install]
+WantedBy=timers.target

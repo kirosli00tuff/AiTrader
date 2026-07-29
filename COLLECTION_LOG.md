@@ -76,3 +76,30 @@ config_sha:        145d3523e5109d59ab62ce891006e775c2f25da9febd19c46447757831990
   "credential_shared": false,
   "latch_separate": true
 }
+
+=== DAILY RUN 2026-07-29T23:43:21Z ===
+action:     refused_already_present
+target:     2026-07-28
+formation:  2026-07-01
+gaps:       none
+rows:       427 before, 427 after
+detail:     427 rows already recorded for 2026-07-28, the collector is append-only, re-running would double-count
+exit:       0
+
+=== DAILY RUN 2026-07-29T23:43:27Z ===
+action:     refused_already_present
+target:     2026-07-28
+formation:  2026-07-01
+gaps:       none
+rows:       427 before, 427 after
+detail:     427 rows already recorded for 2026-07-28, the collector is append-only, re-running would double-count
+exit:       0
+
+=== DAILY RUN 2026-07-29T23:45:30Z ===
+action:     refused_already_present
+target:     2026-07-28
+formation:  2026-07-01
+gaps:       none
+rows:       427 before, 427 after
+detail:     427 rows already recorded for 2026-07-28, the collector is append-only, re-running would double-count
+exit:       0
