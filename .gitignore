@@ -67,3 +67,5 @@ web/node_modules/
 # output, never committed, and never the operational market_ai_lab.db.
 news_experiment.db
 news_experiment.db-*
+electron-app/
+ml_factor/models/*.npz
