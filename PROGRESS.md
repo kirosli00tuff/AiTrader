@@ -138,6 +138,20 @@ New flags from the feed-work session (2026-07-05, `369b6a6`):
 
 ## Session Log
 
+### 2026-07-29 (Fable 5) — Amendment 5: the gross signal question is separated from the net economic question, with the verdicts written before the numbers
+
+**AMENDED WITH THE OPERATOR'S EXPLICIT APPROVAL. NO COLLECTION DATA EXISTED**: not one row carries `run_kind='collection'` and no headline has ever been scored against a price, so nothing was changed after seeing a result. The tick measurement that motivated it measured COSTS, not outcomes. Live trading off. No RiskGate logic, no live-trading gate, no adaptive invariant, no Level 1 value, no threshold, no strategy parameter. No LLM provider call. **pytest spec and collector files 73 passed.**
+
+**THE SEPARATION.** The four primary tests now read GROSS: does the judgment predict next-session drift against the benchmark, across the whole band. Metric, bar (2.50), clustering (day, bootstrap 10,000), cluster floor (60) all carry forward, and the sample arithmetic already used the 30 bp gross delta so it transfers unchanged. The economic question becomes a pre-registered SECONDARY: four E-tests, pooled net per stratum at measured cost, own alpha 0.05 split four ways (2.50), 30-cluster per-stratum floor, under-powered relative to the primary and stated so. **Union-bound cost across the three families is 0.15, stated rather than hidden.** The counter-argument is recorded in the amendment: a reader could call this a weakened standard, and the answer is the pre-registered verdict table, which writes down IN ADVANCE that a gross-positive net-negative outcome is a finding about markets, not a strategy, and licenses no trade.
+
+**THE BAND STAYS FULL, reasons recorded**: the mechanism is strongest in the thin names, cost depends on account size and execution quality while a signal's existence does not, and restriction halves the sample. Reversal conditions recorded: thin strata failing the 30-cluster floor, or the gross signal concentrating entirely in S1/S2.
+
+**MAKER EXECUTION IS THE NAMED RESOLUTION PATH, not designed, not implemented.** A resting order earns the spread rather than paying it, and its costs are recorded honestly: fill uncertainty and adverse selection, since a resting order fills most reliably when the market moves against it and fails to fill exactly when the price runs the predicted way. Before reliance: fill probability at the touch by stratum, time-to-fill against the horizon, post-fill drift conditional on filling. New Open Question 11.
+
+**EVERY DOWNSTREAM SECTION RECONCILED**: the hypothesis statement itself (cost clause moved out, superseded tail preserved), the scored quantity, the bar, the strength secondaries (re-read on gross so a cost gradient cannot masquerade as calibration), the sample-size note, the negative definition (gross, 30 bp), the capacity gate (re-scoped: it gates the economic secondary and any decision to trade, and its 4.96 bp arithmetic still means exactly that), the stratified-sample gradient note, and Open Questions 4, 8 (primary asymmetry resolved by symmetry: uncosted vs uncosted) and 11.
+
+**STAGE 3 IS NOW UNBLOCKED.** The tick multiple is measured, the amendment decision the measurement forced is made and recorded, and the specification no longer pre-condemns half its sample. What remains before collection is the operator's start command with the collector's explicit preconditions flag, and the recompute-at-collection items (rho, residual vol) that were always in-flight checks rather than blockers.
+
 ### 2026-07-29 (Fable 5) — The tick multiple is measured from the historical consolidated tape, and the fee model becomes per-tier
 
 **MEASURED, CHECKED, AND APPLIED TO THE FEE MODEL. THE SPECIFICATION IS UNTOUCHED.** Live trading off. No RiskGate logic, no live-trading gate, no adaptive invariant, no Level 1 value, no threshold, no strategy parameter. No LLM provider call. **pytest 1,191 passed (up from 1,189), ctest 34 of 34.**

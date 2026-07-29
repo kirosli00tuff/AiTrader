@@ -26,6 +26,13 @@
 > because it is a label rather than a parameter and `price_floor_at_formation`
 > carries the operative 10.00 on every row.
 >
+> **AMENDMENT 5 (2026-07-29, operator approved, no collection data existed)
+> separates the gross signal question from the net economic question** after
+> the tick measurement found median hurdles consuming the whole working effect
+> in half the band. The primary family now reads GROSS, the economic question
+> is a pre-registered secondary per stratum, the band is kept in full, and the
+> verdict for every outcome is written before any number exists.
+>
 > This document was a proposed pre-registration written by Stage 0.
 >
 > Written 2026-07-27. Nothing was built, collected, called, or traded to
@@ -220,6 +227,160 @@ for the operative value.** It is wrong, it is harmless, and it is deliberate.
 superseded exclusion-reason list are preserved under SUPERSEDED in Task 7 and
 Task 8, not deleted.**
 
+## AMENDMENT 5 — 2026-07-29, the gross signal question separated from the net economic question
+
+**Changed, four things.**
+
+1. **The four primary tests read GROSS.** The primary question is whether the
+   signal exists: does the model's headline judgment predict next-session
+   drift, measured gross against the benchmark, across the whole band.
+2. **The economic question becomes a pre-registered SECONDARY, per stratum:**
+   where does the measured effect clear the measured cost.
+3. **The band stays ADV 2.07M to 65.3M in full.**
+4. **The verdict for every outcome is pre-registered below**, including the
+   likely one, gross-positive and net-negative, and maker execution is
+   recorded as the named resolution path for exactly that outcome.
+
+**WHY.** The tick measurement (stage 1, attempt 4) found median round-trip
+hurdles of 16.1, 21.4, 30.9 and 50.3 bp across the four strata against a 30 bp
+working effect. S1 and S2 survive at the median, S3 and S4 fail at the median,
+everything fails at p90. The price-floor lever is exhausted, since measured bp
+spread is roughly flat across the band's prices. The specification as written
+required a result to clear costs to count as positive, which pre-condemned
+half the sample to a mechanical negative whatever the signal does. **The
+measurement told us about costs, not about the signal. The specification
+conflated them, and this amendment un-bundles them.**
+
+**WHAT THE SEPARATION IS, AND WHAT IT IS NOT, RECORDED SO THE DECISION IS
+AUDITABLE.** This separates two questions that were conflated: "does the
+signal exist" is a fact about markets and models, "can this account trade it
+profitably" is a fact about costs, account size and execution quality. The
+first cannot change with execution. The second can. Bundling them meant a
+true signal in S4 would have read as a null forever, and no measurement design
+should be built so that one of its answers is unreachable. **The
+counter-argument is recorded rather than omitted: a reader could call this a
+weakened standard, because the headline test no longer requires the effect to
+survive real-world cost.** The answer to that reader is the pre-registered
+verdict table below: a gross-positive net-negative outcome is written down, in
+advance, as NOT tradeable and NOT a strategy, so the re-framing cannot be
+used after the fact to promote an untradeable effect. The net question is not
+removed, it is pre-registered as its own test and reported whatever it says.
+
+### The primary family, re-read on gross
+
+Everything the accepted specification fixed carries forward unchanged except
+the scored unit:
+
+- **Metric:** pooled mean `signed_i` (gross excess against the equal-weighted
+  same-window band benchmark, sign set by the judgment).
+- **The four tests are unchanged in structure:** pooled, NEGATIVE-only,
+  thin-end (S3 and S4), chronological second half.
+- **Bar:** `|z| >= 2.50`, Bonferroni 0.05/4, two-sided, unchanged.
+- **Estimator:** cluster bootstrap over day clusters, 10,000 resamples,
+  unchanged. **Cluster floor 60**, unchanged.
+- The NEUTRAL-rate diagnostic, the de-duplication rule, the story-group
+  re-run trigger, and the sector-clustered robustness figure all carry
+  forward unchanged.
+
+The required-sample arithmetic already used a 30 bp delta, so it transfers to
+the gross framing without recomputation and its stated effect size is now
+exactly the primary's effect size.
+
+### The economic secondary family, pre-registered
+
+- **Four tests, E1 to E4, one per stratum:** pooled mean `net_i` within the
+  stratum, where `net_i = signed_i - cost_i` and `cost_i` is the
+  per-observation round trip from the fee model at the symbol's own price,
+  formation ADV and the 2,000 USD order, with the MEASURED per-tier tick
+  multiples.
+- **Bar:** the family carries its own alpha of 0.05 split four ways,
+  `|z| >= 2.50` two-sided on each test.
+- **Estimator:** the primary's, day-clustered bootstrap, 10,000 resamples.
+- **Per-stratum floor:** at least 30 distinct day clusters containing that
+  stratum's observations, else that stratum's E-test is an abstention.
+- **Power is stated honestly:** each stratum holds roughly a quarter of the
+  sample, so the E-tests are under-powered relative to the pooled primary and
+  their intervals will be wide. They are reported with intervals whatever they
+  say, and a wide interval spanning zero is an abstention, not a negative.
+
+**THE CORRECTION ACROSS FAMILIES, STATED RATHER THAN HIDDEN.** Three families
+now exist: the four primaries at 0.05, the two strength secondaries at 0.05
+(Amendment 3), and the four economic secondaries at 0.05. By the union bound
+the combined family-wise error is up to **0.15**. A secondary that clears its
+bar is weaker evidence than a primary that clears 2.50, it is labelled so
+wherever it is reported, and no secondary can confirm the hypothesis. The
+primary bar is untouched, for the same reason Amendment 3 recorded: raising a
+pre-registered primary bar because a later question was added is the defect
+pre-registration exists to prevent.
+
+### The band stays, and what would reverse that
+
+Restricting to the tier-3 floor (ADV at or above 13.3M) was REJECTED, for
+three recorded reasons. **First**, the documented mechanism, delayed diffusion
+and limits to arbitrage, is strongest in the thin names, so cutting S3 and S4
+tests the population where the effect is weakest and calls it a test of the
+hypothesis. **Second**, cost is a function of account size and execution
+quality, both of which can change, while the existence of a signal cannot. A
+band cut on today's taker cost would bake this account's current execution
+into the definition of the question. **Third**, restriction halves the sample
+and the arrival measurements were taken for the full band.
+
+**What would reverse it, recorded now:** if collection shows the thin strata
+cannot meet the 30-cluster per-stratum floor, their E-tests deliver
+abstentions and the thin half is adding cost-condemned observations that no
+question can use, and a later amendment may restrict on that evidence. And if
+the measured gross signal concentrates entirely in S1 and S2, the premise
+that the mechanism lives in the thin names is falsified for this design, and
+any follow-up should restrict for power.
+
+### The verdicts, pre-registered before any number exists
+
+The likely result is gross-positive and net-negative. Its verdict is written
+here, before collection, so it cannot be negotiated afterwards.
+
+| outcome | verdict |
+|---|---|
+| Clears gross, fails net in every stratum | **The signal exists and is not tradeable at taker execution at this sizing. A finding about markets, not a strategy. The correct response is not to trade it anyway.** The named next step is the maker-execution measurement below, under its own pre-registration. |
+| Clears gross, net clears in some strata and fails in S3/S4 | The signal exists band-wide and is tradeable where the E-tests cleared. Trading only the cleared strata is permitted ONLY as a new pre-registered deployment decision with its own capacity arithmetic. It is never a post-hoc restriction of this result. |
+| Fails gross | **The hypothesis is dead** per the powered-negative definition (Task 6, gross). It is not re-tested with a different horizon, prompt or band. |
+| Clears gross and net | Proceed per the capacity gate, which still separates a finding from a strategy at the configured sizing. |
+
+A gross-positive net-negative result must be reported in exactly those words:
+a finding about markets. It licenses no trade. An effect that cannot pay its
+own costs at this account's execution is not an edge for this account, and
+trading it anyway converts a measurement into a donation.
+
+### Maker execution, the named resolution path, not designed and not implemented
+
+The system crosses the spread on every order, paying roughly half the quoted
+spread each side, which at S4's 50 bp median is about 25 bp per side. **A
+resting limit order earns the spread rather than paying it**, and if the
+signal exists and cost is the only barrier, maker execution is the named path
+by which the economic answer could change without the signal changing.
+
+**Its cost is recorded honestly, because earning the spread is not free.**
+A resting order may never fill, and unfilled orders are not random: the order
+fails to fill most often exactly when the price runs away in the predicted
+direction, so the fills a maker strategy actually gets are adversely selected
+against the signal. A resting order also fills most reliably when the market
+is moving against it. Both effects shrink the realised edge relative to the
+paper arithmetic of "midpoint minus half spread".
+
+**What would have to be measured before it could be relied on:** fill
+probability at the touch by stratum at this order size, time-to-fill against
+the one-session horizon, post-fill drift conditional on filling against the
+drift of orders that never filled, and the venue's order-type mechanics on
+the paper venue against live. None of that is designed or implemented here.
+It is named so that a gross-positive net-negative result has a recorded
+forward path that is a measurement, not a hope.
+
+**When:** 2026-07-29, before any collection. **The operator approved this
+amendment explicitly. No collection data existed**: not one row carries
+`run_kind='collection'` and no headline has ever been scored against a price.
+The tick measurement that motivated it measured COSTS, not outcomes: no
+signal, judgment or return was seen. The superseded net-framed text is
+preserved under SUPERSEDED notes at each amended site.
+
 ## Why this exists
 
 Every prior research attempt in this project built first and measured after.
@@ -239,8 +400,14 @@ until it is accepted.
 headline, given only that headline and its ticker, predicts the sign of that
 stock's next-session return in excess of the contemporaneous cross-sectional
 move, for US common equities whose median daily dollar volume sits between
-2,070,000 and 65,300,000 USD, by a
-margin exceeding the band's round-trip cost hurdle.**
+2,070,000 and 65,300,000 USD.**
+
+**AMENDED by AMENDMENT 5: the cost clause moved out of the hypothesis.** The
+hypothesis is the prediction claim above, tested GROSS by the primary family.
+Whether the predicted drift exceeds the measured round-trip cost is the
+pre-registered economic SECONDARY, per stratum, and its verdicts are written
+in the amendment before any number exists. SUPERSEDED hypothesis tail: "by a
+margin exceeding the band's round-trip cost hurdle."
 
 Every clause is load-bearing and a later session may not relax one:
 
@@ -257,7 +424,11 @@ Every clause is load-bearing and a later session may not relax one:
 - **ADV 2,070,000 to 65,300,000 USD** — the universe in Task 2. AMENDED
   2026-07-27 from liquidity rank 1500 to 5000, because rank is a proxy that
   drifts and an absolute band means the same thing at every formation.
-- **exceeding the band's round-trip cost hurdle** — beating zero is not the bar.
+- **exceeding the band's round-trip cost hurdle** — SUPERSEDED as a clause of
+  the hypothesis by AMENDMENT 5. The economic question is a pre-registered
+  secondary with its own bar, and "beating zero is not the bar" remains true
+  there: the E-tests compare against measured cost and the capacity floor.
+  For the primary, the bar is the benchmark, never bare zero.
 
 ### The economic mechanism
 
@@ -589,9 +760,14 @@ deterministically from `sha256(rule_id + formation_date)`. 400 total.
   have given without buying its drift.
 
 **The gradient the strata must express:** the mechanism predicts the effect is
-strongest in S4 and weakest in S1. The hurdle runs the other way, 4.50 bp in S4
-against 2.73 bp in S1, so the NET effect after cost is what the pre-registered
-thin-end test (strata S3 and S4) measures.
+strongest in S4 and weakest in S1. Since AMENDMENT 5 the pre-registered
+thin-end test (strata S3 and S4) measures the GROSS effect there, so the
+gradient question is no longer contaminated by the cost gradient, which runs
+the other way and is far steeper than the one-tick arithmetic suggested
+(measured median hurdles 50.3 bp in S4 against 16.1 bp in S1). Where the
+effect clears that cost is the economic secondary's question, per stratum.
+SUPERSEDED: the thin-end test measured the NET effect after cost, at
+orientation figures of 4.50 bp in S4 against 2.73 bp in S1.
 
 ### SUPERSEDED — the 5.00 USD price floor
 
@@ -1094,7 +1270,7 @@ All resolved against the exchange calendar in `analysis_bars.db`
 
 ## TASK 5 — Scoring, benchmark, and the bar
 
-### The scored quantity
+### The scored quantity (AMENDED by AMENDMENT 5)
 
 For observation `i` on symbol `s` over its scoring window:
 
@@ -1107,6 +1283,14 @@ signed_i   = +excess_i  if judgment == POSITIVE
              (NEUTRAL is not scored)
 net_i      = signed_i - cost_i
 ```
+
+**`signed_i` is the PRIMARY scored quantity: the primary family asks whether
+the signal exists, gross.** `net_i` is the ECONOMIC SECONDARY's quantity: the
+E-tests ask, per stratum, where the effect clears the measured cost. Both are
+computed for every scored observation and both are recorded on every row.
+SUPERSEDED (pre-Amendment-5): the primary tests ran on `net_i`, which
+required the effect to clear taker cost to register at all and pre-condemned
+the strata whose measured hurdle exceeds the working effect.
 
 **`strength` APPEARS IN NO LINE OF THAT FORMULA, AND THAT IS THE POINT.** It does
 not weight an observation, it does not filter one, and it does not enter
@@ -1129,10 +1313,13 @@ percent is itself a reportable failure of the design.
 `cost_i` is the **per-observation round trip** from
 `fees.equity_per_side_bp(price, adv, notional)` at the symbol's own price and
 formation-date ADV, doubled. **The hurdle is not a single number**, for the
-reason in Task 2. For orientation the band's tier floors are **3.15 bp** (tier 3, ADV at or
-above 13.3M) and **4.87 bp** (tier 4, ADV 2.07M to 13.3M), and every such
-figure is a floor assuming a one-tick market. Per-observation costing is
-retained: each fill is priced from its OWN ADV and price.
+reason in Task 2, and since 2026-07-29 the fee model carries MEASURED
+per-tier tick multiples (8.0 ticks tier 3, 9.0 ticks tier 4), so `cost_i` is
+a measured quantity, not a floor. For orientation the measured median round
+trips are about **17.8 bp** (tier 3) and **41.2 bp** (tier 4). `cost_i`
+enters the ECONOMIC SECONDARY only (Amendment 5). SUPERSEDED orientation
+figures at the one-tick floor: 3.15 bp and 4.87 bp. Per-observation costing
+is retained: each fill is priced from its OWN ADV and price.
 
 ### The clustering unit
 
@@ -1164,14 +1351,15 @@ observation per ticker with a shared `story_group_id` recorded. **If more than
 10 percent of observations share a `story_group_id`, the primary estimate is
 re-run clustered on `story_group_id`** and both are reported.
 
-### The bar
+### The bar (AMENDED by AMENDMENT 5: the primaries read GROSS)
 
-- **Primary test:** is pooled mean `net_i` greater than zero.
+- **Primary test:** is pooled mean `signed_i` greater than zero, GROSS
+  against the benchmark. SUPERSEDED: pooled mean `net_i`.
 - **Estimator:** cluster bootstrap over day clusters, 10,000 resamples,
   two-sided.
 - **Four pre-registered primary tests**, so a **Bonferroni** correction gives
   **`|z| >= 2.50`** (0.05/4 two-sided):
-  1. pooled net excess over all scored observations,
+  1. pooled gross excess over all scored observations,
   2. **NEGATIVE-only** subset (the literature's stronger case),
   3. **thin-end** subset, strata S3 and S4 (ADV 2.07M to 11.63M),
   4. **chronological second half**, testing decay.
@@ -1181,8 +1369,12 @@ re-run clustered on `story_group_id`** and both are reported.
 
 Anything outside those four is **exploratory** and is labelled so. Exploratory
 results may motivate a new pre-registration and may never be reported as a
-finding. **The two strength tests below are the one exception: they are
-pre-registered, they are secondary, and they are not part of the four.**
+finding. **Two pre-registered secondary families are the exception: the two
+strength tests below, and the four economic E-tests defined in AMENDMENT 5
+(per-stratum `net_i`, own alpha 0.05 split four ways, `|z| >= 2.50`, at least
+30 day clusters containing the stratum's observations else abstention).
+Combined family-wise error across the three families is up to 0.15 by the
+union bound, stated in the amendment.**
 
 ### Secondary tests on strength, pre-registered (AMENDMENT 3)
 
@@ -1200,14 +1392,18 @@ excluded because they carry no strength. Both use the same estimator as the
 primary: **cluster bootstrap over day clusters, 10,000 resamples, two-sided**,
 under the same 60-cluster floor.
 
-**S1, MONOTONICITY.** Spearman rank correlation between `strength` and `net_bp`,
-positive expected. **Rank, not Pearson**, because the prompt defines an ordering
+**S1, MONOTONICITY.** Spearman rank correlation between `strength` and
+`signed_bp` (GROSS, re-read by AMENDMENT 5 to match the primary's unit, so a
+cost gradient across strata cannot masquerade as a calibration gradient.
+SUPERSEDED unit: `net_bp`), positive expected. **Rank, not Pearson**, because
+the prompt defines an ordering
 and not an interval scale: the distance from 1 to 2 is not claimed equal to the
 distance from 4 to 5, so a correlation on the numeric value would assume
 something the prompt never asserts.
 
-**S2, TOP AGAINST BOTTOM.** Mean `net_bp` over strengths {4, 5} minus mean
-`net_bp` over strengths {1, 2}, positive expected. **The buckets are pooled and
+**S2, TOP AGAINST BOTTOM.** Mean `signed_bp` over strengths {4, 5} minus mean
+`signed_bp` over strengths {1, 2} (GROSS, same re-read, SUPERSEDED unit
+`net_bp`), positive expected. **The buckets are pooled and
 pre-specified HERE rather than chosen after the distribution is seen**: at 1,000
 scored observations with an unknown strength distribution, the two extreme single
 buckets could each be very thin, and pooling gives two halves whose n is
@@ -1258,8 +1454,14 @@ distinguish the two explanations is reported as not distinguishing them.
 ### Required sample size
 
 Assumed effect, stated before collection: **30 bp gross** per scored
-observation, the middle of the "tens of basis points" the literature describes,
-less a representative **5 bp** cost, giving **25 bp net**.
+observation, the middle of the "tens of basis points" the literature
+describes. **AMENDMENT 5 note: the arithmetic below already used the 30 bp
+gross delta, so it transfers to the gross-framed primary unchanged.** The
+per-stratum E-tests hold roughly a quarter of the sample each and are
+under-powered relative to the pooled primary, stated in the amendment.
+SUPERSEDED framing: "less a representative 5 bp cost, giving 25 bp net". The
+5 bp representative cost is itself superseded by the measured per-tier
+hurdles (17.8 and 41.2 bp median round trip).
 
 Residual standard deviation: measured median daily volatility in these bands is
 2.41 percent (S1-S2) and 1.76 percent (S3-S4). Removing the market factor via
@@ -1290,17 +1492,21 @@ never "1,000 reached".
 
 ## TASK 6 — What counts as a negative, and the capacity gate
 
-### The result that ends the experiment
+### The result that ends the experiment (AMENDED by AMENDMENT 5: reads GROSS)
 
-**A powered negative:** at 60 or more day clusters, the pooled net excess
-interval's upper bound sits below the assumed 25 bp effect while no primary
-test clears `|z| >= 2.50`. This mirrors the council measurement that produced
-this project's first powered negative, and the hypothesis is then dead. It is
-not re-tested with a different horizon, prompt, or band, because each of those
-is a new hypothesis needing its own pre-registration.
+**A powered negative:** at 60 or more day clusters, the pooled GROSS excess
+interval's upper bound sits below the assumed 30 bp gross effect while no
+primary test clears `|z| >= 2.50`. This mirrors the council measurement that
+produced this project's first powered negative, and the hypothesis is then
+dead. It is not re-tested with a different horizon, prompt, or band, because
+each of those is a new hypothesis needing its own pre-registration.
 
-**An interval that includes both zero and 25 bp at the cluster floor is an
-abstention, not a negative and not a finding.**
+**An interval that includes both zero and 30 bp gross at the cluster floor is
+an abstention, not a negative and not a finding.**
+
+SUPERSEDED (pre-Amendment-5): the definition read on net excess against a
+25 bp net effect, which made the negative partly a statement about taker
+cost rather than about the signal.
 
 ### The capacity gate, applied now
 
@@ -1372,6 +1578,20 @@ should be understood going in as a test of a marginal-capacity hypothesis**, and
 a statistically significant positive that does not clear the capacity floor is
 a **finding, not a strategy**. That distinction is pre-registered here so it
 cannot be blurred later.
+
+**AMENDMENT 5 RE-SCOPE: what the capacity arithmetic still means.** The
+capacity gate no longer touches the primary verdict, which is gross and asks
+only whether the signal exists. **The arithmetic still means two things.**
+First, the 4.96 bp required net edge at the 2,000 USD sizer is the bar the
+per-stratum E-tests' point estimates are compared against when reading the
+economic secondary: a stratum whose measured net effect sits below it fails
+the economic question even if its interval excludes zero. Second, the gate
+governs any DECISION TO TRADE that a clears-both outcome could motivate,
+exactly as written above: a significant positive that does not clear the
+capacity floor is a finding, not a strategy. What the arithmetic no longer
+does is decide whether the experiment's headline answer counts as positive,
+because that answer is now about the signal, not about this account's
+execution.
 
 ---
 
@@ -1621,7 +1841,10 @@ Listed rather than resolved optimistically.
    halved both figures, to a 10.41 bp worst case and 3.2x dispersion. **Not
    eliminated**: the Reg NMS tick is one cent above 1.00 USD, so the worst
    member always pays `100/floor` bp and only a higher floor reduces it, at a
-   measured cost in the thin strata.
+   measured cost in the thin strata. **UPDATE 2026-07-29: the tick multiple is
+   MEASURED (stage 1, attempt 4), the fee model carries 8.0 and 9.0 ticks for
+   tiers 3 and 4, and after AMENDMENT 5 cost dispersion touches only the
+   economic secondary, never the primary.**
 
 5. **CLOSED BY AMENDMENT 3, by removing the conflict rather than granting an
    exception.** The model is `claude-haiku-4-5`, already one of CLAUDE.md's four
@@ -1655,7 +1878,13 @@ Listed rather than resolved optimistically.
    effect the literature places lower. This is the most consequential unresolved
    item.
 
-8. **The benchmark's own cost is not modelled.** The unconditional band move is
+8. **ADDRESSED FOR THE PRIMARY BY AMENDMENT 5.** The primary now compares an
+   uncosted gross excess against an uncosted benchmark, which is symmetric,
+   so the asymmetry this question named cannot bias the headline answer. The
+   economic secondary nets only the strategy's own cost, and that is correct
+   for its question: the benchmark there is a measuring stick, not an
+   alternative being traded. ORIGINAL TEXT: The benchmark's own cost is not
+   modelled. The unconditional band move is
    a paper quantity with no execution cost. Comparing a costed strategy against
    an uncosted benchmark is the error the buy-and-hold work already corrected
    once, and the treatment should be settled before scoring.
@@ -1682,6 +1911,15 @@ Listed rather than resolved optimistically.
     distribution is reported as a first-class diagnostic alongside the NEUTRAL
     rate, and the reversal condition is recorded under "What would revisit the
     five-point scale and the anchors".
+
+11. **NEW, INTRODUCED BY AMENDMENT 5: maker execution is named and unmeasured.**
+    The amendment records resting limit orders as the path by which a
+    gross-positive net-negative result could become tradeable without the
+    signal changing. Nothing about that path is measured: fill probability at
+    the touch in the band, time-to-fill against the one-session horizon, and
+    the adverse selection of which orders fill are all unknown, and the
+    amendment forbids relying on the path before they are measured under
+    their own pre-registration.
 
 ---
 

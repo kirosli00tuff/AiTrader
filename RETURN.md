@@ -11,6 +11,33 @@ Model:
 Prompt summary: one line.
 Changes: what changed.
 
+## Prompt: Amendment 5, separate the gross signal question from the net economic question
+
+Date: 2026-07-29
+Model: Fable 5 (claude-fable-5, 1M context).
+Prompt summary: Queued work, prompt 1 of 2. The tick measurement found median round-trip hurdles of 16.1, 21.4, 30.9 and 50.3 bp against a 30 bp working effect, so the specification as written pre-condemns half its sample. The operator chooses to re-frame rather than restrict the band and approves this amendment explicitly. Collection has NOT started, no data exists. Task 1 separate the conflated questions: the PRIMARY becomes whether the signal exists, gross against the benchmark across the whole band, carrying forward the accepted metric, bar, clustering unit and correction. The ECONOMIC question becomes a pre-registered SECONDARY per stratum with its own metric, bar and correction. Record both the separation rationale and the counter-argument that a reader could call it a weakened standard. Task 2 keep the full band ADV 2.07M to 65.3M, record why tier-3 restriction was rejected and what would reverse the choice. Task 3 pre-register the verdict for every outcome including the likely gross-positive net-negative one, with the honest reading that such a result is a finding about markets, not a strategy to trade anyway. Task 4 record maker execution as the named resolution path with its costs stated honestly, measured before relied upon, not designed, not implemented. Task 5 reconcile the capacity gate, scoring rule, negative definition, strata secondary and open questions, and report whether the capacity arithmetic still means anything. Task 6 amend in place with superseded text preserved, update PROGRESS.md, commit and push.
+
+CONSTRAINTS HONORED: live trading off. No RiskGate logic, no live-trading gate, no adaptive limit-weakening invariant, no Level 1 value, no threshold, no strategy parameter. No LLM provider calls.
+
+### FINDINGS
+
+**AMENDED WITH OPERATOR APPROVAL, NO COLLECTION DATA EXISTED. Spec and collector tests 73 passed. No LLM provider call. Live trading untouched.**
+
+**TASK 1.** Primary family re-read GROSS: pooled `signed_i` against the benchmark, four tests unchanged in structure (pooled, NEGATIVE-only, thin-end, second half), bar 2.50, day-clustered bootstrap 10,000, 60-cluster floor, all carried forward. Sample arithmetic already used the 30 bp gross delta and transfers unchanged. Economic secondary pre-registered: E1-E4, pooled `net_i` per stratum at measured cost, own alpha 0.05/4 (2.50), 30-cluster per-stratum floor, stated under-powered. Union bound across three families 0.15, stated. Separation rationale AND the weakened-standard counter-argument both recorded, answered by the pre-registered verdict table.
+
+**TASK 2.** Band kept at ADV 2.07M-65.3M. Rejection of tier-3 restriction recorded (mechanism strongest thin, cost is account-contingent while signal existence is not, sample halves). Reversal conditions recorded.
+
+**TASK 3.** Verdicts pre-registered: gross-positive net-negative everywhere is a finding about markets, not a strategy, and the correct response is not to trade it anyway. Partial net clearance permits trading only via a new pre-registered deployment decision. Gross failure kills the hypothesis per the powered-negative definition, now gross at 30 bp. Clears-both proceeds through the capacity gate.
+
+**TASK 4.** Maker execution named as the resolution path, costs stated (fill uncertainty, adverse selection), four measurements required before reliance, not designed, not implemented. Open Question 11 added.
+
+**TASK 5.** Reconciled: hypothesis statement (cost clause moved out, superseded tail preserved), scored quantity, the bar, strength secondaries re-read gross, sample-size note, negative definition, capacity gate re-scoped (its 4.96 bp arithmetic still gates the economic secondary and any trade decision, no longer the headline verdict), stratified gradient note, Open Questions 4, 8, 11. No section still describes the bundled framing outside a SUPERSEDED marker.
+
+**STAGE 3 IS UNBLOCKED.** Measurement done, decision made, specification coherent. Collection waits only on the operator's start command.
+
+Changes: EXPERIMENT.md (Amendment 5 + reconciliations, superseded text preserved), PROGRESS.md, RETURN.md.
+Commit message: Amendment 5, separate the gross signal question from the net economic question, keep the full band, pre-register the verdict for a gross-positive net-negative outcome, collection not started
+
 ## Prompt: Measure the tick multiple from historical consolidated quotes
 
 Date: 2026-07-29
