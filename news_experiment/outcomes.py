@@ -79,6 +79,64 @@ class PriceBook:
         return (symbol, session) in self.closes
 
 
+# The horizons Task 8 records as "follow-up only". Derived from the spec list
+# rather than restated, so the scored horizon can never drift into it.
+COMPANION_HORIZONS: tuple[int, ...] = tuple(
+    k for k in spec.RETURN_HORIZONS if k != 1)
+
+
+def price_legs(book: PriceBook, symbol: str, anchor_kind: str,
+               anchor_session: str,
+               scoring_session: str) -> tuple[float | None, float | None]:
+    """The two prices one scored window needs. Either may be absent.
+
+    ONE definition of "which bars does this row depend on", used by the
+    resolver, by the companion-horizon pass, and by the reopen script. The
+    ternary below previously appeared in three places, and a reopen script
+    that decided bar presence with its own copy would be a second opinion on
+    the resolver's own precondition.
+    """
+    anchor = (book.opens.get((symbol, scoring_session))
+              if anchor_kind == spec.ANCHOR_NEXT_SESSION_OPEN
+              else book.closes.get((symbol, anchor_session)))
+    return anchor, book.closes.get((symbol, scoring_session))
+
+
+def companion_horizons(*, symbol: str, anchor_kind: str, anchor_session: str,
+                       scoring_session: str, book: PriceBook,
+                       cal: Calendar) -> dict[int, float | None]:
+    """The UNSCORED follow-up horizons, or None per horizon whose bar is absent.
+
+    SEPARATE FROM `resolve_one` BECAUSE THEY ARRIVE LATER. A row resolved at
+    T+1 cannot know its 2, 5 and 10-session returns, because those sessions
+    have not happened. The resolver fills a row once, so those columns used to
+    stay NULL permanently and Task 8's recorded reason for carrying them, that
+    they "enable pre-registered follow-ups without a second collection", was
+    being lost on every row.
+
+    BOTH LEGS COME FROM THE SAME BOOK, deliberately. `adjustment=all`
+    re-bases history at every dividend and split, so pairing a stored
+    `anchor_price` from an earlier pull with a freshly pulled close would
+    blend two adjustment baselines into one return and produce a number wrong
+    by the dividend. The cost of this choice is recorded rather than hidden:
+    `ret_1session` keeps the baseline it was first resolved on, so a dividend
+    landing between that resolution and a later top-up leaves the scored
+    horizon and its companions on different baselines. Correcting THAT would
+    mean rewriting a scored quantity, which is forbidden.
+    """
+    out: dict[int, float | None] = {k: None for k in COMPANION_HORIZONS}
+    anchor, _end = price_legs(book, symbol, anchor_kind, anchor_session,
+                              scoring_session)
+    if anchor is None or anchor <= 0 or scoring_session not in cal.sessions:
+        return out
+    for k in COMPANION_HORIZONS:
+        target = cal.session_ahead(scoring_session, k - 1)
+        price = book.closes.get((symbol, target)) if target else None
+        if price:
+            out[k] = price / anchor - 1.0
+    return out
+
+
 def band_benchmark(book: PriceBook, members: list[str], anchor_kind: str,
                    anchor_session: str, scoring_session: str) -> float | None:
     """The equal-weighted unconditional move of the band over the same window.
@@ -128,10 +186,8 @@ def resolve_one(*, symbol: str, judgment: str | None, anchor_kind: str,
     if not scoring_session or scoring_session not in cal.sessions:
         return Outcome("pending")
 
-    anchor_price = (book.opens.get((symbol, scoring_session))
-                    if anchor_kind == spec.ANCHOR_NEXT_SESSION_OPEN
-                    else book.closes.get((symbol, anchor_session)))
-    end_price = book.closes.get((symbol, scoring_session))
+    anchor_price, end_price = price_legs(book, symbol, anchor_kind,
+                                        anchor_session, scoring_session)
     if anchor_price is None or end_price is None or anchor_price <= 0:
         # Absence, not a zero. Recorded and excluded, never rolled forward.
         return Outcome("excluded",

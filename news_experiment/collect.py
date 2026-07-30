@@ -471,10 +471,13 @@ def run(cfg: RunConfig, *, finnhub_client=None, scorer=None,
 
     resolved = resolve_pending(conn, cfg, cal, band_symbols)
     conn.commit()
+    horizons = backfill_horizons(conn, cfg, cal)
+    conn.commit()
 
     report = {
         "rows_written": written,
         "outcomes_resolved": resolved,
+        "horizons_backfilled": horizons,
         "band_members": len(members),
         "seeded_sample_size": spec.SAMPLE_TOTAL,
         "symbols_run": len(sample),
@@ -495,40 +498,125 @@ def run(cfg: RunConfig, *, finnhub_client=None, scorer=None,
     return report
 
 
+def band_resolver(cfg: RunConfig, cal: Calendar,
+                  seed: dict[str, list[str]] | None = None):
+    """A cached formation-date to band-membership lookup.
+
+    THE BENCHMARK BELONGS TO THE ROW'S OWN FORMATION, NOT TO THE RUNNING
+    QUARTER. Task 5 defines the benchmark as the equal-weighted mean of every
+    eligible ADV-band member that traded the window, and Task 2 fixes band
+    membership at the formation date. The resolver previously benchmarked
+    every pending row against the CURRENT run's band, which is identical
+    inside one quarter and silently wrong across a boundary: on 2026-10-01 a
+    row still pending from the July formation would have been priced against
+    the October universe. The row's own `formation_date` is recorded on every
+    row precisely so this question has an answer.
+
+    Returns None for a formation whose band cannot be resolved, which leaves
+    those rows PENDING and reported rather than priced against a substitute.
+    """
+    cache: dict[str, list[str] | None] = {k: list(v) for k, v in
+                                          (seed or {}).items() if v}
+    sessions = list(cal.sessions)
+
+    def get(formation: str) -> list[str] | None:
+        if formation not in cache:
+            try:
+                members, _rej = universe.resolve_band(
+                    cfg.analysis_db, formation, sessions=sessions)
+            except Exception as exc:  # noqa: BLE001
+                # ANY failure to resolve a band leaves those rows pending.
+                # The alternative, letting it propagate, would abandon the
+                # whole resolve pass over one bad formation, and the
+                # alternative to THAT, substituting another band, is the
+                # defect this function exists to remove.
+                print(f"[resolve] band UNRESOLVABLE at formation "
+                      f"{formation}: {type(exc).__name__}: {exc}. "
+                      f"Its rows stay pending.")
+                cache[formation] = None
+            else:
+                cache[formation] = [m.symbol for m in members]
+                print(f"[resolve] formation {formation} band "
+                      f"{len(cache[formation] or [])} members")
+        return cache[formation]
+
+    return get
+
+
+def needed_days(rows: list, *, anchor_idx: int, scoring_idx: int) -> set[str]:
+    """Every session date the rows depend on, anchors included.
+
+    A row's earliest bar is its anchor session, so the load span must be
+    derived from it rather than from an offset off the scoring session.
+    """
+    days = {(r[anchor_idx] or "")[:10] for r in rows}
+    days |= {r[scoring_idx] or "" for r in rows}
+    days.discard("")
+    return days
+
+
+RESOLVE_UPDATE_SQL = (
+    "UPDATE news_observation SET outcome_state=?, anchor_price=?, "
+    "ret_intraday=?, ret_1session=?, ret_2session=?, ret_5session=?, "
+    "ret_10session=?, bench_1session=?, excess_1session=?, "
+    "bar_source=?, cost_bp_round_trip=?, net_bp=?, "
+    "exclusion_reason=CASE WHEN ?='' THEN exclusion_reason ELSE ? END "
+    "WHERE id=?")
+
+
 def resolve_pending(conn, cfg: RunConfig, cal: Calendar,
-                    band_symbols: list[str]) -> int:
-    """Fill outcomes for rows whose scoring session has closed."""
+                    band_symbols: list[str], band_for=None) -> int:
+    """Fill outcomes for rows whose scoring session has closed.
+
+    Each row is benchmarked against the band of ITS OWN formation date. The
+    running band is passed in only as a cache seed, so the common case (every
+    pending row belongs to the current quarter) costs no extra resolution.
+    `band_for` is injectable so a test can supply a band without standing up
+    a full universe, and so the pre-fix behaviour can be mutated back in.
+    """
     rows = conn.execute(
         "SELECT id, symbol, judgment, anchor_kind, anchor_ts, scoring_session, "
-        "adv_usd_at_formation FROM news_observation "
+        "adv_usd_at_formation, formation_date FROM news_observation "
         "WHERE outcome_state='pending' AND scoring_session IS NOT NULL "
         "AND scoring_session != ''").fetchall()
     if not rows:
         return 0
+    if band_for is None:
+        seed = ({cfg.formation: list(band_symbols)}
+                if cfg.formation and band_symbols else {})
+        band_for = band_resolver(cfg, cal, seed)
+
     sessions = sorted({r[5] for r in rows})
-    symbols = {r[1] for r in rows} | set(band_symbols)
-    start = cal.session_ahead(sessions[0], -2) or sessions[0]
-    end = cal.session_ahead(sessions[-1], 12) or sessions[-1]
+    symbols = {r[1] for r in rows}
+    for formation in sorted({r[7] for r in rows}):
+        members = band_for(formation)
+        if members:
+            symbols |= set(members)
+    # The span starts at the earliest bar any row actually needs, which is its
+    # ANCHOR session, not two sessions before its scoring session. The old
+    # form guessed the anchor's position and lost it whenever the arithmetic
+    # ran off the front of the calendar, and a lost anchor bar reads as
+    # `symbol_did_not_trade`, the same wrong reason this session is repairing.
+    start = min(needed_days(rows, anchor_idx=4, scoring_idx=5))
+    end = cal.session_ahead(sessions[-1], 12) or cal.sessions[-1]
     book = outcomes.PriceBook.load(cfg.analysis_db, symbols, start, end)
 
     n = 0
-    for rid, sym, judgment, kind, anchor_ts, scoring, adv in rows:
+    for rid, sym, judgment, kind, anchor_ts, scoring, adv, formation in rows:
+        members = band_for(formation)
+        if members is None:
+            continue
         out = outcomes.resolve_one(
             symbol=sym, judgment=judgment, anchor_kind=kind or "",
             anchor_session=(anchor_ts or "")[:10],
             scoring_session=scoring or "",
             adv_usd=(float(adv) if adv is not None else None),
             notional=NOTIONAL_FOR_COST, book=book, cal=cal,
-            band_members=band_symbols)
+            band_members=members)
         if out.outcome_state == "pending":
             continue
         conn.execute(
-            "UPDATE news_observation SET outcome_state=?, anchor_price=?, "
-            "ret_intraday=?, ret_1session=?, ret_2session=?, ret_5session=?, "
-            "ret_10session=?, bench_1session=?, excess_1session=?, "
-            "bar_source=?, cost_bp_round_trip=?, net_bp=?, "
-            "exclusion_reason=CASE WHEN ?='' THEN exclusion_reason ELSE ? END "
-            "WHERE id=?",
+            RESOLVE_UPDATE_SQL,
             (out.outcome_state, out.anchor_price, out.ret_intraday,
              out.ret_1session, out.ret_2session, out.ret_5session,
              out.ret_10session, out.bench_1session, out.excess_1session,
@@ -536,6 +624,88 @@ def resolve_pending(conn, cfg: RunConfig, cal: Calendar,
              out.exclusion_reason, out.exclusion_reason, rid))
         n += 1
     return n
+
+
+# THE IMMUTABILITY GUARD, AND IT IS STRUCTURAL RATHER THAN A CONVENTION.
+#
+# 1. The statement NAMES ONLY the three unscored companion horizons.
+#    `ret_1session`, `excess_1session`, `bench_1session`, `net_bp`,
+#    `cost_bp_round_trip`, `anchor_price`, `judgment`, `strength`,
+#    `outcome_state` and `bar_source` are absent, so no execution of this
+#    statement can write them whatever the caller computed.
+# 2. Every assignment is COALESCE(existing, new), so an already-filled value
+#    WINS over anything recomputed. A later pull on a different adjustment
+#    baseline therefore cannot silently move a number that has been reported.
+# 3. The caller's WHERE clause requires `outcome_state='resolved'`, so the
+#    pass cannot touch a pending or excluded row.
+#
+# Guarded by `tests/test_outcome_backfill.py`, which asserts every column
+# except the three is byte-identical across a pass, and by a mutation test
+# that adds `ret_1session` here and verifies that assertion fails.
+HORIZON_UPDATE_SQL = (
+    "UPDATE news_observation SET "
+    "ret_2session = COALESCE(ret_2session, ?), "
+    "ret_5session = COALESCE(ret_5session, ?), "
+    "ret_10session = COALESCE(ret_10session, ?) "
+    "WHERE id=?")
+
+
+def backfill_horizons(conn, cfg: RunConfig, cal: Calendar) -> dict:
+    """Fill the unscored follow-up horizons whose bars have since arrived.
+
+    A row resolves once, at T+1, when its 2, 5 and 10-session returns do not
+    exist yet, so those columns stayed NULL forever and Task 8's recorded
+    reason for carrying them was being lost on every row collected. This pass
+    fills each one when, and only when, its bar appears. It never re-touches
+    the scored horizon: see HORIZON_UPDATE_SQL above.
+    """
+    cols = ", ".join(f"ret_{k}session" for k in outcomes.COMPANION_HORIZONS)
+    nulls = " OR ".join(f"ret_{k}session IS NULL"
+                        for k in outcomes.COMPANION_HORIZONS)
+    rows = conn.execute(
+        f"SELECT id, symbol, anchor_kind, anchor_ts, scoring_session, {cols} "
+        f"FROM news_observation WHERE outcome_state='resolved' "
+        f"AND scoring_session IS NOT NULL AND scoring_session != '' "
+        f"AND ({nulls})").fetchall()
+    filled = {k: 0 for k in outcomes.COMPANION_HORIZONS}
+    report = {"rows_examined": len(rows), "rows_updated": 0,
+              "filled": filled, "rows_still_incomplete": 0}
+    if not rows:
+        return report
+
+    sessions = sorted({r[4] for r in rows})
+    try:
+        start = min(needed_days(rows, anchor_idx=3, scoring_idx=4))
+        end = cal.session_ahead(sessions[-1], max(
+            outcomes.COMPANION_HORIZONS) + 2) or cal.sessions[-1]
+    except ValueError:
+        # A scoring session outside the loaded calendar. Reported by leaving
+        # every such row untouched rather than guessing a span.
+        print("[horizons] a scoring session is outside the calendar, "
+              "skipping the pass")
+        return report
+    book = outcomes.PriceBook.load(cfg.analysis_db, {r[1] for r in rows},
+                                   start, end)
+
+    for rid, sym, kind, anchor_ts, scoring, *have in rows:
+        present = dict(zip(outcomes.COMPANION_HORIZONS, have))
+        values = outcomes.companion_horizons(
+            symbol=sym, anchor_kind=kind or "",
+            anchor_session=(anchor_ts or "")[:10], scoring_session=scoring,
+            book=book, cal=cal)
+        new = {k: v for k, v in values.items()
+               if present[k] is None and v is not None}
+        if any(present[k] is None and values[k] is None
+               for k in outcomes.COMPANION_HORIZONS):
+            report["rows_still_incomplete"] += 1
+        if not new:
+            continue
+        conn.execute(HORIZON_UPDATE_SQL,
+                     (*(new.get(k) for k in outcomes.COMPANION_HORIZONS), rid))
+        report["rows_updated"] += 1
+        for k in new:
+            filled[k] += 1
+    return report
 
 
 def main(argv: list[str] | None = None) -> int:

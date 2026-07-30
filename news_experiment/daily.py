@@ -79,7 +79,7 @@ if _REPO not in sys.path:
 
 from ops import logpipe  # noqa: E402
 
-from . import spec, store, universe  # noqa: E402
+from . import maintain, spec, store, universe  # noqa: E402
 from .horizon import Calendar  # noqa: E402
 
 ANALYSIS_DB = os.path.join(_REPO, "analysis_bars.db")
@@ -142,6 +142,7 @@ class RunLog:
     spend_usd: float | None = None
     calls: int | None = None
     ceiling_hit: bool = False
+    maintenance: str = ""
     exit_code: int = EXIT_FAILURE
 
 
@@ -382,11 +383,36 @@ def append_collection_log(log: RunLog, path: str | None = None) -> None:
     if log.ceiling_hit:
         lines.append("CEILING HIT: the run stopped mid-session, the session "
                      "is PARTIAL, operator decision required")
+    if log.maintenance:
+        lines.append(f"maintain:   {log.maintenance}")
     if log.detail:
         lines.append(f"detail:     {log.detail}")
     lines.append(f"exit:       {log.exit_code}")
     with open(path, "a") as fh:
         fh.write("\n".join(lines) + "\n")
+
+
+def run_maintenance(args, tee: Tee, log: RunLog) -> None:
+    """Resolve what became resolvable and fill the horizons whose bars came.
+
+    A collection run does both itself, so this is called only on the paths
+    where the collector does NOT run. Failure here is recorded and never
+    escalated: a maintenance pass that cannot run has lost nothing, because
+    both passes are catch-up work that the next run repeats.
+    """
+    try:
+        rep = maintain.run_maintenance(args.db, args.analysis_db)
+    except Exception as exc:  # noqa: BLE001
+        tee.line(f"[maintain] FAILED, nothing lost, next run retries: "
+                 f"{type(exc).__name__}: {exc}")
+        log.maintenance = f"failed: {type(exc).__name__}"
+        return
+    h = rep.get("horizons", {})
+    tee.line(f"[maintain] resolved {rep.get('outcomes_resolved')} pending, "
+             f"filled horizons on {h.get('rows_updated')} rows "
+             f"{h.get('filled')}")
+    log.maintenance = (f"resolved {rep.get('outcomes_resolved')}, horizons "
+                       f"{h.get('filled')}")
 
 
 def run_collector(target: str, formation: str, ceiling: float, exp_db: str,
@@ -489,6 +515,10 @@ def _run(args, now: datetime, tee: Tee, log: RunLog) -> int:
                       f"the collector is append-only, re-running would "
                       f"double-count")
         tee.line(f"IDEMPOTENT REFUSAL: {log.detail}")
+        # A refusal is not a rest day for the outcome passes. A row's scoring
+        # session and its 2, 5 and 10-session companions close on their own
+        # schedule, so catching up must not depend on the collector running.
+        run_maintenance(args, tee, log)
         return EXIT_GAP if log.gaps else EXIT_OK
 
     tee.line(f"[universe] resolving band at formation {formation} for the "

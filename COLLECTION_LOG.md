@@ -103,3 +103,13 @@ gaps:       none
 rows:       427 before, 427 after
 detail:     427 rows already recorded for 2026-07-28, the collector is append-only, re-running would double-count
 exit:       0
+
+=== DAILY RUN 2026-07-30T00:10:55Z ===
+action:     refused_already_present
+target:     2026-07-28
+formation:  2026-07-01
+gaps:       none
+rows:       427 before, 427 after
+maintain:   resolved 0, horizons {2: 0, 5: 0, 10: 0}
+detail:     427 rows already recorded for 2026-07-28, the collector is append-only, re-running would double-count
+exit:       0
