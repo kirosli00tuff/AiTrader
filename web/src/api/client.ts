@@ -11,7 +11,7 @@ import type {
   AdaptiveEngineLogRow, WhaleFeeds,
   ActivityResponse, CouncilDecisions, SymbolDiagnostics, UniverseState, WatchdogDiagnostics,
   BarsResponse, PositionExit, UnmanageablePosition,
-  NearMisses, FactorParticipation,
+  NearMisses, FactorParticipation, CollectionMonitor,
 } from "./types";
 
 export const API_BASE = import.meta.env.VITE_API_BASE ?? "http://127.0.0.1:8000";
@@ -53,6 +53,9 @@ export const api = {
   signals: (category?: Category) =>
     get<SignalsResponse>(`/signals${category ? `?category=${category}` : ""}`),
   council: () => get<Council>("/council"),
+  // Collection monitoring. Outcome-free by construction: see
+  // api_server/collection.py for the four enforcement layers.
+  collectionMonitor: () => get<CollectionMonitor>("/collection/monitor"),
   risk: () => get<{ level1: Record<string, unknown>; kill_switch_enabled: boolean; kill_switch_tripped: boolean }>("/risk"),
   venues: () => get<{ venues: Venue[] }>("/venues"),
   approval: () => get<Approval>("/approval"),

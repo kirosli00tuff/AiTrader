@@ -18,6 +18,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, ConfigDict
 
 from api_server import store
+from api_server import collection
 from api_server import controls
 from api_server import health
 from api_server import operator
@@ -50,6 +51,18 @@ def _mode(mode: str) -> str:
 @app.get("/health")
 def get_health():
     return store.health()
+
+
+@app.get("/collection/monitor")
+def get_collection_monitor():
+    """Collection progress and scheduler health for the running experiment.
+
+    READ-ONLY, and it CANNOT REPORT AN OUTCOME. The holdout is evaluated once,
+    at stage 4, against pre-registered tests, so no return, benchmark, excess
+    or net quantity is selected, aggregated or returned. See
+    api_server/collection.py for the four layers that enforce it.
+    """
+    return collection.monitor()
 
 
 @app.get("/health/integrations")

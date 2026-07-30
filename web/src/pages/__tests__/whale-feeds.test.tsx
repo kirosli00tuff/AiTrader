@@ -11,7 +11,6 @@ import { render, screen, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, expect, it, vi } from "vitest";
 
-import { WhaleFeedsPanel } from "../../components/WhaleFeedsPanel";
 import HealthPage from "../HealthPage";
 import { setDisplayTimeZone } from "../../api/tz";
 
@@ -105,74 +104,7 @@ it("shows an off Whale Alert grey, and it does not count as a failure", async ()
 // enforce it. Masking in the UI would only hide a backend bug behind a mangled
 // string.
 
-// --- Ops panel -------------------------------------------------------------
-
-it("shows both whale feeds side by side, so the operator sees which is which",
-   async () => {
-  view(<WhaleFeedsPanel />);
-  const sec = await screen.findByTestId("feed-sec-edgar");
-  const wa = await screen.findByTestId("feed-whale-alert");
-  expect(within(sec).getByText("SEC EDGAR 13F + Form 4")).toBeTruthy();
-  expect(within(wa).getByText("Whale Alert (crypto trial)")).toBeTruthy();
-  expect(within(sec).getByText("ON")).toBeTruthy();
-  expect(within(wa).getByText("ON")).toBeTruthy();
-});
-
-it("reads a disabled feed as intentionally off, not as broken", async () => {
-  mockFeeds.mockResolvedValue({
-    ...FEEDS, whale_alert: { ...FEEDS.whale_alert, enabled: false } });
-  view(<WhaleFeedsPanel />);
-  const wa = await screen.findByTestId("feed-whale-alert");
-  expect(within(wa).getByText("off by choice")).toBeTruthy();
-  expect(wa.querySelector(".dot.d")).toBeTruthy();     // grey, not red
-});
-
-it("flags an OFF feed that has no key, so the prerequisite is visible first", async () => {
-  // The operator deciding whether to enable it is exactly who needs to know a
-  // key is missing. Showing this only when enabled hid it from them until after
-  // they turned it on and restarted.
-  mockFeeds.mockResolvedValue({
-    ...FEEDS, whale_alert: { ...FEEDS.whale_alert, enabled: false, keyed: false } });
-  view(<WhaleFeedsPanel />);
-  const wa = await screen.findByTestId("feed-whale-alert");
-  expect(within(wa).getByText("off by choice")).toBeTruthy();
-  expect(within(wa).getByText("no key")).toBeTruthy();
-  // Still grey, not amber: it is off by choice, and the key is a note not a fault.
-  expect(wa.querySelector(".dot.d")).toBeTruthy();
-});
-
-it("flags an enabled feed that has no key, since it cannot work", async () => {
-  mockFeeds.mockResolvedValue({
-    ...FEEDS, whale_alert: { ...FEEDS.whale_alert, enabled: true, keyed: false } });
-  view(<WhaleFeedsPanel />);
-  const wa = await screen.findByTestId("feed-whale-alert");
-  expect(within(wa).getByText("no key")).toBeTruthy();
-  expect(wa.querySelector(".dot.a")).toBeTruthy();     // amber
-});
-
-it("shows recent whale-signal activity with its last timestamp", async () => {
-  view(<WhaleFeedsPanel />);
-  const a = await screen.findByTestId("whale-activity");
-  expect(a.textContent).toContain("12");        // last 24h
-  expect(a.textContent).toContain("2113");      // total, unformatted
-});
-
-it("says what the activity count actually is, so it is not read as fetches",
-   async () => {
-  // whale_activity (raw per-fetch rows) is empty by design. The number is the
-  // combined whale FACTOR's signals, and the panel has to say so or the operator
-  // reads it as "Whale Alert fetched 12 times".
-  view(<WhaleFeedsPanel />);
-  const note = await screen.findByTestId("whale-activity-note");
-  expect(note.textContent).toContain("combined across both feeds");
-  expect(note.textContent).toContain("not persisted");
-});
-
-it("reads zero activity as none yet rather than a broken feed", async () => {
-  mockFeeds.mockResolvedValue({
-    ...FEEDS, signal_activity: { ...FEEDS.signal_activity, last_24h: 0, total: 0,
-                                 last_ts: null } });
-  view(<WhaleFeedsPanel />);
-  const a = await screen.findByTestId("whale-activity");
-  expect(a.textContent).toContain("No whale signals recorded yet");
-});
+// The Ops whale-feeds panel tests were REMOVED 2026-07-29 with the panel.
+// whale_signal carries weight 0.00, the panel held no control, and feed
+// reachability is covered by the Health view tests above, which is the
+// surface that makes a real call per integration and is retained.

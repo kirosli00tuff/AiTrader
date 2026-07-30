@@ -1,7 +1,6 @@
 import { useState } from "react";
 import { api } from "../api/client";
 import { useApi } from "../api/useApi";
-import { WhaleFeedsPanel } from "../components/WhaleFeedsPanel";
 import type { ControlsState } from "../api/types";
 import { Toggle, SourceToggle } from "../components/controls";
 import SkipFeed from "../components/SkipFeed";
@@ -81,7 +80,6 @@ export default function OpsPage() {
       <div style={{ marginBottom: 14 }}><DaySummary /></div>
       <div className="cols">
         <LayerTogglesPanel />
-        <WhaleFeedsPanel />
         <Panel title="Council skip reasons"><SkipFeed /></Panel>
       </div>
       <div className="cols" style={{ marginTop: 14 }}>

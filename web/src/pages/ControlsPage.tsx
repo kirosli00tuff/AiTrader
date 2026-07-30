@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { api } from "../api/client";
 import { useApi } from "../api/useApi";
-import type { ControlResult, ControlsState, RegistryEntry } from "../api/types";
+import type { ControlResult, ControlsState } from "../api/types";
 import { DataState, Panel } from "../components/ui";
 import { ConfirmButton, Slider, Toggle, SourceToggle } from "../components/controls";
 import { SleevesPanel } from "../components/SleevesPanel";
@@ -33,32 +33,6 @@ const MODEL_LABEL: Record<string, string> = {
   "gpt-5.5": "OpenAI GPT-5.5", "claude-opus-4-8": "Anthropic Claude Opus 4.8",
   "gemini-3.1-pro-preview": "Google Gemini 3.1 Pro",
 };
-
-function metric(m: Record<string, unknown>, k: string): string {
-  const v = m[k];
-  if (v === undefined || v === null) return "—";
-  if (typeof v === "number") return Number.isInteger(v) ? String(v) : v.toFixed(4);
-  return String(v);
-}
-
-function RegistryCard({ title, e }: { title: string; e: RegistryEntry | null }) {
-  return (
-    <div style={{ flex: 1, minWidth: 220 }}>
-      <div className="ctrl-sub" style={{ marginBottom: 4 }}>{title}</div>
-      {e ? (
-        <div>
-          <div className="mono" style={{ fontSize: 13 }}>{e.model_id}</div>
-          <div className="dim" style={{ fontSize: 11.5, marginTop: 4 }}>
-            sharpe {metric(e.metrics, "validation_sharpe")}
-            {" · "}mdd {metric(e.metrics, "max_drawdown")}
-            {" · "}n {metric(e.metrics, "n_samples")}
-            {" · "}{metric(e.metrics, "provenance")}
-          </div>
-        </div>
-      ) : <div className="dim" style={{ fontSize: 12 }}>none</div>}
-    </div>
-  );
-}
 
 export default function ControlsPage() {
   const c = useApi<ControlsState>(() => api.controls(), 0, []);
@@ -111,15 +85,11 @@ export default function ControlsPage() {
                   ))}
                 </div>
               ))}
-              <div className="group-label">RL advisory (deferred)</div>
-              <div className="slider-row">
-                <span className="dim">rl_advisory</span>
-                <Slider value={0} disabled onChange={() => {}} />
-                <span className="slider-val dim">0.00</span>
-              </div>
               <div className="callout" style={{ margin: "10px 0" }}>
-                Weights are normalized to sum 1 server-side. RL advisory stays at
-                0 and out of normalization until it is enabled past its fill gate.
+                Weights are normalized to sum 1 server-side. A factor at 0.00
+                is deactivated and stays out of the composed mean; raising its
+                weight here is what reactivates it, which is why these sliders
+                remain for dnn_advisory and whale_signal.
               </div>
               {w && d.weight_factors.some((f) => (w[f] ?? 0) !== (d.weights[f] ?? 0)) && (
                 <div className="callout" data-testid="weight-preview" style={{ margin: "10px 0" }}>
@@ -237,51 +207,6 @@ export default function ControlsPage() {
                 <Toggle on={d.gate_enabled}
                   onToggle={(nx) => act(() => api.setModel("gate", nx))} />
               </div>
-            </Panel>
-
-            {/* --- Champion / challenger --- */}
-            <Panel title="Champion / challenger (dnn_advisory)">
-              <div className="flex wrap" style={{ gap: 24, marginBottom: 12 }}>
-                <RegistryCard title="CHAMPION" e={d.registry.champion} />
-                <RegistryCard title="CHALLENGER" e={d.registry.challenger} />
-              </div>
-              <div className="ctrl-row">
-                <div className="ctrl-name">Auto-promote a better challenger
-                  <div className="ctrl-sub">Default off. Promotion stays manual and gated.</div>
-                </div>
-                <Toggle on={d.auto_promote}
-                  onToggle={(nx) => act(() => api.setAutoPromote(nx))} />
-              </div>
-              <div className="flex" style={{ marginTop: 10 }}>
-                <ConfirmButton label="Promote challenger" busyLabel="Recording…"
-                  disabled={!d.registry.can_promote}
-                  onConfirm={() => act(() => api.promote())} />
-                <ConfirmButton label="Rollback champion" busyLabel="Recording…" danger
-                  disabled={!d.registry.can_rollback}
-                  onConfirm={() => act(() => api.rollback())} />
-              </div>
-              <div className="ctrl-sub" style={{ marginTop: 8 }}>
-                {d.registry.can_promote ? "Challenger meets promotion criteria." : d.registry.promote_reason}
-              </div>
-            </Panel>
-
-            {/* --- RL enable --- */}
-            <Panel title="RL advisory enable (deferred)">
-              <div className="ctrl-row">
-                <div className="ctrl-name">Enable RL advisory
-                  <div className="ctrl-sub">
-                    Real closed fills {d.rl.real_fills} / {d.rl.min_real_fills} gate.
-                    No synthetic-data training path. The server refuses enable below the gate.
-                  </div>
-                </div>
-                <Toggle on={d.rl.enabled} disabled={!d.rl.can_enable}
-                  onToggle={(nx) => act(() => api.setRl(nx))} />
-              </div>
-              {!d.rl.can_enable && (
-                <div className="callout warn" style={{ marginTop: 8 }}>
-                  Locked: {d.rl.real_fills} of {d.rl.min_real_fills} required real fills.
-                </div>
-              )}
             </Panel>
 
             {/* --- Regime override --- */}

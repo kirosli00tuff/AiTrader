@@ -1,7 +1,9 @@
 import { NavLink } from "react-router-dom";
 
 const LINKS = [
-  { to: "/", label: "Operator", ico: "◉" },
+  // Collection first: it is the landing view and the daily check.
+  { to: "/", label: "Collection", ico: "▣" },
+  { to: "/operator", label: "Operator", ico: "◉" },
   { to: "/council", label: "Council", ico: "◭" },
   { to: "/diagnostics", label: "Diagnostics", ico: "✚" },
   { to: "/paper", label: "Paper", ico: "▦" },

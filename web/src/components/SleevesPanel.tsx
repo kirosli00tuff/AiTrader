@@ -7,7 +7,7 @@ import { useState } from "react";
 import { api } from "../api/client";
 import { useApi } from "../api/useApi";
 import { Panel, DataState } from "./ui";
-import { Toggle, ConfirmButton, ArmedToggle } from "./controls";
+import { Toggle, ArmedToggle } from "./controls";
 import { money, sharePct, shortTs } from "../api/format";
 
 export function SleevesPanel() {
@@ -73,8 +73,13 @@ export function SleevesPanel() {
                 ? <strong className="warn"> — REBALANCE DUE</strong>
                 : <span className="ok"> — within band</span>}
             </div>
-            <ConfirmButton label="Rebalance now" busyLabel="Requesting..."
-              onConfirm={async () => { await api.requestRebalance(); s.reload(); }} />
+            {/* The "Rebalance now" button was REMOVED 2026-07-29. It wrote
+                `rebalance_requested` to controls.json and no engine code ever
+                read that key: a grep across every .cpp, .hpp and .py found the
+                only other occurrence in an inert JSON fixture. The button
+                reported success and did nothing. The drift-triggered rebalance
+                the line above reports is real and runs in the engine. The POST
+                endpoint is left in place so the capability is not destroyed. */}
             {s.data.enabled.research_satellite
               && !s.data.research_satellite_config_enabled && (
               <div className="muted small" data-testid="sleeve-config-note">

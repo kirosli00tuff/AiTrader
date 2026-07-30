@@ -782,3 +782,119 @@ export interface UnmanageablePosition {
   opened_ts: string | null;
   qty: number | null;
 }
+
+// --- Collection monitoring (news-drift experiment) -------------------------
+// NO OUTCOME QUANTITY APPEARS IN THIS TYPE, and that is deliberate rather than
+// incidental. The holdout is evaluated ONCE, at stage 4, against pre-registered
+// tests, so the monitoring surface reports progress and health and cannot
+// report a return, benchmark, excess or net figure. The backend raises if one
+// ever reaches the payload (api_server/collection.py). If you find yourself
+// adding a field here whose name ends in `session` or `_bp`, stop.
+export interface StratumProgress {
+  stratum: string;
+  day_clusters: number;
+  judged: number;
+  cluster_floor: number;
+  meets_floor: boolean;
+}
+export interface CollectionRun {
+  started_utc: string;
+  action?: string;
+  target?: string;
+  formation?: string;
+  exit_code?: number | null;
+  detail?: string;
+  maintenance?: string;
+  gaps: string[];
+}
+export interface CollectionAlarm {
+  level: "critical" | "warn";
+  code: string;
+  message: string;
+}
+export interface CollectionMonitor {
+  generated_utc: string;
+  db_present: boolean;
+  outcome_columns_excluded: string[];
+  exclusion_note: string;
+  error?: string;
+  progress: {
+    day_clusters: number;
+    cluster_floor: number;
+    hard_stop: number;
+    clusters_to_floor: number;
+    clusters_to_hard_stop: number;
+    meets_cluster_floor: boolean;
+    at_hard_stop: boolean;
+    judged: number;
+    judged_target: number;
+    scored_directional: number;
+    first_session: string | null;
+    last_session: string | null;
+    per_stratum: StratumProgress[];
+  } | null;
+  run_health: {
+    log_present: boolean;
+    runs_recorded: number;
+    last_run: CollectionRun | null;
+    recent_runs: CollectionRun[];
+    gaps: string[];
+    gap_count: number;
+    timer: {
+      known: boolean;
+      timer_active: boolean | null;
+      next_fire_utc: string | null;
+      unit_failed: boolean | null;
+      last_trigger_utc: string | null;
+      error: string | null;
+    };
+    calendar: {
+      known: boolean;
+      sessions_behind: number | null;
+      next_expected: string | null;
+    };
+  };
+  composition: {
+    total_rows: number;
+    states: Record<string, number>;
+    excluded_pre_call_by_error_class: Record<string, number>;
+    model_failed_by_error_class: Record<string, number>;
+    source_failed_fraction: number;
+    source_failed_critical: boolean;
+    day_excluded_risk: boolean;
+    excluded_outcomes: Record<string, number>;
+    non_collection_rows: Record<string, number>;
+  } | null;
+  judgment: {
+    positive: number;
+    negative: number;
+    neutral: number;
+    directional: number;
+    neutral_rate: number;
+    neutral_reportable_failure_bar: number;
+    neutral_rate_reportable_failure: boolean;
+    minority_share: number;
+    minority_share_floor: number;
+    mixed_day_clusters: number;
+    mixed_cluster_floor: number;
+    null_informative: boolean;
+    per_stratum: { stratum: string; positive: number; negative: number; neutral: number }[];
+  } | null;
+  strength: {
+    histogram: Record<string, number>;
+    scored_directional: number;
+    distinct_values: number;
+    unparseable: number;
+    neutral_strength_anomalies: number;
+    degenerate: boolean;
+  } | null;
+  spend: {
+    total_usd: number;
+    calls: number;
+    per_call: number | null;
+    measured_per_call: number;
+    per_call_drift_pct: number | null;
+    per_session: { session: string; usd: number; calls: number }[];
+  } | null;
+  alarms: CollectionAlarm[];
+}

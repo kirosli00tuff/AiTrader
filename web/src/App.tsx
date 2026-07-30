@@ -1,5 +1,6 @@
 import { Navigate, Route, Routes } from "react-router-dom";
 import Layout from "./components/Layout";
+import CollectionPage from "./pages/CollectionPage";
 import OperatorPage from "./pages/OperatorPage";
 import CouncilPage from "./pages/CouncilPage";
 import DiagnosticsPage from "./pages/DiagnosticsPage";
@@ -21,8 +22,11 @@ export default function App() {
   return (
     <Routes>
       <Route element={<Layout />}>
-        {/* The operator surface is the front door: live reasoning first. */}
-        <Route index element={<OperatorPage />} />
+        {/* COLLECTION IS THE FRONT DOOR. A missed session is unrecoverable,
+            so the daily check must be opening a tab rather than remembering to
+            navigate. The operator surface keeps its own route. */}
+        <Route index element={<CollectionPage />} />
+        <Route path="operator" element={<OperatorPage />} />
         <Route path="council" element={<CouncilPage />} />
         <Route path="diagnostics" element={<DiagnosticsPage />} />
         <Route path="paper" element={<PaperSection />}>
