@@ -113,3 +113,30 @@ rows:       427 before, 427 after
 maintain:   resolved 0, horizons {2: 0, 5: 0, 10: 0}
 detail:     427 rows already recorded for 2026-07-28, the collector is append-only, re-running would double-count
 exit:       0
+
+=== DAILY RUN 2026-07-30T22:30:45Z ===
+action:     collected
+target:     2026-07-29
+formation:  2026-07-01
+gaps:       none
+rows:       0 before, 538 after
+spend:      0.108320 USD over 197 calls
+exit:       0
+
+=== DAILY RUN 2026-07-31T22:31:45Z ===
+action:     collected
+target:     2026-07-30
+formation:  2026-07-01
+gaps:       none
+rows:       0 before, 489 after
+spend:      0.087919 USD over 160 calls
+exit:       0
+
+=== DAILY RUN 2026-08-03T22:31:46Z ===
+action:     collected
+target:     2026-07-31
+formation:  2026-07-01
+gaps:       none
+rows:       0 before, 440 after
+spend:      0.050897 USD over 93 calls
+exit:       0
