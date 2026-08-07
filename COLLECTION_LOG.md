@@ -140,3 +140,30 @@ gaps:       none
 rows:       0 before, 440 after
 spend:      0.050897 USD over 93 calls
 exit:       0
+
+=== DAILY RUN 2026-08-04T22:31:46Z ===
+action:     collected
+target:     2026-08-03
+formation:  2026-07-01
+gaps:       none
+rows:       0 before, 453 after
+spend:      0.062530 USD over 113 calls
+exit:       0
+
+=== DAILY RUN 2026-08-05T22:30:46Z ===
+action:     collected
+target:     2026-08-04
+formation:  2026-07-01
+gaps:       none
+rows:       0 before, 477 after
+spend:      0.093538 USD over 168 calls
+exit:       0
+
+=== DAILY RUN 2026-08-06T22:30:08Z ===
+action:     collected
+target:     2026-08-05
+formation:  2026-07-01
+gaps:       none
+rows:       0 before, 543 after
+spend:      0.136653 USD over 246 calls
+exit:       0
