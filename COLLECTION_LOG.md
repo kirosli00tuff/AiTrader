@@ -167,3 +167,66 @@ gaps:       none
 rows:       0 before, 543 after
 spend:      0.136653 USD over 246 calls
 exit:       0
+
+=== DAILY RUN 2026-08-07T22:31:46Z ===
+action:     collected
+target:     2026-08-06
+formation:  2026-07-01
+gaps:       none
+rows:       0 before, 559 after
+spend:      0.142932 USD over 260 calls
+exit:       0
+
+=== DAILY RUN 2026-08-10T22:31:46Z ===
+action:     collected
+target:     2026-08-07
+formation:  2026-07-01
+gaps:       none
+rows:       0 before, 507 after
+spend:      0.103069 USD over 188 calls
+exit:       0
+
+=== DAILY RUN 2026-08-11T22:30:46Z ===
+action:     collected
+target:     2026-08-10
+formation:  2026-07-01
+gaps:       none
+rows:       0 before, 483 after
+spend:      0.083138 USD over 150 calls
+exit:       0
+
+=== DAILY RUN 2026-08-12T22:31:46Z ===
+action:     collected
+target:     2026-08-11
+formation:  2026-07-01
+gaps:       none
+rows:       0 before, 455 after
+spend:      0.065850 USD over 120 calls
+exit:       0
+
+=== DAILY RUN 2026-08-13T22:31:46Z ===
+action:     collected
+target:     2026-08-12
+formation:  2026-07-01
+gaps:       none
+rows:       0 before, 432 after
+spend:      0.049414 USD over 89 calls
+exit:       0
+
+=== DAILY RUN 2026-08-14T22:31:04Z ===
+action:     collected
+target:     2026-08-13
+formation:  2026-07-01
+gaps:       none
+rows:       0 before, 445 after
+spend:      0.058568 USD over 107 calls
+exit:       0
+
+=== DAILY RUN 2026-08-17T22:31:43Z ===
+action:     collected
+target:     2026-08-14
+formation:  2026-07-01
+gaps:       none
+rows:       0 before, 427 after
+spend:      0.039561 USD over 72 calls
+exit:       0
