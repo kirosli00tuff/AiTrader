@@ -69,3 +69,5 @@ news_experiment.db
 news_experiment.db-*
 electron-app/
 ml_factor/models/*.npz
+.env.bak*
+.env.*
