@@ -1,5 +1,144 @@
 # CLAUDE.md — AiTrader / Market AI Lab
 
+## Read first: current phase and session rules (added 2026-09-23)
+
+The repo is in **Stage B** of the pre-registered news-drift experiment.
+EXPERIMENT.md is ACCEPTED and BINDING (Amendments 1 to 7). The engine
+build described under "Project context" below is historical context for
+the code, not the current work. Where this section conflicts with older
+text in this file, this section wins.
+
+- Stage plan and status: docs/STAGES.md. Locked decisions: docs/DECISIONS.md.
+- Orchestration reasoning, the prompt skeleton and launch: docs/ORCHESTRATION.md.
+- How the planning chat writes prompts, and the return-document format:
+  docs/PROMPT_WRITING.md. Every stage prompt as sent: docs/prompts/.
+
+### Invariants (every session)
+
+- Status check at start and end, output copied verbatim into the return
+  document. Counts must not drop between the two:
+  `systemctl --user is-active news-collect.timer; tail -8 COLLECTION_LOG.md; sqlite3 news_experiment.db "SELECT COUNT(DISTINCT query_date), COUNT(*), SUM(state='judged') FROM news_observation WHERE run_kind='collection';"`
+- EXPERIMENT.md: no edit unless the stage prompt carries an amendment the
+  user wrote or approved, and never after any outcome has been computed.
+- Outcome blindness until a Stage C prompt unlocks it: do not run
+  news_experiment/outcomes.py or news_experiment/scoring.py on collection
+  rows, and do not read, print, aggregate or plot any return, excess,
+  benchmark or cost column (excess_1session, net_bp, ret_*, bench_*,
+  cost_bp_round_trip) or any table holding them. Counts by state,
+  judgment, strength, error_class, stratum and query_date are allowed.
+- Collector untouched: news_experiment/collect.py, daily.py, store.py,
+  universe.py, spec.py, horizon.py, dedup.py, maintain.py, the user units
+  in ~/.config/systemd/user, writes to news_experiment.db, and
+  COLLECTION_LOG.md (the wrapper appends to it). Never stop, restart or
+  edit news-collect.timer or news-collect.service. Read-only SELECTs on
+  allowed columns only.
+- Gaps stay gaps. Never backfill a missing session.
+- The experiment key (anthropic_experiment_key) spends only through the
+  collector. Any other paid call needs a logged quote and explicit
+  approval in the stage prompt.
+- Do not touch RiskGate logic, the live-trading gate, or the adaptive
+  limit-weakening invariant. Live trading stays off. Services bind
+  loopback. Never print or log a key value.
+- No commits unless the stage prompt asks for one. Never force-push.
+
+### Roles
+
+The session reading this file is the LEAD. Default lead model: Opus 5.5
+(the `opus` alias). The lead plans, delegates, verifies and synthesizes.
+It does not write bulk code, parse logs or run long jobs itself. It keeps
+for itself: decomposing the stage and routing each subtask, any
+pre-registration or amendment text, judgments on statistical results
+(cluster bootstrap, permutation null, power), the final synthesis written
+against the original stage prompt, and any decision the prompt reserves.
+
+### Model and effort routing
+
+Route by decision complexity and silent-failure risk, not by task label.
+Worker models: haiku, sonnet, opus, fable. Efforts: medium, high, xhigh,
+max. No low effort.
+
+| Work | Model | Effort |
+|---|---|---|
+| Pure extraction: reading, parsing, tabulating files, logs and allowed columns into a fixed schema. No interpretation | haiku | medium |
+| Complex extraction: joining sources, messy inputs, light reading comprehension. Still no conclusions | sonnet | medium |
+| Mechanical: running a written script, applying a decided edit, test boilerplate | sonnet | medium, or high for multi-part steps |
+| Standard coding: modules to spec, harness changes, debugging, test design | opus | high; xhigh when touching news_experiment/, risk/, execution/ or the live gate |
+| High-level work: hard reasoning, statistical design, synthesis, drafting with judgment | opus | xhigh, or max for the hardest single pieces |
+| Independent or adversarial work: verification of any number entering a verdict, leakage, look-ahead and outcome-exposure audits, review of statistical code | fable | xhigh |
+| The single adversarial call a stage hinges on, or a disputed verification | fable | max |
+
+- State model and effort for every subtask before spawning.
+- Promote on failure: rerun a failed subtask one tier up. Never demote
+  judgment work to save usage.
+- Haiku extracts and never interprets, and its output carries row counts
+  and source references. Sonnet makes no design or statistical decisions.
+
+### Spawning and budget
+
+- Agent tool: effort is fixed by the agent file, the model is set per
+  call. Use .claude/agents/worker-medium, worker-high, worker-xhigh,
+  worker-max and always pass `model`. Dynamic workflows set both:
+  `agent(prompt, { model: 'opus', effort: 'high' })`. If a model rejects an
+  effort level, drop one level and log it.
+- The Agent call's description is `<Role>-<Model><Effort>`, for example
+  `LogReader-HaikuMed`, `ScoringCoder-OpusXHigh`, `NumberVerifier-FableXHigh`.
+- At most 4 subagents at once (.claude/settings.json). Workers do not spawn
+  workers unless the prompt says so. Each spawn costs roughly 25k to 35k
+  tokens of setup, so small tasks go inline.
+- Every brief gives one objective, input paths, an output path and format,
+  allowed tools, and boundaries.
+
+### Artifacts, verification, checkpoints
+
+- Workers write full results to reports/ or the stage scratch path and
+  return the path, a summary of at most 200 words, and anything
+  unfinished. They return failures and non-survivors, not only winners.
+  The lead reads the artifact files for anything entering the synthesis.
+- Every number entering a verdict gets an independent fable xhigh check by
+  a worker that did not produce it, recomputed from raw inputs.
+- After each task, append status to reports/<stage>_STATE.md (done,
+  running, next, artifact paths, times). On resume, read it first and skip
+  finished tasks. The user is not watching: do not stop to ask whether to
+  continue. If Fable usage runs out, Fable-routed checks stay pending in
+  the STATE file rather than being downgraded.
+
+### ETA tables and session cost
+
+- Estimate table in chat after planning, before the first spawn: one row
+  per task and per spawn with owner, model, effort, parallel or serial,
+  ETA and cumulative ETA. Say which rows are guesses. Revise in chat when
+  the cumulative ETA moves by more than 30 minutes or the user asks.
+- Final table at the end, in chat and in the return document: actual
+  start and end, time taken, tokens per spawn from the transcripts,
+  status and deviations, a cumulative row set against the estimate, with
+  pauses shown separately.
+- Session cost section: wall-clock time, tokens per model (input, output,
+  cache read, cache creation) summed from this session's transcript and
+  its subagent transcripts under
+  ~/.claude/projects/-home-kiros-li-Documents-GitHub-AiTrader/, one line
+  per spawn, lead versus worker share. Token counts only, never estimated.
+  If the transcripts are unreadable, say so and report time only.
+
+### Return document
+
+Every session ends by writing reports/<STAGE>_RETURN.md in the eight-part
+format in docs/PROMPT_WRITING.md section 4. PROGRESS.md and RETURN.md each
+get a short dated entry pointing to it, which satisfies the logging rule
+under "Project context".
+
+### Compute limits (stability over speed)
+
+The ThinkPad has 14 GB of RAM and a recorded out-of-memory incident.
+- Parallel compute: at most `os.cpu_count() // 2` workers, never more than
+  8, and one heavy computation at a time across the lead and all workers.
+- Long jobs run at low priority (`nice -n 10` or `os.nice(10)`), write
+  progress to disk, and resume by skipping finished pieces.
+- Check free memory before any job longer than a few minutes. If the
+  estimated peak exceeds half of what is free, chunk it.
+- Keep heavy work out of the collector window (about 15:30 to 16:30 PT on
+  weekdays) and never starve news-collect.service. A PropExperiment
+  session running at the same time shares this machine.
+
 ## Project context
 
 AiTrader (Market AI Lab) is a **C++20-first algorithmic trading platform that trades US EQUITIES ONLY**.
@@ -21,6 +160,8 @@ Read PROGRESS.md and CONTEXT.md at the start of each session. Update PROGRESS.md
 See `AUDIT.md` for the current honest state of each layer (what is real vs. scaffolding) and `README.md` / `docs/ARCHITECTURE.md` for the design.
 
 ## Build order (do not skip ahead)
+
+Historical. This was the engine build order. The current plan is docs/STAGES.md.
 
 1. Static safety layer with working kill switch and live-trading gate
 2. Alpaca paper trading integration only
@@ -47,6 +188,8 @@ See `AUDIT.md` for the current honest state of each layer (what is real vs. scaf
 - Prefer established libraries over hand-rolled code for backtesting, market-data normalization, and ML
 
 ## Queue
+
+Stage prompts now live in docs/prompts/ and are pasted or launched directly (docs/ORCHESTRATION.md). The queue below stays opt-in and is not the normal path.
 
 A `queue/` directory at the repo root holds inbound prompt files written by chat Claude, named `NNN-short-name.md`. Each file names its model at the top and carries a Status line.
 
