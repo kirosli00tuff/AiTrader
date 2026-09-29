@@ -50,6 +50,14 @@
 > universe rule and no verdict.** The 4.96 bp economic comparison figure is
 > confirmed exact, not moved.
 >
+> **AMENDMENT 8 (2026-09-28, operator approved, written DURING collection at
+> 41 day clusters, blind to every outcome column)** records the model's
+> training cutoff against the collection window, adds a pre-declared
+> sensitivity exclusion for preferred shares, share classes and closed-end
+> funds found in the universe, adds a relevance-rate characterisation, and
+> fixes how the stop rule's realised rho and sigma are computed at the gate.
+> **It changes no primary test, no bar, no universe rule and no verdict.**
+>
 > This document was a proposed pre-registration written by Stage 0.
 >
 > Written 2026-07-27. Nothing was built, collected, called, or traded to
@@ -687,6 +695,107 @@ amendment explicitly. No collection data existed**: not one row carries
 price. Every input to this amendment is a code read, not an outcome, so
 nothing was changed after seeing a result. Superseded figures are preserved
 in place under SUPERSEDED notes.
+
+## AMENDMENT 8 — 2026-09-28, model cutoff, sensitivity exclusion, relevance rate, and the gate computation
+
+**When and what data existed.** 2026-09-28, during Stage B collection, at 41
+day clusters (2026-07-28 to 2026-09-25), 19,091 collection rows, 5,613
+judged. **The operator approved this amendment explicitly.** Every input is a
+read of pre-outcome fields only: symbol, stratum, sector, sector_source,
+state, judgment, strength, headline, source, timestamps, tradeability flags
+and model metadata. **No outcome column (`ret_*`, `bench_*`,
+`excess_1session`, `net_bp`, `cost_bp_round_trip`, `outcome_state`,
+`anchor_*`) has been read, printed or aggregated by any person or analysis
+for this study.** The scheduled maintenance job may populate those columns;
+nothing has read them. The queries that informed this amendment ran through
+a script that refuses any query naming an outcome column, archived as
+`scripts/blind_interim_20260928.py`, with results in
+`reports/B.2_BLIND_INTERIM.md`.
+
+**Why now.** The blind interim read found three things the specification
+does not handle: preferred shares whose headlines describe the parent company
+or unrelated topics, closed-end funds admitted despite the fund exclusion, and
+day clusters about 3.4 times larger than the design effect assumed. Each is
+fixed here, before any outcome exists to steer the fix.
+
+### 8.1 Model cutoff
+
+Claude Haiku 4.5's training-data cutoff is July 2025 (Anthropic model page,
+checked 2026-09-28; reliable knowledge cutoff February 2025). The first
+collection session is 2026-07-28. **Every scored headline postdates the
+model's training data by about a year, so a positive result cannot come from
+the model recalling the event or its aftermath.** This is recorded as a
+property of the design, and Stage C reports it with the verdict.
+
+### 8.2 Sensitivity exclusion, pre-declared
+
+**The primary analysis is unchanged.** Every primary test is ALSO reported
+with the following symbols excluded. The rule applies to every formation,
+including 2026-10-01 and any later one:
+
+(a) **Preferred shares and share classes:** any symbol containing ".", plus
+STRK, STRF, STRD and STRC (Strategy Inc. preferreds, which trade under
+plain tickers).
+
+(b) **Closed-end funds and unclassified vehicles:** any symbol whose modal
+non-null `sector` across its collection rows in that formation is `N/A`
+with `sector_source = finnhub_profile2`. The rule is per symbol and modal
+because `sector` is stored per row and is not constant within a symbol
+(SECZ carries `Financial Services` on 71 rows and `N/A` on 2, and is not
+excluded).
+
+Members in the 2026-07-01 formation, computed 2026-09-28:
+- (a): ARES.PRB, BAC.PRL, BF.A, NEE.PRV, STRK, UHAL.B, WFC.PRL
+- (b): BCAR, BCX, BIT, BMEZ, BSTZ, BUI, GDV, HQH, PSUS
+
+Scale at 41 clusters: (a) 421 judged rows, 7.5 percent of judged; (b) 31
+judged rows, 0.6 percent. Sample headlines: BAC.PRL carries Bank of America
+research notes about other companies ("Bank of America resets Costco stock
+target"), STRK carries Strategy Inc. bitcoin purchases, and WFC.PRL carries
+unrelated items ("Y Combinator's Paul Graham says AI companies are measuring
+inference the wrong way").
+
+**The closed-end funds are a defect in the fund exclusion**, the same class
+as the admit-by-default fund classifier recorded in Task 7: closed-end funds
+list as ordinary shares, so an exclusion built on the ETF flag admits them.
+The collector is not changed mid-collection. Stage C reports the defect, its
+scale, and the sensitivity result together.
+
+**When the two readings disagree.** If the primary and the excluded version
+reach different verdicts under the pre-registered verdict table, both are
+reported side by side, the primary governs, and the one-line summary states
+the disagreement in words. Neither reading is dropped.
+
+### 8.3 Relevance rate, a characterisation and not a filter
+
+Before Stage C.2 computes any outcome, a fixed-seed random sample of 200
+judged collection rows is graded blind to outcomes into three classes:
+company-specific (the headline is about the symbol's issuer), roundup (the
+issuer is one of several named), and off-topic. The seed, the sample and the
+grades are committed before C.2 runs. The rates are reported with the
+verdict. **Nothing is removed on the basis of these grades.** A 54-row
+deterministic look on 2026-09-28 (rows with `id % 97 = 11`, common stocks
+only) found about 72 percent company-specific, 13 percent roundup, 9 percent
+off-topic and 6 percent closed-end funds. That look is recorded here and is
+not the registered sample.
+
+### 8.4 The gate computation
+
+The stop rule stays "60 day clusters AND 1,000 scorable observations AND
+realised power adequate at the realised rho". Measured cluster size is about
+137 judged rows per day (78 directional) against the 40 the design effect was
+sized on, so the rho check carries more weight than the design assumed.
+Projected to 60 clusters at the registered 30 bp effect and 180 bp sigma,
+power holds for rho up to about 0.14. If sigma is 250 bp, that ceiling falls
+to about 0.07. Both rho and sigma need outcome data, so:
+
+At 60 clusters, the Stage C.1 harness computes the realised within-day rho
+and sigma of the scored quantity from pooled rows, **without reading
+`judgment`, `strength` or `reason`**, and applies the stop rule to those two
+numbers **before any effect is estimated**. If power is short, collection
+continues under the existing rule and the 120-trading-day hard stop is
+unchanged. This computation is part of the C.1 harness and is hash-frozen
+with it.
 
 ## Why this exists
 

@@ -30,6 +30,12 @@ EXPERIMENT.md is the binding contract. This file is the index.
   PropExperiment (CLAUDE.md session rules, .claude/, docs/ORCHESTRATION.md,
   docs/PROMPT_WRITING.md, docs/prompts/, this file, docs/DECISIONS.md).
   Written by the planning chat through Desktop Commander, no CLI session.
+- B.2 "BLIND INTERIM READ" (2026-09-28): pre-outcome fields only, at 41
+  clusters. Found preferreds carrying parent or unrelated news, closed-end
+  funds past the fund exclusion, and clusters 3.4x the design size. Led
+  to EXPERIMENT.md Amendment 8 (operator approved): model cutoff
+  attestation, sensitivity exclusion, relevance rate, gate computation.
+  reports/B.2_BLIND_INTERIM.md. Planning chat, no CLI session.
 
 ## Stage C: evaluation (NOT STARTED, runs once)
 
