@@ -543,3 +543,39 @@ GAP:        2 session(s) missing, UNRECOVERABLE by design: 2026-08-28, 2026-09-1
 rows:       0 before, 494 after
 spend:      0.101767 USD over 184 calls
 exit:       4
+
+=== DAILY RUN 2026-09-23T22:30:31Z ===
+action:     collected
+target:     2026-09-22
+formation:  2026-07-01
+GAP:        2 session(s) missing, UNRECOVERABLE by design: 2026-08-28, 2026-09-15
+rows:       0 before, 498 after
+spend:      0.115422 USD over 208 calls
+exit:       4
+
+=== DAILY RUN 2026-09-24T23:23:12Z ===
+action:     collected
+target:     2026-09-23
+formation:  2026-07-01
+GAP:        2 session(s) missing, UNRECOVERABLE by design: 2026-08-28, 2026-09-15
+rows:       0 before, 498 after
+spend:      0.110179 USD over 198 calls
+exit:       4
+
+=== DAILY RUN 2026-09-26T00:10:32Z ===
+action:     collected
+target:     2026-09-24
+formation:  2026-07-01
+GAP:        2 session(s) missing, UNRECOVERABLE by design: 2026-08-28, 2026-09-15
+rows:       0 before, 500 after
+spend:      0.111397 USD over 200 calls
+exit:       4
+
+=== DAILY RUN 2026-09-28T23:57:33Z ===
+action:     collected
+target:     2026-09-25
+formation:  2026-07-01
+GAP:        2 session(s) missing, UNRECOVERABLE by design: 2026-08-28, 2026-09-15
+rows:       0 before, 487 after
+spend:      0.099053 USD over 178 calls
+exit:       4

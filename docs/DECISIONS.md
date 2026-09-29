@@ -29,3 +29,35 @@ Current-phase decisions. Older engine-era decisions stay in CONTEXT.md.
 - Unchanged hard rules: RiskGate logic, the live-trading gate and the
   adaptive limit-weakening invariant are never touched. Live trading is off
   by default. Services bind loopback. Keys are never logged.
+- 2026-09-28 (user, planning chat): Phidias Propfirm researched as a
+  funded venue candidate for AiTrader after Stage C, because its Premium
+  tier is a swing account and AiTrader's signal is a next-session hold.
+  Recorded, not adopted. Venue for Stages D and E stays IBKR.
+  - What fits: Premium permits overnight and weekend holding with no
+    same-day flatten, and uses an EOD trailing drawdown. That matches a
+    next-session hold.
+  - Blocker 1, instrument: Phidias is a futures prop firm. Its listed
+    products are CME micros (MES, MNQ, M2K, MYM, currency, energy and
+    metal micros). AiTrader's signal is single-name US equity news drift
+    on 400 small and mid-cap names. No single-name equity is tradeable
+    there, so the signal as registered has no instrument at Phidias.
+  - Blocker 2, automation: the Phidias Terms of Use ban "robots, fully
+    automated trading algorithms or any form of automated trading",
+    except "semi-automated software, provided the User actively monitors
+    and manually adjusts all operations". The terms do not define
+    semi-automated and do not mention alert or confirmation systems.
+  - User's candidate design if semi-automation reads permissively: the
+    strategy generates a signal, a Telegram bot pushes it, the user taps
+    to confirm, and only that tap submits the order. Unconfirmed against
+    Phidias's reading. No build time until Phidias support answers in
+    writing. At the measured rate (about 78 directional calls a day
+    before any capacity filter) per-trade confirmation is a real
+    workload, so the filtered trade count sets whether this is practical.
+  - To revisit only if both blockers clear: a futures expression of the
+    signal would be a new hypothesis needing its own pre-registration,
+    and an equity prop firm that allows overnight holds and automation
+    would be the closer fit. Neither is researched yet.
+  - Sources checked 2026-09-28: phidiaspropfirm.com/rules, /swing-allowed,
+    /accounts, /tou.
+- Scope rule (user, 2026-09-28): the AiTrader planning chat does not
+  edit PropExperiment files. PropExperiment has its own chat.
