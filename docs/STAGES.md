@@ -44,8 +44,11 @@ EXPERIMENT.md is the binding contract. This file is the index.
   scoring.py, the bootstrap, the permutation null, the report writer) and
   tests it on synthetic rows. No real outcome is computed in C.1. The user
   commits the freeze manifest.
-- C.2 computes outcomes and runs the pre-registered verdict table exactly
-  once, against the frozen hashes. Every number entering a verdict gets an
+- C.2 first runs the Amendment 8.4 gate step with the frozen harness:
+  realised rho and sigma from pooled rows, judgments unread. If power is
+  short, collection resumes and C.2 stops there. Otherwise it computes
+  the verdict table exactly once, against the frozen hashes, with the
+  Amendment 8.2 sensitivity reading beside every primary. Every number entering a verdict gets an
   independent Fable check. Any change to a frozen file voids the run.
 - Deferred to C as reporting questions, not Stage B changes: preferred
   shares and share classes in the universe (ARES.PRB, BAC.PRL, NEE.PRV,
