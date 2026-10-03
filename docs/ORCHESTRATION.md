@@ -138,7 +138,7 @@ The order is fixed:
 
    The session shows up in `claude agents` and the /resume picker, so the
    user opens it with `claude --resume <id>`.
-5. Never launch a stage into the collector window (about 15:30 to 16:30 PT
+5. Never launch a stage into the collector window (about 22:00 to 22:45 Pacific
    on weekdays), and never run two heavy sessions at once. Check
    `ps -eo pid,etime,args | grep claude` first: a PropExperiment session
    running at the same time shares the 14 GB of RAM and the usage pool.

@@ -1,13 +1,19 @@
-# Once per weekday at 22:30 UTC: 2.5 hours after the 20:00 UTC summer close,
-# 1.5 hours after the 21:00 UTC winter close, both past the SIP settle and
-# the daily bar cut. Local: 15:30 PDT, 14:30 PST. The wrapper itself decides
-# what is collectable, so a firing on a holiday resolves to a clean no-op.
+# Once per weekday at 22:00 Pacific (America/Vancouver), moved 2026-10-02
+# from 22:30 UTC (15:30 PDT) at the operator's request: the laptop is
+# reliably online overnight and busy in the afternoon. 22:00 Pacific is
+# 9 hours after the regular close in both summer (05:00 UTC) and winter
+# (06:00 UTC), far past the SIP settle and the daily bar cut. The target
+# session is unchanged: the wrapper picks the latest session whose following
+# session closed at least SETTLE_MINUTES ago, so a Monday 22:00 firing still
+# collects Friday, exactly as a Monday 15:30 firing did. Finnhub's
+# company-news query is a whole-date window, so the later fetch sees the same
+# day. A firing on a holiday resolves to a clean no-op.
 [Unit]
 Description=MAL daily news collection schedule
 
 [Timer]
-OnCalendar=Mon..Fri *-*-* 22:30:00 UTC
-# A machine asleep or off at 22:30 runs the job at next wake instead of
+OnCalendar=Mon..Fri *-*-* 22:00:00 America/Vancouver
+# A machine asleep or off at 22:00 runs the job at next wake instead of
 # skipping it. The wrapper's idempotence makes late firings safe.
 Persistent=true
 RandomizedDelaySec=120

@@ -135,7 +135,7 @@ The ThinkPad has 14 GB of RAM and a recorded out-of-memory incident.
   progress to disk, and resume by skipping finished pieces.
 - Check free memory before any job longer than a few minutes. If the
   estimated peak exceeds half of what is free, chunk it.
-- Keep heavy work out of the collector window (about 15:30 to 16:30 PT on
+- Keep heavy work out of the collector window (about 22:00 to 22:45 Pacific on
   weekdays) and never starve news-collect.service. A PropExperiment
   session running at the same time shares this machine.
 

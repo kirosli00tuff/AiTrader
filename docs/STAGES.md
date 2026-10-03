@@ -18,7 +18,7 @@ EXPERIMENT.md is the binding contract. This file is the index.
 
 ## Stage B: collection (RUNNING)
 
-- First target session 2026-07-28. news-collect.timer, weekdays 22:30 UTC.
+- First target session 2026-07-28. news-collect.timer, weekdays 22:30 UTC until 2026-10-02, then 22:00 America/Vancouver (operator request, target sessions unchanged).
 - Exit gate: 60 day-clusters AND at least 1,000 scorable observations AND
   realised power adequate at the realised rho, recomputed, not assumed.
   Per-stratum floor 30 clusters (cleared). Hard stop 120 trading days,

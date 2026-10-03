@@ -221,7 +221,7 @@ open choices in the return document. Then the literal line `END PROMPT`.
 - Allowed reads: state, judgment, strength, error_class, stratum,
   query_date, symbol, counts. Nothing from outcomes.py or scoring.py, and
   no return, excess, benchmark or cost column.
-- Schedule heavy work outside 15:30 to 16:30 PT on weekdays.
+- Schedule heavy work outside 22:00 to 22:45 Pacific on weekdays.
 - Small doc or config commits go through the planning chat via Desktop
   Commander, with no CLI session, when Kiros asks.
 

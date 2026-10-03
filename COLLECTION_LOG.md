@@ -579,3 +579,49 @@ GAP:        2 session(s) missing, UNRECOVERABLE by design: 2026-08-28, 2026-09-1
 rows:       0 before, 487 after
 spend:      0.099053 USD over 178 calls
 exit:       4
+
+=== DAILY RUN 2026-09-29T23:35:36Z ===
+action:     collected
+target:     2026-09-28
+formation:  2026-07-01
+GAP:        2 session(s) missing, UNRECOVERABLE by design: 2026-08-28, 2026-09-15
+rows:       0 before, 485 after
+spend:      0.101338 USD over 183 calls
+exit:       4
+
+=== DAILY RUN 2026-10-01T00:06:11Z ===
+action:     collected
+target:     2026-09-29
+formation:  2026-07-01
+GAP:        2 session(s) missing, UNRECOVERABLE by design: 2026-08-28, 2026-09-15
+rows:       0 before, 511 after
+spend:      0.115104 USD over 207 calls
+exit:       4
+
+=== DAILY RUN 2026-10-02T01:44:53Z ===
+action:     collected
+target:     2026-09-30
+formation:  2026-07-01
+GAP:        2 session(s) missing, UNRECOVERABLE by design: 2026-08-28, 2026-09-15
+rows:       0 before, 511 after
+spend:      0.122285 USD over 221 calls
+exit:       4
+
+=== DAILY RUN 2026-10-03T01:17:42Z ===
+action:     collected
+target:     2026-10-01
+formation:  2026-10-01
+GAP:        2 session(s) missing, UNRECOVERABLE by design: 2026-08-28, 2026-09-15
+rows:       0 before, 492 after
+spend:      0.116527 USD over 211 calls
+exit:       4
+
+=== DAILY RUN 2026-10-03T05:00:42Z ===
+action:     refused_already_present
+target:     2026-10-01
+formation:  2026-10-01
+GAP:        2 session(s) missing, UNRECOVERABLE by design: 2026-08-28, 2026-09-15
+rows:       492 before, 492 after
+maintain:   resolved 0, horizons {2: 0, 5: 0, 10: 0}
+detail:     492 rows already recorded for 2026-10-01, the collector is append-only, re-running would double-count
+exit:       4
