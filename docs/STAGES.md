@@ -55,6 +55,25 @@ EXPERIMENT.md is the binding contract. This file is the index.
   WFC.PRL, UHAL.B), the strength distribution concentrated at 2 to 4, the
   capability replay on the remaining Anthropic balance.
 
+## Planned follow-up: cutoff-replay study (after the Stage C readout, whatever the outcome; stage letter assigned at pre-registration)
+
+Recorded 2026-10-02 at 45 day clusters, before any outcome has been read.
+
+- Idea: score historical headlines from after a model training-data
+  cutoff, which the model cannot have seen, as a pseudo-forward test.
+  For Claude Haiku 4.5 the window starts after July 2025 (training-data
+  cutoff), not February 2025 (reliable-knowledge cutoff).
+- Separate study: its own pre-registration, its own database or
+  run_kind, its own verdict. Run and read only after Stage C reports,
+  so nothing in it can steer an amendment to the live experiment.
+- Leak controls to pre-register: archive timestamps vs first-seen time
+  (backfill and re-stamping), a point-in-time universe per quarter
+  including delisted names, and a coverage check of historical Finnhub
+  news against the live-collected overlap months.
+- Optional model ladder: each model scored only on events after its
+  own training cutoff, testing whether stronger models predict better.
+  Later cutoffs mean shorter windows and less power.
+
 ## Stage D: paper on IBKR Gateway (NOT STARTED, only on a green C)
 
 - D.1 build: IBKR Gateway paper path, a separate fresh paper account (the
