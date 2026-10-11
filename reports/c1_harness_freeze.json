@@ -1,0 +1,615 @@
+{
+  "created_pdt": "2026-10-11 03:29:25 PDT",
+  "external": [
+    {
+      "path": "/home/kiros-li/Documents/GitHub/PropExperiment/c1_replication/evaluate.py",
+      "sha256": "5f22c251095e90f2bb3f72185e79727dfb677e6b602893fe87cb13c8cbe1d381"
+    },
+    {
+      "path": "/home/kiros-li/Documents/GitHub/PropExperiment/reports/stage_e18_freeze.json",
+      "sha256": "5ed208a21c2556e84830aca6fb7b2dba08a3012713f62de6e7bd1c57fb702d03"
+    },
+    {
+      "path": "/home/kiros-li/Documents/GitHub/PropExperiment/tests/test_harness_freeze.py",
+      "sha256": "94f62fb383c0e24c7641ea6340cba4ce9e35bf58bb2d64a478c02a0a6dbf5f4b"
+    },
+    {
+      "path": "/home/kiros-li/Documents/GitHub/PropExperiment/docs/prompts/STAGE_E.18.md",
+      "sha256": "e83a33d9f53016ac2d46a6761809bf1e95bccd30b7029928240361015b37c5f8"
+    },
+    {
+      "path": "/home/kiros-li/Documents/GitHub/PropExperiment/reports/E.18_RETURN.md",
+      "sha256": "d9e7112734bcb42ff5652664172330933a60e1b6c1ba8a6ac190eac2ea5a980e"
+    }
+  ],
+  "files": [
+    {
+      "bytes": 340,
+      "path": "news_eval/__init__.py",
+      "sha256": "10943cf17c65d8214c72ff18f3684451149eb6e007fd882d6a7a8ac837376c89"
+    },
+    {
+      "bytes": 11658,
+      "path": "news_eval/constants.py",
+      "sha256": "4344248ae35b0a12a17e444c1bbda90f4e8b9a28057f428552e958efbeee4131"
+    },
+    {
+      "bytes": 9121,
+      "path": "news_eval/cutoff.py",
+      "sha256": "bcf8b7663d9428288c29afc7d6f8f30b9474115be7de0b5cf62818d4b4b9be9f"
+    },
+    {
+      "bytes": 47064,
+      "path": "news_eval/data.py",
+      "sha256": "d93a2374669509405ed2b289486867627e59e7ff1f9f94b9d4ec45912fdc9e35"
+    },
+    {
+      "bytes": 2057,
+      "path": "news_eval/envcheck.py",
+      "sha256": "adc044887654202f916b65cd6cb00761c9d5854c75b1ae9641b33e8165ab650a"
+    },
+    {
+      "bytes": 40664,
+      "path": "news_eval/family.py",
+      "sha256": "0d8f74d74fd071946c9eeee1cb47b634a9878775b31f4ff011cf5c6b0d33b009"
+    },
+    {
+      "bytes": 18160,
+      "path": "news_eval/freeze.py",
+      "sha256": "0ae439217d42362c006af180b09442760865507994039fd931e6a0675865b292"
+    },
+    {
+      "bytes": 12868,
+      "path": "news_eval/gate.py",
+      "sha256": "d9bf9578e3deae6cf273af3644765e4b3a9c2b2204d0e743952d50509187a27f"
+    },
+    {
+      "bytes": 2681,
+      "path": "news_eval/marker.py",
+      "sha256": "414c166f9885ac51ea8197e0f3d3660e904bb2f1651209872fb3e0dc4f136b86"
+    },
+    {
+      "bytes": 17620,
+      "path": "news_eval/relevance.py",
+      "sha256": "08fced3c1cad2561264a3b0fa66fe1f3a65fd16f118f51ac36cb8d6fa7d832cb"
+    },
+    {
+      "bytes": 29269,
+      "path": "news_eval/report.py",
+      "sha256": "abf9e855d7657fedaf62574a27bbf8c16c89bbea5ee5071833966af65d6e2200"
+    },
+    {
+      "bytes": 465,
+      "path": "news_eval/requirements-eval.lock",
+      "sha256": "c9ba89c63ec56258012dc6fefa3581939a7f87ff3e38e044b9235d06f8428e37"
+    },
+    {
+      "bytes": 40367,
+      "path": "news_eval/run_c2.py",
+      "sha256": "7b5aaf50276bb44e9d5227d41b3a1180222e1fd485877e92728e318ccd27df9f"
+    },
+    {
+      "bytes": 2700,
+      "path": "news_eval/schema.sql",
+      "sha256": "389b48afb7d158ea1a88192a60256cc8574df4041ea29ad9e06050e1aec60ced"
+    },
+    {
+      "bytes": 39598,
+      "path": "news_eval/stats.py",
+      "sha256": "173375917cbadae1949c980acb19a018c412e21fab356a01d3c6e990e9656c36"
+    },
+    {
+      "bytes": 59893,
+      "path": "news_eval/synthetic.py",
+      "sha256": "ec8529b474566a51c245e4c6077caa889f32765da7e331d8e48e1b5648c321df"
+    },
+    {
+      "bytes": 31530,
+      "path": "news_eval/verdict.py",
+      "sha256": "a68b06340e56569b064147049226c32578a3346046a93b387e84cdad51ee3343"
+    },
+    {
+      "bytes": 17342,
+      "path": "reports/c1_verdict_mapping.md",
+      "sha256": "0e37dd5eed2e533c4ce59c81feb6c7a62dd315fa6e0640aa3cc1353846a7c11e"
+    },
+    {
+      "bytes": 7737,
+      "path": "tests/test_news_eval_constants.py",
+      "sha256": "49312694a1e7683b93371923612801cf1b5cb8403287c0032453b9363f20a204"
+    },
+    {
+      "bytes": 7355,
+      "path": "tests/test_news_eval_cutoff.py",
+      "sha256": "c07c927ccb1503581b0a8adb39da7324e4b1a45f74eb3aff2e2ecd5280d4fad0"
+    },
+    {
+      "bytes": 43174,
+      "path": "tests/test_news_eval_data.py",
+      "sha256": "7fc65bc91c086d6099ebc317fb8074bb25915bcd4384c13e6b7aeb53d5f3ec01"
+    },
+    {
+      "bytes": 1138,
+      "path": "tests/test_news_eval_envcheck.py",
+      "sha256": "83bbcad2ff7c9eca8360731d781f17156ac9f78cc10d30524450b8a3d55f0917"
+    },
+    {
+      "bytes": 33760,
+      "path": "tests/test_news_eval_family.py",
+      "sha256": "9ea0bd4da83dece5bd39aa1aafbae7b125a07ea31fe7f3b8b17c76cbae99b200"
+    },
+    {
+      "bytes": 16742,
+      "path": "tests/test_news_eval_freeze.py",
+      "sha256": "3494935f07c7c49019297d3d0877c98cc3fec2a9f7541933f0416b48892b7464"
+    },
+    {
+      "bytes": 33038,
+      "path": "tests/test_news_eval_gate.py",
+      "sha256": "916ac04bbbccfb6417888461095b40aa0f6e3fbad0858b45caaf11c593920e28"
+    },
+    {
+      "bytes": 34964,
+      "path": "tests/test_news_eval_known_answers.py",
+      "sha256": "f0a07e75a11ccaf5f43539137269ce22982842b3124bfca37793142614ffbb09"
+    },
+    {
+      "bytes": 16144,
+      "path": "tests/test_news_eval_mutations.py",
+      "sha256": "579c55372cd98cc3264e49deab2c7512f423ec2f8c327ca1bc4d31c175471e63"
+    },
+    {
+      "bytes": 18234,
+      "path": "tests/test_news_eval_relevance.py",
+      "sha256": "40a515141214027e01a563414b61b4295bb3dab1eb455b37fd763c7910c65445"
+    },
+    {
+      "bytes": 16296,
+      "path": "tests/test_news_eval_report.py",
+      "sha256": "0c338b927620576dd9ac7c8e62a4f73f93744c1d565aa8d848e10528eec9f731"
+    },
+    {
+      "bytes": 44593,
+      "path": "tests/test_news_eval_run_c2.py",
+      "sha256": "50a1911d9503faa9fdabedd39b48be9fdda879e0d9dabcdde12997d630634f6a"
+    },
+    {
+      "bytes": 32900,
+      "path": "tests/test_news_eval_stats.py",
+      "sha256": "0f83c420c42f127c90885ca8155e5ebc706783393f3e61e890ba9cc7df60f50d"
+    },
+    {
+      "bytes": 12355,
+      "path": "tests/test_news_eval_synthetic.py",
+      "sha256": "5e8970daea828ad68ec7bce9f200aaf7a2efedbc3136cd936440f4c2ceaf8f28"
+    },
+    {
+      "bytes": 26602,
+      "path": "tests/test_news_eval_verdict.py",
+      "sha256": "30d1fc9c62d40ea995d12b12e54bbf641a20e9a971fb984459a744b532d1fc67"
+    }
+  ],
+  "inputs": [
+    {
+      "bytes": 182742,
+      "path": "EXPERIMENT.md",
+      "sha256": "641272349a0346f61727ee811b8b69b97b91cc43940db3dc840fff60dea13386"
+    },
+    {
+      "bytes": 11105,
+      "path": "news_experiment/outcomes.py",
+      "sha256": "462d197251075d950a805fbb3dc219a5f58cf5940c6bc5bd44629caf263e92d7"
+    },
+    {
+      "bytes": 12092,
+      "path": "news_experiment/scoring.py",
+      "sha256": "7ee2ee189a8639245ef5aaec7ebfd7012a99b02e8b4c6426b490edd12695655b"
+    },
+    {
+      "bytes": 12374,
+      "path": "news_experiment/spec.py",
+      "sha256": "a59ed66d888675228e03c2de34833bdde2f7505b81a6867b17cc2105f48f86b7"
+    },
+    {
+      "bytes": 7694,
+      "path": "news_experiment/horizon.py",
+      "sha256": "db39014d890d1c08199a83e736d56ef9afcb8ae93ad81004c8c6ddc5047ccc5c"
+    },
+    {
+      "bytes": 9829,
+      "path": "news_experiment/store.py",
+      "sha256": "6c77d531522a040f2c8ca8b660bffe7d5b2e6b1ab4d4e843a4a3d23c4d5629ac"
+    },
+    {
+      "bytes": 34048,
+      "path": "news_experiment/collect.py",
+      "sha256": "5908077f3c292847c0b6cb1136a2c1f4e1a3e3013835eb7a623695f9805bf20c"
+    },
+    {
+      "bytes": 3053,
+      "path": "news_experiment/maintain.py",
+      "sha256": "5b9ca955f1d56f1e6631d6b3b93ed422b5ca51beedaafc1725c9ee86b3c8fb10"
+    },
+    {
+      "bytes": 26901,
+      "path": "news_experiment/daily.py",
+      "sha256": "f67d703b78ad2b980bf26be07fcf78a1396e6aef32b2f4a669b26f0bc1c060cf"
+    },
+    {
+      "bytes": 8918,
+      "path": "backtest/fees.py",
+      "sha256": "6511ba593534e46641775c1e3c3d7f5077a2ade1dddd8e7823ad8d4e2850970d"
+    },
+    {
+      "bytes": 5895,
+      "path": "scripts/blind_interim_20260928.py",
+      "sha256": "53a557e99fcf102ac29823c1b3639dc55e30a6d6563834d7b687babadccd8bb9"
+    }
+  ],
+  "pins": {
+    "constants": {
+      "BAR_PERM_P": 0.0125,
+      "BAR_PRIMARY_Z": 2.5,
+      "BAR_STRENGTH_Z": 2.24,
+      "BLIND_COLUMNS": [
+        "scoring_session",
+        "judgment",
+        "strength",
+        "reason"
+      ],
+      "BLIND_COLUMN_RE": {
+        "flags": 32,
+        "regex": "\\b(scoring_session|judgment|strength|reason)\\b"
+      },
+      "BOOT_SEED": 20261010,
+      "BP_PER_UNIT": 10000.0,
+      "DIRECTIONAL": [
+        "POSITIVE",
+        "NEGATIVE"
+      ],
+      "ECON_BAR_BP": 4.96,
+      "EFFECT_BP": 30.0,
+      "EXCLUSION_NONE": "",
+      "E_TEST_STRATUM": {
+        "E1": "S1",
+        "E2": "S2",
+        "E3": "S3",
+        "E4": "S4"
+      },
+      "FLOOR_ANALYSIS_CLUSTERS": 60,
+      "FLOOR_SCORABLE": 1000,
+      "FLOOR_TEST_CLUSTERS": 30,
+      "GUARDED_COLUMNS": [
+        "anchor_kind",
+        "anchor_ts",
+        "anchor_price",
+        "outcome_state",
+        "ret_intraday",
+        "ret_1session",
+        "ret_2session",
+        "ret_5session",
+        "ret_10session",
+        "bench_1session",
+        "excess_1session",
+        "cost_bp_round_trip",
+        "net_bp",
+        "scoring_session",
+        "judgment",
+        "strength",
+        "reason",
+        "raw_response",
+        "strength_parse_ok",
+        "neutral_strength_anomaly",
+        "delay_rolled",
+        "bar_source"
+      ],
+      "GUARDED_COLUMN_RE": {
+        "flags": 32,
+        "regex": "\\b(anchor_kind|anchor_ts|anchor_price|outcome_state|ret_intraday|ret_1session|ret_2session|ret_5session|ret_10session|bench_1session|excess_1session|cost_bp_round_trip|net_bp|scoring_session|judgment|strength|reason|raw_response|strength_parse_ok|neutral_strength_anomaly|delay_rolled|bar_source)\\b"
+      },
+      "JUDGMENT_DERIVED_COLUMNS": [
+        "raw_response",
+        "strength_parse_ok",
+        "neutral_strength_anomaly"
+      ],
+      "MIN_MEM_AVAILABLE_MB": 2048,
+      "NEGATIVE": "NEGATIVE",
+      "NEUTRAL": "NEUTRAL",
+      "NEUTRAL_RATE_BAR": 0.8,
+      "NULL_MIN_MINORITY_SHARE": 0.1,
+      "NULL_MIN_MIXED_CLUSTERS": 30,
+      "N_BOOT": 10000,
+      "N_PERM": 10000,
+      "N_STREAMS": 28,
+      "OUTCOME_ADJACENT_COLUMNS": [
+        "delay_rolled",
+        "bar_source"
+      ],
+      "OUTCOME_COLUMNS": [
+        "anchor_kind",
+        "anchor_ts",
+        "anchor_price",
+        "outcome_state",
+        "ret_intraday",
+        "ret_1session",
+        "ret_2session",
+        "ret_5session",
+        "ret_10session",
+        "bench_1session",
+        "excess_1session",
+        "cost_bp_round_trip",
+        "net_bp"
+      ],
+      "OUTCOME_COLUMN_RE": {
+        "flags": 32,
+        "regex": "\\b(ret_\\w+|bench_\\w+|anchor_\\w+|excess_\\w+|net_bp|cost_bp_round_trip|outcome_state)\\b"
+      },
+      "OUTCOME_EXCLUDED": "excluded",
+      "OUTCOME_PENDING": "pending",
+      "OUTCOME_RESOLVED": "resolved",
+      "PERM_SEED": 20261011,
+      "POSITIVE": "POSITIVE",
+      "RELEVANCE_COLUMNS": [
+        "id",
+        "symbol",
+        "query_date",
+        "headline",
+        "sector",
+        "stratum"
+      ],
+      "RELEVANCE_N": 200,
+      "RELEVANCE_QUERY_DATE_MAX": "2026-10-09",
+      "RELEVANCE_SEED": 20261012,
+      "REQUIRED_FACTOR": 11.156,
+      "RUN_KIND_COLLECTION": "collection",
+      "RUN_ONCE_SCHEMA": "c2_run_once/1",
+      "S2_BOTTOM": [
+        1,
+        2
+      ],
+      "S2_TOP": [
+        4,
+        5
+      ],
+      "SCHEMA_COLUMNS": [
+        "id",
+        "rule_id",
+        "formation_date",
+        "symbol",
+        "adv_usd_at_formation",
+        "liquidity_rank",
+        "stratum",
+        "median_close_at_formation",
+        "price_floor_at_formation",
+        "sector",
+        "sector_source",
+        "query_date",
+        "state",
+        "exclusion_reason",
+        "headline",
+        "source_name",
+        "source_article_id",
+        "published_ts",
+        "fetched_ts",
+        "story_group_id",
+        "model_id",
+        "prompt_sha256",
+        "temperature",
+        "called_ts",
+        "latency_ms",
+        "raw_response",
+        "judgment",
+        "strength",
+        "strength_parse_ok",
+        "neutral_strength_anomaly",
+        "reason",
+        "parse_ok",
+        "error_class",
+        "input_tokens",
+        "cached_input_tokens",
+        "output_tokens",
+        "cost_usd",
+        "credential_shared",
+        "etb",
+        "shortable",
+        "etb_source",
+        "anchor_kind",
+        "anchor_ts",
+        "anchor_price",
+        "scoring_session",
+        "delay_rolled",
+        "outcome_state",
+        "ret_intraday",
+        "ret_1session",
+        "ret_2session",
+        "ret_5session",
+        "ret_10session",
+        "bench_1session",
+        "excess_1session",
+        "bar_source",
+        "cost_bp_round_trip",
+        "net_bp",
+        "spec_version",
+        "collector_git_sha",
+        "run_kind",
+        "written_ts"
+      ],
+      "SECTOR_UNCLASSIFIED": "unclassified",
+      "SENS_RULE_A_CHAR": ".",
+      "SENS_RULE_A_SYMBOLS": [
+        "STRK",
+        "STRF",
+        "STRD",
+        "STRC"
+      ],
+      "SENS_RULE_B_SECTOR": "N/A",
+      "SENS_RULE_B_SOURCE": "finnhub_profile2",
+      "SOURCE_FAILED_DAY_EXCLUDE": 0.2,
+      "STALE_PENDING_SESSIONS": 3,
+      "STATES": [
+        "no_news",
+        "judged",
+        "model_failed",
+        "excluded_pre_call",
+        "source_failed"
+      ],
+      "STATE_EXCLUDED_PRE_CALL": "excluded_pre_call",
+      "STATE_JUDGED": "judged",
+      "STATE_MODEL_FAILED": "model_failed",
+      "STATE_NO_NEWS": "no_news",
+      "STATE_SOURCE_FAILED": "source_failed",
+      "STORY_TRIGGER_SHARE": 0.1,
+      "STRATA": [
+        "S1",
+        "S2",
+        "S3",
+        "S4"
+      ],
+      "STREAM_ORDER": [
+        [
+          "P1",
+          "primary"
+        ],
+        [
+          "P1",
+          "sensitivity"
+        ],
+        [
+          "P2",
+          "primary"
+        ],
+        [
+          "P2",
+          "sensitivity"
+        ],
+        [
+          "P3",
+          "primary"
+        ],
+        [
+          "P3",
+          "sensitivity"
+        ],
+        [
+          "P4",
+          "primary"
+        ],
+        [
+          "P4",
+          "sensitivity"
+        ],
+        [
+          "E1",
+          "primary"
+        ],
+        [
+          "E1",
+          "sensitivity"
+        ],
+        [
+          "E2",
+          "primary"
+        ],
+        [
+          "E2",
+          "sensitivity"
+        ],
+        [
+          "E3",
+          "primary"
+        ],
+        [
+          "E3",
+          "sensitivity"
+        ],
+        [
+          "E4",
+          "primary"
+        ],
+        [
+          "E4",
+          "sensitivity"
+        ],
+        [
+          "S1",
+          "primary"
+        ],
+        [
+          "S1",
+          "sensitivity"
+        ],
+        [
+          "S2",
+          "primary"
+        ],
+        [
+          "S2",
+          "sensitivity"
+        ]
+      ],
+      "STREAM_ORDER_STORY": [
+        [
+          "P1",
+          "primary_story"
+        ],
+        [
+          "P1",
+          "sensitivity_story"
+        ],
+        [
+          "P2",
+          "primary_story"
+        ],
+        [
+          "P2",
+          "sensitivity_story"
+        ],
+        [
+          "P3",
+          "primary_story"
+        ],
+        [
+          "P3",
+          "sensitivity_story"
+        ],
+        [
+          "P4",
+          "primary_story"
+        ],
+        [
+          "P4",
+          "sensitivity_story"
+        ]
+      ],
+      "THIN_END": [
+        "S3",
+        "S4"
+      ],
+      "UNLOCK_FIELDS": [
+        "schema",
+        "stage",
+        "approver",
+        "utc_time",
+        "experiment_sha256",
+        "manifest_sha256"
+      ],
+      "UNLOCK_SCHEMA": "c2_unlock/1",
+      "UNLOCK_STAGE": "C.2",
+      "Z_BETA": 0.84
+    },
+    "git_head_before_freeze": "c4263188623956bd9f21bdd83f441b108e3cfa63",
+    "numpy_blas": {
+      "name": "scipy-openblas",
+      "version": "0.3.34.106.0"
+    },
+    "numpy_version": "2.5.3",
+    "python_version": "3.12.13",
+    "seeds": {
+      "BOOT_SEED": 20261010,
+      "PERM_SEED": 20261011,
+      "RELEVANCE_SEED": 20261012
+    },
+    "sqlite_version": "3.53.1"
+  },
+  "schema": "c1_harness_freeze/1"
+}

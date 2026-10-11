@@ -1,0 +1,9 @@
+# .venv-eval lock (Stage C.1). Python 3.12.13 from uv-managed cpython-3.12.13.
+# Why: numpy 1.26.4 on Python 3.14.4 (.venv) silently corrupts in-function arithmetic on arrays >= 256 KiB (temporary elision vs 3.14 borrowed refs). Reproducer: reports/c1_scratch/lead_elision_check.py.
+# Built: uv venv .venv-eval --python 3.12.13; uv pip install --offline numpy==2.5.3 pytest
+iniconfig==2.3.0
+numpy==2.5.3
+packaging==26.3
+pluggy==1.6.0
+pygments==2.21.0
+pytest==9.1.1

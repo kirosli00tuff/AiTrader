@@ -1,0 +1,65 @@
+{
+ "db": "reports/c1_verify/S-EFFECT.db",
+ "analysis_set": {
+  "excluded_days": [
+   "2026-08-25"
+  ],
+  "excluded_day_shares": {
+   "2026-08-25": 0.35398230088495575
+  },
+  "sessions_n": 65,
+  "latest_resolved": "2026-10-26",
+  "s_star": "2026-10-26",
+  "pending_placed": {
+   "2026-10-27": 25
+  },
+  "stale_pending": {},
+  "pending_empty_session": 0,
+  "dropped_by_day_rule": 38,
+  "dropped_after_s_star": 0,
+  "null_excess_excluded_all": 9,
+  "null_excess_excluded_directional": 7
+ },
+ "counts": {
+  "G": 3552,
+  "scored": 2486
+ },
+ "P1": {
+  "n": 2486,
+  "n_pos": 1727,
+  "n_neg": 759,
+  "C": 64,
+  "T_bp": 40.09565859877645,
+  "SE_bp": 1.8778497080598244,
+  "z": 21.351899689673722,
+  "lo_bp": 35.40103432862689,
+  "hi_bp": 44.79028286892601,
+  "pct_lo_bp": 35.47053245048597,
+  "pct_hi_bp": 44.739754674329546,
+  "perm_p": 0.00019998000199980003,
+  "perm_ge": 0,
+  "perm_le": 10000,
+  "upper_tail": true,
+  "perm_null_mean_bp": 6.758349098428953,
+  "perm_null_sd_bp": 2.0655260069390584,
+  "minority_share": 0.3053097345132743,
+  "mixed_clusters": 64,
+  "boot_seed": 7001,
+  "perm_seed": 7002
+ },
+ "gate": {
+  "N_G": 3552,
+  "C_G": 64,
+  "sigma_bp": 111.77902760118488,
+  "MSB": 13704.337178218277,
+  "MSW": 12472.699942514228,
+  "n0": 55.48086479336479,
+  "rho_raw": 0.0017766702469915604,
+  "rho": 0.0017766702469915604,
+  "C_dir": 64,
+  "M": 2486,
+  "k_eff": 39.965406275140786,
+  "required": 165.59882432607253,
+  "passed": true
+ }
+}

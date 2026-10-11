@@ -1,0 +1,65 @@
+{
+ "db": "reports/c1_verify/S-HIGHRHO.db",
+ "analysis_set": {
+  "excluded_days": [
+   "2026-08-25"
+  ],
+  "excluded_day_shares": {
+   "2026-08-25": 0.3684210526315789
+  },
+  "sessions_n": 65,
+  "latest_resolved": "2026-10-26",
+  "s_star": "2026-10-26",
+  "pending_placed": {
+   "2026-10-27": 32
+  },
+  "stale_pending": {},
+  "pending_empty_session": 0,
+  "dropped_by_day_rule": 33,
+  "dropped_after_s_star": 0,
+  "null_excess_excluded_all": 9,
+  "null_excess_excluded_directional": 7
+ },
+ "counts": {
+  "G": 3614,
+  "scored": 2526
+ },
+ "P1": {
+  "n": 2526,
+  "n_pos": 1756,
+  "n_neg": 770,
+  "C": 64,
+  "T_bp": -6.594995555693314,
+  "SE_bp": 6.428252132261208,
+  "z": -1.0259391542212972,
+  "lo_bp": -22.665625886346334,
+  "hi_bp": 9.475634774959707,
+  "pct_lo_bp": -22.898403994284713,
+  "pct_hi_bp": 9.655994932415668,
+  "perm_p": 0.14878512148785122,
+  "perm_ge": 9257,
+  "perm_le": 743,
+  "upper_tail": false,
+  "perm_null_mean_bp": -2.8622353335607373,
+  "perm_null_sd_bp": 2.5605873120659153,
+  "minority_share": 0.30482977038796516,
+  "mixed_clusters": 64,
+  "boot_seed": 7001,
+  "perm_seed": 7002
+ },
+ "gate": {
+  "N_G": 3614,
+  "C_G": 64,
+  "sigma_bp": 182.03976791067007,
+  "MSB": 760395.8386855779,
+  "MSW": 20232.219698201534,
+  "n0": 56.45063729236391,
+  "rho_raw": 0.3932260498297332,
+  "rho": 0.3932260498297332,
+  "C_dir": 64,
+  "M": 2526,
+  "k_eff": 40.536025336500394,
+  "required": 6796.842108642902,
+  "passed": false
+ }
+}
