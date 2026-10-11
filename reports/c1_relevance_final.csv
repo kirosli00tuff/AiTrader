@@ -1,0 +1,201 @@
+id,grade,reason,source
+280,company-specific,THFF earnings beat headline names issuer,agreed
+435,off-topic,issuer not named in the headline; not one of several named,lead
+625,off-topic,issuer not named in the headline; not one of several named,lead
+946,company-specific,Horizon Quantum Computing collaboration; issuer's own operating company,agreed
+1045,company-specific,Kite Realty Q2 earnings metrics,agreed
+1070,company-specific,CNX Resources earnings call summary,agreed
+1118,company-specific,Cactus CEO insider stock sale,agreed
+1239,company-specific,Colliers earnings call transcript,agreed
+1342,company-specific,XPLR Infrastructure valuation article,agreed
+1550,company-specific,CNX Resources earnings call transcript,agreed
+1704,off-topic,issuer not named in the headline; not one of several named,lead
+1982,company-specific,EPR Properties bull case article,agreed
+2008,company-specific,Analyst action on Perpetua Resources,agreed
+2047,company-specific,Beam Therapeutics valuation article,agreed
+2424,company-specific,Versigent Q2 earnings beat and guidance,agreed
+2438,off-topic,issuer not named in the headline; not one of several named,lead
+2481,off-topic,issuer not named in the headline; not one of several named,lead
+2659,company-specific,iRadimed earnings call highlights,agreed
+2731,company-specific,Mayville Engineering raises sales guidance,agreed
+2905,company-specific,Radian Group Q2 results correction,agreed
+2929,company-specific,SAIC receives intelligence agency contract,agreed
+3052,company-specific,Innoviva Q2 results,agreed
+3081,company-specific,Analyst action on Revolve Group,agreed
+3129,company-specific,Okeanis Eco Tankers earnings presentation,agreed
+3153,company-specific,MGE Energy second-quarter earnings,agreed
+3172,company-specific,Barrett Business Services Q2 earnings miss,agreed
+3410,off-topic,issuer not named in the headline; not one of several named,lead
+3411,company-specific,Advantage Solutions shares surge on guidance,agreed
+3568,roundup,Stock picks list naming Cinemark with two others,agreed
+3632,company-specific,Appian Q2 results beat,agreed
+3826,company-specific,Clearfield earnings call highlights,agreed
+3983,off-topic,issuer not named in the headline; not one of several named,lead
+4050,company-specific,Calumet Q2 beat and share slide,agreed
+4102,company-specific,Analyst action on Pilgrim's Pride,agreed
+4169,company-specific,Analyst action on Appian,agreed
+4212,company-specific,Interface Q2 results beat,agreed
+4442,company-specific,Southside Bancshares conference presentation,agreed
+4945,company-specific,Analyst action on Orthofix Medical,agreed
+5023,company-specific,EPR's own convertible preferred securities analysis,agreed
+5053,company-specific,Ambiq Micro earnings presentation,agreed
+5335,company-specific,Analyst action on Viant Technology,agreed
+5396,company-specific,Consolidated Water earnings call transcript,agreed
+5491,company-specific,Analysts raise Ambiq Micro forecasts,agreed
+5662,company-specific,Ituran Q2 results beat,agreed
+5669,company-specific,Amerant Bancorp downgrade,agreed
+5881,company-specific,Analyst action on Versigent,agreed
+6026,off-topic,"About sponsor Ackman's picks and ETFs, not PSUS fund",agreed
+6138,company-specific,Analyst action on Jack In The Box,agreed
+6140,company-specific,Analyst action on Jack In The Box,agreed
+6185,company-specific,M-tron earnings call transcript,agreed
+6393,company-specific,Target approves sale to H.B. Fuller; issuer is acquirer,agreed
+6893,off-topic,"About Home Depot earnings, not La-Z-Boy",agreed
+7098,company-specific,Claritev expands Marpai collaboration,agreed
+7189,company-specific,EPR Properties rating upgrade article,agreed
+7485,company-specific,Options activity in ATS Corporation stock,agreed
+7822,company-specific,REX American Resources rating article,agreed
+8348,company-specific,HBT Financial technical screen article,agreed
+8721,company-specific,About issuer Strategy's bitcoin profit itself,agreed
+9716,company-specific,Sunoco dividend article; SunocoCorp holds Sunoco LP units,agreed
+9784,company-specific,Bread Financial analyst upgrade,agreed
+9891,off-topic,issuer not named in the headline; not one of several named,lead
+9905,company-specific,JinkoSolar Q2 results miss,agreed
+10011,company-specific,Analyst action on Postal Realty Trust,agreed
+10197,company-specific,Diodes guidance analysis,agreed
+10777,off-topic,"About parent Fidelity National Financial, not F&G",agreed
+10980,company-specific,American Coastal Insurance valuation article,agreed
+11000,company-specific,Driivz is a Vontier subsidiary; its product news,agreed
+11020,off-topic,"About competitor XPeng deliveries, not Li Auto",agreed
+11033,company-specific,Analyst action on Protagonist Therapeutics,agreed
+11041,company-specific,Analyst action on SAIC,agreed
+11247,off-topic,issuer not named in the headline; not one of several named,lead
+11265,company-specific,Arqit quantum-safe encryption demonstration,agreed
+11581,company-specific,Appian partner award announcement,agreed
+11888,off-topic,California oil policy headline; Sable not named,lead
+11916,off-topic,issuer not named in the headline; not one of several named,lead
+12590,roundup,Wells Fargo one of three named dividend payers,agreed
+12660,off-topic,"Consumer spending data, not about Bank of America itself",agreed
+12699,company-specific,"Brown-Forman CEO retirement; same issuer, other share class",agreed
+12818,off-topic,"About Skyward Specialty, not Palomar",agreed
+12905,company-specific,News Corp conference presentation transcript,agreed
+12959,off-topic,"About Warehub, not Cushman & Wakefield",agreed
+12965,company-specific,U-Haul quarterly results,agreed
+13064,off-topic,issuer not named in the headline; not one of several named,lead
+13098,company-specific,Caleres earnings preview,agreed
+13142,company-specific,Park Aerospace declares dividend,agreed
+13280,company-specific,Clearwater Paper sustainability report,agreed
+13324,off-topic,issuer not named in the headline; not one of several named,lead
+13431,company-specific,Analyst action on Artisan Partners,agreed
+13481,company-specific,APEI's universities host conference,agreed
+13505,company-specific,Okeanis Eco Tankers performance versus sector,agreed
+13548,company-specific,Ituran wins Israeli transport contract,agreed
+13577,off-topic,"About PCB Bancorp, not Hanmi Financial",agreed
+13580,company-specific,Caleres Q3 EPS guidance,agreed
+13747,company-specific,Kazia Therapeutics trial dosing milestone,agreed
+13765,company-specific,"About PPL, issuer of the corporate units",agreed
+13793,company-specific,Seadrill valuation article,agreed
+13906,company-specific,Life360 conference presentation transcript,agreed
+14053,off-topic,"About BioCryst competitive pressure, not Pharvaris",agreed
+14056,company-specific,Pharvaris HAE trial data,agreed
+14061,company-specific,Tamboran sells first Beetaloo gas,agreed
+14224,company-specific,Unity Bancorp tax credit purchase,agreed
+14381,company-specific,TORM capital increase for share units,agreed
+14713,off-topic,issuer not named in the headline; not one of several named,lead
+14751,company-specific,IDEAYA conference presentation transcript,agreed
+14798,off-topic,Generic halt notice; nothing ties it to Sibanye-Stillwater,agreed
+15232,off-topic,"About Granite Ridge Resources, not Sable Offshore",agreed
+15373,company-specific,Addus HomeCare valuation article,agreed
+15405,company-specific,Sally Beauty event award finalist,agreed
+15442,off-topic,Generic dividend headline; MGE Energy not named,lead
+15496,company-specific,KBRA assigns ratings to NB Bancorp,agreed
+15508,off-topic,issuer not named in the headline; not one of several named,lead
+15522,off-topic,Remark executive hire; 'Strategy' is a job title,agreed
+15605,company-specific,Sturm Ruger terminates rights plan,agreed
+15658,off-topic,issuer not named in the headline; not one of several named,lead
+15855,company-specific,Blue Owl Technology Finance earnings call,agreed
+15896,company-specific,Flex LNG conference presentation,agreed
+15911,company-specific,PAR Technology business analysis,agreed
+16002,roundup,Strategy named among several crypto-linked movers,agreed
+16242,off-topic,"About Rexford Industrial asset sale, not Vornado",agreed
+16274,off-topic,"Ticker collision: Romanian Nuclearelectrica, not Smith & Nephew",agreed
+16278,off-topic,issuer not named in the headline; not one of several named,lead
+16305,company-specific,Nexa Resources earnings call transcript,agreed
+16507,company-specific,DRDGOLD business analysis,agreed
+16565,off-topic,issuer not named in the headline; not one of several named,lead
+16684,company-specific,Sunoco valuation; SunocoCorp holds Sunoco LP units,agreed
+16833,company-specific,Appian ranked first in Gartner report,agreed
+16925,off-topic,"About Bank of America, not Wells Fargo",agreed
+17010,off-topic,"BofA research on data centers, not about BofA itself",agreed
+17016,off-topic,"BofA analyst call on UPS, not about BofA",agreed
+17160,company-specific,Seadrill Zacks rank and valuation,agreed
+17190,company-specific,Organon FDA review acceptance,agreed
+17214,company-specific,Peer benchmarking piece focused on Bandwidth,agreed
+17271,company-specific,Life360 rating upgrade,agreed
+17302,company-specific,Amneal valuation article,agreed
+17403,company-specific,Worthington Enterprises Q1 results beat,agreed
+17404,company-specific,Worthington Enterprises dividend and director retirements,agreed
+17471,company-specific,Arqit joint demonstration with Babcock,agreed
+17525,company-specific,West Fraser valuation after refinancing,agreed
+17768,company-specific,RealReal valuation article,agreed
+17815,company-specific,Cushman & Wakefield accounting change and valuation,agreed
+17905,company-specific,Worthington Enterprises earnings call highlights,agreed
+17976,company-specific,QuinStreet business diversification analysis,agreed
+18015,off-topic,"About UPS analyst views, not Bank of America",agreed
+18031,company-specific,Cantor bullish on Securitize,agreed
+18034,company-specific,Securitize shares hit all-time high,agreed
+18089,company-specific,Regencell rating downgrade article,agreed
+18464,company-specific,About issuer Strategy's share rally itself,agreed
+18513,company-specific,Clearfield product launch,agreed
+18556,off-topic,issuer not named in the headline; not one of several named,lead
+18622,company-specific,PPL subsidiary wins DOE grant; issuer of the units,agreed
+18630,off-topic,"About Sirion recognition, not Hackett Group",agreed
+18636,off-topic,issuer not named in the headline; not one of several named,lead
+18659,off-topic,issuer not named in the headline; not one of several named,lead
+18660,off-topic,issuer not named in the headline; not one of several named,lead
+18717,roundup,Head-to-head comparison; Sezzle one of two named,agreed
+18734,off-topic,issuer not named in the headline; not one of several named,lead
+18866,off-topic,"About Universal Insurance Holdings, not Mercury General",agreed
+18932,company-specific,Elmet stake purchase in Masan High-Tech,agreed
+18960,company-specific,Strategy proposes daily dividends on its preferreds,agreed
+18995,off-topic,"BofA market research call, not about BofA itself",agreed
+18999,off-topic,"Analyst call on Nike, not Bank of America",agreed
+19173,company-specific,Li Auto valuation article,agreed
+19222,company-specific,Adeia appoints new CEO,agreed
+19492,off-topic,issuer not named in the headline; not one of several named,lead
+19689,off-topic,issuer not named in the headline; not one of several named,lead
+19703,company-specific,uniQure Huntington's data miss,agreed
+19774,company-specific,Winnebago dividend quality article,agreed
+19800,off-topic,"Independent Bank Corporation is IBCP, not INDB",lead
+19907,company-specific,UMH Properties investor presentation,agreed
+20184,company-specific,EPR Properties yield article,agreed
+20199,company-specific,Sezzle growth outlook article,agreed
+20227,company-specific,uniQure data and rating upgrade,agreed
+20355,off-topic,issuer not named in the headline; not one of several named,lead
+20381,off-topic,issuer not named in the headline; not one of several named,lead
+20589,company-specific,Adlai Nortye investor relations hire,agreed
+20915,company-specific,Bank of America's own retirement business milestone,agreed
+20935,company-specific,Pursuit tram proposal near Glacier,agreed
+21195,off-topic,issuer not named in the headline; not one of several named,lead
+22186,off-topic,Wyndham Hotels is not Travel + Leisure Co.,agreed
+22205,roundup,Levi one of three named companies,agreed
+22232,company-specific,Peer earnings piece focused on Five9,agreed
+22283,off-topic,"About Equifax, not CBIZ",agreed
+22310,company-specific,Enterprise Financial Services Zacks feature,agreed
+22436,roundup,Strategy named beside Strive; one of two named,lead
+22699,off-topic,issuer not named in the headline; not one of several named,lead
+22795,company-specific,TowneBank bank acquisition deal,agreed
+22829,off-topic,"About Socket Mobile, not Frequency Electronics",agreed
+22832,off-topic,issuer not named in the headline; not one of several named,lead
+22845,off-topic,issuer not named in the headline; not one of several named,lead
+23038,company-specific,OrthoPediatrics product launch,agreed
+23151,roundup,NextNav one of three named sliding stocks,agreed
+23168,company-specific,Levi Strauss raises profit outlook,agreed
+23169,off-topic,issuer not named in the headline; not one of several named,lead
+23170,company-specific,Levi Q3 earnings beat,agreed
+23212,off-topic,"About MarketAxess integration, not Marex",agreed
+23248,off-topic,issuer not named in the headline; not one of several named,lead
+23424,company-specific,Strategy tokenized stock trading; about issuer itself,agreed
+23485,off-topic,"About Weyco Group, not Caleres",agreed
+23527,company-specific,Movado sells EBEL brand stake,agreed
+23531,company-specific,ChipMOS Q3 sales report,agreed

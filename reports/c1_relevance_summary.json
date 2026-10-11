@@ -1,0 +1,237 @@
+{
+  "agreement_opus_fable": {
+    "cohens_kappa": 0.6478184308354529,
+    "confusion_rows_opus_cols_fable": [
+      [
+        131,
+        0,
+        3
+      ],
+      [
+        0,
+        6,
+        32
+      ],
+      [
+        0,
+        1,
+        27
+      ]
+    ],
+    "n_agree": 164,
+    "n_disagree": 36,
+    "raw_agreement": 0.82
+  },
+  "grades_order": [
+    "company-specific",
+    "roundup",
+    "off-topic"
+  ],
+  "inputs": {
+    "fable": {
+      "path": "reports/c1_relevance_grades_fable.csv",
+      "sha256": "f472916bfd0e748cc84413424258b67eefab10164d4ff7537e612e1e7fa8bc23"
+    },
+    "final": {
+      "path": "reports/c1_relevance_final.csv",
+      "sha256": "3deeb03590c5a749ecb1fe8419c7387bf506febbf0e3ca0d927844960a480279"
+    },
+    "opus": {
+      "path": "reports/c1_relevance_grades_opus.csv",
+      "sha256": "010bf706643cd21f3e6399a524ac572f0c5841bf714814e5dd5848abb9bfbf95"
+    },
+    "sample": {
+      "path": "reports/c1_relevance_sample.csv",
+      "sha256": "c470731e4a6522aa9c0b9d57f839c862dae328867a3d620fc6b0d7ced84b8a76"
+    }
+  },
+  "n_sample": 200,
+  "note": "Nothing is filtered on these grades (Amendment 8.3).",
+  "rates": {
+    "fable": {
+      "all_rows": {
+        "counts": {
+          "company-specific": 131,
+          "off-topic": 62,
+          "roundup": 7
+        },
+        "n": 200,
+        "rates": {
+          "company-specific": 0.655,
+          "off-topic": 0.31,
+          "roundup": 0.035
+        }
+      },
+      "excl_rule_a_exact": {
+        "counts": {
+          "company-specific": 124,
+          "off-topic": 53,
+          "roundup": 4
+        },
+        "n": 181,
+        "rates": {
+          "company-specific": 0.6850828729281768,
+          "off-topic": 0.292817679558011,
+          "roundup": 0.022099447513812154
+        }
+      },
+      "excl_rule_a_exact_and_rule_b1_approximate": {
+        "counts": {
+          "company-specific": 124,
+          "off-topic": 52,
+          "roundup": 4
+        },
+        "n": 180,
+        "rates": {
+          "company-specific": 0.6888888888888889,
+          "off-topic": 0.28888888888888886,
+          "roundup": 0.022222222222222223
+        }
+      },
+      "excl_rule_a_exact_and_rule_b2_approximate": {
+        "counts": {
+          "company-specific": 124,
+          "off-topic": 52,
+          "roundup": 4
+        },
+        "n": 180,
+        "rates": {
+          "company-specific": 0.6888888888888889,
+          "off-topic": 0.28888888888888886,
+          "roundup": 0.022222222222222223
+        }
+      }
+    },
+    "final": {
+      "all_rows": {
+        "counts": {
+          "company-specific": 131,
+          "off-topic": 62,
+          "roundup": 7
+        },
+        "n": 200,
+        "rates": {
+          "company-specific": 0.655,
+          "off-topic": 0.31,
+          "roundup": 0.035
+        }
+      },
+      "excl_rule_a_exact": {
+        "counts": {
+          "company-specific": 124,
+          "off-topic": 53,
+          "roundup": 4
+        },
+        "n": 181,
+        "rates": {
+          "company-specific": 0.6850828729281768,
+          "off-topic": 0.292817679558011,
+          "roundup": 0.022099447513812154
+        }
+      },
+      "excl_rule_a_exact_and_rule_b1_approximate": {
+        "counts": {
+          "company-specific": 124,
+          "off-topic": 52,
+          "roundup": 4
+        },
+        "n": 180,
+        "rates": {
+          "company-specific": 0.6888888888888889,
+          "off-topic": 0.28888888888888886,
+          "roundup": 0.022222222222222223
+        }
+      },
+      "excl_rule_a_exact_and_rule_b2_approximate": {
+        "counts": {
+          "company-specific": 124,
+          "off-topic": 52,
+          "roundup": 4
+        },
+        "n": 180,
+        "rates": {
+          "company-specific": 0.6888888888888889,
+          "off-topic": 0.28888888888888886,
+          "roundup": 0.022222222222222223
+        }
+      }
+    },
+    "opus": {
+      "all_rows": {
+        "counts": {
+          "company-specific": 134,
+          "off-topic": 28,
+          "roundup": 38
+        },
+        "n": 200,
+        "rates": {
+          "company-specific": 0.67,
+          "off-topic": 0.14,
+          "roundup": 0.19
+        }
+      },
+      "excl_rule_a_exact": {
+        "counts": {
+          "company-specific": 127,
+          "off-topic": 19,
+          "roundup": 35
+        },
+        "n": 181,
+        "rates": {
+          "company-specific": 0.7016574585635359,
+          "off-topic": 0.10497237569060773,
+          "roundup": 0.19337016574585636
+        }
+      },
+      "excl_rule_a_exact_and_rule_b1_approximate": {
+        "counts": {
+          "company-specific": 127,
+          "off-topic": 18,
+          "roundup": 35
+        },
+        "n": 180,
+        "rates": {
+          "company-specific": 0.7055555555555556,
+          "off-topic": 0.1,
+          "roundup": 0.19444444444444445
+        }
+      },
+      "excl_rule_a_exact_and_rule_b2_approximate": {
+        "counts": {
+          "company-specific": 127,
+          "off-topic": 18,
+          "roundup": 35
+        },
+        "n": 180,
+        "rates": {
+          "company-specific": 0.7055555555555556,
+          "off-topic": 0.1,
+          "roundup": 0.19444444444444445
+        }
+      }
+    }
+  },
+  "schema": "c1_relevance_summary/1",
+  "variants": {
+    "all_rows": {
+      "approximate": false,
+      "n": 200,
+      "note": "every sampled row"
+    },
+    "excl_rule_a_exact": {
+      "approximate": false,
+      "n": 181,
+      "note": "8.2 rule (a), exact by symbol"
+    },
+    "excl_rule_a_exact_and_rule_b1_approximate": {
+      "approximate": true,
+      "n": 180,
+      "note": "8.2 rule (a) exact, plus rule (b) APPROXIMATED by the 2026-07-01 members Amendment 8.2 lists"
+    },
+    "excl_rule_a_exact_and_rule_b2_approximate": {
+      "approximate": true,
+      "n": 180,
+      "note": "8.2 rule (a) exact, plus rule (b) APPROXIMATED by the 2026-07-01 members and any sampled row whose sector is 'N/A'"
+    }
+  }
+}

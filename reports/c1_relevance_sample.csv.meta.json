@@ -1,0 +1,23 @@
+{
+  "columns": [
+    "id",
+    "symbol",
+    "query_date",
+    "headline",
+    "sector",
+    "stratum"
+  ],
+  "csv_path": "reports/c1_relevance_sample.csv",
+  "csv_sha256": "c470731e4a6522aa9c0b9d57f839c862dae328867a3d620fc6b0d7ced84b8a76",
+  "draw_method": "population: news_eval.data RELEVANCE phase relevance_population('2026-10-09'), judged collection rows, six columns, ordered by id; rng = numpy.random.default_rng(RELEVANCE_SEED); idx = rng.choice(n, 200, replace=False); output rows sorted by id (EXPERIMENT.md 9.13; c1_verdict_mapping D23)",
+  "n_drawn": 200,
+  "numpy_version": "2.5.3",
+  "population_count": 7078,
+  "population_max_id": 23651,
+  "population_max_query_date": "2026-10-08",
+  "population_min_id": 48,
+  "query_date_max_filter": "2026-10-09",
+  "schema": "c1_relevance_sample_meta/1",
+  "seed": 20261012,
+  "utc_time": "2026-10-11T10:30:08Z"
+}
