@@ -61,3 +61,24 @@ Current-phase decisions. Older engine-era decisions stay in CONTEXT.md.
     /accounts, /tou.
 - Scope rule (user, 2026-09-28): the AiTrader planning chat does not
   edit PropExperiment files. PropExperiment has its own chat.
+
+## Numbered user decisions (from 2026-10-10, PropExperiment's V-number pattern)
+
+The planning chat records each operator decision here as V<n>, in the
+same commit as the stage prompt that relies on it.
+
+- V1 (2026-10-10, user, planning chat, before Stage C.1, blind at 50
+  collection days): take every planning-chat recommendation for Stage C.
+  Recorded as EXPERIMENT.md Amendment 9 (day cluster = scoring_session,
+  subset floors of 30 clusters, clears only at z >= +2.50, observation-
+  weighted statistic, interval T +/- 2.50 SE, halves by clusters, exact
+  gate computation and a rerun every 5 clusters, snapshot and cutoff,
+  seeds, companion horizons only after a successor draft is committed).
+  Also: the 8.3 relevance sample is graded by two independent workers
+  (opus and fable) and adjudicated by the C.1 lead. The C.1 lead commits
+  the freeze with no push. The 349 credit-outage headlines stay
+  model_failed. The PropExperiment doc sync (context hygiene, Sonnet 5.5
+  pin, web-search cap, return section 7) is applied.
+- V1 launch note: the user asked the planning chat to launch C.1 itself,
+  unattended, in skip-permissions mode, and to close the two finished
+  PropExperiment CLI sessions (E.17 and E.19), done 2026-10-10 about 22:55.

@@ -36,14 +36,24 @@ EXPERIMENT.md is the binding contract. This file is the index.
   to EXPERIMENT.md Amendment 8 (operator approved): model cutoff
   attestation, sensitivity exclusion, relevance rate, gate computation.
   reports/B.2_BLIND_INTERIM.md. Planning chat, no CLI session.
+- B.3 "C.1 PREPARATION" (2026-10-10): planning chat, no CLI session, at
+  50 collection days, 23,614 rows, 7,078 judged. EXPERIMENT.md Amendment 9
+  (operator approved, blind): Stage C harness definitions, day cluster =
+  scoring_session. Doc sync from PropExperiment (context hygiene, Sonnet
+  pin, return section 7). docs/prompts/STAGE_C.1.md written and committed.
 
 ## Stage C: evaluation (NOT STARTED, runs once)
 
 - Starts only after the Stage B exit gate is met and recorded.
-- C.1 builds and hash-freezes the evaluation code (outcomes.py,
-  scoring.py, the bootstrap, the permutation null, the report writer) and
-  tests it on synthetic rows. No real outcome is computed in C.1. The user
-  commits the freeze manifest.
+- C.1 builds the evaluation harness as a new package, news_eval/ (the
+  gate step, the bootstrap, the permutation null, the tests, the report
+  writer, the C.2 runner), tests it on synthetic rows, and hash-freezes it.
+  outcomes.py and scoring.py are NOT evaluation code: scoring.py is the
+  Haiku call and parser, outcomes.py the per-row resolver the nightly
+  maintenance already runs. Both are hashed as read-only inputs and never
+  edited. No real outcome is computed in C.1. Per Amendment 9.15 the C.1
+  lead commits the freeze (no push). C.1 also draws and grades the 8.3
+  relevance sample (Amendment 9.13).
 - C.2 first runs the Amendment 8.4 gate step with the frozen harness:
   realised rho and sigma from pooled rows, judgments unread. If power is
   short, collection resumes and C.2 stops there. Otherwise it computes

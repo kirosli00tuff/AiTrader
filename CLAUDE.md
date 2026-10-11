@@ -3,7 +3,9 @@
 ## Read first: current phase and session rules (added 2026-09-23)
 
 The repo is in **Stage B** of the pre-registered news-drift experiment.
-EXPERIMENT.md is ACCEPTED and BINDING (Amendments 1 to 7). The engine
+EXPERIMENT.md is ACCEPTED and BINDING (Amendments 1 to 9). Amendment 9
+(2026-10-10) fixes the Stage C harness definitions: the day cluster is
+`scoring_session`, not `query_date`. The engine
 build described under "Project context" below is historical context for
 the code, not the current work. Where this section conflicts with older
 text in this file, this section wins.
@@ -138,6 +140,25 @@ The ThinkPad has 14 GB of RAM and a recorded out-of-memory incident.
 - Keep heavy work out of the collector window (about 22:00 to 22:45 Pacific on
   weekdays) and never starve news-collect.service. A PropExperiment
   session running at the same time shares this machine.
+
+### Context hygiene (ported from PropExperiment 2026-10-10)
+
+Usage is context size times steps: every step re-reads the agent's whole
+context. PropExperiment measured stages of 700M to 800M tokens, about 97
+percent cache reads.
+- Read files by section, never whole: grep, line ranges, or a short script
+  that prints only the fields needed. Never load a large JSON, log or table
+  into context. EXPERIMENT.md is about 3,250 lines: read it by section.
+- Keep command output short: `pytest -q`, logs to files and read only the
+  tail, scripts print summaries and counts, not rows.
+- Prefer several short workers with one objective each over one long
+  worker. A large new brief gets a fresh worker.
+- Times in STATE files and return documents come from `date`, file mtimes
+  or git, never typed estimates.
+- Research and web lookups run on opus (high, or medium for a narrow
+  lookup), never sonnet. Sonnet's research readers failed verification in
+  PropExperiment E.0.
+- Before ending, confirm no worker or background shell is still running.
 
 ## Project context
 

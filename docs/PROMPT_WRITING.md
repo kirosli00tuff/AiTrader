@@ -181,7 +181,9 @@ file and nothing else to review the session. Fixed sections, in order:
 5. Verification: each Fable finding, the lead's ruling, the fix.
 6. Open choices: every decision the lead made on its own, with the
    reason, so Kiros overturns any of them before the next stage.
-7. Next session must first: commits the user owes, frozen files, blockers.
+7. Decisions for the user, each with the lead's recommendation first,
+   then what the next session must do first: commits the user owes,
+   frozen files, blockers. (Ported from PropExperiment 2026-10-10.)
 8. Session cost: the final ETA table (one row per task and per spawn,
    actual start and end, time taken, tokens from transcripts, status) and
    the per-model token table, per CLAUDE.md. Never estimated.

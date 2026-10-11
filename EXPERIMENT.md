@@ -58,6 +58,16 @@
 > fixes how the stop rule's realised rho and sigma are computed at the gate.
 > **It changes no primary test, no bar, no universe rule and no verdict.**
 >
+> **AMENDMENT 9 (2026-10-10, operator approved, written DURING collection at
+> 50 collection days, blind to every outcome column)** fixes the
+> implementation definitions the Stage C harness needs and this document left
+> open: the day-cluster column, the cluster floors for subset tests, the sign
+> a test must carry to clear, the exact statistic, z and interval, the
+> chronological split, the scorable row and analysis set, the exact gate
+> computation, the secondaries' mechanics, the seeds, the companion horizons,
+> the relevance grading procedure, and run-once execution. **It moves no bar,
+> no threshold, no test count, no universe rule and no verdict row.**
+>
 > This document was a proposed pre-registration written by Stage 0.
 >
 > Written 2026-07-27. Nothing was built, collected, called, or traded to
@@ -796,6 +806,241 @@ numbers **before any effect is estimated**. If power is short, collection
 continues under the existing rule and the 120-trading-day hard stop is
 unchanged. This computation is part of the C.1 harness and is hash-frozen
 with it.
+
+## AMENDMENT 9 (2026-10-10): implementation definitions for the Stage C harness, fixed blind before the build
+
+**When and what data existed.** 2026-10-10, during Stage B collection, after
+the run that collected session 2026-10-08: 50 distinct collection days
+(`query_date` 2026-07-28 to 2026-10-08), 23,614 collection rows, 7,078
+judged. **The operator approved this amendment explicitly** in the planning
+chat on 2026-10-10, taking every recommendation listed below. Its inputs are
+this document's text, code reads of `news_experiment/horizon.py`,
+`collect.py`, `outcomes.py`, `maintain.py` and `daily.py`, and one count
+query by `query_date`, `state` and `error_class`. **No outcome column
+(`ret_*`, `bench_*`, `excess_1session`, `net_bp`, `cost_bp_round_trip`,
+`outcome_state`, `anchor_*`) and no `scoring_session` value has been read,
+printed or aggregated by any person or analysis.** `scoring_session` was
+read only as a definition in code.
+
+**Why.** The Stage C.1 harness must implement the registered tests exactly,
+and the text leaves details open: which column is the "trading day", what
+"pooled mean" means under a cluster bootstrap, which interval decides a
+powered negative, how the chronological halves split, and how 8.4 computes
+rho without the judgment. Left open, the build session would decide each one
+inside code that is then frozen, which is a choice made with no record. Each
+is fixed here, before any outcome exists. **No bar, threshold, test count,
+universe rule or verdict row moves.** Items 9.1 and 9.2 change how
+registered rules apply, and each states why.
+
+### 9.1 The day cluster is `scoring_session`
+
+Task 5 clusters by "trading day" because "a market-wide move on one session
+affects every observation scored that session". `query_date` is the
+collection day. Its rows carry different scoring windows (pre-market news
+scores that session's open to close, in-session news scores close to next
+close, after-hours news scores the next session's open to close), so one
+`query_date` spans at least two sessions. **The cluster unit for the
+bootstrap, the permutation strata (Amendment 6) and every cluster count is
+the row's recorded `scoring_session`**, computed at collection from the
+source's publication time, the 20-minute delay and the exchange calendar,
+never from a price. A working note in planning documents named `query_date`
+as the cluster column. This supersedes it. The Task 7 rule excluding a day
+whose `source_failed` share exceeds 20 percent applies to the collection
+day, `query_date`, because queries happen per collection day, and those rows
+leave the analysis set before clusters form.
+
+### 9.2 Cluster floors
+
+The 60-cluster floor gates the analysis set as a whole: the stop rule and
+Task 5's floor. **Each primary test additionally needs at least 30 clusters
+holding its own scored observations, else that test is an abstention.** The
+reason: the chronological second half holds half the clusters by
+construction, so a 60 floor per test would make P4 unreachable before the
+120-day hard stop. The 30 reuses the E-tests' registered floor. The E-tests
+keep their 30. S1 and S2 need 30 clusters holding scored observations with
+`strength_parse_ok = 1`.
+
+### 9.3 The sign a test must carry
+
+A primary test **clears** only when all hold: z at or above **+2.50**, the
+Amendment 6 permutation p at or below 0.0125, the observed statistic in the
+upper tail of the null (the `count(T_perm >= T_obs)` term is the smaller of
+the two in Amendment 6's formula), and the null informative. **A z at or
+below -2.50 is reported as a "significant reversal", in those words, and is
+never a clear.** It still counts toward Task 6's powered-negative reading.
+
+### 9.4 The statistic
+
+For each test, `T = (sum of signed_bp over the test's observations) / n`,
+observation-weighted, where `signed_bp = +10,000 x excess_1session` for
+POSITIVE and `-10,000 x excess_1session` for NEGATIVE. For E1 to E4, `T =
+(sum of net_bp) / n` over the stratum's scored observations with non-null
+`net_bp`. **No mean of cluster means is used anywhere.** (PropExperiment E.18
+recorded the same lesson: name per-observation or per-cluster explicitly.)
+
+### 9.5 z, standard error, interval, powered negative
+
+- **Bootstrap:** 10,000 draws. Each draw samples C clusters with replacement
+  from the C clusters holding the test's observations, and recomputes T as
+  the ratio over every observation in the drawn clusters, with multiplicity.
+- **SE** is the sample standard deviation (ddof 1) of the 10,000 replicates.
+  **z = T / SE.**
+- **Interval:** T plus or minus 2.50 x SE. The bootstrap bar is met exactly
+  when the lower bound is above zero.
+- **Powered negative (Task 6):** P1's upper bound, T + 2.50 x SE, sits below
+  30 bp and no primary clears.
+- Percentile intervals are reported beside, labelled descriptive, and
+  decide nothing.
+- An SE of zero or fewer than 2 clusters is a named refusal, `degenerate`,
+  never a number.
+
+### 9.6 Chronological halves
+
+Order the analysis set's D clusters by `scoring_session`. **The second half
+is the last floor(D/2) clusters.** With odd D the middle cluster belongs to
+the first half. P4 is every scored observation in second-half clusters. The
+8.2 sensitivity reading keeps the same cluster split and only removes
+symbols.
+
+### 9.7 The scorable row and the analysis set
+
+- **Scorable:** `run_kind = 'collection'`, `state = 'judged'`, `judgment` in
+  (POSITIVE, NEGATIVE), `outcome_state = 'resolved'`, `exclusion_reason =
+  ''`, `excess_1session` not null, `scoring_session` not empty, and a
+  `query_date` not excluded under 9.1. The E-tests also need `net_bp` not
+  null.
+- **Snapshot:** C.2 copies `news_experiment.db` with the SQLite backup API,
+  sets the copy read-only, records its sha256 and row counts, and reads only
+  the copy.
+- **Cutoff S\*:** the latest `scoring_session` at or before which no judged
+  collection row is still `pending` in the snapshot. Rows with a later
+  `scoring_session` are outside the analysis set. A pending row whose
+  `scoring_session` is more than 3 sessions before the latest resolved
+  session is reported as stale and does not hold S\* back.
+- The snapshot is taken only after the nightly maintenance run that
+  resolves S\*. This likely moves the readout one day after the gate
+  session's collection.
+
+### 9.8 The gate computation (Amendment 8.4), exact
+
+- **Gate rows G:** every row meeting the scorable conditions except the
+  judgment condition, so NEUTRAL rows are included. No row-level
+  `judgment`, `strength` or `reason` is read.
+- **sigma:** the standard deviation (ddof 1) of `10,000 x excess_1session`
+  over G. No trimming and no winsorizing.
+- **rho:** the one-way ANOVA intraclass correlation of the same quantity
+  over G, clustered by `scoring_session`:
+  `n0 = (N - sum n_c^2 / N) / (C - 1)`,
+  `rho = (MSB - MSW) / (MSB + (n0 - 1) x MSW)`, floored at 0.
+- **k_eff:** `sum m_c^2 / M`, where `m_c` is the count of directional
+  scorable rows in cluster c and `M` their total. These counts come from a
+  `COUNT ... GROUP BY scoring_session` over the judgment column, which is a
+  count by judgment and is allowed. No row-level judgment reaches the gate
+  code.
+- **Required:** `11.156 x (sigma / 30)^2 x (1 + (k_eff - 1) x rho)`, where
+  11.156 is (2.50 + 0.84)^2 from Task 5.
+- **The gate passes** when C (clusters with at least one directional
+  scorable row) is at least 60, M is at least 1,000, and M is at least
+  Required.
+- **Why rho of excess:** using rho of the unsigned excess instead of the
+  signed quantity overstates rho under mixed judgments, so power can read
+  short and never falsely adequate.
+- **Cadence:** each gate run appends one entry to an append-only gate log.
+  If the gate fails, collection continues and the gate reruns after every
+  5 new clusters, until the 120-trading-day hard stop, which is unchanged.
+
+### 9.9 The permutation null, details
+
+Strata are `scoring_session` clusters (9.1). Everything else is Amendment 6
+unchanged: 10,000 permutations, one seeded stream per test, the doubled
+one-sided add-one p, the NEGATIVE-only rule of re-forming the subset from
+permuted labels, and the story-group block version when 9.10's trigger
+fires.
+
+### 9.10 The secondaries and robustness figures
+
+- **E1 to E4:** clear when z is at least +2.50 AND T is at least 4.96 bp
+  (Task 6), with 30 clusters holding the stratum's scored observations. An
+  interval spanning zero is an abstention. A z at or below -2.50 is
+  reported as "net negative".
+- **S1:** the Spearman correlation between `strength` and `signed_bp` over
+  scored observations with `strength_parse_ok = 1`, ties at average ranks.
+  The bootstrap recomputes it per 9.5 on each draw. It clears when z is at
+  least +2.24.
+- **S2:** the observation-weighted mean `signed_bp` over strengths {4, 5}
+  minus the same over {1, 2}, bootstrapped per 9.5, clearing when z is at
+  least +2.24. An empty pool in the observed data makes S2 an abstention.
+  The five per-bucket means are descriptive.
+- **Sector robustness:** each symbol's sector is its modal non-null
+  `sector` across its rows in the analysis set per formation, the 8.2(b)
+  rule. `N/A` and null pool into one cluster, `unclassified`. Report P1's T
+  with a CR1 cluster-robust SE over sectors, and the resulting z.
+  Descriptive, no bar.
+- **Story-group trigger:** the share of scored observations whose non-empty
+  `story_group_id` appears on at least 2 scored observations. Above 10
+  percent, P1 to P4 are re-run clustered on `story_group_id` (unshared rows
+  are their own cluster), and the null is re-run with groups as blocks
+  within `scoring_session`. Both versions are reported.
+
+### 9.11 Seeds
+
+`BOOT_SEED = 20261010`, `PERM_SEED = 20261011`, `RELEVANCE_SEED =
+20261012`. Each (test, reading) pair gets its own child stream from
+`numpy.random.SeedSequence(seed).spawn`, in a fixed order written into the
+frozen code: P1, P2, P3, P4, E1 to E4, S1, S2, each primary reading first
+and the 8.2 sensitivity reading second.
+
+### 9.12 Companion horizons
+
+`ret_2session`, `ret_5session` and `ret_10session` have no registered test.
+C.2 reports them only if a successor pre-registration draft is committed
+before the C.2 snapshot, and then only as the observation-weighted mean of
+the judgment-signed raw return, labelled EXPLORATORY, with no interval and
+no bar. Without that commit, C.2 does not compute them. The reason: these
+horizons are the successor's design space, and seeing them first would
+steer it.
+
+### 9.13 The relevance grading procedure (Amendment 8.3)
+
+- **The draw:** 200 rows, uniform without replacement, `RELEVANCE_SEED`,
+  from judged collection rows with `query_date` at or before 2026-10-09.
+  Only `id`, `symbol`, `query_date`, `headline`, `sector` and `stratum` are
+  read.
+- **The graders:** two independent graders, each blind to the other's
+  grades: one opus worker and one fable worker. Each receives the symbol,
+  the issuer name from a reference source the C.1 lead records, and the
+  headline, and assigns one of the three Amendment 8.3 classes.
+- **Disagreements** are adjudicated in writing by the C.1 lead.
+- **Reported:** the agreement rate, both grade sets and the final grades,
+  overall and with the 8.2 exclusions removed. All are committed before
+  C.2. Nothing is filtered on these grades.
+
+### 9.14 The credit-outage rows stay as recorded
+
+The 2026-10-02 and 2026-10-05 headlines that failed with `error_class =
+'exhausted'` stay `model_failed`. They are not re-judged. Re-judging would
+call the model weeks after publication outside the collector, and the gain
+is a fraction of one percent of the sample.
+
+### 9.15 Execution
+
+- C.1 builds the harness, tests it on synthetic rows only, and
+  hash-freezes it. The C.1 lead commits the freeze, with no push.
+- **C.2's verdict computation runs once**, behind a run-once marker written
+  before any outcome column is read. Preconditions (every frozen hash, the
+  snapshot hash) refuse with nothing written. Any stop after the marker is
+  a STOPPED verdict with its reason, never a rerun with changed settings.
+- The gate step (9.8) has its own append-only log and may repeat.
+- The report comes from the frozen report writer: diagnostics first, each
+  primary beside its 8.2 sensitivity reading, verdict rows quoted from
+  Amendment 5's table, and the wording "the pipeline predicts".
+
+**What this amendment does NOT change:** the bars (2.50, 2.24, 0.0125), the
+null's informativeness thresholds (10 percent and 30 mixed clusters), the
+stop rule (60 clusters, 1,000 scorable, power), the 30 bp working effect,
+the 4.96 bp economic comparison, 10,000 resamples and permutations, the
+four primaries, the families and their corrections, and the 120-day hard
+stop.
 
 ## Why this exists
 
