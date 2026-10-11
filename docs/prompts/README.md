@@ -12,7 +12,7 @@ that never ran keeps the name with `_draft` and stays in the index.
 | Stage | File | Lead as written | Run | Return document | Notes |
 |---|---|---|---|---|---|
 | B.1 | none | planning chat | 2026-09-23 | this commit | Workflow port through Desktop Commander, no CLI session |
-| C.1 | STAGE_C.1.md | Opus 5.5, xhigh (Fable xhigh verification and second grader, Fable max leakage review) | 2026-10-10, launched by the planning chat | reports/C.1_RETURN.md | Evaluation harness news_eval/ built on synthetic rows and frozen per Amendment 9, 8.3 relevance sample drawn and graded; no outcome read |
+| C.1 | STAGE_C.1.md | Opus 5.5, xhigh (Fable xhigh verification and second grader, Fable max leakage review) | 2026-10-10 22:58 to 2026-10-11 ~03:50 PDT, Claude Code lead Opus 5.5 xhigh, 13 spawns; commits 2b75aba (freeze), 33cadb3 (relevance grades) and the return commit | reports/C.1_RETURN.md | Evaluation harness news_eval/ built on synthetic rows and frozen per Amendment 9, 8.3 relevance sample drawn and graded; no outcome read |
 
 Model names are as written in each prompt at the time. The routing rules
 that apply today are in CLAUDE.md.

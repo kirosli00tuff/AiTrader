@@ -37,7 +37,7 @@ def main() -> int:
         conn.close()
     # 9.13: each grader receives the symbol, the issuer name and the headline.
     with open(OUT, "w", newline="", encoding="utf-8") as fh:
-        writer = csv.writer(fh)
+        writer = csv.writer(fh, lineterminator="\n")
         writer.writerow(["id", "symbol", "issuer_name", "headline",
                          "name_source"])
         for r in rows:

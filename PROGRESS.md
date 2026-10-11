@@ -138,6 +138,18 @@ New flags from the feed-work session (2026-07-05, `369b6a6`):
 
 ## Session Log
 
+### 2026-10-11 (Opus 5.5, xhigh lead) Stage C.1: evaluation harness built, tested on synthetic rows, hash-frozen; no outcome read
+
+The full record is reports/C.1_RETURN.md.
+
+- **news_eval/** is built: the guarded loader, 11 synthetic scenarios, the statistics core, the tests, the gate, the verdict mapping, the report writer, the C.2 runner, the relevance draw and the freeze. It was verified on synthetic rows: 783 tests pass and 12 of 12 mutants are killed.
+- **Fable checks.** The recompute agreed 112 of 112. The leakage audit found 3 BLOCKING and 7 SHOULD FIX; all were fixed, and a Fable re-check found them closed.
+- **Freeze.** Manifest reports/c1_harness_freeze.json, sha256 77c9bd73f0a98e9e3c909ef2e3d57defe4ee4375e85e89cad2992e8c8840b2a9.
+- **Relevance sample, 8.3.** Company-specific 65.5%, roundup 3.5%, off-topic 31.0%; agreement 0.82, kappa 0.65.
+- **Real database.** It was read only three ways, all permitted: the status check, the PRAGMA and the six-column draw.
+- **Environment finding.** The repo `.venv` (Python 3.14 with numpy 1.26.4) silently miscomputes arithmetic on large arrays. The harness runs only under `.venv-eval`.
+- **C.2.** It needs the user's unlock file and the decisions in section 7 of the return document.
+
 ### 2026-07-29 (Opus 5) — The GUI landing view is collection monitoring that cannot display an outcome, and the deactivated-layer panels are gone
 
 **Live trading off. No RiskGate logic, no live-trading gate, no adaptive invariant, no Level 1 value, no threshold, no strategy parameter. The collector, the scheduler, the prompt, the universe rule, the horizon convention and the scoring rule are untouched, and every experiment surface this session added is READ-ONLY.** Suites: pytest 1,284, vitest 140, ctest 34, typecheck clean.

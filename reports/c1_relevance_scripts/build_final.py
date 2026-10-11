@@ -26,7 +26,7 @@ for r in inp:
         assert {o[i]["grade"], f[i]["grade"]} == {"roundup", "off-topic"}, i
         out.append((i, "off-topic", UNNAMED_LIST, "lead"))
 with open(ROOT / "reports/c1_relevance_final.csv", "w", newline="", encoding="utf-8") as fh:
-    w = csv.writer(fh)
+    w = csv.writer(fh, lineterminator="\n")
     w.writerow(["id", "grade", "reason", "source"])
     w.writerows(out)
 from collections import Counter

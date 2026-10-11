@@ -54,6 +54,10 @@ EXPERIMENT.md is the binding contract. This file is the index.
   edited. No real outcome is computed in C.1. Per Amendment 9.15 the C.1
   lead commits the freeze (no push). C.1 also draws and grades the 8.3
   relevance sample (Amendment 9.13).
+- C.1 RUN 2026-10-10/11: harness built and frozen (manifest sha256
+  77c9bd73…b2a9, 783 tests, Fable reviews closed), relevance sample graded,
+  no outcome read; C.2 waits on the user's unlock and the decisions in
+  reports/C.1_RETURN.md section 7.
 - C.2 first runs the Amendment 8.4 gate step with the frozen harness:
   realised rho and sigma from pooled rows, judgments unread. If power is
   short, collection resumes and C.2 stops there. Otherwise it computes

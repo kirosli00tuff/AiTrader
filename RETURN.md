@@ -11,6 +11,21 @@ Model:
 Prompt summary: one line.
 Changes: what changed.
 
+## Prompt: Stage C.1, evaluation harness build and freeze (no outcomes)
+
+Date: 2026-10-10 to 2026-10-11
+Model: Opus 5.5 (claude-opus-5-5), xhigh lead. Workers: Opus (high or xhigh) and Fable (xhigh or max).
+Prompt summary: "Read docs/prompts/STAGE_C.1.md in full and execute it as your prompt. Run unattended."
+Changes:
+- New package news_eval/, with tests/test_news_eval_*.py (783 passed).
+- Freeze manifest reports/c1_harness_freeze.json, sha256 77c9bd73…b2a9.
+- Fable reviews and lead rulings: reports/c1_review_*.md and reports/c1_rulings.md.
+- Relevance sample and grades: reports/c1_relevance_*.
+- Return document: reports/C.1_RETURN.md.
+- No outcome read, no push.
+
+Commit messages: "C.1 freeze", "C.1 relevance grades", "Stage C.1 harness built and frozen".
+
 ## Prompt: Replace the GUI landing view with collection monitoring that cannot display an outcome
 
 Date: 2026-07-29
