@@ -71,3 +71,12 @@ electron-app/
 ml_factor/models/*.npz
 .env.bak*
 .env.*
+
+# --- Stage C evaluation (news_eval/) ---
+# The harness environment (Python 3.12, numpy 2.5.3, locked in
+# news_eval/requirements-eval.lock). The repo .venv's numpy 1.26 on
+# Python 3.14 fails the temporary-elision canary (news_eval/envcheck.py).
+.venv-eval/
+# C.1 scratch: synthetic databases and worker notes, rebuilt from seeds.
+reports/c1_scratch/
+# C.2 snapshots are already covered by *.db above. Never commit one.

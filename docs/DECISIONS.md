@@ -82,3 +82,17 @@ same commit as the stage prompt that relies on it.
 - V1 launch note: the user asked the planning chat to launch C.1 itself,
   unattended, in skip-permissions mode, and to close the two finished
   PropExperiment CLI sessions (E.17 and E.19), done 2026-10-10 about 22:55.
+- V2 (2026-10-15, planning chat, after the C.1 review, before the C.2
+  prompt): the C.1 lead's section 7 recommendations, confirmed by the
+  operator when he launches docs/prompts/STAGE_C.2.md:
+  - the unlock file is written by hand by Kiros only
+  - the gate runs once per snapshot, and after a FAIL it retries after
+    5 more collection days carrying judgments
+  - no successor draft before the snapshot, so no companion horizons
+  - D5 and D7 (revised) are kept
+  - the day-clustered version governs over the story version
+  - a kill after the marker is STOPPED
+  - the harness runs only under .venv-eval
+  Also: .venv-eval/ and reports/c1_scratch/ are added to .gitignore.
+  The repo .venv's numpy defect stays open for a separate session
+  outside the experiment.
