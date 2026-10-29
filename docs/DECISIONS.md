@@ -96,3 +96,19 @@ same commit as the stage prompt that relies on it.
   Also: .venv-eval/ and reports/c1_scratch/ are added to .gitignore.
   The repo .venv's numpy defect stays open for a separate session
   outside the experiment.
+- V3 (2026-10-28 17:19 PDT, user, planning chat): the C.2 unlock.
+  - Kiros was away from the laptop and told the planning chat, in
+    writing, "Write the unlock".
+  - The planning chat wrote reports/c2_UNLOCK.json through Desktop
+    Commander at 2026-10-29T00:19:45Z, with Kiros as approver. The
+    approver field records the instruction.
+  - It was validated with the frozen news_eval.data.load_unlock, and
+    `news_eval.freeze check` printed FROZEN: match.
+  - This deviates from V2 item 1 ("written by hand by Kiros only"). It
+    is recorded here, not hidden. The human decision to unblind is
+    still Kiros's own. The C.2 CLI session did not create the file.
+  - The same message also recorded: session 10-22 was lost to an empty
+    experiment credit balance (357 headlines model_failed exhausted,
+    0 judged). It stays as recorded, by the same rule as Amendment 9.14.
+    The credit was restored before the 2026-10-26 run.
+  - Readiness: 60 judged collection days after the 2026-10-27 run.
