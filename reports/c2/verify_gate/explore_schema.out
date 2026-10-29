@@ -1,0 +1,36 @@
+== tables ==
+  news_observation
+  sqlite_sequence
+== news_observation columns (names only) ==
+  id, rule_id, formation_date, symbol, adv_usd_at_formation, liquidity_rank, stratum, median_close_at_formation, price_floor_at_formation, sector, sector_source, query_date, state, exclusion_reason, headline, source_name, source_article_id, published_ts, fetched_ts, story_group_id, model_id, prompt_sha256, temperature, called_ts, latency_ms, raw_response, judgment, strength, strength_parse_ok, neutral_strength_anomaly, reason, parse_ok, error_class, input_tokens, cached_input_tokens, output_tokens, cost_usd, credential_shared, etb, shortable, etb_source, anchor_kind, anchor_ts, anchor_price, scoring_session, delay_rolled, outcome_state, ret_intraday, ret_1session, ret_2session, ret_5session, ret_10session, bench_1session, excess_1session, bar_source, cost_bp_round_trip, net_bp, spec_version, collector_git_sha, run_kind, written_ts
+== run_kind counts ==
+  ('collection', 30182)
+  ('demonstration', 46)
+== state counts (collection) ==
+  ('excluded_pre_call', 919)
+  ('judged', 9763)
+  ('model_failed', 723)
+  ('no_news', 18743)
+  ('source_failed', 34)
+== outcome_state counts (collection, judged) ==
+  ('excluded', 4)
+  ('resolved', 9759)
+== exclusion_reason counts (collection, judged) ==
+  ('', 9759)
+  ('symbol_did_not_trade', 4)
+== exclusion_reason NULL vs '' (collection, judged) ==
+  (0, 0, 4)
+  (0, 1, 9759)
+== scoring_session NULL/empty counts (collection, judged) ==
+  (0, 0, 9763)
+== typeof(excess_1session) counts (collection, judged, resolved) ==
+  ('real', 9759)
+== typeof(scoring_session), typeof(query_date) (collection) ==
+  ('null', 'text', 19696)
+  ('text', 'text', 10486)
+== query_date range, distinct count (collection) ==
+  ('2026-07-28', '2026-10-26', 62, 30182)
+== scoring_session range, distinct count (collection, judged) ==
+  ('2026-07-28', '2026-10-27', 65, 9763)
+== scoring_session length distribution (collection, judged) ==
+  (10, 9763)

@@ -23,6 +23,10 @@ EXPERIMENT.md is the binding contract. This file is the index.
   realised power adequate at the realised rho, recomputed, not assumed.
   Per-stratum floor 30 clusters (cleared). Hard stop 120 trading days,
   which ends in an underpowered abstention, not a negative.
+- Exit gate result 2026-10-28 (C.2 attempt 1, 65 clusters): NOT MET. The
+  60 clusters and 1,000 scorable observations are met, but power is not
+  (M 5,363 < Required 13,335). Collection continues. Next check on or
+  after 2026-11-04, at 65 judged collection days.
 - Permanent gaps (unrecoverable by design): 2026-08-28, 2026-09-15.
 - Outcome blindness holds for the whole stage. See CLAUDE.md invariants.
 - Status 2026-09-22 run: 37 clusters, 17,108 rows, 4,830 judged.
@@ -64,6 +68,7 @@ EXPERIMENT.md is the binding contract. This file is the index.
   the verdict table exactly once, against the frozen hashes, with the
   Amendment 8.2 sensitivity reading beside every primary. Every number entering a verdict gets an
   independent Fable check. Any change to a frozen file voids the run.
+- C.2 ATTEMPT 1 2026-10-28: snapshot reports/c2/snap_20261028, 9.8 gate FAIL on power (C 65, M 5,363 < Required 13,335; sigma 442 bp, rho 0.046, k_eff 98), Fable recompute 29 of 29 match; no verdict run, judgments unread; rerun on or after 2026-11-04; reports/C.2_RETURN.md.
 - Deferred to C as reporting questions, not Stage B changes: preferred
   shares and share classes in the universe (ARES.PRB, BAC.PRL, NEE.PRV,
   WFC.PRL, UHAL.B), the strength distribution concentrated at 2 to 4, the

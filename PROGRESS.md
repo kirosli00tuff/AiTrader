@@ -138,6 +138,16 @@ New flags from the feed-work session (2026-07-05, `369b6a6`):
 
 ## Session Log
 
+### 2026-10-28 (Opus 5.5, max lead) Stage C.2, first attempt: snapshot taken, 9.8 gate FAIL on power; no verdict run, judgments unread
+
+The full record is reports/C.2_RETURN.md.
+
+- **Snapshot.** reports/c2/snap_20261028 (sha256 2b517c70…6500) holds 30,182 collection rows, equal to the status count taken just before it.
+- **Gate FAIL, on M >= Required alone.** C 65, M 5,363, Required 13,335.0 (sigma 442.1 bp, rho 0.046, k_eff 98.2), S* 2026-10-27. GateVerifier-FableXHigh recomputed it independently and matched 29 of 29 quantities.
+- **No verdict run.** `run_c2 run` was not invoked, no run-once marker exists, and no judgment was read. Collection continues.
+- **Next gate attempt:** on or after 2026-11-04, once the readiness count reaches 65 judged collection days.
+- **Projection, not a finding.** At today's sigma, rho and cluster size, the gate passes near 162 clusters. That is past the 120-session hard stop on 2027-01-15. EXPERIMENT.md registers no readout for a gate still short at the hard stop (return section 7).
+
 ### 2026-10-11 (Opus 5.5, xhigh lead) Stage C.1: evaluation harness built, tested on synthetic rows, hash-frozen; no outcome read
 
 The full record is reports/C.1_RETURN.md.

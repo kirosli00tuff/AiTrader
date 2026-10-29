@@ -1,0 +1,13 @@
+SELECT name FROM sqlite_master WHERE type='table' ORDER BY name;
+PRAGMA table_info(news_observation);
+SELECT run_kind, COUNT(*) FROM news_observation GROUP BY run_kind ORDER BY run_kind;
+SELECT state, COUNT(*) FROM news_observation WHERE run_kind='collection' GROUP BY state ORDER BY state;
+SELECT outcome_state, COUNT(*) FROM news_observation WHERE run_kind='collection' AND state='judged' GROUP BY outcome_state ORDER BY outcome_state;
+SELECT exclusion_reason, COUNT(*) FROM news_observation WHERE run_kind='collection' AND state='judged' GROUP BY exclusion_reason ORDER BY exclusion_reason;
+SELECT (exclusion_reason IS NULL) AS is_null, (exclusion_reason = '') AS is_empty, COUNT(*) FROM news_observation WHERE run_kind='collection' AND state='judged' GROUP BY 1, 2;
+SELECT (scoring_session IS NULL) AS is_null, (scoring_session = '') AS is_empty, COUNT(*) FROM news_observation WHERE run_kind='collection' AND state='judged' GROUP BY 1, 2;
+SELECT typeof(excess_1session), COUNT(*) FROM news_observation WHERE run_kind='collection' AND state='judged' AND outcome_state='resolved' GROUP BY 1;
+SELECT typeof(scoring_session), typeof(query_date), COUNT(*) FROM news_observation WHERE run_kind='collection' GROUP BY 1, 2;
+SELECT MIN(query_date), MAX(query_date), COUNT(DISTINCT query_date), COUNT(*) FROM news_observation WHERE run_kind='collection';
+SELECT MIN(scoring_session), MAX(scoring_session), COUNT(DISTINCT scoring_session), COUNT(*) FROM news_observation WHERE run_kind='collection' AND state='judged' AND scoring_session IS NOT NULL AND scoring_session <> '';
+SELECT LENGTH(scoring_session), COUNT(*) FROM news_observation WHERE run_kind='collection' AND state='judged' GROUP BY 1;

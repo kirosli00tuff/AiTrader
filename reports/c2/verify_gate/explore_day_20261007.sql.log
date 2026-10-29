@@ -1,0 +1,1 @@
+SELECT state, COUNT(*) FROM news_observation WHERE run_kind='collection' AND query_date='2026-10-07' GROUP BY state ORDER BY state;

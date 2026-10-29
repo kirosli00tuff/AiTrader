@@ -1,0 +1,94 @@
+SELECT query_date,
+               COUNT(*) AS n_total,
+               SUM(state = 'source_failed') AS n_source_failed
+        FROM news_observation
+        WHERE run_kind = 'collection'
+        GROUP BY query_date
+        ORDER BY query_date;
+
+SELECT COUNT(*), COUNT(DISTINCT query_date)
+        FROM news_observation
+        WHERE run_kind = 'collection' AND exclusion_reason = 'day_excluded_source_failures';
+
+SELECT MAX(scoring_session)
+        FROM news_observation
+        WHERE run_kind = 'collection' AND state = 'judged' AND outcome_state = 'resolved'
+          AND scoring_session IS NOT NULL AND scoring_session <> '';
+
+SELECT MAX(scoring_session)
+        FROM news_observation
+        WHERE run_kind = 'collection' AND state = 'judged'
+          AND scoring_session IS NOT NULL AND scoring_session <> '';
+
+SELECT scoring_session, COUNT(*)
+        FROM news_observation
+        WHERE run_kind = 'collection' AND state = 'judged' AND outcome_state = 'pending'
+        GROUP BY scoring_session
+        ORDER BY scoring_session;
+
+SELECT outcome_state, COUNT(*)
+        FROM news_observation
+        WHERE run_kind = 'collection' AND state = 'judged'
+        GROUP BY outcome_state
+        ORDER BY outcome_state;
+
+SELECT DISTINCT scoring_session
+        FROM news_observation
+        WHERE run_kind = 'collection' AND state = 'judged'
+          AND scoring_session IS NOT NULL AND scoring_session <> ''
+        ORDER BY scoring_session;
+
+SELECT scoring_session, excess_1session
+        FROM news_observation
+        WHERE 
+        run_kind = 'collection'
+        AND state = 'judged'
+        AND outcome_state = 'resolved'
+        AND exclusion_reason = ''
+        AND scoring_session IS NOT NULL AND scoring_session <> ''
+
+          AND excess_1session IS NOT NULL
+          
+           AND scoring_session <= ?
+        ORDER BY scoring_session;
+
+SELECT COUNT(*)
+        FROM news_observation
+        WHERE 
+        run_kind = 'collection'
+        AND state = 'judged'
+        AND outcome_state = 'resolved'
+        AND exclusion_reason = ''
+        AND scoring_session IS NOT NULL AND scoring_session <> ''
+
+          AND excess_1session IS NULL
+          
+           AND scoring_session <= ?;
+
+SELECT COUNT(*), COUNT(DISTINCT scoring_session)
+        FROM news_observation
+        WHERE 
+        run_kind = 'collection'
+        AND state = 'judged'
+        AND outcome_state = 'resolved'
+        AND exclusion_reason = ''
+        AND scoring_session IS NOT NULL AND scoring_session <> ''
+
+          AND excess_1session IS NOT NULL;
+
+SELECT scoring_session, COUNT(*)
+        FROM news_observation
+        WHERE 
+        run_kind = 'collection'
+        AND state = 'judged'
+        AND outcome_state = 'resolved'
+        AND exclusion_reason = ''
+        AND scoring_session IS NOT NULL AND scoring_session <> ''
+
+          AND excess_1session IS NOT NULL
+          
+           AND scoring_session <= ?
+          AND judgment IN ('POSITIVE', 'NEGATIVE')
+        GROUP BY scoring_session
+        ORDER BY scoring_session;
+

@@ -1,0 +1,16 @@
+started: Wed Oct 28 17:29:10 PDT 2026
+written: Wed Oct 28 17:29:11 PDT 2026
+sha256 ok: True mode: 0o444
+9.1 excluded dates: [] max share: 0.0693
+S*: 2026-10-27 | pending: 0 | readings agree: True
+N=9759 C_G=65 null_excess=0
+sigma=442.087590957 MSB=1542607.38448 MSW=186547.419038 n0=149.655705631
+rho_raw=0.0463231019211 rho=0.0463231019211
+C=65 M=5363 k_eff=98.2388588477
+Required=13335.0015741 (z_sq: 13334.5234457)
+cond C>=60: True | M>=1000: True | M>=Required: False | PASS: False
+only-neutral clusters: [] | rho_alt: None
+float vs exact rel: {'MSB': 0.0, 'MSW': 0.0, 'rho_raw': 1.497933777347307e-16}
+PROJECTION: M/C=82.507692 clusters_to_required=162 hard_stop=2027-01-15 remaining_after_S*=55
+calendar: sessions missing: [] | qdates missing: ['2026-08-28', '2026-09-15'] | non-trading: [] []
+wrote /home/kiros-li/Documents/GitHub/AiTrader/reports/c2/verify_gate/own_gate.json

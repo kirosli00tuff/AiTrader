@@ -1,0 +1,707 @@
+{
+  "written_at_date_cmd": "Wed Oct 28 17:29:11 PDT 2026",
+  "started_at_date_cmd": "Wed Oct 28 17:29:10 PDT 2026",
+  "snapshot": {
+    "path": "/home/kiros-li/Documents/GitHub/AiTrader/reports/c2/snap_20261028/news_experiment_snapshot.db",
+    "sha256": "2b517c70ae61affec18a973952e02714240e8f9086fe3069f3bc1ff8e3ed6500",
+    "sha256_matches": true,
+    "sidecars_present": [],
+    "mode": "0o444"
+  },
+  "constants": {
+    "const_11156_literal": 11.156,
+    "const_z_sq_arith": 11.1556,
+    "delta_bp": 30.0,
+    "min_clusters": 60,
+    "min_M": 1000,
+    "day_exclusion_share_strict_gt": 0.2,
+    "stale_sessions": 3
+  },
+  "day_exclusion_9_1": {
+    "n_query_dates": 62,
+    "excluded_dates": [],
+    "n_excluded": 0,
+    "max_share": 0.06932773109243698,
+    "dates_with_any_source_failed": [
+      "2026-09-24",
+      "2026-10-07"
+    ],
+    "collector_marker": {
+      "rows_with_day_excluded_marker": 0,
+      "dates_with_day_excluded_marker": 0
+    },
+    "per_day": [
+      {
+        "query_date": "2026-07-28",
+        "n_collection_rows": 427,
+        "n_source_failed": 0,
+        "source_failed_share": 0.0,
+        "excluded": false
+      },
+      {
+        "query_date": "2026-07-29",
+        "n_collection_rows": 538,
+        "n_source_failed": 0,
+        "source_failed_share": 0.0,
+        "excluded": false
+      },
+      {
+        "query_date": "2026-07-30",
+        "n_collection_rows": 489,
+        "n_source_failed": 0,
+        "source_failed_share": 0.0,
+        "excluded": false
+      },
+      {
+        "query_date": "2026-07-31",
+        "n_collection_rows": 440,
+        "n_source_failed": 0,
+        "source_failed_share": 0.0,
+        "excluded": false
+      },
+      {
+        "query_date": "2026-08-03",
+        "n_collection_rows": 453,
+        "n_source_failed": 0,
+        "source_failed_share": 0.0,
+        "excluded": false
+      },
+      {
+        "query_date": "2026-08-04",
+        "n_collection_rows": 477,
+        "n_source_failed": 0,
+        "source_failed_share": 0.0,
+        "excluded": false
+      },
+      {
+        "query_date": "2026-08-05",
+        "n_collection_rows": 543,
+        "n_source_failed": 0,
+        "source_failed_share": 0.0,
+        "excluded": false
+      },
+      {
+        "query_date": "2026-08-06",
+        "n_collection_rows": 559,
+        "n_source_failed": 0,
+        "source_failed_share": 0.0,
+        "excluded": false
+      },
+      {
+        "query_date": "2026-08-07",
+        "n_collection_rows": 507,
+        "n_source_failed": 0,
+        "source_failed_share": 0.0,
+        "excluded": false
+      },
+      {
+        "query_date": "2026-08-10",
+        "n_collection_rows": 483,
+        "n_source_failed": 0,
+        "source_failed_share": 0.0,
+        "excluded": false
+      },
+      {
+        "query_date": "2026-08-11",
+        "n_collection_rows": 455,
+        "n_source_failed": 0,
+        "source_failed_share": 0.0,
+        "excluded": false
+      },
+      {
+        "query_date": "2026-08-12",
+        "n_collection_rows": 432,
+        "n_source_failed": 0,
+        "source_failed_share": 0.0,
+        "excluded": false
+      },
+      {
+        "query_date": "2026-08-13",
+        "n_collection_rows": 445,
+        "n_source_failed": 0,
+        "source_failed_share": 0.0,
+        "excluded": false
+      },
+      {
+        "query_date": "2026-08-14",
+        "n_collection_rows": 427,
+        "n_source_failed": 0,
+        "source_failed_share": 0.0,
+        "excluded": false
+      },
+      {
+        "query_date": "2026-08-17",
+        "n_collection_rows": 426,
+        "n_source_failed": 0,
+        "source_failed_share": 0.0,
+        "excluded": false
+      },
+      {
+        "query_date": "2026-08-18",
+        "n_collection_rows": 421,
+        "n_source_failed": 0,
+        "source_failed_share": 0.0,
+        "excluded": false
+      },
+      {
+        "query_date": "2026-08-19",
+        "n_collection_rows": 433,
+        "n_source_failed": 0,
+        "source_failed_share": 0.0,
+        "excluded": false
+      },
+      {
+        "query_date": "2026-08-20",
+        "n_collection_rows": 444,
+        "n_source_failed": 0,
+        "source_failed_share": 0.0,
+        "excluded": false
+      },
+      {
+        "query_date": "2026-08-21",
+        "n_collection_rows": 433,
+        "n_source_failed": 0,
+        "source_failed_share": 0.0,
+        "excluded": false
+      },
+      {
+        "query_date": "2026-08-24",
+        "n_collection_rows": 412,
+        "n_source_failed": 0,
+        "source_failed_share": 0.0,
+        "excluded": false
+      },
+      {
+        "query_date": "2026-08-25",
+        "n_collection_rows": 409,
+        "n_source_failed": 0,
+        "source_failed_share": 0.0,
+        "excluded": false
+      },
+      {
+        "query_date": "2026-08-26",
+        "n_collection_rows": 426,
+        "n_source_failed": 0,
+        "source_failed_share": 0.0,
+        "excluded": false
+      },
+      {
+        "query_date": "2026-08-27",
+        "n_collection_rows": 430,
+        "n_source_failed": 0,
+        "source_failed_share": 0.0,
+        "excluded": false
+      },
+      {
+        "query_date": "2026-08-31",
+        "n_collection_rows": 434,
+        "n_source_failed": 0,
+        "source_failed_share": 0.0,
+        "excluded": false
+      },
+      {
+        "query_date": "2026-09-01",
+        "n_collection_rows": 429,
+        "n_source_failed": 0,
+        "source_failed_share": 0.0,
+        "excluded": false
+      },
+      {
+        "query_date": "2026-09-02",
+        "n_collection_rows": 456,
+        "n_source_failed": 0,
+        "source_failed_share": 0.0,
+        "excluded": false
+      },
+      {
+        "query_date": "2026-09-03",
+        "n_collection_rows": 454,
+        "n_source_failed": 0,
+        "source_failed_share": 0.0,
+        "excluded": false
+      },
+      {
+        "query_date": "2026-09-04",
+        "n_collection_rows": 470,
+        "n_source_failed": 0,
+        "source_failed_share": 0.0,
+        "excluded": false
+      },
+      {
+        "query_date": "2026-09-08",
+        "n_collection_rows": 486,
+        "n_source_failed": 0,
+        "source_failed_share": 0.0,
+        "excluded": false
+      },
+      {
+        "query_date": "2026-09-09",
+        "n_collection_rows": 504,
+        "n_source_failed": 0,
+        "source_failed_share": 0.0,
+        "excluded": false
+      },
+      {
+        "query_date": "2026-09-10",
+        "n_collection_rows": 472,
+        "n_source_failed": 0,
+        "source_failed_share": 0.0,
+        "excluded": false
+      },
+      {
+        "query_date": "2026-09-11",
+        "n_collection_rows": 448,
+        "n_source_failed": 0,
+        "source_failed_share": 0.0,
+        "excluded": false
+      },
+      {
+        "query_date": "2026-09-14",
+        "n_collection_rows": 510,
+        "n_source_failed": 0,
+        "source_failed_share": 0.0,
+        "excluded": false
+      },
+      {
+        "query_date": "2026-09-16",
+        "n_collection_rows": 471,
+        "n_source_failed": 0,
+        "source_failed_share": 0.0,
+        "excluded": false
+      },
+      {
+        "query_date": "2026-09-17",
+        "n_collection_rows": 483,
+        "n_source_failed": 0,
+        "source_failed_share": 0.0,
+        "excluded": false
+      },
+      {
+        "query_date": "2026-09-18",
+        "n_collection_rows": 488,
+        "n_source_failed": 0,
+        "source_failed_share": 0.0,
+        "excluded": false
+      },
+      {
+        "query_date": "2026-09-21",
+        "n_collection_rows": 494,
+        "n_source_failed": 0,
+        "source_failed_share": 0.0,
+        "excluded": false
+      },
+      {
+        "query_date": "2026-09-22",
+        "n_collection_rows": 498,
+        "n_source_failed": 0,
+        "source_failed_share": 0.0,
+        "excluded": false
+      },
+      {
+        "query_date": "2026-09-23",
+        "n_collection_rows": 498,
+        "n_source_failed": 0,
+        "source_failed_share": 0.0,
+        "excluded": false
+      },
+      {
+        "query_date": "2026-09-24",
+        "n_collection_rows": 500,
+        "n_source_failed": 1,
+        "source_failed_share": 0.002,
+        "excluded": false
+      },
+      {
+        "query_date": "2026-09-25",
+        "n_collection_rows": 487,
+        "n_source_failed": 0,
+        "source_failed_share": 0.0,
+        "excluded": false
+      },
+      {
+        "query_date": "2026-09-28",
+        "n_collection_rows": 485,
+        "n_source_failed": 0,
+        "source_failed_share": 0.0,
+        "excluded": false
+      },
+      {
+        "query_date": "2026-09-29",
+        "n_collection_rows": 511,
+        "n_source_failed": 0,
+        "source_failed_share": 0.0,
+        "excluded": false
+      },
+      {
+        "query_date": "2026-09-30",
+        "n_collection_rows": 511,
+        "n_source_failed": 0,
+        "source_failed_share": 0.0,
+        "excluded": false
+      },
+      {
+        "query_date": "2026-10-01",
+        "n_collection_rows": 492,
+        "n_source_failed": 0,
+        "source_failed_share": 0.0,
+        "excluded": false
+      },
+      {
+        "query_date": "2026-10-02",
+        "n_collection_rows": 484,
+        "n_source_failed": 0,
+        "source_failed_share": 0.0,
+        "excluded": false
+      },
+      {
+        "query_date": "2026-10-05",
+        "n_collection_rows": 536,
+        "n_source_failed": 0,
+        "source_failed_share": 0.0,
+        "excluded": false
+      },
+      {
+        "query_date": "2026-10-06",
+        "n_collection_rows": 468,
+        "n_source_failed": 0,
+        "source_failed_share": 0.0,
+        "excluded": false
+      },
+      {
+        "query_date": "2026-10-07",
+        "n_collection_rows": 476,
+        "n_source_failed": 33,
+        "source_failed_share": 0.06932773109243698,
+        "excluded": false
+      },
+      {
+        "query_date": "2026-10-08",
+        "n_collection_rows": 560,
+        "n_source_failed": 0,
+        "source_failed_share": 0.0,
+        "excluded": false
+      },
+      {
+        "query_date": "2026-10-09",
+        "n_collection_rows": 516,
+        "n_source_failed": 0,
+        "source_failed_share": 0.0,
+        "excluded": false
+      },
+      {
+        "query_date": "2026-10-12",
+        "n_collection_rows": 512,
+        "n_source_failed": 0,
+        "source_failed_share": 0.0,
+        "excluded": false
+      },
+      {
+        "query_date": "2026-10-13",
+        "n_collection_rows": 537,
+        "n_source_failed": 0,
+        "source_failed_share": 0.0,
+        "excluded": false
+      },
+      {
+        "query_date": "2026-10-14",
+        "n_collection_rows": 505,
+        "n_source_failed": 0,
+        "source_failed_share": 0.0,
+        "excluded": false
+      },
+      {
+        "query_date": "2026-10-15",
+        "n_collection_rows": 496,
+        "n_source_failed": 0,
+        "source_failed_share": 0.0,
+        "excluded": false
+      },
+      {
+        "query_date": "2026-10-16",
+        "n_collection_rows": 524,
+        "n_source_failed": 0,
+        "source_failed_share": 0.0,
+        "excluded": false
+      },
+      {
+        "query_date": "2026-10-19",
+        "n_collection_rows": 587,
+        "n_source_failed": 0,
+        "source_failed_share": 0.0,
+        "excluded": false
+      },
+      {
+        "query_date": "2026-10-20",
+        "n_collection_rows": 538,
+        "n_source_failed": 0,
+        "source_failed_share": 0.0,
+        "excluded": false
+      },
+      {
+        "query_date": "2026-10-21",
+        "n_collection_rows": 558,
+        "n_source_failed": 0,
+        "source_failed_share": 0.0,
+        "excluded": false
+      },
+      {
+        "query_date": "2026-10-22",
+        "n_collection_rows": 620,
+        "n_source_failed": 0,
+        "source_failed_share": 0.0,
+        "excluded": false
+      },
+      {
+        "query_date": "2026-10-23",
+        "n_collection_rows": 523,
+        "n_source_failed": 0,
+        "source_failed_share": 0.0,
+        "excluded": false
+      },
+      {
+        "query_date": "2026-10-26",
+        "n_collection_rows": 652,
+        "n_source_failed": 0,
+        "source_failed_share": 0.0,
+        "excluded": false
+      }
+    ],
+    "calendar_check": {
+      "query_dates_missing_vs_nyse_calendar": [
+        "2026-08-28",
+        "2026-09-15"
+      ],
+      "query_dates_not_trading_days": []
+    }
+  },
+  "cutoff_9_7": {
+    "latest_resolved_session": "2026-10-27",
+    "latest_judged_session_any_outcome_state": "2026-10-27",
+    "outcome_state_counts_judged_collection": {
+      "excluded": 4,
+      "resolved": 9759
+    },
+    "pending_judged_collection_rows": 0,
+    "pending_sessions": [],
+    "stale_count_reading_A_calendar_sessions": 0,
+    "stale_count_reading_B_data_sessions": 0,
+    "s_star_reading_A": "2026-10-27",
+    "s_star_reading_B": "2026-10-27",
+    "s_star": "2026-10-27",
+    "readings_agree": true,
+    "how_set": "no pending judged collection rows exist, so S* is the latest scoring_session among judged collection rows",
+    "n_distinct_data_sessions_judged": 65,
+    "data_sessions_first": "2026-07-28",
+    "data_sessions_last": "2026-10-27",
+    "calendar_check": {
+      "sessions_missing_vs_nyse_calendar": [],
+      "sessions_not_trading_days": []
+    }
+  },
+  "gate_9_8": {
+    "N": 9759,
+    "C_G": 65,
+    "null_excess_among_otherwise_G": 0,
+    "without_cutoff": {
+      "N_no_cutoff": 9759,
+      "C_G_no_cutoff": 65
+    },
+    "sigma_bp": 442.0875909566156,
+    "MSB": 1542607.3844763383,
+    "MSW": 186547.4190382628,
+    "n0": 149.65570563069986,
+    "SSB": 98726872.60648565,
+    "SSW": 1808390680.1569197,
+    "SS_total": 1907117552.7634053,
+    "sum_nc2": 1766719,
+    "rho_raw": 0.04632310192106974,
+    "rho": 0.04632310192106974,
+    "exact_rational_check": {
+      "sigma_bp": 442.0875909566156,
+      "var_ddof1": 195441.43807782387,
+      "MSB": 1542607.3844763383,
+      "MSW": 186547.4190382628,
+      "n0": 149.65570563069986,
+      "rho_raw": 0.04632310192106973
+    },
+    "float_vs_exact_rel": {
+      "MSB": 0.0,
+      "MSW": 0.0,
+      "rho_raw": 1.497933777347307e-16
+    },
+    "cluster_size_G": {
+      "cluster_size_min": 15,
+      "cluster_size_max": 289,
+      "cluster_size_mean": 150.13846153846154
+    },
+    "C": 65,
+    "M": 5363,
+    "sum_mc2": 526855,
+    "k_eff": 98.2388588476599,
+    "k_eff_exact": "526855/5363",
+    "m_c": {
+      "m_c_min": 5,
+      "m_c_max": 165,
+      "m_c_mean": 82.50769230769231
+    },
+    "clusters_in_G_without_directional_row": [],
+    "directional_clusters_not_in_G": [],
+    "rho_with_C_directional_in_n0": null,
+    "Required": 13335.001574131153,
+    "Required_with_z_sq_11_1556": 13334.523445713292,
+    "cond_C_ge_60": true,
+    "cond_M_ge_1000": true,
+    "cond_M_ge_Required": false,
+    "cond_M_ge_Required_z_sq": false,
+    "pass": false,
+    "directional_per_cluster": {
+      "2026-07-28": 37,
+      "2026-07-29": 79,
+      "2026-07-30": 130,
+      "2026-07-31": 58,
+      "2026-08-03": 60,
+      "2026-08-04": 98,
+      "2026-08-05": 116,
+      "2026-08-06": 165,
+      "2026-08-07": 117,
+      "2026-08-10": 89,
+      "2026-08-11": 86,
+      "2026-08-12": 55,
+      "2026-08-13": 65,
+      "2026-08-14": 56,
+      "2026-08-17": 34,
+      "2026-08-18": 46,
+      "2026-08-19": 47,
+      "2026-08-20": 53,
+      "2026-08-21": 35,
+      "2026-08-24": 41,
+      "2026-08-25": 35,
+      "2026-08-26": 38,
+      "2026-08-27": 33,
+      "2026-08-28": 11,
+      "2026-08-31": 24,
+      "2026-09-01": 55,
+      "2026-09-02": 42,
+      "2026-09-03": 57,
+      "2026-09-04": 73,
+      "2026-09-08": 102,
+      "2026-09-09": 123,
+      "2026-09-10": 96,
+      "2026-09-11": 80,
+      "2026-09-14": 84,
+      "2026-09-15": 52,
+      "2026-09-16": 53,
+      "2026-09-17": 99,
+      "2026-09-18": 92,
+      "2026-09-21": 102,
+      "2026-09-22": 104,
+      "2026-09-23": 121,
+      "2026-09-24": 119,
+      "2026-09-25": 92,
+      "2026-09-28": 81,
+      "2026-09-29": 122,
+      "2026-09-30": 109,
+      "2026-10-01": 136,
+      "2026-10-02": 61,
+      "2026-10-05": 5,
+      "2026-10-06": 52,
+      "2026-10-07": 89,
+      "2026-10-08": 133,
+      "2026-10-09": 119,
+      "2026-10-12": 118,
+      "2026-10-13": 128,
+      "2026-10-14": 110,
+      "2026-10-15": 123,
+      "2026-10-16": 112,
+      "2026-10-19": 117,
+      "2026-10-20": 140,
+      "2026-10-21": 102,
+      "2026-10-22": 68,
+      "2026-10-23": 56,
+      "2026-10-26": 132,
+      "2026-10-27": 96
+    },
+    "G_rows_per_cluster": {
+      "2026-07-28": 55,
+      "2026-07-29": 119,
+      "2026-07-30": 205,
+      "2026-07-31": 123,
+      "2026-08-03": 92,
+      "2026-08-04": 143,
+      "2026-08-05": 189,
+      "2026-08-06": 282,
+      "2026-08-07": 221,
+      "2026-08-10": 169,
+      "2026-08-11": 148,
+      "2026-08-12": 89,
+      "2026-08-13": 112,
+      "2026-08-14": 88,
+      "2026-08-17": 56,
+      "2026-08-18": 70,
+      "2026-08-19": 71,
+      "2026-08-20": 74,
+      "2026-08-21": 71,
+      "2026-08-24": 65,
+      "2026-08-25": 53,
+      "2026-08-26": 57,
+      "2026-08-27": 60,
+      "2026-08-28": 23,
+      "2026-08-31": 38,
+      "2026-09-01": 80,
+      "2026-09-02": 79,
+      "2026-09-03": 117,
+      "2026-09-04": 132,
+      "2026-09-08": 181,
+      "2026-09-09": 199,
+      "2026-09-10": 183,
+      "2026-09-11": 161,
+      "2026-09-14": 165,
+      "2026-09-15": 111,
+      "2026-09-16": 92,
+      "2026-09-17": 180,
+      "2026-09-18": 185,
+      "2026-09-21": 195,
+      "2026-09-22": 183,
+      "2026-09-23": 220,
+      "2026-09-24": 205,
+      "2026-09-25": 185,
+      "2026-09-28": 164,
+      "2026-09-29": 208,
+      "2026-09-30": 200,
+      "2026-10-01": 238,
+      "2026-10-02": 115,
+      "2026-10-05": 15,
+      "2026-10-06": 96,
+      "2026-10-07": 154,
+      "2026-10-08": 234,
+      "2026-10-09": 236,
+      "2026-10-12": 195,
+      "2026-10-13": 250,
+      "2026-10-14": 229,
+      "2026-10-15": 223,
+      "2026-10-16": 209,
+      "2026-10-19": 222,
+      "2026-10-20": 289,
+      "2026-10-21": 219,
+      "2026-10-22": 161,
+      "2026-10-23": 122,
+      "2026-10-26": 239,
+      "2026-10-27": 215
+    }
+  },
+  "projection": {
+    "M_over_C": 82.50769230769231,
+    "clusters_at_which_M_reaches_Required": 162,
+    "clusters_at_which_M_reaches_Required_z_sq": 162,
+    "hard_stop_session_120_date": "2027-01-15",
+    "session_1": "2026-07-28",
+    "s_star_session_index": 65,
+    "sessions_remaining_after_s_star_to_hard_stop": 55,
+    "nyse_holidays_used": {
+      "2026-09-07": "Labor Day",
+      "2026-11-26": "Thanksgiving Day",
+      "2026-12-25": "Christmas Day",
+      "2027-01-01": "New Year's Day"
+    }
+  }
+}

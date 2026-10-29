@@ -1,0 +1,38 @@
+| Quantity | Own | Log | Rel diff | Result |
+|---|---|---|---|---|
+| snapshot sha256 | '2b517c70ae61affec18a973952e02714240e8f9086fe3069f3bc1ff8e3ed6500' | '2b517c70ae61affec18a973952e02714240e8f9086fe3069f3bc1ff8e3ed6500' | exact | MATCH |
+| excluded query_dates | [] | [] | exact | MATCH |
+| latest resolved session | '2026-10-27' | '2026-10-27' | exact | MATCH |
+| pending judged rows (own) vs stale_pending_count+nonstale (log) | 0 | 0 | exact | MATCH |
+| stale count | 0 | 0 | exact | MATCH |
+| S* | '2026-10-27' | '2026-10-27' | exact | MATCH |
+| N | 9759 | 9759 | exact | MATCH |
+| C_G | 65 | 65 | exact | MATCH |
+| null-excess count | 0 | 0 | exact | MATCH |
+| sigma (bp) | 442.0875909566156 | 442.0875909566156 | 0.000e+00 | MATCH |
+| MSB | 1542607.3844763383 | 1542607.384476338 | 1.509e-16 | MATCH |
+| MSW | 186547.4190382628 | 186547.4190382628 | 0.000e+00 | MATCH |
+| n0 | 149.65570563069986 | 149.65570563069986 | 0.000e+00 | MATCH |
+| rho_raw | 0.04632310192106974 | 0.04632310192106974 | 0.000e+00 | MATCH |
+| rho (floored) | 0.04632310192106974 | 0.04632310192106974 | 0.000e+00 | MATCH |
+| C | 65 | 65 | exact | MATCH |
+| M | 5363 | 5363 | exact | MATCH |
+| k_eff | 98.2388588476599 | 98.2388588476599 | 0.000e+00 | MATCH |
+| Required | 13335.001574131153 | 13335.001574131153 | 0.000e+00 | MATCH |
+| cond C>=60 | True | True | exact | MATCH |
+| cond M>=1000 | True | True | exact | MATCH |
+| cond M>=Required | False | False | exact | MATCH |
+| pass | False | False | exact | MATCH |
+| const 11.156 | 11.156 | 11.156 | 0.000e+00 | MATCH |
+| delta 30 bp | 30.0 | 30.0 | 0.000e+00 | MATCH |
+| min clusters 60 | 60 | 60 | exact | MATCH |
+| min M 1000 | 1000 | 1000 | exact | MATCH |
+| day-exclusion share 0.2 | 0.2 | 0.2 | 0.000e+00 | MATCH |
+| stale sessions 3 | 3 | 3 | exact | MATCH |
+
+ALL MATCH
+log failing: ['REQUIRED'] | failing_detail: ['M 5363 < Required 13335.002']
+log s_star_case: latest_session_no_nonstale_pending | degenerate: '' | status: ok | test_mode: False | db_class: NON_SYNTHETIC
+log utc_time: 2026-10-29T00:22:34Z | db_path: /home/kiros-li/Documents/GitHub/AiTrader/reports/c2/snap_20261028/news_experiment_snapshot.db
+log empty_session_pending_count: 0 | earliest_nonstale_pending_session: None
+own Required with (2.50+0.84)^2 = 11.1556: 13334.523445713292

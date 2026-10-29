@@ -11,6 +11,19 @@ Model:
 Prompt summary: one line.
 Changes: what changed.
 
+## Prompt: Stage C.2, gate and the single verdict run (first attempt: gate FAIL)
+
+Date: 2026-10-28
+Model: Opus 5.5 (claude-opus-5-5), max lead. One worker: Fable 5.1, xhigh.
+Prompt summary: "Read docs/prompts/STAGE_C.2.md in full and execute it as your prompt. Run unattended. Note: reports/c2_UNLOCK.json was written by the planning chat on Kiros explicit instruction, recorded as docs/DECISIONS.md V3; treat it as the operator unlock."
+Changes:
+- Snapshot reports/c2/snap_20261028/ (snapshot.json committed; the .db stays ignored) and gate log reports/c2/gate_log.jsonl (one line: FAIL on REQUIRED).
+- Gate verification in reports/c2_gate_verify.md, with code under reports/c2/verify_gate/. Rulings in reports/c2_rulings.md.
+- Return document: reports/C.2_RETURN.md. STATE file: reports/C.2_STATE.md.
+- No verdict run, no run-once marker and no judgment read. No frozen file changed.
+
+Commit messages: "C.2 snapshot and gate 2026-10-28", "Stage C.2 gate FAIL".
+
 ## Prompt: Stage C.1, evaluation harness build and freeze (no outcomes)
 
 Date: 2026-10-10 to 2026-10-11
