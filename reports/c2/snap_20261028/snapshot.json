@@ -1,0 +1,347 @@
+{
+  "bytes": 24264704,
+  "collection_query_dates": 62,
+  "collection_rows_by_query_date_state": {
+    "2026-07-28": {
+      "excluded_pre_call": 4,
+      "judged": 92,
+      "no_news": 331
+    },
+    "2026-07-29": {
+      "excluded_pre_call": 18,
+      "judged": 197,
+      "no_news": 323
+    },
+    "2026-07-30": {
+      "excluded_pre_call": 5,
+      "judged": 160,
+      "no_news": 324
+    },
+    "2026-07-31": {
+      "excluded_pre_call": 14,
+      "judged": 93,
+      "no_news": 333
+    },
+    "2026-08-03": {
+      "excluded_pre_call": 10,
+      "judged": 113,
+      "no_news": 330
+    },
+    "2026-08-04": {
+      "excluded_pre_call": 11,
+      "judged": 168,
+      "no_news": 298
+    },
+    "2026-08-05": {
+      "excluded_pre_call": 6,
+      "judged": 246,
+      "no_news": 291
+    },
+    "2026-08-06": {
+      "excluded_pre_call": 7,
+      "judged": 259,
+      "model_failed": 1,
+      "no_news": 292
+    },
+    "2026-08-07": {
+      "excluded_pre_call": 28,
+      "judged": 188,
+      "no_news": 291
+    },
+    "2026-08-10": {
+      "excluded_pre_call": 11,
+      "judged": 150,
+      "no_news": 322
+    },
+    "2026-08-11": {
+      "excluded_pre_call": 5,
+      "judged": 120,
+      "no_news": 330
+    },
+    "2026-08-12": {
+      "excluded_pre_call": 8,
+      "judged": 89,
+      "no_news": 335
+    },
+    "2026-08-13": {
+      "excluded_pre_call": 7,
+      "judged": 107,
+      "no_news": 331
+    },
+    "2026-08-14": {
+      "excluded_pre_call": 17,
+      "judged": 72,
+      "no_news": 338
+    },
+    "2026-08-17": {
+      "excluded_pre_call": 8,
+      "judged": 61,
+      "no_news": 357
+    },
+    "2026-08-18": {
+      "excluded_pre_call": 3,
+      "judged": 61,
+      "no_news": 357
+    },
+    "2026-08-19": {
+      "excluded_pre_call": 19,
+      "judged": 71,
+      "no_news": 343
+    },
+    "2026-08-20": {
+      "excluded_pre_call": 9,
+      "judged": 93,
+      "no_news": 342
+    },
+    "2026-08-21": {
+      "excluded_pre_call": 10,
+      "judged": 71,
+      "no_news": 352
+    },
+    "2026-08-24": {
+      "excluded_pre_call": 8,
+      "judged": 52,
+      "no_news": 352
+    },
+    "2026-08-25": {
+      "excluded_pre_call": 4,
+      "judged": 45,
+      "no_news": 360
+    },
+    "2026-08-26": {
+      "excluded_pre_call": 4,
+      "judged": 66,
+      "no_news": 356
+    },
+    "2026-08-27": {
+      "excluded_pre_call": 8,
+      "judged": 63,
+      "no_news": 359
+    },
+    "2026-08-31": {
+      "excluded_pre_call": 1,
+      "judged": 69,
+      "no_news": 364
+    },
+    "2026-09-01": {
+      "excluded_pre_call": 1,
+      "judged": 72,
+      "no_news": 356
+    },
+    "2026-09-02": {
+      "excluded_pre_call": 5,
+      "judged": 122,
+      "no_news": 329
+    },
+    "2026-09-03": {
+      "excluded_pre_call": 4,
+      "judged": 109,
+      "no_news": 341
+    },
+    "2026-09-04": {
+      "excluded_pre_call": 22,
+      "judged": 165,
+      "no_news": 283
+    },
+    "2026-09-08": {
+      "excluded_pre_call": 17,
+      "judged": 186,
+      "no_news": 283
+    },
+    "2026-09-09": {
+      "excluded_pre_call": 9,
+      "judged": 211,
+      "no_news": 284
+    },
+    "2026-09-10": {
+      "excluded_pre_call": 5,
+      "judged": 184,
+      "no_news": 283
+    },
+    "2026-09-11": {
+      "excluded_pre_call": 24,
+      "judged": 132,
+      "model_failed": 1,
+      "no_news": 291
+    },
+    "2026-09-14": {
+      "excluded_pre_call": 16,
+      "judged": 196,
+      "no_news": 298
+    },
+    "2026-09-16": {
+      "excluded_pre_call": 13,
+      "judged": 182,
+      "no_news": 276
+    },
+    "2026-09-17": {
+      "excluded_pre_call": 7,
+      "judged": 189,
+      "no_news": 287
+    },
+    "2026-09-18": {
+      "excluded_pre_call": 20,
+      "judged": 192,
+      "no_news": 276
+    },
+    "2026-09-21": {
+      "excluded_pre_call": 19,
+      "judged": 184,
+      "no_news": 291
+    },
+    "2026-09-22": {
+      "excluded_pre_call": 13,
+      "judged": 207,
+      "model_failed": 1,
+      "no_news": 277
+    },
+    "2026-09-23": {
+      "excluded_pre_call": 11,
+      "judged": 198,
+      "no_news": 289
+    },
+    "2026-09-24": {
+      "excluded_pre_call": 10,
+      "judged": 200,
+      "no_news": 289,
+      "source_failed": 1
+    },
+    "2026-09-25": {
+      "excluded_pre_call": 20,
+      "judged": 178,
+      "no_news": 289
+    },
+    "2026-09-28": {
+      "excluded_pre_call": 13,
+      "judged": 183,
+      "no_news": 289
+    },
+    "2026-09-29": {
+      "excluded_pre_call": 10,
+      "judged": 207,
+      "no_news": 294
+    },
+    "2026-09-30": {
+      "excluded_pre_call": 17,
+      "judged": 221,
+      "no_news": 273
+    },
+    "2026-10-01": {
+      "excluded_pre_call": 18,
+      "judged": 210,
+      "model_failed": 1,
+      "no_news": 263
+    },
+    "2026-10-02": {
+      "excluded_pre_call": 32,
+      "judged": 35,
+      "model_failed": 128,
+      "no_news": 289
+    },
+    "2026-10-05": {
+      "excluded_pre_call": 39,
+      "model_failed": 221,
+      "no_news": 276
+    },
+    "2026-10-06": {
+      "excluded_pre_call": 12,
+      "judged": 172,
+      "no_news": 284
+    },
+    "2026-10-07": {
+      "excluded_pre_call": 14,
+      "judged": 170,
+      "model_failed": 7,
+      "no_news": 252,
+      "source_failed": 33
+    },
+    "2026-10-08": {
+      "excluded_pre_call": 23,
+      "judged": 267,
+      "no_news": 270
+    },
+    "2026-10-09": {
+      "excluded_pre_call": 32,
+      "judged": 206,
+      "no_news": 278
+    },
+    "2026-10-12": {
+      "excluded_pre_call": 28,
+      "judged": 212,
+      "no_news": 272
+    },
+    "2026-10-13": {
+      "excluded_pre_call": 24,
+      "judged": 253,
+      "no_news": 260
+    },
+    "2026-10-14": {
+      "excluded_pre_call": 20,
+      "judged": 220,
+      "no_news": 265
+    },
+    "2026-10-15": {
+      "excluded_pre_call": 17,
+      "judged": 228,
+      "no_news": 251
+    },
+    "2026-10-16": {
+      "excluded_pre_call": 32,
+      "judged": 195,
+      "model_failed": 2,
+      "no_news": 295
+    },
+    "2026-10-19": {
+      "excluded_pre_call": 29,
+      "judged": 281,
+      "model_failed": 1,
+      "no_news": 276
+    },
+    "2026-10-20": {
+      "excluded_pre_call": 18,
+      "judged": 245,
+      "no_news": 275
+    },
+    "2026-10-21": {
+      "excluded_pre_call": 16,
+      "judged": 269,
+      "no_news": 273
+    },
+    "2026-10-22": {
+      "excluded_pre_call": 26,
+      "model_failed": 357,
+      "no_news": 237
+    },
+    "2026-10-23": {
+      "excluded_pre_call": 20,
+      "judged": 226,
+      "no_news": 277
+    },
+    "2026-10-26": {
+      "excluded_pre_call": 38,
+      "judged": 350,
+      "model_failed": 3,
+      "no_news": 261
+    }
+  },
+  "collection_rows_by_state": {
+    "excluded_pre_call": 919,
+    "judged": 9763,
+    "model_failed": 723,
+    "no_news": 18743,
+    "source_failed": 34
+  },
+  "collection_rows_total": 30182,
+  "db_class": "NON_SYNTHETIC",
+  "file_mode": "0o444",
+  "journal_mode_after_copy": "delete",
+  "method": "sqlite3.Connection.backup",
+  "schema": "c2_snapshot/1",
+  "sha256": "2b517c70ae61affec18a973952e02714240e8f9086fe3069f3bc1ff8e3ed6500",
+  "sidecars_absent": true,
+  "snapshot_path": "/home/kiros-li/Documents/GitHub/AiTrader/reports/c2/snap_20261028/news_experiment_snapshot.db",
+  "source_realpath": "/home/kiros-li/Documents/GitHub/AiTrader/news_experiment.db",
+  "source_st_mtime": 1793164544.4397335,
+  "source_st_size": 24264704,
+  "utc_time": "2026-10-29T00:22:18.883330Z"
+}
