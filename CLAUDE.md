@@ -3,9 +3,10 @@
 ## Read first: current phase and session rules (added 2026-09-23)
 
 The repo is in **Stage B** of the pre-registered news-drift experiment.
-EXPERIMENT.md is ACCEPTED and BINDING (Amendments 1 to 9). Amendment 9
+EXPERIMENT.md is ACCEPTED and BINDING (Amendments 1 to 10). Amendment 9
 (2026-10-10) fixes the Stage C harness definitions: the day cluster is
-`scoring_session`, not `query_date`. The engine
+`scoring_session`, not `query_date`. Amendment 10 (2026-10-28) registers
+the hard-stop readout and LOCKS the document until the readout. The engine
 build described under "Project context" below is historical context for
 the code, not the current work. Where this section conflicts with older
 text in this file, this section wins.
@@ -102,7 +103,9 @@ max. No low effort.
   running, next, artifact paths, times). On resume, read it first and skip
   finished tasks. The user is not watching: do not stop to ask whether to
   continue. If Fable usage runs out, Fable-routed checks stay pending in
-  the STATE file rather than being downgraded.
+  the STATE file. From 2026-10-28 (V4), a fresh-context Opus reviewer may
+  stand in only when Fable is unavailable, and the return says so. Each
+  reviewer's model is confirmed from its transcript.
 
 ### ETA tables and session cost
 

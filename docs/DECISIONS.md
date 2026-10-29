@@ -112,3 +112,39 @@ same commit as the stage prompt that relies on it.
     0 judged). It stays as recorded, by the same rule as Amendment 9.14.
     The credit was restored before the 2026-10-26 run.
   - Readiness: 60 judged collection days after the 2026-10-27 run.
+- V4 (2026-10-28, user, planning chat), after the C.2 attempt 1 gate FAIL
+  (reports/C.2_RETURN.md):
+  1. **Amendment 10 is approved as drafted.** If the gate has not passed
+     by the 120-session hard stop, C.2 runs the verdict once on the
+     hard-stop snapshot, unchanged. The power shortfall is reported
+     beside it, labelled "registered power rule NOT met". EXPERIMENT.md
+     is then locked (10.3). EXPERIMENT.md sha256 after Amendment 10:
+     964996723df6b1d6778461bad664e1599fdac9ca21dbe5e924f5214c3da78ebe.
+     The unlock written under V3 binds the old sha, so it is void once
+     this commit lands. Kiros writes a new unlock after the C.3
+     re-freeze.
+  2. **Stage C.3 "HARD-STOP READOUT BUILD AND RE-FREEZE"** implements
+     10.1 and 10.2 in news_eval and re-freezes. The prompt is written and
+     committed. It is NOT launched until Kiros says go.
+  3. **Replay ordering.** The cutoff-replay study may run and be read
+     once the live experiment is locked: Amendment 10 plus the C.3
+     re-freeze. This revises the STAGES.md rule "only after Stage C
+     reports". The primary replay model is Haiku 4.5. Fable 5.1 is not a
+     replay model: its cutoff is likely too recent, and it costs about
+     12 times as much. It stays a verifier.
+  4. **Collection continues to the hard stop**, near 2027-01-15. The C.3
+     build confirms the date from the calendar.
+  5. **Prompt structure.** AiTrader prompts follow Kiros's "PropExperiment
+     Prompt Structure" doc (2026-10-28), summarized in PROMPT_WRITING.md
+     section 8:
+     - the lead is always Opus 5.5 at max
+     - Fable xhigh reviewers, with the model confirmed from the transcript
+     - a fresh Opus reviewer only if Fable is unavailable, and said so
+       (this replaces "never downgraded")
+     - the context-wipe rule
+     - one final commit, and the planner pushes
+  6. **Still open:**
+     - the gate-rerun method: planner-run frozen commands versus a full
+       session per rerun
+     - the credit runway through January: the Max $100 monthly credit
+       or a top-up, plus a low-balance alert

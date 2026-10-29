@@ -154,7 +154,37 @@ Rules for filling the table:
 - The lead adjudicates every finding in writing and applies fixes before
   the deliverable.
 - If Fable usage runs out, those checks stay pending in the STATE file.
-  They are never downgraded to opus.
+  They are never downgraded to opus. (Superseded 2026-10-28 by V4 and
+  section 8: a fresh-context Opus reviewer is allowed only if Fable is
+  unavailable, and the return says so.)
+
+## 8. Structure from 2026-10-28 (V4)
+
+Prompts follow Kiros's "PropExperiment Prompt Structure" (2026-10-28).
+Where it differs from the sections above, it wins:
+- The lead is always Opus 5.5 at max.
+- Reviewers and independent verifiers are Fable at xhigh, and the model
+  is confirmed from the worker's transcript. Opus in a fresh context is
+  used only if Fable is unavailable, and the return says so. Extraction
+  runs on Haiku, well-specified low-to-mid tasks on Sonnet, and
+  everything else on Opus.
+- The prompt order is fixed:
+  1. header, opening marker and summary
+  2. decisions in force and binding documents, read first
+  3. lead, why, usage and time, and the autonomy line
+  4. PART 0 (seals, freezes, start gates), then PART A and onward
+  5. SCOPE "does NOT", guardrails and the delegation plan
+  6. deliverable, the last instruction and END PROMPT
+- Worker cap: 4 to 6 agents at once. At most 2 heavy compute jobs, and
+  stop a job if free memory falls below 2 GB.
+- Context wipe: when the lead's context passes about 300k tokens and
+  nothing is running, it writes a RESUME HERE block and "READY FOR WIPE
+  <time>" to its STATE file, and stops.
+- Commits: only the stage's own files and one named final commit. No
+  push. The planner reviews the return's sections 1 and 7, then pushes.
+- Before launch, the prompt is committed and pushed with its README row
+  and V-entry. It launches only on Kiros's go-ahead, in tmux, and the
+  planner gives the attach command.
 
 ### WHAT NOT TO DO
 

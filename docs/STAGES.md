@@ -85,6 +85,13 @@ Recorded 2026-10-02 at 45 day clusters, before any outcome has been read.
 - Separate study: its own pre-registration, its own database or
   run_kind, its own verdict. Run and read only after Stage C reports,
   so nothing in it can steer an amendment to the live experiment.
+  REVISED 2026-10-28 (V4): the replay may run and be read once the live
+  experiment is locked, meaning EXPERIMENT.md Amendment 10.3 is in force
+  and the C.3 re-freeze is committed. After that point, nothing in the
+  live experiment is amendable, so the original rule's intent holds.
+  Primary replay model: Claude Haiku 4.5, the same model as the live
+  experiment. A possible second rung is Sonnet 4.6. Cutoffs are to be
+  confirmed from Anthropic's model pages in the replay's Stage A.
 - Leak controls to pre-register: archive timestamps vs first-seen time
   (backfill and re-stamping), a point-in-time universe per quarter
   including delisted names, and a coverage check of historical Finnhub

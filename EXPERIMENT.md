@@ -68,6 +68,13 @@
 > the relevance grading procedure, and run-once execution. **It moves no bar,
 > no threshold, no test count, no universe rule and no verdict row.**
 >
+> **AMENDMENT 10 (2026-10-28, operator approved, written after the first
+> gate FAIL, blind to every judgment and every effect)** registers what C.2
+> computes if the gate has not passed by the 120-session hard stop: the
+> verdict runs once on the hard-stop snapshot, unchanged, beside the power
+> shortfall. It then locks this document until the readout. **It moves no
+> bar, no threshold, no test count, no universe rule and no verdict row.**
+>
 > This document was a proposed pre-registration written by Stage 0.
 >
 > Written 2026-07-27. Nothing was built, collected, called, or traded to
@@ -1041,6 +1048,66 @@ stop rule (60 clusters, 1,000 scorable, power), the 30 bp working effect,
 the 4.96 bp economic comparison, 10,000 resamples and permutations, the
 four primaries, the families and their corrections, and the 120-day hard
 stop.
+
+## AMENDMENT 10 (2026-10-28): the readout at the hard stop, and the lock
+
+**When and what data existed.** 2026-10-28, after the first C.2 gate run on
+snapshot reports/c2/snap_20261028 (sha256 2b517c70...6500, S* 2026-10-27)
+failed: C = 65, M = 5,363, Required = 13,335.0, sigma = 442.1 bp,
+rho = 0.046, k_eff = 98.2. Those gate aggregates, computed by the frozen
+9.8 code from the unsigned excess and from counts, are the only
+outcome-derived numbers anyone has seen. **No judgment value, per-row
+return, signed quantity, effect or test statistic has been read.** Sigma
+and rho carry no information about the sign or size of the effect. **The
+operator approved this amendment explicitly** in the planning chat on
+2026-10-28 (docs/DECISIONS.md V4).
+
+**Why.** The text registers that collection continues while the gate is
+short and that the hard stop is unchanged, but it registers nothing that
+C.2 computes at the hard stop. The frozen runner refuses without a PASS, so
+the study would end with nothing computed. At the measured sigma, rho and
+cluster size, the C.2 lead projected the gate passing near 162 clusters,
+while the hard stop falls near 120. That is a projection, not a finding.
+
+### 10.1 The hard-stop readout
+
+If no gate run has passed by the hard stop, C.2 runs the verdict once on
+the hard-stop snapshot.
+- **The hard stop** is the 120th trading session of the exchange calendar
+  in analysis_bars.db (trading_calendar), counting 2026-07-28 as session 1.
+  The C.2 verifier's calendar puts it at 2027-01-15. The C.3 build
+  recomputes it from the calendar table, and the computed date governs.
+- **The hard-stop snapshot** is the first snapshot whose S* (9.7) is on or
+  after the hard-stop session.
+- **Its analysis set** is the 9.7 analysis set restricted to
+  `scoring_session` on or before the hard-stop session. The gate line for
+  that snapshot is computed on the same restriction.
+- Every bar, test, seed, null, diagnostic, floor and verdict row is
+  unchanged. The 9.15 run-once rule applies.
+
+### 10.2 What the report must say
+
+- The hard-stop gate line goes beside the verdict, with M against Required
+  and the label **"registered power rule NOT met"**.
+- A clear reads as registered, followed by that label.
+- A powered negative arises only under Task 6's interval rule: P1's upper
+  bound below 30 bp and no primary clearing (D5).
+- Anything else is an abstention, reported in those words.
+
+### 10.3 The lock
+
+After this amendment and the C.3 re-freeze, this document is not amended
+again before the readout, except to correct a demonstrated defect. Each
+such correction is recorded with its demonstration, and none may change a
+bar, a test or a verdict row.
+
+### Stated weakness and what is unchanged
+
+This rule was chosen after sigma and rho were known. Neither informs the
+effect, and the bars that control false positives are untouched.
+Unchanged: the gate and its cadence (a PASS before the hard stop runs the
+verdict as already registered), the 120-session hard stop, and Amendments
+5, 6, 8 and 9.
 
 ## Why this exists
 
