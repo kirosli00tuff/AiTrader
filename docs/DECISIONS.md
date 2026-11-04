@@ -148,3 +148,23 @@ same commit as the stage prompt that relies on it.
        session per rerun
      - the credit runway through January: the Max $100 monthly credit
        or a top-up, plus a low-balance alert
+- V5 (2026-11-04 03:04 PDT, user, planning chat): **collector timer moved
+  to weekdays 23:00 America/Vancouver**, from 22:00. The target session
+  rule is unchanged, and Finnhub's whole-date window sees the same day.
+  - **Installed:** ops/systemd/news-collect.timer, copied to
+    ~/.config/systemd/user, then daemon-reload and a timer restart.
+  - **The restart's immediate catch-up run** at 03:04 refused cleanly
+    ("refused_already_present", target 2026-11-02, 633 rows unchanged).
+  - **The collector window is now about 23:00 to 23:45.** Updated in
+    CLAUDE.md, ORCHESTRATION.md, PROMPT_WRITING.md, STAGES.md and the
+    unlaunched STAGE_C.3.md. STAGE_C.2.md keeps its historical text, and
+    the C.2b continuation will carry the new window.
+  - **Also recorded:** session 2026-10-30 is a new permanent gap. The
+    Monday 2026-11-02 22:02 run was killed by SIGTERM 22 seconds in,
+    during the bar top-up, by a shutdown. Started-then-killed runs are
+    not retried. The likely root cause: suspend.target and sleep.target
+    have been masked since 2026-07-15, so lid close never suspended and
+    the laptop was being shut down to carry it.
+  - **Planning chat set gsettings** lid-close-ac-action to 'nothing'.
+    Kiros is to unmask sleep.target and suspend.target and add a logind
+    drop-in (suspend on battery, ignore on external power).

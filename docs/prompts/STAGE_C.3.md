@@ -63,7 +63,7 @@ that misses a changed file. Each of those would look right and void the
 readout, which justifies max.
 
 Usage and time:
-- Launch at the operator's go-ahead, outside 22:00 to 22:45 America/
+- Launch at the operator's go-ahead, outside 23:00 to 23:45 America/
   Vancouver on weekdays. No fixed end. Expect 2 to 4 hours.
 - Checkpoint to reports/C.3_STATE.md after every step, and resume from it
   after any usage limit or reboot.
@@ -262,7 +262,7 @@ GUARDRAILS
   Never use the repo .venv.
 - At most 1 heavy compute job, the test suite. Stop it if free memory
   falls below 2 GB.
-- Nothing runs between 22:00 and 22:45 America/Vancouver on weekdays.
+- Nothing runs between 23:00 and 23:45 America/Vancouver on weekdays.
   Never touch news-collect.timer or news-collect.service.
 - Commits touch only this stage's files, staged by explicit path. There
   is one named final commit and no push. COLLECTION_LOG.md is never
