@@ -175,11 +175,19 @@ Where it differs from the sections above, it wins:
   4. PART 0 (seals, freezes, start gates), then PART A and onward
   5. SCOPE "does NOT", guardrails and the delegation plan
   6. deliverable, the last instruction and END PROMPT
-- Worker cap: 4 to 6 agents at once. At most 2 heavy compute jobs, and
+- Worker cap: 4 agents at once (V9). At most 2 heavy compute jobs, and
   stop a job if free memory falls below 2 GB.
-- Context wipe: when the lead's context passes about 300k tokens and
-  nothing is running, it writes a RESUME HERE block and "READY FOR WIPE
-  <time>" to its STATE file, and stops.
+- Worker routing (V9, from PropExperiment V59): Sonnet high for counts,
+  inventories, hash checks, test runs and specified mechanical work.
+  Opus high or xhigh for anything that enters a verdict or is published.
+  Fable xhigh for review, with Opus max in a fresh context as the
+  fallback. The lead is always Opus 5.5 at max.
+- Self-wipe (V9, from PropExperiment V60): at about 150k tokens of lead
+  context, at a quiet point, the lead writes RESUME HERE (at most 60
+  lines) and "READY FOR WIPE <time>" to its STATE file, then runs one
+  detached tmux send-keys command that sends /clear and a resume prompt
+  to its own pane. Each prompt carries the exact command. This replaced
+  the earlier stop at about 300k tokens on 2026-11-05.
 - Commits: only the stage's own files and one named final commit. No
   push. The planner reviews the return's sections 1 and 7, then pushes.
 - Before launch, the prompt is committed and pushed with its README row

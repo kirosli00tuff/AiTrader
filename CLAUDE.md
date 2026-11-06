@@ -146,6 +146,8 @@ The ThinkPad has 14 GB of RAM and a recorded out-of-memory incident.
 
 ### Context hygiene (ported from PropExperiment 2026-10-10)
 
+From 2026-11-05 (docs/DECISIONS.md V9): the lead self-wipes at about 150k tokens of context, at a quiet point, with the command its stage prompt carries, and workers are routed by complexity (Sonnet high for counts, checks and test runs, Opus for verdict or published work, Fable xhigh for review). docs/PROMPT_WRITING.md section 8 has the details.
+
 Usage is context size times steps: every step re-reads the agent's whole
 context. PropExperiment measured stages of 700M to 800M tokens, about 97
 percent cache reads.

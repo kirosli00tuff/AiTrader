@@ -195,3 +195,66 @@ same commit as the stage prompt that relies on it.
     review.
   - **GitHub CLI:** `gh` is logged out on the laptop (invalid token), so
     P.1 stops before any remote. Kiros runs `gh auth login`.
+- V7 (2026-11-05, user, planning chat): **public profile layout and the
+  merged Stage P.1.**
+  - **Public:** llm-news-drift and PropExperiment are the two main
+    projects. PropExperiment goes public after its own chat's cleanup.
+  - **research-archive:** a new repo grouping the smaller research repos
+    from July to September 2026. Each keeps its history under
+    experiments/<name>/ or solana/<name>/, with one CARD.md each and an
+    index README. Data, keys, wallet files and third-party material are
+    excluded. A source with a key anywhere in its history becomes card
+    only. The solana/ group is marked for Kiros to confirm.
+  - **AiTrader** stays public until the January 2027 readout as the dated
+    audit trail, then is archived and kept public.
+  - **Made private:** kirosliforlio (Kiros's choice), solattn, solclear,
+    MLCryptoEngine and dc-roofing-redesign-concept. The ten private
+    experiment repos stay private. Their code appears in research-archive
+    if it passes the scans.
+  - **Profile README** (kirosli00tuff/kirosli00tuff): the two projects and
+    the archive. No location, email or phone.
+  - **One stage:** the old P.1 and P.2 merge into Stage P.1. It creates
+    every new repo private and makes nothing public. Kiros resolves each
+    [KIROS: confirm] mark, then runs publish/go_public.sh, which refuses
+    while any mark remains.
+  - **Order (replaces V6's):** C.3, then C.2b attempt 2, then P.1.
+  - **C.3 start gate:** the C.3 prompt required FROZEN: match on the C.1
+    manifest, which Amendment 10 made impossible. That was a planner
+    defect. The planner ruled during the run that EXPERIMENT.md, at its
+    Amendment 9 hash 641272...3386, is the only allowed difference.
+- V8 (2026-11-05 22:00 America/Vancouver, user, planning chat): **the
+  second unlock and Stage C.2b.** Kiros: "I unlock it. Run tonight".
+  - **The unlock:** the planning chat wrote reports/c2_UNLOCK.json on
+    2026-11-06 07:13Z on Kiros's explicit instruction, as in V3, after
+    reviewing the C.3 commit 84cb7fb. It binds EXPERIMENT.md 964996...8ebe
+    and the C.3 manifest 19dc1da7...8bc8. The frozen loader accepted it.
+    File sha256 c71446913fcadc164415d7643ed6682f207d33e8de02b28545170bc8f7bc607b.
+    The attempt-1 unlock stays in git history.
+  - **Stage C.2b:** the reusable continuation of C.2, one attempt per
+    launch with per-attempt file names. Normal mode before the hard stop.
+    One --hard-stop run on the first snapshot with S* on or after
+    2027-01-15, whatever its gate says. It carries C.3 items P1 to P6.
+  - **Readiness for attempt 2:** 65 distinct judged collection query dates
+    live at 2026-11-05 22:10, against 60 on snap_20261028, which meets V2
+    item 2.
+  - **No tests in C.2b.** The stale autouse guards C.3 found stay until a
+    re-freeze happens for another reason (C.3 return section 7 item 4).
+- V9 (2026-11-05, user, planning chat): **PropExperiment prompt structure,
+  2026-11-05 update.** Kiros asked the planning chat to read PropExperiment
+  docs/prompts/PROMPT_STRUCTURE.md (e11d9ea, V59 and V60). Adopted:
+  - **Self-wipe** at about 150k tokens of lead context, at a quiet point,
+    with one detached tmux send-keys command that sends /clear and a
+    resume prompt to the lead's own pane. This replaces the stop at about
+    300k. It was sent to the running C.3 as a planner note at 22:06, and
+    C.3 self-wiped twice without loss.
+  - **Worker routing by complexity:** Sonnet high for counts, inventories,
+    hash checks, test runs and specified mechanical work. Opus high or
+    xhigh for verdict or published work. Fable xhigh for review, with Opus
+    max in a fresh context as the fallback. The lead is always Opus 5.5 at
+    max and never Sonnet. Sonnet workers follow Kiros's own PropExperiment
+    V59 rule (2026-11-04).
+  - **Lean briefs:** exact paths and line ranges. Workers return a path
+    and at most 200 words. Each launch ends with the attach command.
+  - **Kept from AiTrader:** the claude-auto-retry monitor for usage limits
+    (PropExperiment V60 restarts nothing automatically), and the immediate
+    push of the run-once marker.
