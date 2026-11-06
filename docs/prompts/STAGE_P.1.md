@@ -90,7 +90,9 @@ PART 0: START GATES (FIXED HERE)
 - `PYTHONPYCACHEPREFIX=$HOME/.cache/news_eval_pyc .venv-eval/bin/python -m news_eval.freeze check`,
   which must print FROZEN: match
 - `free -m`
-- `gh auth status`, recorded only
+- `gh auth status`, recorded only. gh reads the GNOME keyring, so first
+  run `export XDG_RUNTIME_DIR=/run/user/$(id -u) DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$(id -u)/bus`.
+  Without that export, gh wrongly reports the token as invalid.
 
 0.2 Tools, installed outside the repo and never into .venv:
 - git-filter-repo via `uv tool install git-filter-repo`
