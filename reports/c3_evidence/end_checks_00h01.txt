@@ -1,0 +1,78 @@
+=== date
+2026-11-06 00:01:09 MST
+=== status command
+active
+=== DAILY RUN 2026-11-06T06:01:08Z ===
+action:     collected
+target:     2026-11-04
+formation:  2026-10-01
+GAP:        3 session(s) missing, UNRECOVERABLE by design: 2026-08-28, 2026-09-15, 2026-10-30
+rows:       0 before, 850 after
+spend:      0.333572 USD over 607 calls
+exit:       4
+68|34550|12614
+=== git status --short
+ M COLLECTION_LOG.md
+ M news_eval/constants.py
+ M news_eval/cutoff.py
+ M news_eval/family.py
+ M news_eval/freeze.py
+ M news_eval/gate.py
+ M news_eval/report.py
+ M news_eval/run_c2.py
+ M tests/test_news_eval_freeze.py
+ M tests/test_news_eval_verdict.py
+?? reports/C.3_STATE.md
+?? reports/c3_briefs/
+?? reports/c3_change_record.md
+?? reports/c3_evidence/
+?? reports/c3_harness_freeze.json
+?? reports/c3_lead_notes.md
+?? reports/c3_review_diff.md
+?? reports/c3_review_fix.md
+?? reports/c3_review_runonce.md
+?? reports/c3_rulings.md
+?? reports/c3_tests_record.md
+?? tests/test_news_eval_hardstop.py
+=== git log --oneline -3
+86adee9 docs: STAGE_P.1 gh keyring note (DBUS export needed outside the desktop session)
+66b9e3c docs: V6 and Stage P.1 prompt (public repo llm-news-drift, local build, no push)
+e8b3d2c ops: collection timer to weekdays 23:00 America/Vancouver (operator request, V5); session 2026-10-30 gap recorded
+=== sha256sum EXPERIMENT.md
+964996723df6b1d6778461bad664e1599fdac9ca21dbe5e924f5214c3da78ebe  EXPERIMENT.md
+=== freeze check
+manifest /home/kiros-li/Documents/GitHub/AiTrader/reports/c3_harness_freeze.json sha256 19dc1da78608f7f9d5fdf1fedc0edf024bb39529be1dabbc45681ce393d38bc8
+FROZEN: match
+exit=0
+=== old manifest byte compare: git show c757324:reports/c1_harness_freeze.json | cmp - reports/c1_harness_freeze.json
+cmp exit=0
+77c9bd73f0a98e9e3c909ef2e3d57defe4ee4375e85e89cad2992e8c8840b2a9  reports/c1_harness_freeze.json
+19dc1da78608f7f9d5fdf1fedc0edf024bb39529be1dabbc45681ce393d38bc8  reports/c3_harness_freeze.json
+=== find news_eval -name '*.pyc' | wc -l
+0
+=== ls -la reports/c2* reports/c2/
+-rw-rw-r-- 1 kiros-li kiros-li   347 Oct 28 17:19 reports/c2_UNLOCK.json
+-rw-rw-r-- 1 kiros-li kiros-li 21540 Oct 28 17:32 reports/c2_gate_verify.md
+-rw-rw-r-- 1 kiros-li kiros-li  2375 Oct 28 17:34 reports/c2_rulings.md
+
+reports/c2:
+total 20
+drwxrwxr-x 4 kiros-li kiros-li 4096 Oct 28 17:26 .
+drwxrwxr-x 8 kiros-li kiros-li 4096 Nov  5 23:49 ..
+-rw-rw-r-- 1 kiros-li kiros-li 1250 Oct 28 17:22 gate_log.jsonl
+drwxrwxr-x 2 kiros-li kiros-li 4096 Oct 28 17:22 snap_20261028
+drwxrwxr-x 2 kiros-li kiros-li 4096 Oct 28 17:30 verify_gate
+
+reports/c2/:
+total 20
+drwxrwxr-x 4 kiros-li kiros-li 4096 Oct 28 17:26 .
+drwxrwxr-x 8 kiros-li kiros-li 4096 Nov  5 23:49 ..
+-rw-rw-r-- 1 kiros-li kiros-li 1250 Oct 28 17:22 gate_log.jsonl
+drwxrwxr-x 2 kiros-li kiros-li 4096 Oct 28 17:22 snap_20261028
+drwxrwxr-x 2 kiros-li kiros-li 4096 Oct 28 17:30 verify_gate
+=== free -m
+               total        used        free      shared  buff/cache   available
+Mem:           15118       11351         857        5099        7839        3767
+Swap:           4095        1486        2609
+=== hard stop 0.2
+2027-01-15

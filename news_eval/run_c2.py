@@ -9,6 +9,11 @@ STOPPED). Two steps, so the 9.8 gate has run on the exact bytes analysed:
     python -m news_eval.run_c2 run --snapshot <dir>/news_experiment_snapshot.db \
         --out-dir <dir2> --gate-log <jsonl> --relevance-summary <json>
 
+The hard-stop readout (Amendment 10.1) adds one flag to the second step:
+
+    python -m news_eval.run_c2 run --hard-stop --snapshot <db> --out-dir <dir2> \
+        --gate-log <jsonl> --relevance-summary <json>
+
 Test-only flags (C.1 lead ruling S5): --unlock and --real-db on `snapshot`;
 --manifest, --unlock, --marker, --repo-root and --real-db on `run`. Outside
 test mode (NEWS_EVAL_TEST_MODE=1, set by the test suite only) each is refused
@@ -62,6 +67,18 @@ nothing written:
                       sha256 with pass true and status ok, whose S* equals 5's
                       and whose manifest_sha256 equals 1's (ruling S2), and
                       no FAIL or degenerate entry for that sha256
+
+                      Under --hard-stop (Amendment 10.1, STAGE C.3 A3) 5's S*
+                      must be on or after constants.HARD_STOP_SESSION, no
+                      entry for this sha256 may be degenerate, at least one
+                      status ok entry for it (pass true or false) must carry
+                      5's S*, 1's manifest_sha256 and the analysis_cutoff of
+                      5's S*, and no earlier entry for another snapshot may
+                      have passed or already reached the hard stop. Outside
+                      test mode the log must be GATE_LOG_REL (RunConfig), so
+                      those checks see every gate run. Without the flag this
+                      check is exactly as frozen in C.1.
+
   7 relevance_summary the relevance.summarize JSON exists and parses; its
                       sha256 is recorded (8.3: the rates go with the verdict)
   8 outputs_absent    none of the output files exists in --out-dir
@@ -134,8 +151,10 @@ STOPPED_NAME = "results_STOPPED.json"
 OUTPUT_NAMES = (RESULTS_NAME, RUN_META_NAME, VERDICT_NAME, STOPPED_NAME)
 
 SUCCESSOR_DRAFT_REL = "docs/SUCCESSOR_PREREG_DRAFT.md"
+GATE_LOG_REL = "reports/c2/gate_log.jsonl"  # STAGE C.2's log; pinned by --hard-stop
 RELEVANCE_SCHEMA = "c1_relevance_summary/1"
 GATE_STATUS_OK = "ok"
+GATE_LINE_FIELDS = ("C", "M", "required", "sigma", "rho")  # report.py's 10.2 line
 # Ruling S7: the thread settings run_meta records (value, or null if unset).
 THREAD_ENV_VARS = ("OPENBLAS_NUM_THREADS", "OMP_NUM_THREADS",
                    "MKL_NUM_THREADS")
@@ -320,6 +339,7 @@ class RunConfig:
     repo_root: Path
     real_db: str
     argv: tuple[str, ...] = ()
+    hard_stop: bool = False
 
     def __post_init__(self) -> None:
         """Ruling S5 (and S3 for repo_root): outside test mode every path a
@@ -334,6 +354,10 @@ class RunConfig:
             "repo_root": freeze.REPO_ROOT,
             "real_db": data.COMPILED_REAL_DB_PATH,
         }
+        if self.hard_stop:
+            # 10.1's "no gate run has passed" and "first snapshot" hold only
+            # over the one log every gate run appends to (C.3 review).
+            registered["gate_log"] = freeze.REPO_ROOT / GATE_LOG_REL
         bad = [f"{name}={os.fspath(getattr(self, name))!r}"
                for name, want in registered.items()
                if os.path.realpath(getattr(self, name))
@@ -343,6 +367,11 @@ class RunConfig:
                           "registered default; path overrides are test-only "
                           f"({data.TEST_MODE_ENV}=1 is set by the test suite "
                           "only; C.1 ruling S5)")
+
+
+def _mode(cfg: RunConfig) -> str:
+    """The run mode the marker and run_meta record (STAGE C.3 A3)."""
+    return K.MODE_HARD_STOP if cfg.hard_stop else K.MODE_NORMAL
 
 
 def _check_numpy(cfg: RunConfig, facts: Mapping[str, Any]) -> dict:
@@ -471,6 +500,53 @@ def _check_s_star(cfg: RunConfig, facts: Mapping[str, Any]) -> dict:
             "excluded_query_dates": sorted(excluded)}
 
 
+def _hard_stop_gate(cfg: RunConfig, facts: Mapping[str, Any], mine: list,
+                    others: list) -> dict:
+    """Precondition 6 under --hard-stop (Amendment 10.1, STAGE C.3 A3).
+
+    mine and others are (line number, entry) pairs from the gate log, for this
+    snapshot's sha256 and for any other. A status ok entry counts whether it
+    passed or failed; raises Refused otherwise, with nothing written."""
+    digest = facts["snapshot_sha256"]
+    s_star = facts["s_star"]
+    if s_star < K.HARD_STOP_SESSION:
+        raise Refused("gate_pass", f"--hard-stop needs S* on or after the hard "
+                      f"stop: S* {s_star} is earlier than "
+                      f"{K.HARD_STOP_SESSION}")
+    bad = [i for i, e in mine if e.get("status") != GATE_STATUS_OK]
+    if bad:
+        raise Refused("gate_pass", f"gate log has a degenerate entry for "
+                      f"{digest} (lines {bad})")
+    # The 10.2 gate line must be printable: a missing quantity refuses here,
+    # with nothing written, rather than stopping the single run after the marker.
+    usable = [(i, e) for i, e in mine
+              if isinstance(e.get("pass"), bool)
+              and e.get("s_star") == s_star
+              and e.get("manifest_sha256") == facts["manifest_sha256"]
+              and e.get("analysis_cutoff") == cutoff.analysis_cutoff(s_star)
+              and all(isinstance(e.get(k), (int, float))
+                      and not isinstance(e.get(k), bool)
+                      for k in GATE_LINE_FIELDS)]
+    if not usable:
+        raise Refused("gate_pass", f"no usable gate entry for sha256 {digest} "
+                      f"with S* {s_star} and manifest_sha256 "
+                      f"{facts['manifest_sha256']}")
+    # 10.1 applies only "If no gate run has passed by the hard stop", and the
+    # hard-stop snapshot is the FIRST snapshot whose S* reaches the hard stop.
+    first_line = mine[0][0]
+    earlier = [i for i, e in others if i < first_line and (
+        e.get("pass") is True
+        or (isinstance(e.get("s_star"), str)
+            and e["s_star"] >= K.HARD_STOP_SESSION))]
+    if earlier:
+        raise Refused("gate_pass", f"--hard-stop: an earlier gate log entry "
+                      f"for another snapshot passed or already reached the "
+                      f"hard stop {K.HARD_STOP_SESSION} (lines {earlier})")
+    line_no, entry = usable[-1]
+    return {"gate_log_sha256": sha256_file(cfg.gate_log),
+            "gate_entry_line": line_no, "gate_entry": entry}
+
+
 def _check_gate_pass(cfg: RunConfig, facts: Mapping[str, Any]) -> dict:
     digest = facts["snapshot_sha256"]
     try:
@@ -478,6 +554,7 @@ def _check_gate_pass(cfg: RunConfig, facts: Mapping[str, Any]) -> dict:
     except OSError as exc:
         raise Refused("gate_pass", f"gate log unreadable: {exc}") from None
     mine = []
+    others = []
     for i, line in enumerate(lines, 1):
         if not line.strip():
             continue
@@ -488,6 +565,10 @@ def _check_gate_pass(cfg: RunConfig, facts: Mapping[str, Any]) -> dict:
                 from None
         if isinstance(entry, dict) and entry.get("inputs_sha256") == digest:
             mine.append((i, entry))
+        elif isinstance(entry, dict):
+            others.append((i, entry))
+    if cfg.hard_stop:
+        return _hard_stop_gate(cfg, facts, mine, others)
     bad = [i for i, e in mine
            if e.get("pass") is not True or e.get("status") != GATE_STATUS_OK]
     if bad:
@@ -586,6 +667,7 @@ def write_marker(cfg: RunConfig, facts: Mapping[str, Any]) -> dict:
     appeared after precondition 3 (a concurrent run)."""
     body = {
         "schema": K.RUN_ONCE_SCHEMA,
+        "mode": _mode(cfg),
         "manifest_sha256": facts["manifest_sha256"],
         "snapshot_sha256": facts["snapshot_sha256"],
         "s_star": facts["s_star"],
@@ -689,6 +771,7 @@ def environment_record() -> dict:
 def _run_meta(cfg: RunConfig, facts: Mapping[str, Any], succ: dict) -> dict:
     return {
         "schema": "c2_run_meta/1",
+        "mode": _mode(cfg),
         "argv": list(cfg.argv),
         "utc_start": facts["utc_start"],
         "utc_marker": facts["marker"]["utc_time"],
@@ -835,7 +918,8 @@ def _config(args: argparse.Namespace, argv: list[str]) -> RunConfig:
         relevance_summary=Path(args.relevance_summary),
         repo_root=repo_root,
         real_db=_default(args.real_db, "REAL_DB_PATH"),
-        argv=tuple(argv))
+        argv=tuple(argv),
+        hard_stop=args.hard_stop)
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -853,6 +937,10 @@ def _parser() -> argparse.ArgumentParser:
     r.add_argument("--out-dir", required=True)
     r.add_argument("--gate-log", required=True)
     r.add_argument("--relevance-summary", required=True)
+    r.add_argument("--hard-stop", action="store_true",
+                   help="the hard-stop readout (EXPERIMENT.md Amendment 10.1): "
+                   "precondition 6 accepts a status ok gate entry that failed; "
+                   "refused when S* is before the hard-stop session")
     r.add_argument("--manifest", default=None,
                    help=f"test mode only; default {freeze.MANIFEST_REL}")
     r.add_argument("--unlock", default=None,

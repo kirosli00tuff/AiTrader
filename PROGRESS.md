@@ -138,6 +138,17 @@ New flags from the feed-work session (2026-07-05, `369b6a6`):
 
 ## Session Log
 
+### 2026-11-05 (Opus 5.5, max lead) Stage C.3: hard-stop readout built and re-frozen; no outcome read
+
+The full record is reports/C.3_RETURN.md.
+
+- **Hard stop:** session 120, 2027-01-15, computed from trading_calendar. `run_c2 run --hard-stop` runs once on the first snapshot whose S* reaches it. If no gate has passed, it prints "registered power rule NOT met" beside the verdict.
+- **Normal mode** stays byte-identical to C.1: 44 of 44 checks on the final code.
+- **New manifest:** reports/c3_harness_freeze.json, sha256 19dc1da78608f7f9d5fdf1fedc0edf024bb39529be1dabbc45681ce393d38bc8, FROZEN: match. reports/c1_harness_freeze.json is untouched.
+- **Tests:** 905 passed, 0 skipped in a clean clone, and 16 of 16 mutants killed. In the repo root the same suite adds 157 teardown errors, all the stale C2_PATHS guards left by C.2 attempt 1.
+- **Reviews, Fable:** no BLOCKING finding. One SHOULD FIX fixed in code, one in the record, and four sent to the C.2b prompt as procedural items.
+- **Next:** Kiros writes the new unlock (return section 7). A gate rerun looks due. P.1's freeze wording needs the c3 manifest before it launches.
+
 ### 2026-10-28 (Opus 5.5, max lead) Stage C.2, first attempt: snapshot taken, 9.8 gate FAIL on power; no verdict run, judgments unread
 
 The full record is reports/C.2_RETURN.md.

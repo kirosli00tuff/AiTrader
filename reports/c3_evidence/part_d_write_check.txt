@@ -1,0 +1,13 @@
+=== date 2026-11-05 23:49:26 MST
+=== freeze write
+wrote /home/kiros-li/Documents/GitHub/AiTrader/reports/c3_harness_freeze.json sha256 19dc1da78608f7f9d5fdf1fedc0edf024bb39529be1dabbc45681ce393d38bc8
+exit=0
+=== freeze check
+manifest /home/kiros-li/Documents/GitHub/AiTrader/reports/c3_harness_freeze.json sha256 19dc1da78608f7f9d5fdf1fedc0edf024bb39529be1dabbc45681ce393d38bc8
+FROZEN: match
+exit=0
+=== sha256sum manifests
+19dc1da78608f7f9d5fdf1fedc0edf024bb39529be1dabbc45681ce393d38bc8  reports/c3_harness_freeze.json
+77c9bd73f0a98e9e3c909ef2e3d57defe4ee4375e85e89cad2992e8c8840b2a9  reports/c1_harness_freeze.json
+=== D2 git show c757324:reports/c1_harness_freeze.json | cmp - reports/c1_harness_freeze.json
+cmp exit=0

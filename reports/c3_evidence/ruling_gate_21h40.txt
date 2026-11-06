@@ -1,0 +1,16 @@
+=== date
+2026-11-05 21:40:21 MST
+=== freeze check (planner-ruled gate)
+manifest /home/kiros-li/Documents/GitHub/AiTrader/reports/c1_harness_freeze.json sha256 77c9bd73f0a98e9e3c909ef2e3d57defe4ee4375e85e89cad2992e8c8840b2a9
+MISMATCH inputs: EXPERIMENT.md: bytes 186222 != 182742
+MISMATCH inputs: EXPERIMENT.md: sha256 964996723df6b1d6778461bad664e1599fdac9ca21dbe5e924f5214c3da78ebe != 641272349a0346f61727ee811b8b69b97b91cc43940db3dc840fff60dea13386
+NOT FROZEN: 2 difference(s)
+exit=1
+=== git show c426318:EXPERIMENT.md | sha256sum
+641272349a0346f61727ee811b8b69b97b91cc43940db3dc840fff60dea13386  -
+=== sha256sum EXPERIMENT.md
+964996723df6b1d6778461bad664e1599fdac9ca21dbe5e924f5214c3da78ebe  EXPERIMENT.md
+=== git show c426318:EXPERIMENT.md | wc -c
+182742
+=== wc -c EXPERIMENT.md
+186222 EXPERIMENT.md

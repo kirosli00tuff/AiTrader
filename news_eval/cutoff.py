@@ -1,13 +1,21 @@
 """The 9.1 day exclusion and the 9.7 S* cutoff, over COUNTS only (STAGE C.1).
 
-Both functions are pure: they take the count dictionaries the GATE loader phase
-returns (news_eval.data.GatePhase.state_counts_by_query_date and
+The two count functions are pure: they take the count dictionaries the GATE
+loader phase returns (news_eval.data.GatePhase.state_counts_by_query_date and
 judged_session_status) and never touch a database or a row. They are shared by
 news_eval.gate, news_eval.family and news_eval.run_c2, so their signatures are
 part of the frozen harness:
 
     excluded_query_dates(state_counts) -> (excluded, shares)
     compute_s_star(session_status) -> SStar
+
+Amendment 10.1 (STAGE C.3 A2) adds two pure functions of the S* value, shared
+the same way. analysis_cutoff is the ONE rule for which scoring sessions enter
+the gate rows and the analysis set; hard_stop_record is what gate and family
+report once S* reaches the hard stop:
+
+    analysis_cutoff(s_star) -> latest scoring_session admitted, or None
+    hard_stop_record(s_star) -> {} before the hard stop, else its two keys
 
 Definitions (EXPERIMENT.md Amendment 9; reports/c1_verdict_mapping.md D16, D18):
 
@@ -208,3 +216,30 @@ def compute_s_star(
         stale_pending_rows=sum(n for _, n in stale),
         empty_session_pending=empty_pending,
     )
+
+
+# ------------------------------------------------------ 10.1 hard-stop restriction
+
+def analysis_cutoff(s_star: str | None) -> str | None:
+    """The ONE rule (Amendment 10.1, STAGE C.3 A2) for which scoring sessions
+    enter the gate rows and the analysis set:
+    scoring_session <= min(S*, K.HARD_STOP_SESSION).
+
+    None stays None: an empty analysis set, never "no cutoff" (module
+    docstring). K.HARD_STOP_SESSION is read at call time. ISO date strings
+    order as dates (D16)."""
+    if s_star is None:
+        return None
+    return min(s_star, K.HARD_STOP_SESSION)
+
+
+def hard_stop_record(s_star: str | None) -> dict:
+    """What gate and family report once S* reaches the hard stop (10.1).
+
+    {} when s_star is None or earlier than K.HARD_STOP_SESSION, so output
+    bytes before the hard stop do not change. Otherwise hard_stop_session and
+    analysis_cutoff."""
+    if s_star is None or s_star < K.HARD_STOP_SESSION:
+        return {}
+    return {"hard_stop_session": K.HARD_STOP_SESSION,
+            "analysis_cutoff": analysis_cutoff(s_star)}

@@ -341,7 +341,7 @@ def _funnel(inputs: Inputs, reasons: Sequence[str | None], sstar: cutoff.SStar,
         elif why == DROP_OUTCOME_OTHER:
             other_outcomes[str(row["outcome_state"])] += 1
     excluded_set = frozenset(excluded)
-    s_star = sstar.s_star
+    s_star = cutoff.analysis_cutoff(sstar.s_star)
     judged_on_excluded_days = sum(1 for r in inputs.judged
                                   if r["query_date"] in excluded_set)
     judged_beyond = sum(1 for r in inputs.judged if r["scoring_session"]
@@ -378,7 +378,7 @@ def build_analysis(inputs: Inputs) -> AnalysisSet:
     POSITIVE or NEGATIVE) and the funnel of what was dropped and why."""
     excluded, shares = day_exclusion(inputs.state_counts)
     sstar = cutoff_s_star(inputs.session_status)
-    reason = scorable_filter(excluded, sstar.s_star)
+    reason = scorable_filter(excluded, cutoff.analysis_cutoff(sstar.s_star))
     reasons = [reason(r) for r in inputs.judged]
     gate_rows = tuple(r for r, why in zip(inputs.judged, reasons) if why is None)
     scored = tuple(r for r in gate_rows if is_directional(r))
@@ -805,6 +805,7 @@ def compute_from_inputs(inputs: Inputs) -> dict:
                     if qd in excluded_set)},
             "cutoff": analysis.s_star.as_dict(),
             "funnel": analysis.funnel,
+            **cutoff.hard_stop_record(analysis.s_star.s_star),
         },
         "sensitivity_exclusion": sensitivity_report(flags, inputs.judged,
                                                     analysis.scored),

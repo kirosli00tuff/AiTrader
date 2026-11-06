@@ -161,6 +161,15 @@ UNLOCK_FIELDS = ("schema", "stage", "approver", "utc_time",
 # The run-once marker reports/c2_RUN_ONCE.json (9.15; ruling B2): its schema,
 # and its snapshot_sha256 must equal the sha256 of the file VERDICT opens.
 RUN_ONCE_SCHEMA = "c2_run_once/1"
+# Amendment 10.1: session 120 of analysis_bars.db trading_calendar, 2026-07-28 =
+# session 1, computed at STAGE C.3 Part 0.2.
+HARD_STOP_SESSION = "2027-01-15"
+# Amendment 10.2, quoted.
+HARD_STOP_LABEL = "registered power rule NOT met"
+# The run mode the marker and run_meta record (STAGE C.3 A3).
+MODE_NORMAL = "normal"
+# run_c2 run --hard-stop (Amendment 10.1, STAGE C.3 A3).
+MODE_HARD_STOP = "hard_stop"
 # Ruling S7: run_c2 refuses, with nothing written, unless /proc/meminfo
 # MemAvailable is at least this many MB just before the marker.
 MIN_MEM_AVAILABLE_MB = 2048

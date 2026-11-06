@@ -90,7 +90,8 @@ def test_verdict_table_cells_rebuild_lines_383_to_388_exactly():
              (V.ROW_386_OUTCOME, V.ROW_386_VERDICT),
              (V.ROW_387_OUTCOME, V.ROW_387_VERDICT),
              (V.ROW_388_OUTCOME, V.ROW_388_VERDICT)]
-    for lineno, (outcome, text) in zip(range(383, 389), pairs):
+    # Amendment 10's banner moved the table 7 lines; the row names keep C.1's.
+    for lineno, (outcome, text) in zip(range(390, 396), pairs):
         assert lines[lineno - 1] == f"| {outcome} | {text} |", lineno
 
 

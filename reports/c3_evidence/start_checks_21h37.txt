@@ -1,0 +1,53 @@
+=== date
+2026-11-05 21:37:19 MST
+=== status command
+active
+=== DAILY RUN 2026-11-05T07:01:35Z ===
+action:     collected
+target:     2026-11-03
+formation:  2026-10-01
+GAP:        3 session(s) missing, UNRECOVERABLE by design: 2026-08-28, 2026-09-15, 2026-10-30
+rows:       0 before, 685 after
+spend:      0.233906 USD over 425 calls
+exit:       4
+67|33700|12010
+=== git status --short
+ M COLLECTION_LOG.md
+=== git log --oneline -3
+86adee9 docs: STAGE_P.1 gh keyring note (DBUS export needed outside the desktop session)
+66b9e3c docs: V6 and Stage P.1 prompt (public repo llm-news-drift, local build, no push)
+e8b3d2c ops: collection timer to weekdays 23:00 America/Vancouver (operator request, V5); session 2026-10-30 gap recorded
+=== sha256sum EXPERIMENT.md
+964996723df6b1d6778461bad664e1599fdac9ca21dbe5e924f5214c3da78ebe  EXPERIMENT.md
+=== freeze check
+manifest /home/kiros-li/Documents/GitHub/AiTrader/reports/c1_harness_freeze.json sha256 77c9bd73f0a98e9e3c909ef2e3d57defe4ee4375e85e89cad2992e8c8840b2a9
+MISMATCH inputs: EXPERIMENT.md: bytes 186222 != 182742
+MISMATCH inputs: EXPERIMENT.md: sha256 964996723df6b1d6778461bad664e1599fdac9ca21dbe5e924f5214c3da78ebe != 641272349a0346f61727ee811b8b69b97b91cc43940db3dc840fff60dea13386
+NOT FROZEN: 2 difference(s)
+exit=1
+=== ls -la reports/c2* reports/c2/
+-rw-rw-r-- 1 kiros-li kiros-li   347 Oct 28 17:19 reports/c2_UNLOCK.json
+-rw-rw-r-- 1 kiros-li kiros-li 21540 Oct 28 17:32 reports/c2_gate_verify.md
+-rw-rw-r-- 1 kiros-li kiros-li  2375 Oct 28 17:34 reports/c2_rulings.md
+
+reports/c2:
+total 20
+drwxrwxr-x 4 kiros-li kiros-li 4096 Oct 28 17:26 .
+drwxrwxr-x 6 kiros-li kiros-li 4096 Oct 28 17:41 ..
+-rw-rw-r-- 1 kiros-li kiros-li 1250 Oct 28 17:22 gate_log.jsonl
+drwxrwxr-x 2 kiros-li kiros-li 4096 Oct 28 17:22 snap_20261028
+drwxrwxr-x 2 kiros-li kiros-li 4096 Oct 28 17:30 verify_gate
+
+reports/c2/:
+total 20
+drwxrwxr-x 4 kiros-li kiros-li 4096 Oct 28 17:26 .
+drwxrwxr-x 6 kiros-li kiros-li 4096 Oct 28 17:41 ..
+-rw-rw-r-- 1 kiros-li kiros-li 1250 Oct 28 17:22 gate_log.jsonl
+drwxrwxr-x 2 kiros-li kiros-li 4096 Oct 28 17:22 snap_20261028
+drwxrwxr-x 2 kiros-li kiros-li 4096 Oct 28 17:30 verify_gate
+=== free -m
+               total        used        free      shared  buff/cache   available
+Mem:           15118       11704         577        1881        5008        3414
+Swap:           4095        4093           2
+=== hard stop 0.2
+2027-01-15

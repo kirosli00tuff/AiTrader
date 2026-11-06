@@ -161,6 +161,11 @@ def _analysis(results: Mapping) -> list[str]:
            f"{_label(cut.get('latest_resolved'))}; earliest non-stale pending "
            f"session {_label(cut.get('earliest_nonstale_pending'))}; "
            f"{len(cut.get('sessions') or [])} sessions on the order.",
+           *([f"- Hard stop (10.1): the analysis set and the gate rows are "
+              f"restricted to scoring_session on or before "
+              f"{_label(a.get('analysis_cutoff'))}; the hard-stop session is "
+              f"{_label(a.get('hard_stop_session'))}."]
+             if a.get("hard_stop_session") is not None else []),
            f"- Stale pending rows (more than {K.STALE_PENDING_SESSIONS} "
            f"sessions before the latest resolved): "
            f"{_num(cut.get('stale_pending_rows'))}, in sessions "
@@ -305,7 +310,8 @@ def _net_abstention(na: Mapping | None) -> list[str]:
                     na["quote"])]
 
 
-def _reading_verdict(name: str, d: Mapping) -> list[str]:
+def _reading_verdict(name: str, d: Mapping,
+                     clear_label: bool = False) -> list[str]:
     g = d["gross"]
     reasons = [REASON_WORDS.get(r, _label(r)) for r in g.get("reasons") or []]
     out = [f"### {name.capitalize()} reading"
@@ -339,15 +345,45 @@ def _reading_verdict(name: str, d: Mapping) -> list[str]:
                 + f"; minority share {_pct(dist.get('minority_share'))}; "
                 f"mixed clusters {_num(dist.get('n_mixed_clusters'))}.")
         out.append("")
+    if clear_label and g["gross_reading"] == V.GROSS_CLEARS:
+        out += [f"Label (Amendment 10.2): {K.HARD_STOP_LABEL}.", ""]
     for s in d.get("statements") or []:
         out += _quote("Task 5 and Task 6 (the words that apply)", s)
     return out
 
 
-def _verdict(results: Mapping, decision: Mapping) -> list[str]:
+def _hard_stop_entry(run_meta: Mapping | None) -> Mapping | None:
+    """The gate entry a hard-stop run read (Amendment 10.1), or None in the
+    normal mode or without run_meta."""
+    if run_meta is not None and run_meta.get("mode") == K.MODE_HARD_STOP:
+        return run_meta["gate_entry"]
+    return None
+
+
+def _hard_stop_lines(entry: Mapping) -> list[str]:
+    """The Amendment 10.2 gate line and its label. The label is conditional
+    (C.3 lead ruling): stating NOT met after a PASS would be false, and 10.1
+    applies only when no gate run has passed."""
+    out = [f"Hard-stop gate line (Amendment 10.2): C = {_num(entry['C'], 0)}, "
+           f"M = {_num(entry['M'], 0)}, Required = "
+           f"{_num(entry['required'], 1)}, sigma = {_num(entry['sigma'], 1)} "
+           f"bp, rho = {_num(entry['rho'], 3)}.", ""]
+    if entry["pass"] is False:
+        out += [f"Label (Amendment 10.2): {K.HARD_STOP_LABEL}.", ""]
+    elif entry["pass"] is True:
+        out += ["The gate passed on this snapshot, so the registered power "
+                "rule is met and the Amendment 10.2 label does not apply.", ""]
+    return out
+
+
+def _verdict(results: Mapping, decision: Mapping,
+             hard_stop: Mapping | None = None) -> list[str]:
     out = [H_VERDICT, "", f"One-line summary: {decision['summary']}", ""]
+    if hard_stop is not None:
+        out += _hard_stop_lines(hard_stop)
+    clear_label = hard_stop is not None and hard_stop["pass"] is False
     for name in READINGS:
-        out += _reading_verdict(name, decision["readings"][name])
+        out += _reading_verdict(name, decision["readings"][name], clear_label)
     dis = decision["sensitivity_disagreement"]
     out += ["### Primary against the 8.2 sensitivity reading", ""]
     out += [dis["statement"] if dis.get("differs") else
@@ -581,7 +617,11 @@ def _provenance(meta: Mapping) -> list[str]:
             f"{_label(meta.get('utc_marker'))}.",
             f"- 9.12 condition: draft tracked {_yes(succ.get('tracked'))}, "
             f"last commit {_label(succ.get('last_commit_time'))}, holds "
-            f"{_yes(succ.get('holds'))}.", ""]
+            f"{_yes(succ.get('holds'))}.",
+            *([f"- Run mode: {K.MODE_HARD_STOP} (run_c2 run --hard-stop, "
+               "Amendment 10.1)."]
+              if meta.get("mode") == K.MODE_HARD_STOP else []),
+            ""]
 
 
 # ------------------------------------------------------------------ write
@@ -598,7 +638,7 @@ def write(results: Mapping[str, Any], decision: Mapping[str, Any], *,
     lines += _diagnostics(results, decision)
     lines += _analysis(results)
     lines += _primaries(results, decision)
-    lines += _verdict(results, decision)
+    lines += _verdict(results, decision, _hard_stop_entry(run_meta))
     lines += _cutoff_statement()
     lines += _defect(results, decision)
     lines += _secondaries(results, decision)

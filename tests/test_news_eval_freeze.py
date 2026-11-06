@@ -72,7 +72,7 @@ def test_write_then_check_passes(tree):
 
 def test_manifest_schema_and_pins(tree):
     m = _load(tree["manifest"])
-    assert m["schema"] == "c1_harness_freeze/1"
+    assert m["schema"] == "c3_harness_freeze/1"
     assert re.match(r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} \S+$",
                     m["created_pdt"])
     pins = m["pins"]

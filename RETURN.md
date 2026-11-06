@@ -11,6 +11,21 @@ Model:
 Prompt summary: one line.
 Changes: what changed.
 
+## Prompt: Stage C.3, hard-stop readout build and re-freeze
+
+Date: 2026-11-05 to 2026-11-06
+Model: Opus 5.5 (claude-opus-5-5), max lead, three sessions after two planned self-wipes. Workers: Opus 5.5 xhigh (2), Fable 5.1 xhigh (3).
+Prompt summary: "Read docs/prompts/STAGE_C.3.md in full and execute it as your prompt. Run unattended. Launched 2026-11-05 21:37 America/Vancouver. The collector fires at 23:00 tonight: at 22:55 finish the current tool call, start no new worker, job or test run, checkpoint STATE, and resume at 23:45." Planner messages during the run: the ruling on the 0.1 freeze gate, the missing ETA table, and the self-wipe note.
+Changes:
+- Amendment 10.1 and 10.2 built into news_eval (7 files). 43 hunks in reports/c3_change_record.md, including two edited tests.
+- tests/test_news_eval_hardstop.py is new, 122 cases, with 16 mutants killed.
+- Re-freeze: reports/c3_harness_freeze.json, sha256 19dc1da78608f7f9d5fdf1fedc0edf024bb39529be1dabbc45681ce393d38bc8. The C.1 manifest is untouched.
+- Reviews, rulings and evidence: reports/c3_review_diff.md, c3_review_runonce.md, c3_review_fix.md, c3_rulings.md, c3_lead_notes.md, c3_tests_record.md, c3_evidence/, c3_briefs/.
+- Return document: reports/C.3_RETURN.md. STATE file: reports/C.3_STATE.md.
+- No outcome read, no snapshot, no gate or run_c2 on real data, no spend, no push.
+
+Commit message: "Stage C.3 hard-stop readout build and re-freeze".
+
 ## Prompt: Stage C.2, gate and the single verdict run (first attempt: gate FAIL)
 
 Date: 2026-10-28

@@ -10,13 +10,14 @@ reports/c2_UNLOCK.json for a non-synthetic snapshot (ruling B2).
 
 Manifest (C.1 ruling S2). On a NON_SYNTHETIC database, before any row is
 read, news_eval.freeze.verify checks the frozen manifest (default
-reports/c1_harness_freeze.json under freeze.REPO_ROOT): every frozen file on
+reports/c3_harness_freeze.json under freeze.REPO_ROOT): every frozen file on
 disk, the version and constants pins, and the loaded news_eval modules
 (ruling S3). Any difference refuses. The unlock file's manifest_sha256 must
 then equal the verified manifest's sha256 (ruling B2). On a SYNTHETIC
 database the check runs only when a manifest path is given. Every entry
 carries manifest_sha256: the verified manifest's, or null for a synthetic
 database checked against no manifest. news_eval.run_c2 accepts only a PASS
+(under --hard-stop, Amendment 10.1, a status ok entry that passed or failed)
 whose manifest_sha256 is the manifest it verified itself.
 
 The --real-db, --unlock and --manifest flags are refused (exit 2) outside
@@ -24,12 +25,13 @@ test mode, NEWS_EVAL_TEST_MODE=1 (ruling S5). Flow:
 
 1. state_counts_by_query_date -> cutoff.excluded_query_dates (9.1, D18)
 2. judged_session_status -> cutoff.compute_s_star (9.7, D16)
-3. gate_rows(excluded, S*): y = 10,000 x excess_1session over G, clustered by
+3. gate_rows(excluded, cutoff.analysis_cutoff(S*)), the Amendment 10.1
+   restriction: y = 10,000 x excess_1session over G, clustered by
    scoring_session (9.8, D1); NULL excess rows are counted, never read as 0
    (D25)
-4. directional_counts_by_cluster(excluded, S*): m_c per scoring_session, one
-   COUNT ... GROUP BY (9.8 k_eff); the only bridge to the label column, and it
-   returns directional counts, never a row
+4. directional_counts_by_cluster(excluded, cutoff.analysis_cutoff(S*)): m_c per
+   scoring_session, one COUNT ... GROUP BY (9.8 k_eff); the only bridge to the
+   label column, and it returns directional counts, never a row
 5. stats.gate_quantities: sigma (ddof 1), one-way ANOVA rho floored at 0, n0,
    k_eff, Required = 11.156 x (sigma / 30)^2 x (1 + (k_eff - 1) x rho), and
    the pass: C (C_dir) >= 60, M >= 1,000, M >= Required. C_G (clusters among
@@ -101,8 +103,9 @@ def _read_inputs(phase: data.GatePhase) -> tuple[dict, cutoff.SStar, object,
                              null_excess_count=0)
         m_c: dict[str, int] = {}
     else:
-        rows = phase.gate_rows(excluded, cut.s_star)
-        m_c = phase.directional_counts_by_cluster(excluded, cut.s_star)
+        limit = cutoff.analysis_cutoff(cut.s_star)
+        rows = phase.gate_rows(excluded, limit)
+        m_c = phase.directional_counts_by_cluster(excluded, limit)
     excluded_shares = {d: shares[d] for d in excluded}
     return excluded_shares, cut, rows, m_c
 
@@ -198,6 +201,7 @@ def evaluate(db_path: str | os.PathLike, *,
         "manifest_sha256": manifest_sha256,
         "s_star": cut.s_star,
         "s_star_case": cut.case,
+        **cutoff.hard_stop_record(cut.s_star),
         "latest_resolved_session": cut.latest_resolved,
         "earliest_nonstale_pending_session": cut.earliest_nonstale_pending,
         "stale_pending_count": cut.stale_pending_rows,

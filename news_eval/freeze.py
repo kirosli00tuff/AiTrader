@@ -1,9 +1,13 @@
-"""The C.1 harness freeze: manifest writer and checker (STAGE C.1 Task 8c; Amendment 9.15).
+"""The harness freeze: manifest writer and checker (STAGE C.1 Task 8c; Amendment 9.15).
 
-    python -m news_eval.freeze write [--out reports/c1_harness_freeze.json]
-    python -m news_eval.freeze check [--manifest reports/c1_harness_freeze.json]
+The harness was re-frozen at STAGE C.3 (A5), after Amendments 10.1 and 10.2.
+reports/c1_harness_freeze.json stays committed as the record of the C.1 freeze;
+the gate and the runner verify against reports/c3_harness_freeze.json.
 
-`write` records schema "c1_harness_freeze/1":
+    python -m news_eval.freeze write [--out reports/c3_harness_freeze.json]
+    python -m news_eval.freeze check [--manifest reports/c3_harness_freeze.json]
+
+`write` records schema "c3_harness_freeze/1":
 - created_pdt: the `date "+%Y-%m-%d %H:%M:%S %Z"` command's output.
 - pins: the three 9.11 seeds, every public UPPER_CASE value of
   news_eval.constants (JSON form, sorted), git HEAD before the freeze commit,
@@ -54,9 +58,9 @@ import numpy as np
 
 from news_eval import constants as K
 
-SCHEMA = "c1_harness_freeze/1"
+SCHEMA = "c3_harness_freeze/1"
 REPO_ROOT = Path(__file__).resolve().parent.parent
-MANIFEST_REL = "reports/c1_harness_freeze.json"
+MANIFEST_REL = "reports/c3_harness_freeze.json"
 HARNESS_DIR = "news_eval"
 TESTS_DIR = "tests"
 TESTS_GLOB = "test_news_eval_*.py"
