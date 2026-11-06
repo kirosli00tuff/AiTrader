@@ -168,3 +168,30 @@ same commit as the stage prompt that relies on it.
   - **Planning chat set gsettings** lid-close-ac-action to 'nothing'.
     Kiros is to unmask sleep.target and suspend.target and add a logind
     drop-in (suspend on battery, ignore on external power).
+- V6 (2026-11-05, user, planning chat): **the public showcase repo.**
+  Kiros is applying to schools with this experiment and PropExperiment as
+  his main coding projects.
+  - **The repo:** `llm-news-drift`. Experiment-only, with history from
+    Stage A (74532e7, 2026-07-27) onward. Built locally by Stage P.1 with
+    a deterministic, re-runnable extraction from AiTrader. Frozen files
+    keep their paths, so `freeze check` verifies in a fresh clone.
+  - **Privacy:** a mailmap moves kiros1134@gmail.com to
+    249804683+kirosli00tuff@users.noreply.github.com in the extracted
+    history.
+  - **Order:** P.1 runs before C.3, because the application timing comes
+    first and C.3 is not needed until January.
+  - **Voice:** the README is first person, drafted by the planning chat
+    for Kiros to edit. Statements needing his confirmation are marked
+    [KIROS: confirm].
+  - **docs/AI_USE.md**, per Kiros, states:
+    - that the code is generated and written with Claude Code and its
+      CLI options
+    - a full breakdown of how prompts are structured, the organization,
+      and the markdown files
+    - that he personally reviews every line of code written afterwards
+  - **Not shipped:** headline datasets (the relevance CSVs are redacted),
+    databases, keys and the engine.
+  - **Visibility:** created private, then flipped public by Kiros after
+    review.
+  - **GitHub CLI:** `gh` is logged out on the laptop (invalid token), so
+    P.1 stops before any remote. Kiros runs `gh auth login`.
