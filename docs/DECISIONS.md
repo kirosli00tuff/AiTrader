@@ -258,3 +258,21 @@ same commit as the stage prompt that relies on it.
   - **Kept from AiTrader:** the claude-auto-retry monitor for usage limits
     (PropExperiment V60 restarts nothing automatically), and the immediate
     push of the run-once marker.
+- V10 (2026-11-07, user, planning chat): **going public, and research-archive
+  without Solana.**
+  - **Public at about 10:18:** llm-news-drift and the profile repo. Kiros
+    confirmed all 18 marks ("All good with me"), commit 84586ac. The planner
+    ran publish/go_public.sh in tmux with the typed confirmation. Kiros turned
+    on "Include private contributions".
+  - **Licence:** none chosen. "All rights reserved" stays for llm-news-drift and
+    research-archive until Kiros picks one.
+  - **research-archive:** Kiros said "Put up research-archive. No solana." The
+    six solana sources (solattn, solback, solceil, solclear, solcopy, soltool)
+    leave the archive, its README and the profile. The originals stay private.
+    The solana cards committed in bb09341 stay in AiTrader's history.
+  - **Full legal name** in source LICENSE files: replaced by the handle
+    kirosli00tuff in the archive build, matching the mailmap.
+  - **go_public.sh:** a repo that is already public is updated by an appended
+    commit and a fast-forward push, never a rebuild or a force-push.
+  - **Stage P.2** does the archive work and creates the repo private. The
+    planner flips it public after Kiros confirms the 12 card lessons.
