@@ -24,13 +24,5 @@ experiments	retail-power-limits	/mnt/large-storage/Archive/GitHub/retail-power-l
 # Never included: AiTrader, PropExperiment and its worktrees, two personal repos, names withheld (R39), and
 # ~/OpenManus (a third-party clone, not Kiros's work). Six more repos from the same period were left out on
 # 2026-11-07 at Kiros's request (AiTrader docs/DECISIONS.md V10). Their originals stay private.
-# [KIROS: confirm] 10 of the 12 kept sources still name three of those six repos, or the word solana, in their
-# own files. Occurrences across all blobs of the 4c06138 build: program-audit 4,989 (170 of them in
-# findings/agentA/CROSS_REPO.md and .json), ORBExperiment 694, NPLExperiment 488, MLCryptoEngine 191,
-# ETFExperiment 87, retail-power-limits 50, VRPExperiment 23, PMExperiment 18, MBTExperiment 10, InsiderExperiment 5.
-# 14 commit messages name them, and so does EXCLUDE.txt line 52 at the archive root, the rule that drops
-# program-audit's audit files on two of them. No path names them. Details in AiTrader reports/P.2_RETURN.md
-# section 7. Delete these eight lines to publish the archive as built, or pick another option given there.
-# go_public.sh refuses while this mark remains.
 # Other Git repos under ~/Documents, ~/Desktop and /mnt/large-storage/Archive (find -maxdepth 4 -name .git): none
 # found beyond the lists above. paperssrmtestbed in the archive folder is not a Git repo and is left out.
