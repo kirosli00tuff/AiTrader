@@ -1,5 +1,5 @@
 # HFExperiment
-Group experiments. First commit 2026-08-23, last commit 2026-08-28, 13 commits.
+Group experiments. First commit 2026-08-23, last commit 2026-08-28, 13 commits in the original repo. Here `git log -- experiments/HFExperiment/` shows 14: the extra one adds this card.
 
 ## Question
 Does a top-five book of 12-1 cross-sectional momentum names earn positive daily excess return over its universe after costs? A second question was whether a real broker could run that book at micro size, with fractional orders of 45 USD per name through its API.
@@ -22,5 +22,5 @@ Section 0 verdict BLOCKED (REGISTRATION.md). All 20 names in the test book were 
 ## Why it stopped
 The operator closed the experiment on 2026-08-26, the day after the BLOCKED verdict. The shadow timer was disarmed before its first accrual. No capital was deployed (progress.md). The closure entry gives no further reason.
 
-## One thing learned `[KIROS: confirm]`
+## One thing learned
 A broker can mark every instrument as fractional-eligible and still refuse fractional orders through its API, so only a placed order settles the question.

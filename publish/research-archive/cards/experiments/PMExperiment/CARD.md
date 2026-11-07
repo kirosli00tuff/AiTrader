@@ -1,5 +1,5 @@
 # PMExperiment
-Group experiments. First commit 2026-08-29, last commit 2026-09-02, 36 commits.
+Group experiments. First commit 2026-08-29, last commit 2026-09-02, 36 commits in the original repo. Here `git log -- experiments/PMExperiment/` shows 37: the extra one adds this card.
 
 ## Question
 Are prediction-market prices mis-calibrated by enough to survive the costs a Canadian retail participant actually pays (README.md)?
@@ -25,5 +25,5 @@ The one number produced is BAND-OPEN: over entry prices of 91 to 99 cents held t
 ## Why it stopped
 The one route left, Kalshi Internal Use, needs an established legal entity. The operator does not hold one and decided not to create one (README.md). The README records this as a cost decision, not evidence about H1 (README.md).
 
-## One thing learned `[KIROS: confirm]`
+## One thing learned
 A claim about what a source permits needs a quoted clause, its effective date and its fetch date, or it is recorded as unmeasured.

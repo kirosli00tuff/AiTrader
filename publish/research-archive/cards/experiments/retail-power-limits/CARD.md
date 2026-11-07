@@ -1,5 +1,5 @@
 # retail-power-limits
-Group experiments. First commit 2026-08-29, last commit 2026-08-29, 3 commits.
+Group experiments. First commit 2026-08-29, last commit 2026-08-29, 3 commits in the original repo. Here `git log -- experiments/retail-power-limits/` shows 4: the extra one adds this card.
 
 ## Question
 Across four pre-registered experiments, was the binding constraint whether a published effect exists, or whether an achievable sample could detect an effect of the reported size (README.md)?
@@ -28,5 +28,5 @@ The note says this is not evidence that those anomalies are absent, and that fou
 ## Why it stopped
 The note was written and shipped in one stage, with nothing outstanding inside the repository (progress.md).
 
-## One thing learned `[KIROS: confirm]`
+## One thing learned
 Compute the minimum detectable effect from dispersion and sample size alone, and commit the gate before the measurement it judges.

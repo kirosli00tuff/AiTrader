@@ -1,5 +1,5 @@
 # InsiderExperiment
-Group experiments. First commit 2026-08-25, last commit 2026-08-25, 7 commits.
+Group experiments. First commit 2026-08-25, last commit 2026-08-25, 7 commits in the original repo. Here `git log -- experiments/InsiderExperiment/` shows 8: the extra one adds this card.
 
 ## Question
 Do opportunistic and cluster insider purchases, disclosed on Form 4, predict positive abnormal returns that survive a measured cost band at achievable size? It is a net-of-cost survival test inside a liquid 500-name universe.
@@ -22,5 +22,5 @@ The corpus gate passed: 4,585 qualifying events against a floor of 1,000, and 99
 ## Why it stopped
 The registered primary design could not resolve the effect at achievable power. Stage B was never written and the repo closed on that finding on 2026-08-25 (REGISTRATION.md Section 17, progress.md).
 
-## One thing learned `[KIROS: confirm]`
+## One thing learned
 Weighting by a skewed quantity such as dollar volume can collapse a wide book into a narrow one, and that concentration alone can set the power of the test.

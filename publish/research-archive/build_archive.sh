@@ -196,7 +196,7 @@ while IFS= read -r line || [[ -n "$line" ]]; do
   tabs="${line//[^$'\t']/}"
   (( ${#tabs} == 5 )) || die "SOURCES.txt line $lineno: expected 6 TAB-separated fields"
   IFS=$'\t' read -r group name path branch side status <<<"$line"
-  [[ "$group" =~ ^(experiments|solana)$ ]] || die "SOURCES.txt line $lineno: bad group '$group'"
+  [[ "$group" == experiments ]] || die "SOURCES.txt line $lineno: bad group '$group'"
   [[ "$name" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || die "SOURCES.txt line $lineno: bad name '$name'"
   [[ "$path" == /* ]] || die "SOURCES.txt line $lineno: path must be absolute"
   [[ "$branch" =~ ^[A-Za-z0-9][A-Za-z0-9._/-]*$ ]] || die "SOURCES.txt line $lineno: bad branch '$branch'"
@@ -254,11 +254,11 @@ if [[ -e "$out_abs" ]]; then
   [[ -d "$out_abs" ]] || die "--out exists and is not a folder: $out_abs"
   if [[ -n "$(ls -A -- "$out_abs")" ]]; then
     (( force )) || die "--out is not empty: $out_abs (use --force to replace an earlier build)"
-    # --force removes only a folder that looks like an earlier build: .git, the two groups, the two
+    # --force removes only a folder that looks like an earlier build: .git, experiments, the two
     # root files, and nothing else at the top level.
     while IFS= read -r entry; do
       case "$entry" in
-        .git|experiments|solana|README.md|EXCLUDE.txt) ;;
+        .git|experiments|README.md|EXCLUDE.txt) ;;
         *) die "--force refused: $out_abs holds '$entry', so it does not look like an earlier build" ;;
       esac
     done < <(ls -A -- "$out_abs")

@@ -1,5 +1,5 @@
 # ORBExperiment
-Group experiments. First commit 2026-08-28, last commit 2026-08-29, 59 commits.
+Group experiments. First commit 2026-08-28, last commit 2026-08-29, 59 commits in the original repo. Here `git log -- experiments/ORBExperiment/` shows 60: the extra one adds this card.
 
 ## Question
 Among US common stocks with high opening relative volume, does a breakout of the first 5-minute range predict continuation to the close? It must do so by enough to clear modeled commissions, fees, borrow and slippage, out of sample from 2023-01-03 (README.md).
@@ -12,6 +12,7 @@ First commit 2026-08-28. Last commit 2026-08-29.
 
 ## Data
 One-minute bars from Alpaca (primary bar vendor) and Massive (reference vendor, the only source of delisting dates), reached with paper-account market-data keys that grant no trading (README.md). The data is not included in this archive.
+The delisted-ticker listing, reports/stage_a1r/task6_delisted.json, is excluded from this archive. It lists 6,421 names pulled from Massive's reference endpoint. That is bulk vendor data, and nothing shows a right to redistribute it (EXCLUDE.txt).
 
 ## Method
 Each session at 09:35 New York time, rank US common stocks by first-5-minute volume over its trailing 14-session median and take the top 20, after price, volume and ATR filters. Delisted names are included (REGISTRATION.md).
@@ -25,5 +26,5 @@ H1 closed as `cost-bound` (HYPOTHESES.md). The measured slippage band gave a pes
 ## Why it stopped
 H1 closed on cost before the bar-integrity re-pull, due 2026-09-12, could run (progress.md). The last commit is the close-out of that pass.
 
-## One thing learned `[KIROS: confirm]`
+## One thing learned
 The doubt registered first, that realistic slippage could exceed the whole gross edge, is the one that closed the hypothesis, for the reason it gave.

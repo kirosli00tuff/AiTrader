@@ -1,5 +1,5 @@
 # program-audit
-Group experiments. First commit 2026-08-29, last commit 2026-09-13, 83 commits.
+Group experiments. First commit 2026-08-29, last commit 2026-09-13, 83 commits in the original repo. Here `git log -- experiments/program-audit/` shows 84: the extra one adds this card.
 
 ## Question
 A neutral audit of the research program, findings only (README.md). Agent A tested whether the program closed hypotheses too early or too hard. Agent B tested whether it claimed more than its evidence supports. Agent C refereed both (findings/METHOD.md).
@@ -25,5 +25,5 @@ Incomplete. At the last recorded state, Agent A had finished 13 of 13 repositori
 ## Why it stopped
 Not recorded. The last commits launch B run 16 and C run 16 on 2026-09-13 after earlier runs were cut by session limits (provenance/RUN_LOG.md). No later outcome is recorded.
 
-## One thing learned `[KIROS: confirm]`
+## One thing learned
 The cross-repository failures had one shape: a repository stated a blocker as a fact about the world, and a sibling's dated record said otherwise.

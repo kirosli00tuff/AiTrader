@@ -1,5 +1,5 @@
 # NPLExperiment
-Group experiments. First commit 2026-08-26, last commit 2026-09-21, 41 commits.
+Group experiments. First commit 2026-08-26, last commit 2026-09-21, 41 commits in the original repo. Here `git log -- experiments/NPLExperiment/` shows 42: the extra one adds this card.
 
 ## Question
 Do newly listed Hyperliquid perpetuals drift down over 30 and 90 days by more than a short pays in funding and fees? This founding hypothesis is H1. Later entries in the same register (H2 to H5) tested narrower versions of it.
@@ -25,5 +25,5 @@ H3 and H4 fired BLOCKED on measured venue rates (HYPOTHESES.md). H2 had 55 of 63
 ## Why it stopped
 H1 closed on its FAIL read, and its collectors were disarmed (report.md). The operator then cancelled the whole project on 2026-09-21 to move attention to other work. The record calls this a scope decision, not a verdict, and says no hypothesis was disproven by it (DECISIONS.md, the second ADR-035).
 
-## One thing learned `[KIROS: confirm]`
+## One thing learned
 The market priced most of the decline of new listings into funding, and the drift left over was too small for the registered trade.

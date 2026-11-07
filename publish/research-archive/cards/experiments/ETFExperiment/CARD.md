@@ -1,5 +1,5 @@
 # ETFExperiment
-Group experiments. First commit 2026-08-28, last commit 2026-08-28, 28 commits.
+Group experiments. First commit 2026-08-28, last commit 2026-08-28, 28 commits in the original repo. Here `git log -- experiments/ETFExperiment/` shows 29: the extra one adds this card.
 
 ## Question
 Do US spot Bitcoin ETF net flow prints predict the next day's BTC return, out of sample, by enough to clear a round trip on Hyperliquid perps? The test uses only values published before the entry time.
@@ -22,5 +22,5 @@ Closed as untestable at achievable power (HYPOTHESES.md). Only 11 of 333 printed
 ## Why it stopped
 The sample could not arrive before the registered deadline. The operator closed H1 on that finding on 2026-08-28, before the outcome map fully fired. The last commit disarmed the remaining collector (report.md, Postscript).
 
-## One thing learned `[KIROS: confirm]`
+## One thing learned
 An archive index tells you a capture exists, but only fetching the capture tells you whether it holds a value, and only the second answers the registered question.

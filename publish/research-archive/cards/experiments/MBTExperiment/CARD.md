@@ -1,11 +1,11 @@
 # MBTExperiment
-Group experiments. First commit 2026-09-02, last commit 2026-09-12, 23 commits.
+Group experiments. First commit 2026-09-02, last commit 2026-09-12, 23 commits in the original repo. Here `git log -- experiments/MBTExperiment/` shows 24: the extra one adds this card.
 
 ## Question
 VRPExperiment left one route open for harvesting the BTC variance premium: CME options on Micro Bitcoin futures through IBKR Canada. This repo measures the two venue figures that route turns on, the margin per short option and the cost legs, against thresholds fixed in advance.
 
 ## Registered before testing
-REGISTRATION.md, first committed 2026-09-02 23:48:40 -0700 with Section 0, the outcome map and the gates. Sections 1 onward followed at 23:51:07, before any quote was stored. The first measurement commit, the paper harness record, came 26 seconds later. A gateway reachability probe at 23:27 came earlier but measured no gate figure.
+REGISTRATION.md, first committed 2026-09-02 23:48:40 -0700 with Section 0, the outcome map and the gates. Sections 1 onward followed at 23:51:07, before any quote was stored. The first measurement commit, the paper harness record, came at 23:54:33, 206 seconds later. A gateway reachability probe at 23:27 came earlier but measured no gate figure.
 
 ## Dates
 First commit 2026-09-02. Last commit 2026-09-12. The closure documents are dated 2026-09-03 and were committed on 2026-09-12.
@@ -23,5 +23,5 @@ VENUE_BLOCKED, unqualified, on capital (CLOSURE.md). CME maintenance margin on o
 ## Why it stopped
 The MARGIN gate failed at a 1,000 USD sleeve. The closure is final at that size. A different capital limit is a different question and needs its own registration in a new repository (CLOSURE.md, REINTRODUCTION.md).
 
-## One thing learned `[KIROS: confirm]`
+## One thing learned
 The safety flag the code relied on was the wrong one: IBKR requires a what-if preview to carry transmit=True, and the property that prevents transmission is whatIf=True.

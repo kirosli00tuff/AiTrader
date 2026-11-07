@@ -1,5 +1,5 @@
 # VRPExperiment
-Group experiments. First commit 2026-08-29, last commit 2026-08-30, 12 commits.
+Group experiments. First commit 2026-08-29, last commit 2026-08-30, 12 commits in the original repo. Here `git log -- experiments/VRPExperiment/` shows 13: the extra one adds this card.
 
 ## Question
 Does the option market charge more volatility than BTC and ETH later deliver? And can a British Columbia resident lawfully harvest that premium, below cost, with about $1,000 (docs/ARTIFACT.md)?
@@ -26,5 +26,5 @@ Verdict: VENUE_BLOCKED, qualified, with one route open on two named figures (REA
 ## Why it stopped
 It was a single-stage census with one artifact and no successor in this repository (docs/HANDOVER.md). The open route needs a brokerage account, which the repository does not have and will not open (README.md).
 
-## One thing learned `[KIROS: confirm]`
+## One thing learned
 The arithmetic that decided reachability was not about the premium at all. It was about contract size.

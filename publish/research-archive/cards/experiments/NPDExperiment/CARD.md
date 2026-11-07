@@ -1,5 +1,5 @@
 # NPDExperiment
-Group experiments. First commit 2026-08-25, last commit 2026-08-25, 11 commits.
+Group experiments. First commit 2026-08-25, last commit 2026-08-25, 11 commits in the original repo. Here `git log -- experiments/NPDExperiment/` shows 12: the extra one adds this card.
 
 ## Question
 Given anonymized per-name numeric feature blocks, does a frontier LLM rank next-window cross-sectional returns better than cheap mechanical baselines? It replicates an earlier AiTrader LLM council negative under a changed task.
@@ -22,5 +22,5 @@ Section 0 fired GO at 96.1 percent coverage (reports/stage_b1/collection.md). Th
 ## Why it stopped
 The question was closed by operator decision, not by evidence, on 2026-08-25 (REGISTRATION.md). A powered version would need about 1,700 post-cutoff trading days, and no model has that window (REGISTRATION.md).
 
-## One thing learned `[KIROS: confirm]`
+## One thing learned
 The model leaned against momentum rather than adding noise around it, which widened the contrast and cost the design its power. The repo records this as an observation, not a finding.

@@ -1,14 +1,14 @@
 # research-archive sources (Stage P.1, D1 and D3). Every source folder is READ-ONLY: build_archive.sh clones each
 # one with `git clone --no-local` into a temporary directory and never writes inside it.
 # Fields, separated by one TAB: group, name, source path, branch, side, status
-#   group   experiments (the *Experiment repos, MLCryptoEngine, program-audit, retail-power-limits) or solana
+#   group   experiments (the *Experiment repos, MLCryptoEngine, program-audit, retail-power-limits), the only group
 #   branch  the local default branch that is imported
 #   side    local, or remote (the GitHub default branch, used only when it contains the local branch and is newer)
 #   status  INCLUDE (code, docs and history) or CARDONLY (a card only, no code, no history), ruled after the D6 scans
-# Remote comparison (D2, reports/p1_scratch/inventory.md, 2026-11-07): GitHub was never ahead of local. Eleven are
-# identical. PMExperiment is local ahead by 1 commit, program-audit local ahead by 78. None diverged. MBTExperiment,
-# solback, solceil, solcopy and soltool have no GitHub remote. So every source uses its local history.
-# Only committed history is imported. Uncommitted files in HFExperiment, solback and program-audit stay out.
+# Remote comparison (D2, reports/p1_scratch/inventory.md, 2026-11-07): GitHub was never ahead of local. Nine are
+# identical. PMExperiment is local ahead by 1 commit, program-audit local ahead by 78. None diverged. MBTExperiment
+# has no GitHub remote. So every source uses its local history.
+# Only committed history is imported. Uncommitted files in HFExperiment and program-audit stay out.
 experiments	ETFExperiment	/mnt/large-storage/Archive/GitHub/ETFExperiment	master	local	INCLUDE
 experiments	HFExperiment	/mnt/large-storage/Archive/GitHub/HFExperiment	main	local	INCLUDE
 experiments	InsiderExperiment	/mnt/large-storage/Archive/GitHub/InsiderExperiment	master	local	INCLUDE
@@ -21,13 +21,12 @@ experiments	PMExperiment	/mnt/large-storage/Archive/GitHub/PMExperiment	main	loc
 experiments	VRPExperiment	/mnt/large-storage/Archive/GitHub/VRPExperiment	main	local	INCLUDE
 experiments	program-audit	/mnt/large-storage/Archive/GitHub/program-audit	main	local	INCLUDE
 experiments	retail-power-limits	/mnt/large-storage/Archive/GitHub/retail-power-limits	main	local	INCLUDE
-solana	solattn	/mnt/large-storage/Archive/GitHub/solattn	main	local	INCLUDE
-solana	solback	/mnt/large-storage/Archive/GitHub/solback	main	local	INCLUDE
-solana	solceil	/mnt/large-storage/Archive/GitHub/solceil	master	local	INCLUDE
-solana	solclear	/mnt/large-storage/Archive/GitHub/solclear	main	local	INCLUDE
-solana	solcopy	/mnt/large-storage/Archive/GitHub/solcopy	main	local	INCLUDE
-solana	soltool	/mnt/large-storage/Archive/GitHub/soltool	main	local	INCLUDE
 # Never included: AiTrader, PropExperiment and its worktrees, two personal repos, names withheld (R39), and
-# ~/OpenManus (a third-party clone, not Kiros's work).
+# ~/OpenManus (a third-party clone, not Kiros's work). Six more repos from the same period were left out on
+# 2026-11-07 at Kiros's request (AiTrader docs/DECISIONS.md V10). Their originals stay private.
+# [KIROS: confirm] Files in 10 of the 12 kept sources, most of them program-audit's findings, and some commit
+# messages and paths still name those six repos (counts in AiTrader reports/P.2_RETURN.md section 7). Delete
+# these four lines to publish the archive as built, or pick another option given there. go_public.sh refuses
+# while this mark remains.
 # Other Git repos under ~/Documents, ~/Desktop and /mnt/large-storage/Archive (find -maxdepth 4 -name .git): none
 # found beyond the lists above. paperssrmtestbed in the archive folder is not a Git repo and is left out.
