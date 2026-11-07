@@ -242,3 +242,14 @@ R53. G1's first commit attempt was blocked by AiTrader's pre-commit secret hook 
 ("risk-adjusted-..." and "sk-learn-..."), no key. ops/ is outside this stage, so no allowlist edit, and no --no-verify.
 The lead split both literals at "sk" so the source text holds no sk- run and the runtime string is byte-identical.
 21 of 21 tests in that file pass. publish/checks/ is not in the llm-news-drift allowlist, so no public build changes.
+R54. On the ReturnDrafter return (08:36): go_public.sh step 1 counts the 20 marks under publish/research-archive/, which
+the planner deadline note keeps local, so Kiros could not run go_public.sh without editing archive text that will not
+ship. Lead choice under the planner's item 3 (go_public.sh skips research-archive when it has no remote): step 1 leaves
+publish/research-archive/ out of the mark gate while gh repo view of the archive fails, and says how many marks it left
+out. When the archive repo exists, step 1 gates all of publish/ as H6 says. GateFix-OpusHigh applies it,
+FixChecker2-FableXHigh reviews it, and the final commit carries it. publish/go_public.sh is in no public build.
+R55. On F5, reports/p1_review_fixcheck2.md (FixChecker2-FableXHigh, Fable 5.1, 08:52): BLOCKING 0, SHOULD FIX 0, NOTE 6.
+No action. N1 corrects R53's wording: the blob held one literal, split at its two sk- runs. N2: the skip fires on any
+gh repo view failure, the safe direction (as F4-N4). N3: --exclude-dir matches by folder name, and publish/ has one such
+folder. N4: the empty-array expansion needs bash 4.4 or later, this machine has 5.3.9. N5 is older than R54. N6: the
+step 1 count is lines, 20 marks in 19 files.

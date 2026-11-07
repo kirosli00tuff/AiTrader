@@ -76,6 +76,10 @@ EXPERIMENT.md is the binding contract. This file is the index.
   WFC.PRL, UHAL.B), the strength distribution concentrated at 2 to 4, the
   capability replay on the remaining Anthropic balance.
 
+## Stage P: publication (P.1 RUN, nothing public yet)
+
+- P.1 RUN 2026-11-07: llm-news-drift (50 commits from 2026-07-27, FROZEN: match, gitleaks 0, 1,002 synthetic tests pass) and the profile repo pushed private (llm-news-drift HEAD 8a0f45d). research-archive (18 repos, 496 commits) is a local build only under the planner's deadline note, with open card and README fixes. Fable leak, archive and claims reviews and the doc-wave check found no BLOCKING item. H4 made four repos private and skipped one with a live Pages site. Nothing is public and the bio is not set. Kiros resolves the 18 llm-news-drift and profile confirm marks and runs publish/go_public.sh, which skips the archive and its 20 marks while the archive has no repo. reports/P.1_RETURN.md.
+
 ## Planned follow-up: cutoff-replay study (after the Stage C readout, whatever the outcome; stage letter assigned at pre-registration)
 
 Recorded 2026-10-02 at 45 day clusters, before any outcome has been read.

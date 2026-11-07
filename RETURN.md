@@ -11,6 +11,22 @@ Model:
 Prompt summary: one line.
 Changes: what changed.
 
+## Prompt: Stage P.1, public repos and GitHub profile (private only)
+
+Date: 2026-11-07
+Model: Opus 5.5 (claude-opus-5-5), max lead, in eight contexts after seven self-wipes (one fired by the planner's /clear). Workers: Opus 5.5 xhigh (8), Opus 5.5 high (10), Sonnet 5.5 high (9), Fable 5.1 xhigh (5, with FixChecker and FixChecker2), Haiku 5.5 medium (1).
+Prompt summary: "Read docs/prompts/STAGE_P.1.md in full and execute it as your prompt, together with the planner note /home/kiros-li/planner-drafts/P1_LAUNCH_NOTE.md, which you read first. Run unattended." Planner messages during the run: the /clear and resume at 04:18, the self-wipe note at 04:20, the rm rule at 05:18, the deadline note at 08:06 (P1_DEADLINE_NOTE.md: research-archive stays local, return by 09:45), and the 08:38 note that go_public.sh must skip the archive marks while the archive has no repo (R54).
+Changes:
+- publish/llm-news-drift/: ALLOWLIST.txt, EXCLUDE.txt, extract.sh, README.md, LICENSE_NOTE.md, docs/TIMELINE.md, docs/HOW_TO_VERIFY.md, docs/AI_USE.md, five redacted relevance CSVs and an adjudication summary in reports/.
+- publish/research-archive/: SOURCES.txt, EXCLUDE.txt, mailmap.txt, build_archive.sh, README.md, 18 cards.
+- publish/profile/: README.md, metadata.json, bio.txt. publish/go_public.sh for Kiros to run later, which skips research-archive and its confirm marks while the archive has no GitHub repo (R50, R54).
+- publish/checks/: scan_history.py and its test, verify_extract.py, scratch_source.sh, test_p1_redaction.py, the llm-news-drift mailmap and replace-text rules.
+- reports/p1_rulings.md (R1 to R54, OC1 to OC12), reports/p1_review_leak.md, p1_review_archive.md, p1_review_claims.md, p1_review_fixcheck.md, p1_review_fixcheck2.md, reports/P.1_STATE.md, reports/P.1_RETURN.md, reports/p1_github_before.json and p1_github_after.json (redacted, R39 and R50).
+- Built outside AiTrader: ~/Documents/GitHub/llm-news-drift (HEAD 8a0f45d), the profile repo at ~/Documents/GitHub/kirosli00tuff (16b23062), the local research-archive build at /home/kiros-li/.cache/p1-tmp/ArchiveRules/real1.
+- GitHub: llm-news-drift and kirosli00tuff created private and pushed (remote equals local). Description and topics set on llm-news-drift and AiTrader. solattn, solclear, MLCryptoEngine and the roofing concept repo made private. The portfolio repo skipped (GitHub Pages live). research-archive not created. Nothing new is public, bio not set.
+- No outcome read, no database opened, EXPERIMENT.md and the C.3 freeze unchanged, no paid call, no push.
+Commit: "Stage P.1 publish sources" (bb09341) and "Stage P.1 public repos and GitHub profile".
+
 ## Prompt: Stage C.2b attempt 2 (20261106), gate FAIL
 
 Date: 2026-11-06 to 2026-11-07

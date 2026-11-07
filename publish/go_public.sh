@@ -8,7 +8,8 @@
 #                                             No check, no network. Stage P.1 part H2 uses it.
 #
 # Steps:
-#   1. Stop if any KIROS confirm mark is left under publish/.
+#   1. Stop if any KIROS confirm mark is left under publish/. While research-archive has no GitHub
+#      repo (see below), step 1 leaves publish/research-archive/ out and prints how many marks it left out.
 #   2. Stop unless gh has the user scope, and print the command that adds it.
 #   3. Rebuild llm-news-drift with extract.sh and push it. This must be a fast-forward.
 #   4. Rebuild research-archive and the profile repo and push them. A force-push happens only while
@@ -19,6 +20,9 @@
 #
 # research-archive is skipped in steps 4, 6 and 7 while `gh repo view kirosli00tuff/research-archive`
 # fails, which means the archive has no GitHub repo yet. The script prints one line when it skips it.
+# The same check runs before step 1, in a full run and in --check-only, and step 1 then leaves out the
+# marks under publish/research-archive/. The check that HEAD holds no marks (before step 3) leaves them
+# out too. Once the archive repo exists, both check all of publish/.
 # llm-news-drift and the profile repo run as usual.
 #
 # Stage P.1 wrote this script and tested steps 1 and 2 only. It never ran steps 3 to 6.
@@ -50,14 +54,22 @@ XDG_RUNTIME_DIR="/run/user/$uid"
 DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$uid/bus"
 export XDG_RUNTIME_DIR DBUS_SESSION_BUS_ADDRESS
 
-check_marks() {
-  local hits
-  hits="$(grep -rnF --exclude=go_public.sh -e "$MARK" "$here" || true)"
+check_marks() {   # check_marks <with archive: yes or no>
+  local with_archive="$1" hits where="publish/"
+  local skip=()
+  if [[ "$with_archive" == no ]]; then
+    local left_out
+    left_out="$({ grep -rnF -e "$MARK" "$here/$ARCHIVE_REPO" 2>/dev/null || true; } | wc -l)"
+    skip=(--exclude-dir="$ARCHIVE_REPO")   # by folder name: publish/ has one folder of that name
+    where="publish/ outside publish/$ARCHIVE_REPO/"
+    say "step 1: left publish/$ARCHIVE_REPO/ out of the check ($left_out confirm marks there), because gh repo view $OWNER/$ARCHIVE_REPO fails (no GitHub repo yet) and the archive is skipped in steps 4, 6 and 7"
+  fi
+  hits="$(grep -rnF --exclude=go_public.sh "${skip[@]}" -e "$MARK" "$here" || true)"
   if [[ -n "$hits" ]]; then
     printf '%s\n' "$hits" >&2
-    die "step 1: $(printf '%s\n' "$hits" | wc -l) confirm marks remain under publish/. Resolve each one, then run again."
+    die "step 1: $(printf '%s\n' "$hits" | wc -l) confirm marks remain under $where. Resolve each one, then run again."
   fi
-  say "step 1: no confirm marks under publish/"
+  say "step 1: no confirm marks under $where"
 }
 
 check_scope() {
@@ -74,16 +86,26 @@ check_scope() {
   say "step 2: gh has the user scope"
 }
 
-require_committed() {
+require_committed() {   # require_committed <with archive: yes or no>
+  local with_archive="$1" where="publish/"
+  local spec=(publish/ ':!publish/go_public.sh')
   [[ -z "$(git -C "$aitrader" status --porcelain -- publish/)" ]] \
     || die "publish/ has uncommitted changes. The builds read committed files: commit them first."
-  if git -C "$aitrader" grep -qF -e "$MARK" HEAD -- publish/ ':!publish/go_public.sh'; then
-    die "HEAD still holds confirm marks under publish/. Commit the resolved files first."
+  if [[ "$with_archive" == no ]]; then
+    spec+=(":!publish/$ARCHIVE_REPO/")
+    where="publish/ outside publish/$ARCHIVE_REPO/"
+  fi
+  if git -C "$aitrader" grep -qF -e "$MARK" HEAD -- "${spec[@]}"; then
+    die "HEAD still holds confirm marks under $where. Commit the resolved files first."
   fi
 }
 
 archive_on_github() {   # true when GitHub has the research-archive repo
   gh repo view "$OWNER/$ARCHIVE_REPO" --json name --jq .name >/dev/null 2>&1
+}
+
+archive_state() {   # prints yes when GitHub has the research-archive repo, no when it does not
+  if archive_on_github; then echo yes; else echo no; fi
 }
 
 confirm() {   # confirm <repo> ...: the repos that step 6 makes public
@@ -161,18 +183,18 @@ print_web_steps() {   # print_web_steps <with archive: yes or no>
 
 main() {
   case "${1:-}" in
-    --check-only) check_marks; check_scope; say "check only: stopped before step 3"; exit 0 ;;
+    --check-only) check_marks "$(archive_state)"; check_scope; say "check only: stopped before step 3"; exit 0 ;;
     --build-profile) [[ -n "${2:-}" ]] || die "--build-profile needs a folder"; build_profile "$2"; exit 0 ;;
     -h | --help) sed -n '2,/^$/{s/^# \{0,1\}//;p}' "${BASH_SOURCE[0]}"; exit 0 ;;
     "") ;;
     *) die "unknown argument: $1 (see --help)" ;;
   esac
-  check_marks
+  local with_archive
+  with_archive="$(archive_state)"
+  check_marks "$with_archive"
   check_scope
-  require_committed
-  local with_archive=yes
-  if ! archive_on_github; then
-    with_archive=no
+  require_committed "$with_archive"
+  if [[ "$with_archive" == no ]]; then
     say "$ARCHIVE_REPO: skipped in steps 4, 6 and 7, because gh repo view $OWNER/$ARCHIVE_REPO fails (no GitHub repo yet)"
   fi
   local public=(llm-news-drift)

@@ -138,6 +138,18 @@ New flags from the feed-work session (2026-07-05, `369b6a6`):
 
 ## Session Log
 
+### 2026-11-07 (Opus 5.5, max lead) Stage P.1: llm-news-drift and the profile repo pushed private, research-archive a local build only, nothing public
+
+The full record is reports/P.1_RETURN.md.
+
+- **llm-news-drift:** the experiment from Stage A (2026-07-27) onward, 50 commits, with EXPERIMENT.md, the collector, the frozen harness and its imports, the stage records, five redacted relevance CSVs, and new README, TIMELINE, HOW_TO_VERIFY, AI_USE and licence note. Two identical builds, FROZEN: match in a fresh clone, gitleaks 0, headline scan 0, every removed literal 0, 1,002 synthetic tests passed in a sparse clone. The final build from G1 (HEAD 8a0f45d) passed them again.
+- **research-archive:** 18 research repos with history (496 commits) and one card each. The planner's 08:06 deadline note kept it a LOCAL build at /home/kiros-li/.cache/p1-tmp/ArchiveRules/real1 (HEAD d358b35a), never pushed. Card and README fixes, two confirm marks and a stale solclear test row stay open (return section 3.11).
+- **GitHub:** llm-news-drift and kirosli00tuff created private and pushed. Metadata set on llm-news-drift and AiTrader. solattn, solclear, MLCryptoEngine and the roofing concept repo made private. The portfolio repo stays public because its GitHub Pages site is live (return section 7.4). Nothing new is public. The bio is not set.
+- **Reviews, Fable 5.1 xhigh:** leak audit, archive audit, claims review and a doc-wave check, no BLOCKING finding. 13 SHOULD FIX in all, ruled R34 to R49. The archive items stay open under R49. FixChecker (Fable 5.1 xhigh) found the doc wave clean: no BLOCKING or SHOULD FIX, 4 NOTEs, no action (R52). FixChecker2 (Fable 5.1 xhigh) reviewed the late R53 and R54 tooling changes: BLOCKING 0, SHOULD FIX 0, 6 NOTEs, no action (R55).
+- **Interruptions:** a planned wipe did not fire (idle 03:34 to 04:18), the 5-hour usage limit stopped work from about 05:46 to 06:50, and a permission prompt blocked one worker until 08:04. No file or collection session was lost.
+- **Next:** Kiros resolves the 18 confirm marks in publish/llm-news-drift and publish/profile, picks a licence, commits, runs `gh auth refresh -h github.com -s user`, then publish/go_public.sh, which skips the 20 archive marks while research-archive has no GitHub repo (R54, planner note 08:38). The archive needs its open fixes, a rebuild and a review before it goes public.
+- **Commits:** bb09341 "Stage P.1 publish sources" and "Stage P.1 public repos and GitHub profile". No push.
+
 ### 2026-11-06 to 07 (Opus 5.5, max lead) Stage C.2b attempt 2 (20261106): 9.8 gate FAIL on power; no verdict run, judgments unread
 
 The full record is reports/C.2b_RETURN_20261106.md.
