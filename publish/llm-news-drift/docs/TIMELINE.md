@@ -38,7 +38,7 @@ repository that records it.
 | 2026-07-27 | The quoted spread and tick multiple are measured in regular trading hours for the fee model. Measurement only. | `2135dd0` | `937526c` |
 | 2026-07-27 | The blocked regular-hours tick measurement is recorded. | `fb121c1` | `2635ad9` |
 | 2026-07-28 | Amendment 3: the model becomes Claude Haiku 4.5, with a five-point strength field that is recorded and gates nothing. | `e7d03f4` | `5518051` |
-| 2026-07-28 | EXPERIMENT.md is marked accepted by the operator, binding and closed, before any collection. The same commit builds the stage 2 news collector to that specification, with its own credential. Collection not started. [KIROS: confirm] | `0f1e279` | `2903f79` |
+| 2026-07-28 | EXPERIMENT.md is marked accepted by the operator, binding and closed, before any collection. The same commit builds the stage 2 news collector to that specification, with its own credential. Collection not started. | `0f1e279` | `2903f79` |
 | 2026-07-28 | The regular-hours spread measurement is recorded as unusable on an IEX-only feed. Fee model and specification unchanged. | `f32745b` | `96ec3c7` |
 | 2026-07-28 | Amendment 4, approved explicitly by the operator: a fifth state, `excluded_pre_call`. Delay-rolled headlines are scored, not excluded. | `e93e7f9` | `7a549e2` |
 | 2026-07-28 | The exchange calendar is filled forward. The collector refuses a session it cannot resolve instead of assuming one. | `f742fcc` | `7029959` |
@@ -68,7 +68,7 @@ repository that records it.
 
 | Date | Event | Commit | AiTrader |
 |---|---|---|---|
-| 2026-09-02 to 09-04 | Target session 2026-09-02 appears in the log only as raw collector output, with no DAILY RUN entry. It sits between the runs of 2026-09-03T00:04:10Z and 2026-09-04T22:37:41Z, after a `database is locked` traceback. Who ran it, when, and why: not recorded. [KIROS: confirm] | `f7e2482` | `4c7ba69` |
+| 2026-09-02 to 09-04 | Target session 2026-09-02 appears in the log only as raw collector output, with no DAILY RUN entry. It sits between the runs of 2026-09-03T00:04:10Z and 2026-09-04T22:37:41Z, after a `database is locked` traceback. Who ran it, when, and why: not recorded. | `f7e2482` | `4c7ba69` |
 | 2026-09-16 | Session 2026-09-15 becomes the second permanent gap. The run at 2026-09-16T23:58:17Z refuses it (`refused_bars`, exit 5) with the same detail for 2026-09-16. The next run, at 2026-09-17T22:30:12Z, collects 2026-09-16 and logs 2026-09-15 as unrecoverable. Why the bars were missing: cause not recorded. | `f7e2482` | `4c7ba69` |
 | 2026-09-23 | Stage B.1, workflow port. The planning chat ports the orchestration files from PropExperiment: CLAUDE.md session rules, .claude/, docs/ORCHESTRATION.md, docs/PROMPT_WRITING.md, docs/prompts/, docs/STAGES.md and docs/DECISIONS.md. No CLI session and no prompt file. From this date each new prompt is committed before it is sent. | `f7e2482` | `4c7ba69` |
 | 2026-09-23 | docs/DECISIONS.md records the orchestration rules: an Opus 5.5 lead, workers on haiku, sonnet, opus or fable, and Fable for independent verification only. docs/STAGES.md lists the two permanent gaps. The collection log is committed through 2026-09-21. | `f7e2482` | `4c7ba69` |
@@ -94,7 +94,7 @@ repository that records it.
 | 2026-10-15 | V2: the C.1 recommendations. Kiros alone writes the unlock file by hand. After a gate FAIL the gate retries after 5 more collection days carrying judgments. The harness runs only under .venv-eval. | `4eee167` | `820ca5c` |
 | 2026-10-15 | Stage C.2 prompt committed: docs/prompts/STAGE_C.2.md. | `4eee167` | `820ca5c` |
 | 2026-10-22 | Session 2026-10-22 is lost to an empty experiment credit balance: 357 headlines `model_failed` (exhausted), 0 judged. It stays as recorded. The credit was restored before the 2026-10-26 run. Recorded in V3. | `5681f74` | `e70c5a8` |
-| 2026-10-28 | V3: the C.2 unlock. Kiros, away from the laptop, told the planning chat in writing "Write the unlock". The planning chat wrote reports/c2_UNLOCK.json at 2026-10-29T00:19:45Z with Kiros as approver. This departs from V2 item 1, and V3 says so. [KIROS: confirm] | `5681f74` | `e70c5a8` |
+| 2026-10-28 | V3: the C.2 unlock. Kiros, away from the laptop, told the planning chat in writing "Write the unlock". The planning chat wrote reports/c2_UNLOCK.json at 2026-10-29T00:19:45Z with Kiros as approver. This departs from V2 item 1, and V3 says so. | `5681f74` | `e70c5a8` |
 | 2026-10-28 | Stage C.2, attempt 1, starts at 17:20. The unlock file, snapshot reports/c2/snap_20261028 and the gate log are committed. | `0df977a` | `a1eabc2` |
 | 2026-10-28 | Stage C.2 return: reports/C.2_RETURN.md. The 9.8 gate reads "gate FAIL", on power, at 65 day clusters. No verdict run, judgments unread. Fable recomputed the gate and matched 29 of 29 quantities. | `64791a6` | `d936d9c` |
 | 2026-10-28 | Amendment 10, operator approved: the readout at the hard stop, and the lock. If no gate run has passed by the 120th trading session, C.2 runs the verdict once on the hard-stop snapshot. After the C.3 re-freeze, EXPERIMENT.md is not amended again before the readout, except to correct a demonstrated defect. | `c915772` | `2359d16` |
@@ -105,13 +105,13 @@ repository that records it.
 
 | Date | Event | Commit | AiTrader |
 |---|---|---|---|
-| 2026-11-02 | A shutdown kills the 22:02 collector run with SIGTERM 22 seconds in, during the bar top-up. Started-then-killed runs are not retried. V5 records session 2026-10-30 as a new permanent gap. Likely root cause, as recorded: suspend and sleep had been masked since 2026-07-15, so closing the lid never suspended the laptop, and it was shut down to be carried. [KIROS: confirm] | `3a22e99` | `e8b3d2c` |
+| 2026-11-02 | A shutdown kills the 22:02 collector run with SIGTERM 22 seconds in, during the bar top-up. Started-then-killed runs are not retried. V5 records session 2026-10-30 as a new permanent gap. Likely root cause, as recorded: suspend and sleep had been masked since 2026-07-15, so closing the lid never suspended the laptop, and it was shut down to be carried. | `3a22e99` | `e8b3d2c` |
 | 2026-11-04 | V5: the collection timer moves to weekdays 23:00 America/Vancouver at the operator's request. The target session rule is unchanged. The C.3 prompt gets the new collector window. | `3a22e99` | `e8b3d2c` |
 | 2026-11-05 | V6: the public repository llm-news-drift, built locally by Stage P.1 from Stage A onward with a deterministic extraction. Stage P.1 prompt committed: docs/prompts/STAGE_P.1.md. | `5cf5860` | `66b9e3c` |
 | 2026-11-05 | The Stage P.1 prompt gets a note on the GitHub CLI keyring. | `09a900d` | `86adee9` |
 | 2026-11-05 | Stage C.3 starts at 21:37, unattended. | `a92da39` | `84cb7fb` |
 | 2026-11-05 | V7: the public profile layout. P.1 and P.2 merge into one Stage P.1 that creates every new repository private. AiTrader stays public until the January 2027 readout. The order becomes C.3, then C.2b attempt 2, then P.1. The C.3 start gate in the prompt was a planner defect, ruled on during the run. | `de51fd5` | `f4e2f3a` |
-| 2026-11-05 | V8, at 22:00: the second unlock and Stage C.2b. Kiros: "I unlock it. Run tonight". [KIROS: confirm] | `de51fd5` | `f4e2f3a` |
+| 2026-11-05 | V8, at 22:00: the second unlock and Stage C.2b. Kiros: "I unlock it. Run tonight". | `de51fd5` | `f4e2f3a` |
 | 2026-11-05 | V9: the PropExperiment prompt structure update. The lead self-wipes at about 150k tokens of context, workers are routed by complexity, and briefs are lean. | `de51fd5` | `f4e2f3a` |
 | 2026-11-06 | Stage C.3 return: reports/C.3_RETURN.md. Amendment 10.1 and 10.2 are built into news_eval and the harness is re-frozen in reports/c3_harness_freeze.json, sha256 19dc1da7...8bc8. Hard stop: session 120, 2027-01-15. 905 tests passed in a clean clone. No outcome read. | `a92da39` | `84cb7fb` |
 | 2026-11-06 | The planning chat writes the second reports/c2_UNLOCK.json at 07:13Z on Kiros's instruction, after reviewing the C.3 commit. It binds the EXPERIMENT.md of Amendment 10 and the C.3 manifest. | `fc56589` | `7d01388` |

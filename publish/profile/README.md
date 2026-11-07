@@ -1,6 +1,6 @@
 # Kiros
 
-I study Mechanical Engineering at UBC and I am in my fourth year. `[KIROS: confirm]`
+I study Mechanical Engineering at UBC and I am in my fourth year.
 I build trading research tools, and I write down what I will test before I look at the data.
 
 ## Projects
@@ -11,7 +11,7 @@ I build trading research tools, and I write down what I will test before I look 
   January 2027, and there is no result yet.
 - [PropExperiment](https://github.com/kirosli00tuff/PropExperiment): a self-running bot for prop firm funded accounts
   on CME micro futures, starting with Topstep's XFA through the TopstepX API. Every strategy is frozen before it sees
-  data, and no strategy has passed yet. `[KIROS: confirm]`
+  data, and no strategy has passed yet.
 - research-archive (coming soon): 18 research projects from July to September 2026, each in its own folder with its
   history kept and a one-page card.
 

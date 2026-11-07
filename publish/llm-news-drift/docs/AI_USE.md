@@ -14,11 +14,11 @@ headlines inside the collector, on its own key, and writes no code.
 
 | Role | What it does | Models and effort, as used |
 |---|---|---|
-| Planning chat | Claude on claude.ai, working with me. It designs each stage, recommends decisions, writes each stage prompt and commits it before launch, reviews each return document, and keeps the decision log in [DECISIONS.md](DECISIONS.md). It reaches the laptop through Desktop Commander, a file and shell connector. Stages B.1 to B.3 ran here, with no CLI session. On my written instruction it wrote both unlock files (V3, V8). | The docs name it only as "Claude on claude.ai". [KIROS: confirm] |
+| Planning chat | Claude on claude.ai, working with me. It designs each stage, recommends decisions, writes each stage prompt and commits it before launch, reviews each return document, and keeps the decision log in [DECISIONS.md](DECISIONS.md). It reaches the laptop through Desktop Commander, a file and shell connector. Stages B.1 to B.3 ran here, with no CLI session. On my written instruction it wrote both unlock files (V3, V8). | The docs name it only as "Claude on claude.ai". |
 | CLI lead | One Claude Code session per stage, in this repository. It reads [CLAUDE.md](../CLAUDE.md) and its prompt, splits the work, spawns workers, checks what they return, rules on every reviewer finding and writes the return document. It does not write bulk code itself. | July 2026 (Stage A, the collector build, collection start): single sessions, mostly on Claude Opus 5 (`claude-opus-5`, 1M context). Claude Fable 5 (`claude-fable-5`) ran Amendments 5 to 7, a tick-multiple measurement, an independent audit, the session that scheduled the daily collection from the trading calendar and the commit that closed three cost and usage fallbacks. Efforts were not recorded. From Stage C.1 on: Claude Opus 5.5 (`claude-opus-5-5`), effort xhigh for C.1 and max for C.2, C.3, C.2b and P.1. |
 | Workers | Subagents with one objective each. Each gets a brief with exact paths and returns a file plus at most 200 words. Judgments on results and any amendment text stay with the lead. | C.1: ten Opus 5.5 workers, nine at xhigh (HarnessCoder, StatsCoder, GateCoder, FamilyCoder, RunnerCoder, TestDesigner, HarnessFixer, VerdictFixer, RelevanceGrader) and FixtureCoder at high. C.3: HarnessCoder and TestCoder, Opus 5.5 xhigh. C.2 and C.2b: no worker besides the verifier. P.1, as its prompt routes them: Sonnet high (`claude-sonnet-5-5`) for counts, inventories and test runs, Opus xhigh or high for scripts, cards and these documents. |
 | Independent reviewers | Workers that did not produce what they check. They recompute from raw inputs with their own code and grade findings BLOCKING, SHOULD FIX or NOTE. | Claude Fable 5.1 (`claude-fable-5-1`), confirmed from the transcripts. C.1: KnownAnswerVerifier and a second relevance grader at xhigh, LeakageAuditor at max. C.2 and C.2b: GateVerifier at xhigh. C.3: DiffReviewer, RunOnceAuditor and FixChecker at xhigh. P.1: LeakAuditor, ArchiveAuditor and ClaimsReviewer at xhigh, on Fable 5.1 as the first lines of each report name it. If Fable is unavailable, Opus in a fresh context stands in, and the return says so. |
-| Me | I approve every amendment, every launch and each unlock. [KIROS: confirm] | |
+| Me | I approve every amendment, every launch and each unlock. | |
 
 The July sessions predate the prompt archive. Their summaries are in
 AiTrader's RETURN.md, which is not in this repository. The stage prompts from
@@ -46,7 +46,6 @@ from V2.
   AiTrader's docs say only "in tmux". My PropExperiment notes give the form
   `tmux new-session -d -s stage-<name>`, then
   `claude --dangerously-skip-permissions --model opus --effort max` inside it.
-  [KIROS: confirm]
 - **Headless launch, mobile only.** When I ask, the planning chat starts a
   stage through Desktop Commander with
   `setsid nohup claude -p "$(cat docs/prompts/STAGE_<X.Y>.md)" --model opus --effort xhigh --permission-mode bypassPermissions --name "Stage X.Y title" --output-format stream-json --verbose`,
@@ -60,7 +59,7 @@ from V2.
   a cap of 1,000 web searches per session, and the `sonnet` alias pinned to
   `claude-sonnet-5-5`.
 - **Usage limits.** The claude-auto-retry monitor resumes a session after a
-  usage limit. Its setup is not in this repository. [KIROS: confirm] Claude
+  usage limit. Its setup is not in this repository. Claude
   Code 2.1.234 and later also continues on its own once a limit resets. The
   planner resumes anything else. C.2b attempt 2 shows that case: its lead
   stopped on the 5-hour limit, the laptop rebooted, and the planner restarted
@@ -183,7 +182,6 @@ This stage does NOT:
 ## My review
 
 In my words: "I personally review every line of code written afterwards."
-[KIROS: confirm]
 
 ## Other agents in the history
 

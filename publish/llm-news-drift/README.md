@@ -15,7 +15,7 @@ read the gross excess. Trading cost is a secondary question.
 
 Choices made after seeing the data can find a pattern in almost any data set.
 So I fixed every choice in EXPERIMENT.md and accepted it on 2026-07-28, before
-any observation row existed. [KIROS: confirm] It sets four primary tests at
+any observation row existed. It sets four primary tests at
 |z| >= 2.50, a bootstrap over trading days and a within-day permutation null.
 A clear positive may say only "the pipeline predicts", never "the model
 understands". Each change is a dated amendment. Amendment 10 locks the file
@@ -56,9 +56,9 @@ flowchart LR
   readout in January 2027.
 - **Permanent gaps.** The collector refused 2026-08-28 and 2026-09-15 because
   almost none of the band had a price bar yet. Why is not recorded.
-  [KIROS: confirm] A shutdown killed the run for 2026-10-30, and killed runs
+  A shutdown killed the run for 2026-10-30, and killed runs
   are not retried. Likely cause: sleep was masked, so I shut the laptop down
-  to carry it. [KIROS: confirm] 2026-10-22 has no judgments: the experiment
+  to carry it. 2026-10-22 has no judgments: the experiment
   credit ran out.
 - **No result yet, and no claim.** No effect has been computed.
 
