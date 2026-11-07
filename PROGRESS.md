@@ -138,6 +138,20 @@ New flags from the feed-work session (2026-07-05, `369b6a6`):
 
 ## Session Log
 
+### 2026-11-07 (Opus 5.5, max lead) Stage P.2: research-archive rebuilt without solana and pushed private; nothing new is public
+
+The full record is reports/P.2_RETURN.md.
+
+- **research-archive:** rebuilt from the 12 experiment projects without the six solana repos (V10): 420 commits, HEAD 4c06138, deterministic (three identical builds in each of three rounds, and a fourth in the dry run). The open P.1 items are closed, and Kiros's 12 card lessons stand word for word.
+- **Solana material:** Fable reviews D1 and D1r found 46 program-audit files dedicated to the two solana audits, holding 9 on-chain identifiers. One EXCLUDE.txt rule removed them and pruned one commit (P2-R1). The kept sources still name the six repos 6,557 times (14 commit messages, no path). That class waits behind one confirm mark, SOURCES.txt:27.
+- **Scans and tests:** private terms 0, gitleaks 0, no finding new against P.1. A fresh clone runs 2,421 tests passed, 32 failed and 10 skipped, each failure a known cause in the README Tests table.
+- **go_public.sh:** covers the archive and updates a repo that is already public with an appended commit or a fast-forward, never a rebuild or force-push. D2's two SHOULD FIX items (inherited GIT_* variables, gate errors read as clean) were fixed and passed a second Fable review, harness 340 of 340.
+- **GitHub:** research-archive created PRIVATE and pushed, main 4c06138, description and topics set. Nothing was made public, no public repo was pushed, and the bio is unchanged. The profile README in publish/ mirrors Kiros's 10:21 web edit and adds the archive link (P2-R36).
+- **Reviews, Fable 5.1 xhigh:** D1 (archive), D2 (go_public.sh), FixReview (the D2 fixes), D1r (archive recheck) and ReturnCheck (the return's facts). Rulings P2-R1 to P2-R43 in reports/p2_rulings.md.
+- **Interruptions:** the 5-hour usage limit stopped work from about 11:59 to 13:02, and five planned self-wipes fired. No file was lost, and Saturday had no collection run.
+- **Next:** Kiros decides the confirm mark (return section 7.1; the recommendation is A, accept the class and delete the mark). The planner then pushes AiTrader and runs publish/go_public.sh from a fresh login shell in a tmux pane, dry run first (return section 7.5).
+- **Commits:** 73aa37a "Stage P.2 archive sources (no solana)" and "Stage P.2 research-archive (no solana), private". No push.
+
 ### 2026-11-07 (Opus 5.5, max lead) Stage P.1: llm-news-drift and the profile repo pushed private, research-archive a local build only, nothing public
 
 The full record is reports/P.1_RETURN.md.

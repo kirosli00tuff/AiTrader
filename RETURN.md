@@ -11,6 +11,21 @@ Model:
 Prompt summary: one line.
 Changes: what changed.
 
+## Prompt: Stage P.2, research-archive without solana, private on GitHub
+
+Date: 2026-11-07
+Model: Opus 5.5 (claude-opus-5-5), max lead, in six contexts after five self-wipes. Workers: Opus 5.5 xhigh (3), Opus 5.5 high (2), Sonnet 5.5 high (4), Fable 5.1 xhigh (5, with FixReview, the archive recheck and ReturnCheck).
+Prompt summary: "Read docs/prompts/STAGE_P.2.md in full and execute it as your prompt. Run unattended." (10:24 MST). Other messages during the run: the five self-wipe resume prompts sent by the lead's own tmux command, and the resume message at 13:01 after the 5-hour usage limit.
+Changes:
+- publish/research-archive/: SOURCES.txt (12 sources, the six solana repos dropped, one confirm mark at line 27 for their mentions inside the kept sources), EXCLUDE.txt (the rule for the 46 dedicated solana audit files, P2-R1, and the reworded comment, P2-R24), README.md, build_archive.sh, the 12 experiment cards (P.1 open items; the lessons unchanged) and the six solana cards deleted.
+- publish/go_public.sh and publish/checks/test_go_public.sh: research-archive covered; a repo that is already public is updated by a fast-forward or one appended commit, never rebuilt or force-pushed; new --dry-run; D2's SF-1 and SF-2 fixed (harness 340 of 340).
+- publish/profile/: README.md links the archive and mirrors Kiros's 10:21 web edit (P2-R36); metadata.json says 12 projects and drops the solana topic.
+- reports/p2_rulings.md (P2-R1 to P2-R43 and the class ruling), reports/p2_review_archive.md, p2_review_script.md, p2_review_script_fix.md, p2_review_archive_recheck.md, p2_review_return.md, reports/P.2_STATE.md, reports/P.2_RETURN.md, reports/p2_github_before.json and p2_github_after.json (redacted).
+- Built outside AiTrader: ~/Documents/GitHub/research-archive (12 projects, 420 commits, HEAD 4c06138).
+- GitHub: research-archive created PRIVATE and pushed (main 4c06138), description and topics set. Nothing made public, no public repo pushed, bio unchanged.
+- No outcome read, no database opened, EXPERIMENT.md unchanged, collector untouched, no paid call, AiTrader not pushed.
+Commit: "Stage P.2 archive sources (no solana)" (73aa37a) and "Stage P.2 research-archive (no solana), private".
+
 ## Prompt: Stage P.1, public repos and GitHub profile (private only)
 
 Date: 2026-11-07

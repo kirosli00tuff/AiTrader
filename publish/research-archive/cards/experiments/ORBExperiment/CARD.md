@@ -5,7 +5,7 @@ Group experiments. First commit 2026-08-28, last commit 2026-08-29, 59 commits i
 Among US common stocks with high opening relative volume, does a breakout of the first 5-minute range predict continuation to the close? It must do so by enough to clear modeled commissions, fees, borrow and slippage, out of sample from 2023-01-03 (README.md).
 
 ## Registered before testing
-REGISTRATION.md, first committed 2026-08-28 19:10:01 -0700 (Section 0). Sections 1 to 14 followed within two minutes. The first measurement commit, the vendor access table, came at 19:18:07 the same evening. The rescue criterion that closed H1 (Amendment 24) was committed on 2026-08-29 at 20:13, before the slippage measurement it judged at 20:41 (HYPOTHESES.md). No outcome value was ever read.
+REGISTRATION.md, first committed 2026-08-28 19:10:01 -0700 (Section 0). Sections 1 to 14 followed within about two minutes. The first measurement commit, the vendor access table, came at 19:18:07 the same evening. The rescue criterion that closed H1 (Amendment 24) was committed on 2026-08-29 at 20:13, before the slippage measurement it judged at 20:41 (HYPOTHESES.md). No outcome value was ever read.
 
 ## Dates
 First commit 2026-08-28. Last commit 2026-08-29.

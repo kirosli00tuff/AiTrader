@@ -20,7 +20,8 @@
 #              scopes, bio. gh.log logs every gh call as READ, MUTATE, CREDENTIAL or UNEXPECTED.
 # The stub gh is first on PATH, next to a git wrapper that logs the arguments of every git push to
 # state/git_push.log and then runs the real git, so a force flag is caught even on a push that happens
-# to be a fast-forward. The GitHub URLs reach remotes/ through the environment only:
+# to be a fast-forward. When state/git_fail names a subcommand (status, grep), the wrapper makes that
+# subcommand exit 128 instead. The GitHub URLs reach remotes/ through the environment only:
 # GIT_CONFIG_COUNT with url.file://<scenario>/remotes/.insteadOf = https://github.com/kirosli00tuff/.
 # The script's own `-c credential.helper=` options do not touch url.*, so the redirect holds and the
 # script is unchanged. GIT_ALLOW_PROTOCOL=file stops git from using any network transport,
@@ -80,6 +81,22 @@ cat > "$SANDBOX/bin/git" <<WRAP
 for a in "\$@"; do
   if [[ "\$a" == push && -n "\${STUB_STATE:-}" ]]; then printf '%s\n' "\$*" >> "\$STUB_STATE/git_push.log"; break; fi
 done
+# A scenario makes one git subcommand fail by naming it in state/git_fail: exit 128, as git does on a fatal error.
+if [[ -n "\${STUB_STATE:-}" && -s "\$STUB_STATE/git_fail" ]]; then
+  args=("\$@")
+  i=0
+  while (( i < \${#args[@]} )); do
+    case "\${args[i]}" in
+      -C | -c) i=\$((i + 2)) ;;
+      -*) i=\$((i + 1)) ;;
+      *) break ;;
+    esac
+  done
+  if [[ "\${args[i]:-}" == "\$(cat "\$STUB_STATE/git_fail")" ]]; then
+    echo "fatal: test_go_public.sh made git \${args[i]} fail" >&2
+    exit 128
+  fi
+fi
 exec "$real_git" "\$@"
 WRAP
 chmod +x "$SANDBOX/bin/git"
@@ -445,6 +462,7 @@ pushes_to() {   # pushes_to <name> <count>: the number of logged pushes to that 
   [[ "$(grep -cF "/$1.git" "$S/state/git_push.log" || true)" == "$2" ]]
 }
 tmp_in_sandbox() { compgen -G "$S/tmp/go_public.*" > /dev/null; }
+quiet() { "$@" > /dev/null 2>&1; }   # quiet <command...>: its status only
 
 # ---------------------------------------------------------------- safety preflight
 
@@ -869,6 +887,169 @@ s16_help_and_arguments() {
   evidence
 }
 
+# ---------------------------------------------------------------- review findings SF-1 and SF-2
+
+run_gp_env() {   # run_gp_env <NAME=value>... -- <run_gp arguments...>: run_gp with these variables exported
+  while [[ "$1" != -- ]]; do
+    local -x "$1"
+    printf '  exported for the next run: %s\n' "${1/#"$S"/<scenario>}"
+    shift
+  done
+  shift
+  run_gp "$@"
+}
+
+make_decoy() {   # make_decoy: another git repo in the scenario, for GIT_DIR and the others to point at
+  git init -q -b main "$S/decoy"
+  printf 'not AiTrader\n' > "$S/decoy/decoy.txt"
+  fixed_commit "$S/decoy" 20 "decoy"
+}
+
+dir_digest() {   # dir_digest <dir>: one hash over every path, type, mode and file content under dir
+  (cd "$1" && { find . -printf '%p %y %m\n' | LC_ALL=C sort
+    find . -type f -exec sha256sum {} + | LC_ALL=C sort; } | sha256sum)
+}
+
+standin_state() {   # the stand-in AiTrader's HEAD, refs and status
+  git -C "$S/AiTrader" symbolic-ref HEAD
+  git -C "$S/AiTrader" for-each-ref --format='%(refname) %(objectname)'
+  git -C "$S/AiTrader" status --porcelain
+}
+
+plan_as_expected() {   # plan_as_expected <label>: the dry run's plan for the expected state, as in s01
+  check "$1: exit 0, as with a clean environment" rc_is 0
+  check "$1: plan: llm-news-drift fast-forward old -> new" \
+    out_has "llm-news-drift (PUBLIC): push $old_news -> $(expect_tip news ff), a fast-forward"
+  check "$1: plan: research-archive force-push old -> new" \
+    out_has "research-archive (PRIVATE): force-push $old_archive -> $(expect_tip archive nonff) with --force-with-lease"
+  check "$1: plan: kirosli00tuff appends to its old main" out_has "kirosli00tuff (PUBLIC): push $old_profile -> "
+  check "$1: plan: the commit message names the stand-in's HEAD" \
+    out_has "appends one commit, \"update from AiTrader $(git -C "$S/AiTrader" rev-parse --short HEAD)\""
+}
+
+s17_git_dir_exported() {
+  new_scenario s17 "GIT_DIR and GIT_WORK_TREE exported, pointing at another repository"
+  change_profile
+  make_decoy
+  local decoy_before standin_before
+  decoy_before="$(dir_digest "$S/decoy")"
+  standin_before="$(standin_state)"
+  run_gp_env "GIT_DIR=$S/decoy/.git" "GIT_WORK_TREE=$S/decoy" -- - --dry-run
+  plan_as_expected "dry run"
+  check "dry run: the other repository is unchanged" [ "$(dir_digest "$S/decoy")" == "$decoy_before" ]
+  check "dry run: the stand-in AiTrader is unchanged" [ "$(standin_state)" == "$standin_before" ]
+  check "dry run: no ref changed" refs_unchanged
+  check "dry run: no mutating gh call" no_mutation
+  run_gp_env "GIT_DIR=$S/decoy/.git" "GIT_WORK_TREE=$S/decoy" -- "go public"
+  check "real run: exit 0" rc_is 0
+  check "real run: llm-news-drift is the fast-forward build" remote_is llm-news-drift "$(expect_tip news ff)"
+  check "real run: research-archive is the rebuild" remote_is research-archive "$(expect_tip archive nonff)"
+  check "real run: kirosli00tuff got one commit on top of the old main" \
+    one_appended_commit kirosli00tuff "$old_profile"
+  check "real run: its message names the stand-in's HEAD, exactly" message_exact kirosli00tuff
+  check "real run: its README.md is the stand-in's committed README" profile_has_standin_readme
+  check "real run: push hook: ff, NONFF (private archive), ff" \
+    updates_are "llm-news-drift ff" "research-archive NONFF" "kirosli00tuff ff"
+  check "real run: the other repository is unchanged" [ "$(dir_digest "$S/decoy")" == "$decoy_before" ]
+  check "real run: the stand-in AiTrader is unchanged" [ "$(standin_state)" == "$standin_before" ]
+  evidence
+}
+
+s18_git_vars_one_by_one() {   # each variable alone, in a dry run of the expected state
+  # GIT_ALTERNATE_OBJECT_DIRECTORIES is cleared too, but it only adds objects to read, which changes
+  # nothing a scenario here can see, so it has no scenario.
+  local var value decoy_before standin_before
+  for var in GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY GIT_COMMON_DIR GIT_NAMESPACE \
+    GIT_SHALLOW_FILE GIT_GRAFT_FILE; do
+    new_scenario "s18-$var" "$var alone exported (dry run)"
+    change_profile
+    make_decoy
+    case "$var" in
+      GIT_DIR | GIT_COMMON_DIR) value="$S/decoy/.git" ;;
+      GIT_WORK_TREE) value="$S/decoy" ;;
+      GIT_INDEX_FILE) value="$S/decoy/.git/index" ;;
+      GIT_OBJECT_DIRECTORY) value="$S/decoy/.git/objects" ;;
+      GIT_NAMESPACE) value=decoy ;;
+      GIT_SHALLOW_FILE | GIT_GRAFT_FILE)   # cuts history at the news build's tip
+        value="$S/decoy/history_cut"
+        expect_tip news ff > "$value"
+        fixed_commit "$S/decoy" 21 "history cut" ;;
+    esac
+    decoy_before="$(dir_digest "$S/decoy")"
+    standin_before="$(standin_state)"
+    run_gp_env "$var=$value" -- - --dry-run
+    plan_as_expected "$var"
+    check "$var: the other repository is unchanged" [ "$(dir_digest "$S/decoy")" == "$decoy_before" ]
+    check "$var: the stand-in AiTrader is unchanged" [ "$(standin_state)" == "$standin_before" ]
+    check "$var: no ref changed" refs_unchanged
+    evidence
+  done
+}
+
+s19_grep_cannot_read() {
+  new_scenario s19 "step 1's grep cannot read a folder under publish/ (exit 2), and a mark hides in it"
+  change_profile
+  local locked="$S/AiTrader/publish/llm-news-drift/locked" grep_rc=0
+  mkdir -p "$locked"
+  printf '%s] hidden where grep cannot read\n' "$MARK" > "$locked/note.md"
+  chmod 000 "$locked"
+  grep -rqF -e "$MARK" "$locked" 2>/dev/null || grep_rc=$?
+  check "precondition: grep -r on the folder exits 2 (not root, the folder is unreadable)" [ "$grep_rc" == 2 ]
+  check "precondition: git status does not list it (only step 1 can see it)" \
+    [ -z "$(git -C "$S/AiTrader" status --porcelain -- publish/ 2>/dev/null)" ]
+  run_gp "go public"
+  check "real run: exit 1" rc_is 1
+  check "real run: stops at step 1 on the grep error" \
+    out_has "go_public.sh: step 1: grep could not read everything under publish/ (exit 2)"
+  check "real run: never says there are no marks" out_lacks "step 1: no confirm marks"
+  check "real run: no ref changed" refs_unchanged
+  check "real run: no mutating gh call" no_mutation
+  check "real run: stopped before any build" no_builds
+  run_gp - --dry-run
+  check "dry run: exit 1" rc_is 1
+  check "dry run: reports the grep error" \
+    out_has "a real run would stop here: step 1: grep could not read everything under publish/ (exit 2)"
+  check "dry run: it is the only reason" out_has "dry run: a real run would have stopped (1):"
+  check "dry run: goes on to the plan" out_has "llm-news-drift (PUBLIC): push $old_news -> "
+  check "dry run: no ref changed" refs_unchanged
+  check "dry run: no mutating gh call" no_mutation
+  chmod 755 "$locked"
+  evidence
+}
+
+s20_git_gate_fails() {   # git status (uncommitted check) and git grep (HEAD marks check) fail with exit 128
+  local sub what probe_rc
+  for sub in status grep; do
+    case "$sub" in
+      status) what="git status of publish/ failed (exit 128)" ;;
+      grep) what="git grep of HEAD failed (exit 128)" ;;
+    esac
+    new_scenario "s20-$sub" "git $sub fails in require_committed (the gate must not read it as clean)"
+    change_profile
+    set_state git_fail "$sub"
+    probe_rc=0
+    case "$sub" in
+      status) go_env git -C "$S/AiTrader" status --porcelain > /dev/null 2>&1 || probe_rc=$? ;;
+      grep) go_env git -C "$S/AiTrader" grep -qF -e "$MARK" HEAD > /dev/null 2>&1 || probe_rc=$? ;;
+    esac
+    check "precondition: git $sub under the scenario's state exits 128" [ "$probe_rc" == 128 ]
+    check "precondition: other git commands still work" quiet go_env git -C "$S/AiTrader" rev-parse --verify HEAD
+    run_gp "go public"
+    check "real run: exit 1" rc_is 1
+    check "real run: stops on the failed git $sub" out_has "go_public.sh: $what"
+    check "real run: no ref changed" refs_unchanged
+    check "real run: no mutating gh call" no_mutation
+    check "real run: stopped before any build" no_builds
+    run_gp - --dry-run
+    check "dry run: exit 1" rc_is 1
+    check "dry run: reports the failed git $sub" out_has "a real run would stop here: $what"
+    check "dry run: it is the only reason" out_has "dry run: a real run would have stopped (1):"
+    check "dry run: no ref changed" refs_unchanged
+    check "dry run: no mutating gh call" no_mutation
+    evidence
+  done
+}
+
 # ---------------------------------------------------------------- run
 
 printf 'test_go_public.sh: sandbox %s\n' "$SANDBOX"
@@ -890,6 +1071,10 @@ s13_public_empty_remote
 s14_private_archive_ff
 s15_confirm_declined
 s16_help_and_arguments
+s17_git_dir_exported
+s18_git_vars_one_by_one
+s19_grep_cannot_read
+s20_git_gate_fails
 
 printf '\nRESULT: %d passed, %d failed\n' "$pass" "$fail"
 if (( fail > 0 )); then

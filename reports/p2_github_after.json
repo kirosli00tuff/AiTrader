@@ -1,0 +1,82 @@
+[
+ {
+  "name": "research-archive",
+  "visibility": "PRIVATE"
+ },
+ {
+  "name": "AiTrader",
+  "visibility": "PUBLIC"
+ },
+ {
+  "name": "kirosli00tuff",
+  "visibility": "PUBLIC"
+ },
+ {
+  "name": "llm-news-drift",
+  "visibility": "PUBLIC"
+ },
+ {
+  "name": "PropExperiment",
+  "visibility": "PUBLIC"
+ },
+ {
+  "name": "NPLExperiment",
+  "visibility": "PRIVATE"
+ },
+ {
+  "name": "program-audit",
+  "visibility": "PRIVATE"
+ },
+ {
+  "name": "PMExperiment",
+  "visibility": "PRIVATE"
+ },
+ {
+  "name": "VRPExperiment",
+  "visibility": "PRIVATE"
+ },
+ {
+  "name": "ORBExperiment",
+  "visibility": "PRIVATE"
+ },
+ {
+  "name": "NPDExperiment",
+  "visibility": "PRIVATE"
+ },
+ {
+  "name": "InsiderExperiment",
+  "visibility": "PRIVATE"
+ },
+ {
+  "name": "HFExperiment",
+  "visibility": "PRIVATE"
+ },
+ {
+  "name": "ETFExperiment",
+  "visibility": "PRIVATE"
+ },
+ {
+  "name": "retail-power-limits",
+  "visibility": "PRIVATE"
+ },
+ {
+  "name": "solattn",
+  "visibility": "PRIVATE"
+ },
+ {
+  "name": "solclear",
+  "visibility": "PRIVATE"
+ },
+ {
+  "name": "MLCryptoEngine",
+  "visibility": "PRIVATE"
+ },
+ {
+  "name": "the roofing concept repo",
+  "visibility": "PRIVATE"
+ },
+ {
+  "name": "the portfolio repo",
+  "visibility": "PUBLIC"
+ }
+]

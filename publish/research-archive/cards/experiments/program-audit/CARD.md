@@ -1,5 +1,5 @@
 # program-audit
-Group experiments. First commit 2026-08-29, last commit 2026-09-13, 83 commits in the original repo. Here `git log -- experiments/program-audit/` shows 84: the extra one adds this card.
+Group experiments. First commit 2026-08-29, last commit 2026-09-13, 83 commits in the original repo. Here `git log -- experiments/program-audit/` shows 83: one commit added only a removed file and is gone, and the extra one adds this card.
 
 ## Question
 A neutral audit of the research program, findings only (README.md). Agent A tested whether the program closed hypotheses too early or too hard. Agent B tested whether it claimed more than its evidence supports. Agent C refereed both (findings/METHOD.md).
@@ -11,7 +11,7 @@ Not pre-registered as an experiment. The audit rules given to every agent, findi
 First commit 2026-08-29. Last commit 2026-09-13.
 
 ## Data
-Thirteen of the program's own repositories, read from read-only snapshots at anchored commits listed in findings/ANCHOR.md (findings/METHOD.md). Agents' scratch computations sat under work/ (RESUME.md). The snapshots and work/ are not included in this archive.
+Thirteen of the program's own repositories, read from read-only snapshots at anchored commits listed in findings/ANCHOR.md (findings/METHOD.md). Agents' scratch computations sat under work/ (RESUME.md). The snapshots, work/ and the findings files on two of the thirteen repositories are not included in this archive (EXCLUDE.txt).
 
 ## Method
 Each repository went through a chain of fresh-context agents: readers, a consolidator, two verifiers for citation and labelling, and an applier (findings/METHOD.md).

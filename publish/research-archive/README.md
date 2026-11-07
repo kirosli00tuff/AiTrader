@@ -34,9 +34,9 @@ account and spend ledger, and program-audit's cross-checking agents. llm-news-dr
 
 ## How AI was used here
 
-From the commit history: 8 of the 12 repos have a CLAUDE.md, the file Claude Code reads. 122 commits name
+From the commit history: 8 of the 12 repos have a CLAUDE.md, the file Claude Code reads. 121 commits name
 Claude in a Co-Authored-By line and carry a Claude-Session line: Claude Opus 5 (1M context) on 39, Claude
-Fable 5.1 on 82, all in program-audit, and Claude Fable 5 on 1. Other commits name no AI tool, which does
+Fable 5.1 on 81, all in program-audit, and Claude Fable 5 on 1. Other commits name no AI tool, which does
 not show none was used. How I work now is in llm-news-drift's
 [docs/AI_USE.md](https://github.com/kirosli00tuff/llm-news-drift/blob/main/docs/AI_USE.md), set up later.
 Do not read it back into these repos.
@@ -49,11 +49,11 @@ address. My full name became my handle, kirosli00tuff. Personal contact details 
 account ID were also replaced, in files and messages.
 
 `EXCLUDE.txt` lists what the build removed: databases, model files, archives, data and log folders,
-recorded vendor replies, program-audit's work/ folder, key and env files, saved web pages, vendor price
-tables, bulk vendor reference data, wallet keypair files and non-code files over 1 MB. That includes
-.env.example, so setup steps that copy it do not run as written. Two removals appear in the cards:
-MBTExperiment's CME margin export and ORBExperiment's delisted-ticker listing. Nothing shows I may share
-either.
+recorded vendor replies, program-audit's work/ folder and its findings on two of the repos it audited, key
+and env files, saved web pages, vendor price tables, bulk vendor reference data, wallet keypair files and
+non-code files over 1 MB. That includes .env.example, so setup steps that copy it do not run as written.
+Two removals appear in the cards: MBTExperiment's CME margin export and ORBExperiment's delisted-ticker
+listing. Nothing shows I may share either.
 
 ## Licence
 

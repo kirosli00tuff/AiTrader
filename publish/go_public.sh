@@ -55,6 +55,11 @@
 # under publish/ before you run it.
 
 set -euo pipefail
+# An exported GIT_DIR, or one of the others, would point the git commands below at another repository or
+# at other parts of one. Every call names its repository with -C or a path, so none is needed. GIT_CONFIG_*
+# stays: publish/checks/test_go_public.sh reaches its local remotes through it.
+unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY GIT_ALTERNATE_OBJECT_DIRECTORIES \
+  GIT_COMMON_DIR GIT_NAMESPACE GIT_SHALLOW_FILE GIT_GRAFT_FILE
 
 readonly OWNER=kirosli00tuff
 readonly NEWS_REPO=llm-news-drift
@@ -110,7 +115,12 @@ check_marks() {   # check_marks <with archive: yes or no>
     where="publish/ outside publish/$ARCHIVE_REPO/"
     say "step 1: left publish/$ARCHIVE_REPO/ out of the check ($left_out confirm marks there), because gh repo view $OWNER/$ARCHIVE_REPO fails (no GitHub repo yet) and the archive is skipped in steps 4, 6 and 7"
   fi
-  hits="$(grep -rnF --exclude=go_public.sh "${skip[@]}" -e "$MARK" "$here" || true)"
+  local grep_rc=0
+  hits="$(grep -rnF --exclude=go_public.sh "${skip[@]}" -e "$MARK" "$here")" || grep_rc=$?
+  if (( grep_rc > 1 )); then   # 1 is "no match". Anything above it is an error, never "no marks".
+    stop "step 1: grep could not read everything under $where (exit $grep_rc), so the confirm marks are unchecked. Fix the error above, then run again."
+    return 0
+  fi
   if [[ -n "$hits" ]]; then
     printf '%s\n' "$hits" >&2
     stop "step 1: $(printf '%s\n' "$hits" | wc -l) confirm marks remain under $where. Resolve each one, then run again."
@@ -145,16 +155,24 @@ check_scope() {
 require_committed() {   # require_committed <with archive: yes or no>
   local with_archive="$1" where="publish/"
   local spec=(publish/ ':!publish/go_public.sh')
-  if [[ -n "$(git -C "$aitrader" status --porcelain -- publish/)" ]]; then
+  local porcelain git_rc=0
+  porcelain="$(git -C "$aitrader" status --porcelain -- publish/)" || git_rc=$?
+  if (( git_rc != 0 )); then
+    stop "git status of publish/ failed (exit $git_rc), so uncommitted changes are unchecked. Fix the error above, then run again."
+  elif [[ -n "$porcelain" ]]; then
     stop "publish/ has uncommitted changes. The builds read committed files: commit them first."
   fi
   if [[ "$with_archive" == no ]]; then
     spec+=(":!publish/$ARCHIVE_REPO/")
     where="publish/ outside publish/$ARCHIVE_REPO/"
   fi
-  if git -C "$aitrader" grep -qF -e "$MARK" HEAD -- "${spec[@]}"; then
-    stop "HEAD still holds confirm marks under $where. Commit the resolved files first."
-  fi
+  git_rc=0
+  git -C "$aitrader" grep -qF -e "$MARK" HEAD -- "${spec[@]}" || git_rc=$?
+  case "$git_rc" in
+    0) stop "HEAD still holds confirm marks under $where. Commit the resolved files first." ;;
+    1) ;;   # no match
+    *) stop "git grep of HEAD failed (exit $git_rc), so the confirm marks in HEAD under $where are unchecked. Fix the error above, then run again." ;;
+  esac
 }
 
 archive_on_github() {   # true when GitHub has the research-archive repo

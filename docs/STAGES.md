@@ -76,9 +76,10 @@ EXPERIMENT.md is the binding contract. This file is the index.
   WFC.PRL, UHAL.B), the strength distribution concentrated at 2 to 4, the
   capability replay on the remaining Anthropic balance.
 
-## Stage P: publication (P.1 RUN, nothing public yet)
+## Stage P: publication (P.1 and P.2 RUN; llm-news-drift and the profile public, research-archive private)
 
 - P.1 RUN 2026-11-07: llm-news-drift (50 commits from 2026-07-27, FROZEN: match, gitleaks 0, 1,002 synthetic tests pass) and the profile repo pushed private (llm-news-drift HEAD 8a0f45d). research-archive (18 repos, 496 commits) is a local build only under the planner's deadline note, with open card and README fixes. Fable leak, archive and claims reviews and the doc-wave check found no BLOCKING item. H4 made four repos private and skipped one with a live Pages site. Nothing is public and the bio is not set. Kiros resolves the 18 llm-news-drift and profile confirm marks and runs publish/go_public.sh, which skips the archive and its 20 marks while the archive has no repo. reports/P.1_RETURN.md.
+- P.2 RUN 2026-11-07: research-archive rebuilt without the six solana repos (12 projects, 420 commits, HEAD 4c06138, deterministic) and created PRIVATE on GitHub with its description and topics. Fable review D1 found 46 dedicated solana audit files, and one EXCLUDE.txt rule removed them (P2-R1). Scans clean against P.1; a fresh clone runs 2,421 tests passed, 32 known failures, 10 skipped. go_public.sh updates a public repo by a fast-forward or an appended commit, never a rebuild; D2's two SHOULD FIX items were fixed and re-reviewed (harness 340 of 340). Nothing new is public and the bio is unchanged. One confirm mark stays (SOURCES.txt:27, 6,557 mentions of the six repos inside the kept sources): Kiros decides it, then the planner runs publish/go_public.sh. reports/P.2_RETURN.md
 
 ## Planned follow-up: cutoff-replay study (after the Stage C readout, whatever the outcome; stage letter assigned at pre-registration)
 

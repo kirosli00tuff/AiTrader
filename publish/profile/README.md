@@ -1,7 +1,4 @@
-# Kiros
 
-I study Mechanical Engineering at UBC and I am in my fourth year.
-I build trading research tools, and I write down what I will test before I look at the data.
 
 ## Projects
 

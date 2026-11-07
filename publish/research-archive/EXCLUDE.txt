@@ -45,3 +45,8 @@ docs/evidence/cme_outright_rates_crypto_20260903.csv
 # Bulk vendor reference data (lead ruling R36, 2026-11-07). ORBExperiment's listing of 6421 delisted tickers pulled
 # from a vendor reference endpoint. Nothing shows a right to redistribute it. Only ORBExperiment has this path.
 reports/stage_a1r/task6_delisted.json
+
+# 2026-11-07 Stage P.2 ruling P2-R1 (D1 S1). program-audit's audit files on two of the six repos left out under V10: every
+# path under findings/ with either repo's name in a path component (46 paths, all of them at HEAD). They hold those
+# repos' commit ids, file inventories, figures and on-chain addresses. Only program-audit has these paths.
+regex:^findings/(.*/)?[^/]*(solattn|solclear)
