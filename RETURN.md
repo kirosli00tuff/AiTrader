@@ -11,6 +11,18 @@ Model:
 Prompt summary: one line.
 Changes: what changed.
 
+## Prompt: Stage C.2b attempt 2 (20261106), gate FAIL
+
+Date: 2026-11-06 to 2026-11-07
+Model: Opus 5.5 (claude-opus-5-5), max lead, in two sessions. The first stopped on the 5-hour usage limit, and the planner restarted the lead after a reboot. Worker: Fable 5.1 xhigh (1, GateVerifier).
+Prompt summary: "Read docs/prompts/STAGE_C.2b.md in full and execute it as your prompt. Run unattended. This is attempt 2. Launched 2026-11-06 00:17 America/Vancouver." Restart: "Read /home/kiros-li/planner-drafts/C2b_RESUME_NOTE.md in full and execute it as your prompt. Run unattended."
+Changes:
+- Snapshot reports/c2/snap_20261106 (sha256 47f2733e...ad96c) and reports/c2/gate_log.jsonl line 2: gate FAIL, C 72, M 6,653 < Required 16,067.7. The V8 unlock rewrite was committed with them.
+- GateVerifier: reports/c2_gate_verify_20261106.md and reports/c2/verify_gate_20261106/, MATCH on 31 of 31.
+- reports/C.2b_RETURN_20261106.md and reports/C.2b_STATE_20261106.md. The rulings are in the return: 7 NOTEs, no action, and one wording slip in the verify report corrected in the return.
+- Entries in PROGRESS.md, docs/STAGES.md and docs/prompts/README.md.
+Commit: "C.2b snapshot and gate 20261106" (7d01388) and "Stage C.2b 20261106 gate FAIL".
+
 ## Prompt: Stage C.3, hard-stop readout build and re-freeze
 
 Date: 2026-11-05 to 2026-11-06

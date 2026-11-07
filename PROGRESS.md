@@ -138,6 +138,16 @@ New flags from the feed-work session (2026-07-05, `369b6a6`):
 
 ## Session Log
 
+### 2026-11-06 to 07 (Opus 5.5, max lead) Stage C.2b attempt 2 (20261106): 9.8 gate FAIL on power; no verdict run, judgments unread
+
+The full record is reports/C.2b_RETURN_20261106.md.
+
+- **Gate:** snapshot reports/c2/snap_20261106, S* 2026-11-05, before the 2027-01-15 hard stop. C 72 and M 6,653 clear their floors, but M is short of Required 16,067.7, so pass is false. sigma 481.8 bp, rho 0.039, k_eff 118.4. Since attempt 1: C +7, M +1,290, Required +2,732.7, and M/Required went from 0.402 to 0.414.
+- **Verification:** the GateVerifier (Fable 5.1, xhigh, model confirmed from its transcript) matched 31 of 31 quantities. Its 7 NOTEs are ruled no action, and one wording slip in its report is corrected in the return only.
+- **Interruption:** the first lead stopped on the 5-hour usage limit at 00:25 MST on 2026-11-06, just after the verifier finished, and nothing resumed it. The laptop rebooted at 10:35. The planner restarted the lead on 2026-11-07 at 01:58. No file or collection session was lost.
+- **Next:** attempt 3 needs 71 judged collection days, 66 on the snapshot plus 5. The Thu 2026-11-12 run reaches it. Recommended launch: 2026-11-13.
+- **Commits:** 7d01388 "C.2b snapshot and gate 20261106" and "Stage C.2b 20261106 gate FAIL".
+
 ### 2026-11-05 (Opus 5.5, max lead) Stage C.3: hard-stop readout built and re-frozen; no outcome read
 
 The full record is reports/C.3_RETURN.md.

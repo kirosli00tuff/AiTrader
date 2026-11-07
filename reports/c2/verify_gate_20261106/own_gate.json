@@ -1,0 +1,248 @@
+{
+ "worker": "GateVerifier-FableXHigh",
+ "model": "claude-fable-5-1",
+ "attempt": "20261106",
+ "started": "2026-11-06T00:22:45-0700",
+ "integrity": {
+  "snapshot_path": "/home/kiros-li/Documents/GitHub/AiTrader/reports/c2/snap_20261106/news_experiment_snapshot.db",
+  "sha256_computed": "47f2733e6578f2d8c21498e54a4e26c1c5b8deb68b9d6913079c0123b39ad96c",
+  "sha256_recorded": "47f2733e6578f2d8c21498e54a4e26c1c5b8deb68b9d6913079c0123b39ad96c",
+  "sha256_match": true,
+  "bytes_computed": 28725248,
+  "bytes_recorded": 28725248,
+  "file_mode_octal": "0o444",
+  "mode_is_0444": true,
+  "sidecars_present": [],
+  "integrity_ok": true
+ },
+ "readings": [
+  "9.1/Task 7 denominator: all collection rows of the query_date (every state). Sensitivity with excluded_pre_call removed from the denominator is also reported.",
+  "9.7 stale rule: 'sessions' counted on the exchange trading_calendar (primary); sensitivity counted on the distinct scoring_sessions present among judged collection rows.",
+  "9.7 pending check: every judged collection row, regardless of exclusion_reason (primary); sensitivity restricted to exclusion_reason = ''."
+ ],
+ "warnings": [],
+ "schema": {
+  "news_observation_column_count": 61,
+  "allowed_columns_present": true,
+  "judgment_column_present": true
+ },
+ "vocab": {
+  "run_kind": {
+   "collection": 34550,
+   "demonstration": 46
+  },
+  "state_collection": {
+   "excluded_pre_call": 1102,
+   "judged": 12614,
+   "model_failed": 736,
+   "no_news": 20055,
+   "source_failed": 43
+  },
+  "outcome_state_judged_collection": {
+   "excluded": 8,
+   "resolved": 12606
+  },
+  "exclusion_reason_class_judged_collection": {
+   "EMPTY": 12606,
+   "NONEMPTY": 8
+  },
+  "scoring_session_class_judged_collection": {
+   "SET": 12614
+  }
+ },
+ "day_rule_9_1": {
+  "query_dates_collection": 68,
+  "collection_rows_total": 34550,
+  "source_failed_rows_total": 43,
+  "limit_strict_greater_than": 0.2,
+  "excluded_query_dates": [],
+  "excluded_query_date_count": 0,
+  "max_source_failed_share": 0.06932773109243698,
+  "max_source_failed_share_query_date": "2026-10-07",
+  "max_share_numerator_denominator": [
+   33,
+   476
+  ],
+  "sensitivity_denominator_without_excluded_pre_call": {
+   "excluded_query_dates": [],
+   "max_source_failed_share": 0.07142857142857142,
+   "max_source_failed_share_query_date": "2026-10-07"
+  }
+ },
+ "hard_stop_10_1": {
+  "trading_calendar_rows": 2907,
+  "calendar_first": "2016-01-04",
+  "calendar_last": "2027-07-28",
+  "session_1": "2026-07-28",
+  "hard_stop_session_index": 120,
+  "hard_stop_session": "2027-01-15",
+  "calendar_is_strictly_increasing": true
+ },
+ "cutoff_9_7": {
+  "index": "trading_calendar",
+  "latest_resolved_session": "2026-11-05",
+  "pending_judged_rows": 0,
+  "stale_pending_rows": 0,
+  "live_pending_rows": 0,
+  "earliest_non_stale_pending_session": null,
+  "S_star": "2026-11-05",
+  "sessions_after_S_star_with_judged_rows": 0
+ },
+ "cutoff_9_7_sensitivity": {
+  "sessions_counted_on_snapshot_sessions": {
+   "index": "distinct_scoring_sessions_in_snapshot",
+   "latest_resolved_session": "2026-11-05",
+   "pending_judged_rows": 0,
+   "stale_pending_rows": 0,
+   "live_pending_rows": 0,
+   "earliest_non_stale_pending_session": null,
+   "S_star": "2026-11-05",
+   "sessions_after_S_star_with_judged_rows": 0
+  },
+  "pending_check_on_unexcluded_rows_only": {
+   "index": "trading_calendar, exclusion_reason='' rows only",
+   "latest_resolved_session": "2026-11-05",
+   "pending_judged_rows": 0,
+   "stale_pending_rows": 0,
+   "live_pending_rows": 0,
+   "earliest_non_stale_pending_session": null,
+   "S_star": "2026-11-05",
+   "sessions_after_S_star_with_judged_rows": 0
+  },
+  "agree_S_star": true,
+  "agree_stale": true
+ },
+ "gate_restriction": {
+  "S_star": "2026-11-05",
+  "hard_stop": "2027-01-15",
+  "scoring_session_max_inclusive": "2026-11-05",
+  "binding": "S_star"
+ },
+ "gate_rows_G": {
+  "rows_meeting_state_outcome_exclusion_session_conditions_before_dayrule_and_cut": 12606,
+  "dropped_by_day_rule": 0,
+  "dropped_scoring_session_after_cut": 0,
+  "null_excess_1session_among_rows_meeting_other_conditions": 0,
+  "N": 12606,
+  "C_G": 72,
+  "n_c_min": 15,
+  "n_c_max": 619,
+  "sum_n_c_sq": 3042336.0,
+  "G_first_session": "2026-07-28",
+  "G_last_session": "2026-11-05"
+ },
+ "sigma_rho": {
+  "sigma_bp_ddof1": 481.8044316469854,
+  "grand_mean_bp": 3.4924785023258678,
+  "SSB": 128041398.23909637,
+  "SSW": 2798026709.7815776,
+  "MSB": 1803399.9751985404,
+  "MSW": 223234.9377518412,
+  "n0": 174.15013642061797,
+  "rho_raw": 0.0390583144321253,
+  "rho": 0.0390583144321253,
+  "rho_floored": false
+ },
+ "directional_9_8": {
+  "M": 6653,
+  "C": 72,
+  "k_eff": 118.36299413798287,
+  "m_c_min": 5,
+  "m_c_max": 267,
+  "sum_m_c_sq": 787469,
+  "directional_sessions_subset_of_G_sessions": true,
+  "C_equals_C_G": true,
+  "G_sessions_without_directional_rows": []
+ },
+ "m_c": {
+  "2026-07-28": 37,
+  "2026-07-29": 79,
+  "2026-07-30": 130,
+  "2026-07-31": 58,
+  "2026-08-03": 60,
+  "2026-08-04": 98,
+  "2026-08-05": 116,
+  "2026-08-06": 165,
+  "2026-08-07": 117,
+  "2026-08-10": 89,
+  "2026-08-11": 86,
+  "2026-08-12": 55,
+  "2026-08-13": 65,
+  "2026-08-14": 56,
+  "2026-08-17": 34,
+  "2026-08-18": 46,
+  "2026-08-19": 47,
+  "2026-08-20": 53,
+  "2026-08-21": 35,
+  "2026-08-24": 41,
+  "2026-08-25": 35,
+  "2026-08-26": 38,
+  "2026-08-27": 33,
+  "2026-08-28": 11,
+  "2026-08-31": 24,
+  "2026-09-01": 55,
+  "2026-09-02": 42,
+  "2026-09-03": 57,
+  "2026-09-04": 73,
+  "2026-09-08": 102,
+  "2026-09-09": 123,
+  "2026-09-10": 96,
+  "2026-09-11": 80,
+  "2026-09-14": 84,
+  "2026-09-15": 52,
+  "2026-09-16": 53,
+  "2026-09-17": 99,
+  "2026-09-18": 92,
+  "2026-09-21": 102,
+  "2026-09-22": 104,
+  "2026-09-23": 121,
+  "2026-09-24": 119,
+  "2026-09-25": 92,
+  "2026-09-28": 81,
+  "2026-09-29": 122,
+  "2026-09-30": 109,
+  "2026-10-01": 136,
+  "2026-10-02": 61,
+  "2026-10-05": 5,
+  "2026-10-06": 52,
+  "2026-10-07": 89,
+  "2026-10-08": 133,
+  "2026-10-09": 119,
+  "2026-10-12": 118,
+  "2026-10-13": 128,
+  "2026-10-14": 110,
+  "2026-10-15": 123,
+  "2026-10-16": 112,
+  "2026-10-19": 117,
+  "2026-10-20": 140,
+  "2026-10-21": 102,
+  "2026-10-22": 68,
+  "2026-10-23": 56,
+  "2026-10-26": 132,
+  "2026-10-27": 172,
+  "2026-10-28": 223,
+  "2026-10-29": 267,
+  "2026-10-30": 97,
+  "2026-11-02": 85,
+  "2026-11-03": 191,
+  "2026-11-04": 223,
+  "2026-11-05": 128
+ },
+ "required_9_8": {
+  "z_const_used": 11.156,
+  "z_const_exact_sensitivity": 11.1556,
+  "delta_bp": 30.0,
+  "design_effect": 5.5840007277370125,
+  "required": 16067.675160289782,
+  "required_with_exact_const": 16067.099051463669,
+  "M_over_required": 0.414061146595897
+ },
+ "pass_9_8": {
+  "C_at_least_60": true,
+  "M_at_least_1000": true,
+  "M_at_least_Required": false,
+  "gate_passes": false,
+  "M_minus_required": -9414.675160289782
+ },
+ "finished": "2026-11-06T00:22:45-0700"
+}

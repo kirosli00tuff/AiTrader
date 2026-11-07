@@ -1,0 +1,42 @@
+own_gate.json: /home/kiros-li/Documents/GitHub/AiTrader/reports/c2/verify_gate_20261106/own_gate.json
+gate_log.jsonl entries: 2; entries with inputs_sha256 == snapshot sha256: 1
+
+quantity                                                                                    own                      log     rel_diff    ok
+inputs_sha256                                                          b9d6913079c0123b39ad96c" b9d6913079c0123b39ad96c"        exact  True
+db_path                                                                _experiment_snapshot.db" _experiment_snapshot.db"        exact  True
+manifest_sha256 vs sha256sum(c3_harness_freeze.json)                   e1dabbc45681ce393d38bc8" e1dabbc45681ce393d38bc8"        exact  True
+excluded_query_dates                                                                         []                       []        exact  True
+latest_resolved_session                                                            "2026-11-05"             "2026-11-05"        exact  True
+stale_pending_count                                                                           0                        0        exact  True
+stale_pending_sessions                                                                       []                       []        exact  True
+earliest_nonstale_pending_session                                                          null                     null        exact  True
+empty_session_pending_count (own: judged collection rows with NULL/empty scoring_session, 0 of any outcome_state)                        0                        0        exact  True
+s_star                                                                             "2026-11-05"             "2026-11-05"        exact  True
+N                                                                                         12606                    12606        exact  True
+C_G                                                                                          72                       72        exact  True
+null_excess_count                                                                             0                        0        exact  True
+sigma                                                                         481.8044316469854        481.8044316469854    0.000e+00  True
+MSB                                                                          1803399.9751985404       1803399.9751985404    0.000e+00  True
+MSW                                                                           223234.9377518412       223234.93775184115    2.607e-16  True
+n0                                                                           174.15013642061797       174.15013642061797    0.000e+00  True
+rho_raw                                                                      0.0390583144321253     0.039058314432125305    1.777e-16  True
+rho                                                                          0.0390583144321253     0.039058314432125305    1.777e-16  True
+M                                                                                          6653                     6653        exact  True
+C                                                                                            72                       72        exact  True
+k_eff                                                                        118.36299413798287       118.36299413798287    0.000e+00  True
+required                                                                     16067.675160289782       16067.675160289784    1.132e-16  True
+pass                                                                                      false                    false        exact  True
+failing (own: derived from the three conditions)                                   ["REQUIRED"]             ["REQUIRED"]        exact  True
+constants.REQUIRED_FACTOR                                                                11.156                   11.156    0.000e+00  True
+constants.EFFECT_BP                                                                        30.0                     30.0    0.000e+00  True
+constants.FLOOR_ANALYSIS_CLUSTERS                                                            60                       60        exact  True
+constants.FLOOR_SCORABLE                                                                   1000                     1000        exact  True
+constants.SOURCE_FAILED_DAY_EXCLUDE                                                         0.2                      0.2    0.000e+00  True
+constants.STALE_PENDING_SESSIONS                                                              3                        3        exact  True
+
+compared: 31  ok: 31  mismatched: 0  largest relative difference over reals: 2.607e-16
+log fields not recomputed by this verifier: ['db_class', 'degenerate_condition', 'failing_detail', 's_star_case', 'status', 'test_mode', 'utc_time']
+own quantities with no log counterpart: ['hard_stop_session (2027-01-15; the log carries no hard-stop field)', 'pending_judged_rows total (0)', 'max_source_failed_share and its query_date (33/476 on 2026-10-07)', 'design_effect 1 + (k_eff - 1) rho', 'required_with_exact_const (2.50 + 0.84)^2 = 11.1556 sensitivity']
+log entries for this snapshot: 1 (required: exactly 1)
+manifest_sha256 matches sha256sum reports/c3_harness_freeze.json: True
+RESULT: MATCH; own pass decision: False; log pass: False

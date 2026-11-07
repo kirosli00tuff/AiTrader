@@ -70,6 +70,7 @@ EXPERIMENT.md is the binding contract. This file is the index.
   independent Fable check. Any change to a frozen file voids the run.
 - C.2 ATTEMPT 1 2026-10-28: snapshot reports/c2/snap_20261028, 9.8 gate FAIL on power (C 65, M 5,363 < Required 13,335; sigma 442 bp, rho 0.046, k_eff 98), Fable recompute 29 of 29 match; no verdict run, judgments unread; rerun on or after 2026-11-04; reports/C.2_RETURN.md.
 - C.3 RUN 2026-11-05/06: Amendment 10.1 and 10.2 built into news_eval and re-frozen (hard stop 2027-01-15; manifest reports/c3_harness_freeze.json sha256 19dc1da78608f7f9d5fdf1fedc0edf024bb39529be1dabbc45681ce393d38bc8); 905 tests passed in a clean clone, 16 of 16 mutants killed, Fable reviews with no BLOCKING finding, no outcome read; the C.2 rerun waits on Kiros's new unlock; reports/C.3_RETURN.md.
+- C.2b ATTEMPT 2 2026-11-06 (finished 2026-11-07 after a usage-limit stop and a reboot): snapshot reports/c2/snap_20261106, 9.8 gate FAIL on power (C 72, M 6,653 < Required 16,068; sigma 482 bp, rho 0.039, k_eff 118), Fable recompute 31 of 31 match; no verdict run, judgments unread; attempt 3 on or after 2026-11-13 at 71 judged collection days; reports/C.2b_RETURN_20261106.md.
 - Deferred to C as reporting questions, not Stage B changes: preferred
   shares and share classes in the universe (ARES.PRB, BAC.PRL, NEE.PRV,
   WFC.PRL, UHAL.B), the strength distribution concentrated at 2 to 4, the
