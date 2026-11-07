@@ -1,0 +1,72 @@
+# llm-news-drift allowlist (Stage P.1, A1). git-filter-repo --paths-from-file syntax.
+# History starts at AiTrader 74532e7 (2026-07-27, Stage A). Every path keeps its AiTrader path.
+# NEVER-INCLUDED paths are in EXCLUDE.txt beside this file and are removed after this filter.
+# publish/llm-news-drift/ is renamed to the repository root by extract.sh.
+
+# Experiment
+EXPERIMENT.md
+news_experiment/
+news_eval/
+glob:tests/test_news_eval_*.py
+glob:tests/test_news_experiment_*.py
+tests/test_collection_daily.py
+tests/conftest.py
+tests/fixtures/finnhub_SYNTHETIC.json
+scripts/blind_interim_20260928.py
+COLLECTION_LOG.md
+ops/systemd/news-collect.timer
+ops/systemd/news-collect.service
+
+# Process documents
+CLAUDE.md
+.claude/agents/
+.claude/settings.json
+docs/STAGES.md
+docs/DECISIONS.md
+docs/ORCHESTRATION.md
+docs/PROMPT_WRITING.md
+docs/prompts/
+
+# Stage records (Stage B.2 onward; Stage P records stay in AiTrader)
+reports/B.2_BLIND_INTERIM.md
+glob:reports/C.*
+glob:reports/c1_*
+glob:reports/c2_*
+reports/c2/
+glob:reports/c3_*
+
+# Collector dependencies: the repo-local import closure of news_experiment/, news_eval/ and the tests above,
+# module-level and in-function imports, mapped 2026-11-07 (reports/p1_scratch/import_graph.py).
+backtest/__init__.py
+backtest/fees.py
+backtest/universe.py
+config/default_config.yaml
+ops/logpipe.py
+llm_consensus/__init__.py
+llm_consensus/config_access.py
+llm_consensus/consensus.py
+llm_consensus/control_file.py
+llm_consensus/evidence.py
+llm_consensus/gate.py
+llm_consensus/http_json.py
+llm_consensus/persist.py
+llm_consensus/prompts.py
+llm_consensus/provider_health.py
+llm_consensus/providers.py
+llm_consensus/verdicts.py
+account_manager/__init__.py
+account_manager/credentials.py
+account_manager/log_safety.py
+adaptive/__init__.py
+adaptive/settings.py
+discovery/__init__.py
+discovery/finnhub_source.py
+discovery/settings.py
+discovery/watchlist.py
+market_data/__init__.py
+market_data/alpaca_source.py
+market_data/tradeable.py
+market_data/universe.py
+
+# Public documents written by Stage P.1 (mapped to the root)
+publish/llm-news-drift/

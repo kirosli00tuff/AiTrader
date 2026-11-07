@@ -1,0 +1,18 @@
+# llm-news-drift NEVER-INCLUDED list (Stage P.1, A1). Removed after the allowlist filter (--invert-paths).
+regex:(^|.*/)[^/]*\.db$
+regex:(^|.*/)[^/]*\.db-[^/]*$
+regex:(^|.*/)\.env[^/]*$
+regex:(^|.*/)[^/]*(keystore|\.pem$|\.key$|_key\.|token\.|secret)[^/]*$
+docs/FOLLOWUP_CREDENTIALS.md
+reports/c1_scratch/
+# The redacted copies in publish/llm-news-drift/reports/ take the next six paths after the filter, so the tree holds the redacted versions and never the originals.
+reports/c1_relevance_sample.csv
+reports/c1_relevance_grader_input.csv
+reports/c1_relevance_grades_opus.csv
+reports/c1_relevance_grades_fable.csv
+reports/c1_relevance_final.csv
+reports/c1_relevance_adjudication.md
+publish/research-archive/
+publish/profile/
+publish/checks/
+publish/go_public.sh

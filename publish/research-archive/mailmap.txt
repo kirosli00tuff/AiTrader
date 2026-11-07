@@ -1,0 +1,3 @@
+# research-archive mailmap (Stage P.1, D5, same rule as the llm-news-drift A4 mailmap). Every source commit
+# uses kiros1134@gmail.com, under the names kirosli00tuff, kiros-li and NPD (inventory 2026-11-07).
+kirosli00tuff <249804683+kirosli00tuff@users.noreply.github.com> <kiros1134@gmail.com>

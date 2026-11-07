@@ -1,0 +1,9 @@
+# Mailmap for the llm-news-drift extraction (Stage P.1, A4). Read by
+# publish/llm-news-drift/extract.sh from the --ref commit.
+# It lives in publish/checks/, which is not mapped into llm-news-drift. The
+# folder is committed in AiTrader, where the address already appears in the
+# history as an author email (R12, R34), so this file adds no exposure.
+# The first line matches that address under any name. The second line names
+# the one identity seen in the history. Every other identity stays as recorded.
+kirosli00tuff <249804683+kirosli00tuff@users.noreply.github.com> <kiros1134@gmail.com>
+kirosli00tuff <249804683+kirosli00tuff@users.noreply.github.com> kirosli00tuff <kiros1134@gmail.com>

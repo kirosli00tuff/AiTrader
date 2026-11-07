@@ -1,0 +1,17 @@
+{
+  "llm-news-drift": {
+    "description": "Pre-registered test: does Claude Haiku 4.5's call on one news headline predict the stock's next-session excess return? Readout due January 2027. No result yet.",
+    "topics": ["pre-registration", "llm", "news", "event-study", "stocks", "reproducibility", "claude"],
+    "homepage": ""
+  },
+  "research-archive": {
+    "description": "18 research projects from July to September 2026, each with its git history kept and a one-page card.",
+    "topics": ["research-archive", "trading-research", "backtesting", "solana", "pre-registration"],
+    "homepage": ""
+  },
+  "AiTrader": {
+    "description": "The working repo behind llm-news-drift. It stays public as the dated audit trail until the 2027 readout.",
+    "topics": ["llm-news-drift", "audit-trail", "pre-registration", "paper-trading"],
+    "homepage": ""
+  }
+}

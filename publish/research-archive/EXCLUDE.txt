@@ -1,0 +1,51 @@
+# research-archive NEVER-INCLUDED paths (Stage P.1, D4). git-filter-repo --paths-from-file syntax, used with
+# --invert-paths on each source's ORIGINAL paths, before --to-subdirectory-filter. Tested 2026-11-07 against every
+# path in the full history of all 18 sources (reports/P.1_STATE.md).
+# Two D4 rules test content, not paths. build_archive.sh applies them in a pre-pass over every (path, blob) in a
+# source's full history, adds each hit path to that source's exclusion list, and logs it in the build report:
+#   R1 any JSON that parses as an array of 64 integers 0-255 (a Solana keypair), whatever its name or place
+#   R2 any blob over 1 MB (1048576 bytes) that is not code or markdown written in the repo
+# Tiny fixtures that tests need stay only if proven synthetic. None of the 18 sources has one: MLCryptoEngine's
+# tests/fixtures/README.md says its messages were "recorded live" with "no synthetic data", and soltool's data
+# fixtures are replies from vendor APIs. Tests that need them are documented, not fixed (D9).
+
+# Data and model files
+regex:(?i)(^|.*/)[^/]*\.(db|db-[^/]*|sqlite[^/]*|parquet|feather|pkl|pickle|npy|npz|h5|hdf5|arrow|ipc)$
+regex:(?i)(^|.*/)[^/]*\.(pt|pth|ckpt|safetensors|onnx|joblib|gguf|ggml|tflite|keras|weights|bin|pb|model)$
+# Compressed archives can hold data of any kind
+regex:(?i)(^|.*/)[^/]*\.(zip|gz|tgz|tar|bz2|xz|7z|rar|zst)$
+# Data folders anywhere: every file under data/, raw/, cache/, logs/ or log/, except code and markdown.
+# MLCryptoEngine data/ and NPDExperiment src/npd/data/ are Python packages, so their .py files stay.
+regex:(?i)(^|.*/)(data|raw|cache|\.cache|logs?)/(.*/)?[^/]+(?<!\.py)(?<!\.rs)(?<!\.ts)(?<!\.js)(?<!\.sh)(?<!\.md)$
+# Recorded vendor data used as test fixtures (code and markdown fixtures stay)
+regex:(?i)(^|.*/)fixtures?/(.*/)?[^/]+\.(json|jsonl|ndjson|csv|tsv|html?|txt|xml|bin)$
+# program-audit work/: agent scratch with copies of other repos and bulk on-chain data (1,359 paths)
+work/
+
+# Secrets: env files (templates included), key and keystore files, and DATA files named like a key, wallet,
+# secret or token. Code files with such names (for example ORBExperiment src/orb/credentials.py) stay and are
+# checked by the D6 content scans instead.
+regex:(?i)(^|.*/)\.env[^/]*$
+regex:(?i)(^|.*/)[^/]*\.(pem|key|p12|pfx|jks|keystore|asc|gpg|kdbx)$
+regex:(?i)(^|.*/)[^/]*(key|wallet|secret|token|credential|mnemonic|seed|keystore|keypair|id_rsa|id_ed25519)[^/]*\.(json|txt|b58|dat|yaml|yml|toml|ini|cfg|conf|csv)$
+regex:(?i)(^|.*/)[^/.]*(key|wallet|secret|token|credential|mnemonic|seed|keystore|keypair|id_rsa|id_ed25519)[^/.]*$
+
+# Saved third-party pages. Three HTML files were written in their repos and stay (checked 2026-11-07):
+# MLCryptoEngine desktop/index.html, NPDExperiment reports/session_record.html, soltool soltool/ui/index.html.
+regex:(?i)(^|.*/)[^/]*\.(mhtml|mht|pdf|webarchive)$
+regex:(?i)^(?!desktop/index\.html$|reports/session_record\.html$|soltool/ui/index\.html$)(.*/)?[^/]*\.html?$
+
+# Vendor market data by name: price, quote, trade, option, bar, tick, candle, kline, chain or order book tables
+regex:(?i)(^|.*/)[^/]*(price|quote|trade|option|ohlc|bars|tick|candle|kline|chain|orderbook|order_book)[^/]*\.(csv|tsv|jsonl|ndjson|txt)$
+
+# Exchange data exports that nothing shows a right to redistribute (lead ruling R2, 2026-11-07).
+# MBTExperiment's CME export. The rule applies to every source, and only MBTExperiment has this path.
+docs/evidence/cme_outright_rates_crypto_20260903.csv
+
+# Bulk vendor reference data (lead ruling R36, 2026-11-07). ORBExperiment's listing of 6421 delisted tickers pulled
+# from a vendor reference endpoint. Nothing shows a right to redistribute it. Only ORBExperiment has this path.
+reports/stage_a1r/task6_delisted.json
+
+# A trained model file in text form (lead ruling R37, 2026-11-07). solclear's LightGBM model dump is model weights
+# whatever its extension (D4). Only solclear has this path, relative to the solclear repo root.
+solclear/artifacts/hard_rug_clearance.txt
