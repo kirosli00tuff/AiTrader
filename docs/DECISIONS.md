@@ -276,3 +276,21 @@ same commit as the stage prompt that relies on it.
     commit and a fast-forward push, never a rebuild or a force-push.
   - **Stage P.2** does the archive work and creates the repo private. The
     planner flips it public after Kiros confirms the 12 card lessons.
+- V11 (2026-11-16, user, planning chat): **C.2b attempt 3, and PropExperiment
+  V64 to V76 read first.** Kiros asked the planning chat to read
+  PropExperiment's prompt structure and agent setup before launching.
+  Adopted for AiTrader stages from now on:
+  - **Self-wipe** at about 250k tokens (PropExperiment V75). RESUME HERE at
+    most 40 lines, and a fresh lead reads only RESUME HERE and what follows.
+  - **One review and one fix round per stage** (V76), except where a stage
+    prompt names more for a verdict number. C.2b's Step 2b, 4 and 5 reviews
+    guard the single verdict and stay.
+  - **At most 4 workers** (V76). Workers at high effort by default. Sonnet
+    only for low-to-mid mechanical work (V73).
+  - **Leads:** Opus at high effort for execution stages, and max for design
+    or verdict stages (V76, V64). C.2b keeps an Opus max lead.
+  - **Fable:** at most one review per stage, with Opus max in a fresh
+    context as the fallback, marked REDUCED INDEPENDENCE.
+  - **Pushes:** the planner reviews and pushes. The exception is the
+    run-once marker, which is still pushed at once (V9).
+  - **Launch note** for attempt 3: ~/planner-drafts/C2b_A3_LAUNCH_NOTE.md.
