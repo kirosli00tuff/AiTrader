@@ -1,0 +1,42 @@
+gate_log entries: 3; entries for this snapshot sha256: 1
+group     log field                            own                          log                          rule   rel diff   ok
+gate      N                                    15451                        15451                        exact  0          OK
+gate      C_G                                  79                           79                           exact  0          OK
+gate      C                                    79                           79                           exact  0          OK
+gate      M                                    8054                         8054                         exact  0          OK
+gate      null_excess_count                    0                            0                            exact  0          OK
+gate      pass                                 False                        False                        exact  0          OK
+gate      excluded_query_dates                 []                           []                           exact  0          OK
+gate      latest_resolved_session              '2026-11-16'                 '2026-11-16'                 exact  0          OK
+gate      s_star                               '2026-11-16'                 '2026-11-16'                 exact  0          OK
+gate      earliest_nonstale_pending_session    None                         None                         exact  0          OK
+gate      stale_pending_count                  0                            0                            exact  0          OK
+gate      stale_pending_sessions               []                           []                           exact  0          OK
+gate      empty_session_pending_count          0                            0                            exact  0          OK
+gate      failing                              ['REQUIRED']                 ['REQUIRED']                 exact  0          OK
+gate      sigma                                503.59151962817856           503.59151962817856           real   0.000e+00  OK
+gate      MSB                                  1963937.3724936396           1963937.3724936403           real   3.557e-16  OK
+gate      MSW                                  244925.91419173867           244925.91419173867           real   0.000e+00  OK
+gate      n0                                   194.3507996329173            194.3507996329173            real   0.000e+00  OK
+gate      rho_raw                              0.03485385207480393          0.034853852074803945         real   3.982e-16  OK
+gate      rho                                  0.03485385207480393          0.034853852074803945         real   3.982e-16  OK
+gate      k_eff                                140.22547802334245           140.22547802334245           real   0.000e+00  OK
+gate      required                             18397.86872872078            18397.868728720783           real   1.977e-16  OK
+string    failing_detail                       'M 8054 < Required 18397.869 'M 8054 < Required 18397.869 exact  0          OK
+constant  constants.REQUIRED_FACTOR            11.156                       11.156                       real   0.000e+00  OK
+constant  constants.EFFECT_BP                  30.0                         30.0                         real   0.000e+00  OK
+constant  constants.FLOOR_ANALYSIS_CLUSTERS    60.0                         60                           real   0.000e+00  OK
+constant  constants.FLOOR_SCORABLE             1000.0                       1000                         real   0.000e+00  OK
+constant  constants.SOURCE_FAILED_DAY_EXCLUDE  0.2                          0.2                          real   0.000e+00  OK
+constant  constants.STALE_PENDING_SESSIONS     3.0                          3                            real   0.000e+00  OK
+identity  inputs_sha256                        '3893d9095293cdd0b345326b58a '3893d9095293cdd0b345326b58a exact  0          OK
+identity  manifest_sha256                      '19dc1da78608f7f9d5fdf1fedc0 '19dc1da78608f7f9d5fdf1fedc0 exact  0          OK
+identity  db_path                              '/home/kiros-li/Documents/Gi '/home/kiros-li/Documents/Gi exact  0          OK
+
+compared: 32 (gate 22, string 1, constant 6, identity 3); mismatches: 0
+largest relative difference on reals: 3.982e-16 (rho_raw); tolerance 1e-09
+log fields not recomputed: db_class='NON_SYNTHETIC', degenerate_condition='', s_star_case='latest_session_no_nonstale_pending', status='ok', test_mode=False, utc_time='2026-11-17T06:19:05Z'
+log fields unaccounted for: []
+own quantities with no log field: hard_stop_session=2027-01-15, bound=2026-11-16, rows_dropped_by_bound=0, pending_judged_collection_rows=0, largest source_failed shares, m_c and n_c per cluster, the three pass conditions as separate booleans
+sha256(reports/c3_harness_freeze.json) = 19dc1da78608f7f9d5fdf1fedc0edf024bb39529be1dabbc45681ce393d38bc8; equals log manifest_sha256: True
+RESULT: MATCH; own pass decision: False; log pass: False

@@ -1,0 +1,20 @@
+{
+ "note": "sensitivity only, not the registered gate",
+ "bound": "2026-11-13",
+ "N": 15355,
+ "C_G": 78,
+ "M": 8002,
+ "C": 78,
+ "sigma": 504.10573704860127,
+ "MSB": 1986935.6289530385,
+ "MSW": 245388.77179882702,
+ "n0": 195.61219789653526,
+ "rho_raw": 0.03501118603892834,
+ "rho": 0.03501118603892834,
+ "k_eff": 140.798800299925,
+ "required": 18567.68906459427,
+ "cond_C_ge_60": true,
+ "cond_M_ge_1000": true,
+ "cond_M_ge_required": false,
+ "pass": false
+}

@@ -11,6 +11,18 @@ Model:
 Prompt summary: one line.
 Changes: what changed.
 
+## Prompt: Stage C.2b attempt 3 (20261116), gate FAIL
+
+Date: 2026-11-16
+Model: Opus 5.5 (claude-opus-5-5), max lead. Worker: Fable 5.2 xhigh (1, GateVerifier).
+Prompt summary: "Read docs/prompts/STAGE_C.2b.md in full and execute it as your prompt, together with the planner note /home/kiros-li/planner-drafts/C2b_A3_LAUNCH_NOTE.md, which you read first. This is attempt 3. Run unattended."
+Changes:
+- Snapshot reports/c2/snap_20261116 (sha256 3893d909...d7f9) and reports/c2/gate_log.jsonl line 3: gate FAIL, C 79, M 8,054 < Required 18,397.9.
+- GateVerifier: reports/c2_gate_verify_20261116.md and reports/c2/verify_gate_20261116/, MATCH on 32 of 32, 1 SHOULD FIX and 8 NOTEs, all ruled in the return.
+- reports/C.2b_RETURN_20261116.md and reports/C.2b_STATE_20261116.md.
+- Entries in PROGRESS.md, docs/STAGES.md and docs/prompts/README.md.
+Commit: "C.2b snapshot and gate 20261116" (0cb3dea) and "Stage C.2b 20261116 gate FAIL". Neither is pushed by the session (launch note item 6).
+
 ## Prompt: Stage P.2, research-archive without solana, private on GitHub
 
 Date: 2026-11-07

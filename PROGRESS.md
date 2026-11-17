@@ -138,6 +138,15 @@ New flags from the feed-work session (2026-07-05, `369b6a6`):
 
 ## Session Log
 
+### 2026-11-16 (Opus 5.5, max lead) Stage C.2b attempt 3 (20261116): 9.8 gate FAIL on power; no verdict run, judgments unread
+
+The full record is reports/C.2b_RETURN_20261116.md.
+
+- **Gate:** snapshot reports/c2/snap_20261116, S* 2026-11-16, before the 2027-01-15 hard stop. C 79 and M 8,054 clear their floors, but M is short of Required 18,397.9, so pass is false. sigma 503.6 bp, rho 0.035, k_eff 140.2. Since attempt 2: C +7, M +1,401, Required +2,330.2, and M/Required went from 0.414 to 0.438.
+- **Verification:** the GateVerifier (Fable 5.2, xhigh, model confirmed from its transcript) matched 32 of 32 quantities. Its SHOULD FIX F1 (the S* session's own query_date is not collected yet, so the last cluster is partial) changes no decision: the literal 9.7 rule governs and the gate fails either way. Its 8 NOTEs are ruled no action.
+- **Next:** attempt 4 needs 78 judged collection days, 73 on the snapshot plus 5. The Mon 2026-11-23 run reaches it. Recommended launch: Tue 2026-11-24. For the hard stop, the return recommends launching only after the Tue 2027-01-19 run, so that the 2027-01-15 cluster is complete.
+- **Commits:** 0cb3dea "C.2b snapshot and gate 20261116" and "Stage C.2b 20261116 gate FAIL", both local. The planner reviews and pushes (launch note item 6).
+
 ### 2026-11-07 (Opus 5.5, max lead) Stage P.2: research-archive rebuilt without solana and pushed private; nothing new is public
 
 The full record is reports/P.2_RETURN.md.

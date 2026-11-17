@@ -1,0 +1,49 @@
+{
+ "gate_rows_by_relation[same,later,earlier,count,sessions]": [
+  [
+   0,
+   1,
+   0,
+   7658,
+   73
+  ],
+  [
+   1,
+   0,
+   0,
+   7793,
+   73
+  ]
+ ],
+ "last_session_2026-11-16_gate_rows_by_query_date": [
+  [
+   "2026-11-13",
+   96
+  ]
+ ],
+ "sessions_with_same_day_rows": 73,
+ "same_day_rows_total": 7793,
+ "same_day_rows_in_last_session": 0,
+ "median_same_day_rows_per_session_having_any": 92,
+ "n_c_last5": {
+  "2026-11-10": 411,
+  "2026-11-11": 295,
+  "2026-11-12": 306,
+  "2026-11-13": 300,
+  "2026-11-16": 96
+ },
+ "m_c_last5": {
+  "2026-11-10": 206,
+  "2026-11-11": 132,
+  "2026-11-12": 159,
+  "2026-11-13": 139,
+  "2026-11-16": 52
+ },
+ "n_c_median": 181,
+ "m_c_median": 96,
+ "query_dates_max": [
+  "2026-11-13",
+  75
+ ],
+ "sessions_in_gate_not_a_query_date": 4
+}
