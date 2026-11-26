@@ -1,0 +1,6 @@
+[2026-11-25T17:28:17-07:00] [snapshot] PRAGMA table_info(news_observation) | params=[]
+[2026-11-25T17:28:17-07:00] [snapshot] SELECT query_date, scoring_session, state, run_kind, exclusion_reason, outcome_state, excess_1session FROM news_observation | params=[]
+[2026-11-25T17:30:44-07:00] [snapshot] PRAGMA table_info(news_observation) | params=[]
+[2026-11-25T17:30:44-07:00] [snapshot] SELECT query_date, scoring_session, state, run_kind, exclusion_reason, outcome_state, excess_1session FROM news_observation | params=[]
+[2026-11-25T17:30:45-07:00] [analysis_bars] SELECT date FROM trading_calendar ORDER BY date | params=[]
+[2026-11-25T17:30:45-07:00] [snapshot] SELECT scoring_session, COUNT(*) FROM news_observation WHERE run_kind = 'collection' AND state = 'judged' AND outcome_state = 'resolved' AND exclusion_reason = '' AND excess_1session IS NOT NULL AND scoring_session IS NOT NULL AND scoring_session <> '' AND scoring_session <= ? AND judgment IN ('POSITIVE','NEGATIVE') GROUP BY scoring_session | params=['2026-11-24']

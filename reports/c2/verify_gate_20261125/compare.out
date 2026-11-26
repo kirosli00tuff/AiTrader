@@ -1,0 +1,44 @@
+own_gate.json sha256: b0ad043ade50449878fcb61d8527856296ef302690ced487d852018523f0a00b
+gate_log.jsonl sha256: b2401d2f4156b47a23a9580c2be0d50d2987c1b88d37f822bdb43ed4669fb6ba  entries: 4
+entries with inputs_sha256 == snapshot sha256: 1
+
+quantity                                                                       | own                      | log                      | rel diff | verdict
+N                                                                              | 16815                    | 16815                    | exact    | ok
+C_G                                                                            | 85                       | 85                       | exact    | ok
+C                                                                              | 85                       | 85                       | exact    | ok
+M                                                                              | 8802                     | 8802                     | exact    | ok
+null_excess_count                                                              | 0                        | 0                        | exact    | ok
+sigma                                                                          | 501.1912644824479        | 501.1912644824478        | 1.134e-16 | ok
+MSB                                                                            | 1904139.092964234        | 1904139.0929642348       | 3.668e-16 | ok
+MSW                                                                            | 242893.37107784612       | 242893.37107784612       | 0.000e+00 | ok
+n0                                                                             | 196.76271752828399       | 196.76271752828399       | 0.000e+00 | ok
+rho_raw                                                                        | 0.03359200417445839      | 0.0335920041744584       | 4.131e-16 | ok
+rho                                                                            | 0.03359200417445839      | 0.0335920041744584       | 4.131e-16 | ok
+k_eff                                                                          | 139.15382867530107       | 139.15382867530107       | 0.000e+00 | ok
+required                                                                       | 17563.80513743205        | 17563.80513743205        | 0.000e+00 | ok
+pass                                                                           | False                    | False                    | exact    | ok
+failing (derived from my three pass conditions)                                | ['REQUIRED']             | ['REQUIRED']             | exact    | ok
+failing_detail (derived: M and Required to 3 decimals)                         | ['M 8802 < Required 17563.805'] | ['M 8802 < Required 17563.805'] | exact    | ok
+s_star                                                                         | '2026-11-24'             | '2026-11-24'             | exact    | ok
+latest_resolved_session                                                        | '2026-11-24'             | '2026-11-24'             | exact    | ok
+earliest_nonstale_pending_session                                              | None                     | None                     | exact    | ok
+stale_pending_count                                                            | 0                        | 0                        | exact    | ok
+stale_pending_sessions (derived: empty because my stale count is 0)            | []                       | []                       | exact    | ok
+empty_session_pending_count (derived: 0 because my pending judged count is 0)  | 0                        | 0                        | exact    | ok
+excluded_query_dates (9.1; log is a mapping, its keys compared)                | []                       | []                       | exact    | ok
+inputs_sha256                                                                  | '16d1d18f7ee3cb9f69c0edade5742df704f29cf78ac70a1767d6cd13e667f100' | '16d1d18f7ee3cb9f69c0edade5742df704f29cf78ac70a1767d6cd13e667f100' | exact    | ok
+db_path                                                                        | '/home/kiros-li/Documents/GitHub/AiTrader/reports/c2/snap_20261125/news_experiment_snapshot.db' | '/home/kiros-li/Documents/GitHub/AiTrader/reports/c2/snap_20261125/news_experiment_snapshot.db' | exact    | ok
+constants.REQUIRED_FACTOR (9.8 text)                                           | 11.156                   | 11.156                   | 0.000e+00 | ok
+constants.EFFECT_BP (9.8 text)                                                 | 30.0                     | 30.0                     | 0.000e+00 | ok
+constants.FLOOR_ANALYSIS_CLUSTERS (9.8 text)                                   | 60                       | 60                       | exact    | ok
+constants.FLOOR_SCORABLE (9.8 text)                                            | 1000                     | 1000                     | exact    | ok
+constants.SOURCE_FAILED_DAY_EXCLUDE (9.1 text)                                 | 0.2                      | 0.2                      | 0.000e+00 | ok
+constants.STALE_PENDING_SESSIONS (9.7 text)                                    | 3                        | 3                        | exact    | ok
+manifest_sha256 vs sha256(reports/c3_harness_freeze.json)                      | 19dc1da78608f7f9d5fdf1.. | 19dc1da78608f7f9d5fdf1.. | exact    | ok
+
+quantities compared: 32  mismatches: 0
+largest relative difference among reals: 4.131e-16 (rho_raw)
+log fields not recomputed: db_class='NON_SYNTHETIC', degenerate_condition='', s_star_case='latest_session_no_nonstale_pending', status='ok', test_mode=False, utc_time='2026-11-26T00:24:08Z'
+own quantities with no log field: the largest source_failed share and its date (both denominators); pending judged row count (the log carries stale and empty-session pending counts only); hard-stop session, the bound min(S*, hard stop), rows dropped by the restriction; n_c and m_c per cluster, sum n_c^2, sum m_c^2; the pass conditions C >= 60 and M >= 1000 as separate booleans (the log carries pass and failing)
+snapshot entries in log: 1 (must be exactly 1)
+RESULT: MATCH  | pass decision own=False log=False
